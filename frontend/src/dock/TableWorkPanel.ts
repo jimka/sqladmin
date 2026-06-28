@@ -1,11 +1,12 @@
 // The dock work panel for one table: an inline ToolBar of glyph-only actions
-// (Refresh / Add / Delete / Save) over the live data grid.
+// (Add / Delete / Save … Refresh) over the live data grid.
 //
-// The toolbar drives the store directly: load / add / remove / sync. Errors are
-// not handled here — load()/sync() failures surface as the store's
-// 'exception'/'sync' events, wired to the controller's notifyError in openTable.
-// The table's structure (column metadata) opens in its own tab from the
-// navigator's right-click menu (see StructurePanel / SqlAdminController).
+// The toolbar drives the store directly: load / add / remove / sync. Transport
+// errors surface as the store's 'exception'/'sync' events, wired to the
+// controller's notifyError in openTable; client-side validation messages and the
+// save-feedback go through the `notify` callback the controller supplies. The
+// table's structure opens in its own tab from the navigator's right-click menu
+// (see StructurePanel / SqlAdminController).
 
 import { Panel } from "@jimka/typescript-ui/core";
 import { Placement } from "@jimka/typescript-ui/primitive";
@@ -16,6 +17,7 @@ import { Button } from "@jimka/typescript-ui/component/button";
 import { Table } from "@jimka/typescript-ui/component/table";
 import type { ColumnSpec } from "@jimka/typescript-ui/component/table";
 import { Glyph } from "@jimka/typescript-ui/component/display";
+import { Dialog, DialogButtons } from "@jimka/typescript-ui/overlay";
 import type { AjaxStore, ModelRecord } from "@jimka/typescript-ui/data";
 import { refresh } from "@jimka/typescript-ui/glyphs/solid/refresh";
 import { plus } from "@jimka/typescript-ui/glyphs/solid/plus";
@@ -30,12 +32,15 @@ const BLUE = "rgb(30, 100, 200)";
 const GREEN = "rgb(46, 125, 50)";
 const RED = "rgb(198, 40, 40)";
 
+/** Surface a short status message (validation / save feedback) to the user. */
+export type Notify = (message: string) => void;
+
 /** Build the work panel hosting a table's data grid. */
-export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[]): Panel {
+export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[], notify: Notify): Panel {
     const dataGrid = Table(store, buildColumnSpec(columns));
 
     const panel = Panel({ layoutManager: new BorderLayout() });
-    panel.addComponent(buildToolBar(store, dataGrid), { placement: Placement.NORTH });
+    panel.addComponent(buildToolBar(store, dataGrid, columns, notify), { placement: Placement.NORTH });
     panel.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
 
     return panel;
@@ -50,17 +55,21 @@ function buildColumnSpec(columns: ColumnMeta[]): ColumnSpec {
     return { columns: columns.map(c => ({ field: c.name, readOnly: c.isGenerated })) };
 }
 
-/** Glyph-only toolbar wired to the store (CRUD). */
-function buildToolBar(store: AjaxStore, dataGrid: Table): ToolBar {
+/** Glyph-only toolbar wired to the store (CRUD) with validation + confirmation. */
+function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], notify: Notify): ToolBar {
     const bar = new ToolBar();
 
     bar.addComponent(glyphButton("plus", GREEN, "Add row", () => store.add({})));
-    bar.addComponent(glyphButton("minus", RED, "Delete row", () => dataGrid.getSelectedRecords().forEach((r: ModelRecord) => store.remove(r))));
-    const saveButton = glyphButton("save", BLUE, "Save", () => void store.sync());
+    bar.addComponent(glyphButton("minus", RED, "Delete row", () => void confirmDelete(store, dataGrid)));
+    const saveButton = glyphButton("save", BLUE, "Save", () => save_(store, columns, notify));
     bar.addComponent(saveButton);
     // Flex spacer pushes Refresh to the far right, away from the edit actions.
     bar.addComponent(Spacer.flex());
-    bar.addComponent(glyphButton("refresh", BLUE, "Refresh", () => void store.load()));
+    // Refresh discards unsaved edits then reloads from the server. reject()
+    // must precede load(): load() replaces the records but leaves pending
+    // removals queued, so without it a deleted row would reappear yet stay
+    // marked for deletion on the next Save.
+    bar.addComponent(glyphButton("refresh", BLUE, "Refresh", () => { store.reject(); void store.load(); }));
 
     // Save is only meaningful with unsaved edits/adds/removes; 'datachanged'
     // fires on each of those (and after a sync clears them).
@@ -69,6 +78,67 @@ function buildToolBar(store: AjaxStore, dataGrid: Table): ToolBar {
     store.on("datachanged", syncSaveEnabled);
 
     return bar;
+}
+
+/**
+ * Validate required fields, then sync. A required field is one that is NOT NULL,
+ * not generated, and has no DB default — the user must supply it. Reporting the
+ * missing fields up front avoids a raw Postgres NOT NULL error on the round-trip.
+ */
+function save_(store: AjaxStore, columns: ColumnMeta[], notify: Notify): void {
+    const missing = missingRequiredFields(store, columns);
+
+    if (missing.length > 0) {
+        notify(`Required field(s) missing: ${missing.join(", ")}`);
+
+        return;
+    }
+
+    void store.sync();
+}
+
+/**
+ * Collect the names of required fields left empty across the pending (new or
+ * edited) records. Required = not nullable, not generated, no default.
+ */
+function missingRequiredFields(store: AjaxStore, columns: ColumnMeta[]): string[] {
+    const required = columns.filter(c => !c.nullable && !c.isGenerated && !c.hasDefault);
+    const missing = new Set<string>();
+
+    for (const record of store.getAll()) {
+        if (!record.isNew() && !record.isDirty()) {
+            continue;
+        }
+
+        for (const column of required) {
+            const value = record.get(column.name);
+
+            if (value === null || value === undefined || value === "") {
+                missing.add(column.name);
+            }
+        }
+    }
+
+    return [...missing];
+}
+
+/** Confirm before queuing the selected rows for deletion (applied on Save). */
+async function confirmDelete(store: AjaxStore, dataGrid: Table): Promise<void> {
+    const selected = dataGrid.getSelectedRecords();
+
+    if (selected.length === 0) {
+        return;
+    }
+
+    const result = await Dialog.show({
+        title: "Delete rows",
+        message: `Delete ${selected.length} selected row(s)? The deletion is applied when you Save.`,
+        buttons: [DialogButtons.Cancel, { ...DialogButtons.Confirm, text: "Delete" }],
+    });
+
+    if (result === "confirm") {
+        selected.forEach((r: ModelRecord) => store.remove(r));
+    }
 }
 
 /** A glyph-only toolbar button: colored icon, accessible label, click handler. */

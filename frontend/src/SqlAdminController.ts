@@ -82,11 +82,12 @@ export class SqlAdminController {
         }
 
         store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
-        store.on("sync", (e: StoreSyncEvent) => e.failures.forEach((f: StoreExceptionEvent) => this.notifyError(f.error, ref)));
+        store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
         this._openPanels.set(id, { ref, node, store });
 
         // addPanel activates the newly opened panel; no explicit focus needed.
-        this.dock.addPanel({ id, title: ref.name ?? id, tooltip: this.panelTooltip(ref), content: TableWorkPanel(store, columns) });
+        const notify = (message: string): void => this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: ${message}`);
+        this.dock.addPanel({ id, title: ref.name ?? id, tooltip: this.panelTooltip(ref), content: TableWorkPanel(store, columns, notify) });
 
         try {
             await store.load();
@@ -117,6 +118,17 @@ export class SqlAdminController {
         this._openPanels.set(id, { ref, node });
         this.dock.addPanel({ id, title: `${ref.name ?? id} (structure)`, tooltip: this.panelTooltip(ref), content: StructurePanel(columns) });
         this.syncToPanel(id);
+    }
+
+    /** Report a sync outcome: each failure as an error, or a success message. */
+    private reportSync(event: StoreSyncEvent, ref: DbObjectRef): void {
+        if (event.failures.length > 0) {
+            event.failures.forEach((f: StoreExceptionEvent) => this.notifyError(f.error, ref));
+
+            return;
+        }
+
+        this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: changes saved`);
     }
 
     /** Surface an error (AjaxError detail, or any thrown value) to the StatusBar. */
