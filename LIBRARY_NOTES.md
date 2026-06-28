@@ -8,6 +8,27 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️🩹 Accordion `fillHeight` only fills the bottommost open section
+
+The sidebar wants the navigator (top section) to fill while the Properties
+inspector (bottom section) stays a fixed compact height. `Accordion.fillHeight`
+routes all leftover space to the **bottommost open** section — there is no
+per-section fill weight or "this section fills" flag — so with both sections open
+the bottom one always grows. Turning fill off instead leaves an empty gap when
+the content underflows.
+
+**Worked around (app):** disabled `fillHeight`, pinned the Properties section to a
+fixed height (`preferred === min`, so the shrink can't steal from it), and gave
+the navigator an outsized preferred height (`NAV_FILL_HINT`) so the accordion's
+proportional shrink hands it every remaining pixel. Works, but relies on a magic
+preferred height rather than declaring intent.
+
+**Possible library improvement:** a per-section grow/fill weight (or a
+`setFillTarget(index)` override), so a non-bottom section can be the one that
+absorbs leftover height without the outsized-preferred trick.
+
+---
+
 ## 🐞✅ Tooltip rendered beneath modal dialogs
 
 Hovering a button on a modal `Dialog` showed its tooltip *under* the dialog and
