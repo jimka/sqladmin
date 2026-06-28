@@ -8,6 +8,22 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🔎 No built-in "required" cell affordance (enhancement, deferred)
+
+The table has no way to mark a column/cell as required and visually flag it —
+e.g. a header asterisk and a tint on an empty required cell, especially in a
+freshly added (new) row. SQLAdmin validates required fields (NOT NULL, not
+generated, no default) only at Save time and reports the missing names on the
+status bar; there is no inline, per-cell hint guiding the user *as they fill a
+new row*.
+
+**Suggested library enhancement:** a `ColumnConfig.required` flag (or a
+`requiredPredicate(record)`) that renders a required affordance and tints empty
+required cells, so consumers get the visual guidance without a custom renderer.
+Deferred for now — the Save-time validation message covers the basic need.
+
+---
+
 ## 🐞✅ MenuBar menu stayed open when empty bar space was clicked
 
 Opening a menubar menu and then clicking empty space *in the menubar* (beside the
