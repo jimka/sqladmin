@@ -8,6 +8,19 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️✅ Tree had no programmatic selection setter
+
+Syncing the navigator's highlighted node to the active dock tab needed to set
+the tree selection from code, but `Tree` exposed only `getSelectedNode(s)` —
+selection could only change via a user click / arrow key.
+
+**Fix (library):** added `Tree.selectNode(node)` — selects + scrolls into view,
+and deliberately does **not** emit `"selection"` (a programmatic sync must not
+re-trigger the open-the-table side effect a real click has). The controller calls
+it from the Dock `"focus"` handler (`SqlAdminController`).
+
+---
+
 ## ✂️✅ Tree had no right-click / context-menu hook
 
 `Tree` emitted only `selection` and `loaderror`, so there was no way to offer a

@@ -18,10 +18,11 @@ export function NavigatorTree(controller: SqlAdminController): Tree {
     const contextMenu = Menu();
 
     tree.on("selection", (nodes: TreeNode[]) => {
-        const ref = nodes[0]?.data as DbObjectRef | undefined;
+        const node = nodes[0];
+        const ref = node?.data as DbObjectRef | undefined;
 
-        if (ref && (ref.kind === "table" || ref.kind === "view")) {
-            void controller.openTable(ref);
+        if (node && ref && (ref.kind === "table" || ref.kind === "view")) {
+            void controller.openTable(ref, node);
         }
     });
 
@@ -31,12 +32,15 @@ export function NavigatorTree(controller: SqlAdminController): Tree {
 
         if (ref && (ref.kind === "table" || ref.kind === "view")) {
             contextMenu.show(event.clientX, event.clientY, [
-                { text: "Open structure", action: () => void controller.openStructure(ref) },
+                { text: "Open structure", action: () => void controller.openStructure(ref, node) },
             ]);
         }
     });
 
     tree.on("loaderror", (_node: TreeNode, error: unknown) => controller.notifyError(error));
+
+    // Let the controller drive selection when a dock tab is focused.
+    controller.setNavigator(tree);
 
     void loadDatabases(conn)
         .then(nodes => tree.setNodes(nodes))

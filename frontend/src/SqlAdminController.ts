@@ -5,6 +5,7 @@
 import { Dock } from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent } from "@jimka/typescript-ui/overlay";
 import { StatusBar } from "@jimka/typescript-ui/component/container";
+import type { Tree, TreeNode } from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef } from "./contract";
 import { getColumns } from "./data/api";
@@ -13,12 +14,20 @@ import { buildStore } from "./data/stores";
 import { TableWorkPanel } from "./dock/TableWorkPanel";
 import { StructurePanel } from "./dock/StructurePanel";
 
+/** Registry entry for one open dock panel; `store` is absent for structure tabs. */
+interface OpenPanel {
+    ref: DbObjectRef;
+    node: TreeNode;
+    store?: AjaxStore;
+}
+
 export class SqlAdminController {
     readonly dock: Dock;
     readonly statusBar: StatusBar;
 
     private readonly _connectionId: string;
-    private readonly _openPanels: Map<string, AjaxStore> = new Map();
+    private readonly _openPanels: Map<string, OpenPanel> = new Map();
+    private _navigator: Tree | null = null;
 
     /**
      * @param connectionId - The connection these operations target (Phase 0-1: "default").
@@ -32,6 +41,14 @@ export class SqlAdminController {
         // destruction (a tear-off fires "detach" and the panel survives).
         this.dock.on("close", (e: DockPanelEvent) => this.disposePanel(e.id));
 
+        // Switching tabs syncs the navigator selection and the status bar to the
+        // now-active panel. A null payload means no panel is focused.
+        this.dock.on("focus", (e: DockPanelEvent | null) => {
+            if (e) {
+                this.syncToPanel(e.id);
+            }
+        });
+
         this.statusBar.setMessage(`Connection: ${connectionId}`);
     }
 
@@ -39,8 +56,13 @@ export class SqlAdminController {
         return this._connectionId;
     }
 
+    /** Register the navigator tree so the focused tab can drive its selection. */
+    setNavigator(tree: Tree): void {
+        this._navigator = tree;
+    }
+
     /** Open a table in the Dock (deduping by panel id), wiring its store errors. */
-    async openTable(ref: DbObjectRef): Promise<void> {
+    async openTable(ref: DbObjectRef, node: TreeNode): Promise<void> {
         const id = this.panelId(ref);
 
         if (this.dock.focusPanel(id)) {
@@ -61,21 +83,21 @@ export class SqlAdminController {
 
         store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
         store.on("sync", (e: StoreSyncEvent) => e.failures.forEach((f: StoreExceptionEvent) => this.notifyError(f.error, ref)));
-        this._openPanels.set(id, store);
+        this._openPanels.set(id, { ref, node, store });
 
         // addPanel activates the newly opened panel; no explicit focus needed.
         this.dock.addPanel({ id, title: ref.name ?? id, content: TableWorkPanel(store, columns) });
 
         try {
             await store.load();
-            this.setRowCount(ref, store);
+            this.syncToPanel(id);
         } catch {
             // load() rethrows, but the 'exception' listener already surfaced it.
         }
     }
 
     /** Open a read-only structure (column metadata) tab for a table/view. */
-    async openStructure(ref: DbObjectRef): Promise<void> {
+    async openStructure(ref: DbObjectRef, node: TreeNode): Promise<void> {
         const id = this.structurePanelId(ref);
 
         if (this.dock.focusPanel(id)) {
@@ -92,7 +114,9 @@ export class SqlAdminController {
             return;
         }
 
+        this._openPanels.set(id, { ref, node });
         this.dock.addPanel({ id, title: `${ref.name ?? id} (structure)`, content: StructurePanel(columns) });
+        this.syncToPanel(id);
     }
 
     /** Surface an error (AjaxError detail, or any thrown value) to the StatusBar. */
@@ -116,9 +140,26 @@ export class SqlAdminController {
         this._openPanels.delete(id);
     }
 
-    private setRowCount(ref: DbObjectRef, store: AjaxStore): void {
-        const count = store.getTotalCount() ?? store.getRecords().length;
-        this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: ${count} rows`);
+    /** Select the panel's navigator node and refresh the status bar to match. */
+    private syncToPanel(id: string): void {
+        const panel = this._openPanels.get(id);
+
+        if (!panel) {
+            return;
+        }
+
+        this._navigator?.selectNode(panel.node);
+        this.updateStatusFor(panel);
+    }
+
+    /** Status line for a panel: row count for a data tab, else a structure label. */
+    private updateStatusFor(panel: OpenPanel): void {
+        if (panel.store) {
+            const count = panel.store.getTotalCount() ?? panel.store.getRecords().length;
+            this.statusBar.setMessage(`${this._connectionId} · ${panel.ref.name}: ${count} rows`);
+        } else {
+            this.statusBar.setMessage(`${this._connectionId} · ${panel.ref.name}: structure`);
+        }
     }
 
     /** Prefer an AjaxError's parsed {detail}; fall back to a message or string. */
