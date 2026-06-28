@@ -13,21 +13,28 @@ import { buildModel } from "./data/buildModel";
 import { buildStore } from "./data/stores";
 import { TableWorkPanel } from "./dock/TableWorkPanel";
 import { StructurePanel } from "./dock/StructurePanel";
+import { PropertiesPanel } from "./properties/PropertiesPanel";
 
 /** Registry entry for one open dock panel; `store` is absent for structure tabs. */
 interface OpenPanel {
     ref: DbObjectRef;
     node: TreeNode;
     store?: AjaxStore;
+    columns: ColumnMeta[];
 }
 
 export class SqlAdminController {
     readonly dock: Dock;
     readonly statusBar: StatusBar;
+    readonly properties: PropertiesPanel;
 
     private readonly _connectionId: string;
     private readonly _openPanels: Map<string, OpenPanel> = new Map();
     private _navigator: Tree | null = null;
+
+    // Bumped on every showProperties call so a slow column fetch whose selection
+    // has since moved on is discarded instead of clobbering the current view.
+    private _propsSeq: number = 0;
 
     /**
      * @param connectionId - The connection these operations target (Phase 0-1: "default").
@@ -36,6 +43,7 @@ export class SqlAdminController {
         this._connectionId = connectionId;
         this.dock = Dock();
         this.statusBar = new StatusBar();
+        this.properties = new PropertiesPanel();
 
         // Disposal is wired once: the dock fires "close" only on genuine
         // destruction (a tear-off fires "detach" and the panel survives).
@@ -83,7 +91,7 @@ export class SqlAdminController {
 
         store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
         store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
-        this._openPanels.set(id, { ref, node, store });
+        this._openPanels.set(id, { ref, node, store, columns });
 
         // addPanel activates the newly opened panel; no explicit focus needed.
         const notify = (message: string): void => this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: ${message}`);
@@ -115,9 +123,47 @@ export class SqlAdminController {
             return;
         }
 
-        this._openPanels.set(id, { ref, node });
+        this._openPanels.set(id, { ref, node, columns });
         this.dock.addPanel({ id, title: `${ref.name ?? id} (structure)`, tooltip: this.panelTooltip(ref), content: StructurePanel(columns) });
         this.syncToPanel(id);
+    }
+
+    /**
+     * Show the selected object's metadata in the Properties inspector. A database
+     * or schema renders immediately; a table/view needs its columns (for the
+     * count and primary key), reused from an open panel when possible and fetched
+     * otherwise. A monotonic guard discards a stale fetch whose selection has
+     * since changed, so rapid clicks never render the wrong object.
+     */
+    async showProperties(ref: DbObjectRef): Promise<void> {
+        const seq = ++this._propsSeq;
+
+        if (ref.kind !== "table" && ref.kind !== "view") {
+            this.properties.show(ref);
+
+            return;
+        }
+
+        const cached = this._openPanels.get(this.panelId(ref))?.columns
+            ?? this._openPanels.get(this.structurePanelId(ref))?.columns;
+
+        if (cached) {
+            this.properties.show(ref, cached);
+
+            return;
+        }
+
+        try {
+            const columns = await getColumns(ref);
+
+            if (seq === this._propsSeq) {
+                this.properties.show(ref, columns);
+            }
+        } catch (err) {
+            if (seq === this._propsSeq) {
+                this.notifyError(err, ref);
+            }
+        }
     }
 
     /** Report a sync outcome: each failure as an error, or a success message. */
@@ -171,6 +217,7 @@ export class SqlAdminController {
 
         this._navigator?.selectNode(panel.node);
         this.updateStatusFor(panel);
+        void this.showProperties(panel.ref);
     }
 
     /** Status line for a panel: row count for a data tab, else a structure label. */

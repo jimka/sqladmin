@@ -21,8 +21,16 @@ export function NavigatorTree(controller: SqlAdminController): Tree {
         const node = nodes[0];
         const ref = node?.data as DbObjectRef | undefined;
 
-        if (node && ref && (ref.kind === "table" || ref.kind === "view")) {
+        if (!node || !ref) {
+            return;
+        }
+
+        // Every selection updates the Properties inspector; a table/view also
+        // opens (or focuses) its data tab in the Dock.
+        if (ref.kind === "table" || ref.kind === "view") {
             void controller.openTable(ref, node);
+        } else {
+            void controller.showProperties(ref);
         }
     });
 
