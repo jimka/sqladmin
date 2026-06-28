@@ -8,6 +8,29 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞✅ Tooltip rendered beneath modal dialogs
+
+Hovering a button on a modal `Dialog` showed its tooltip *under* the dialog and
+its darkened backdrop. The tooltip's z-index was a hardcoded 10001, below the
+`LayerManager` Dialog band (11000).
+
+**Fix (library):** added a Tooltip z-index band (12000) above every managed
+layer; the Tooltip singleton stamps itself from it. No app change.
+
+---
+
+## 🐞✅ Tooltip lingered after its anchor vanished
+
+A tooltip whose attached component was removed from the DOM stayed on screen
+until another tooltip registered. The browser fires no `mouseout` when an
+element is removed under a stationary pointer, so the anchored hide never ran.
+
+**Fix (library):** the Tooltip now tracks its active anchor and, while shown,
+watches pointer movement; once the anchor is no longer connected it dismisses
+itself. No app change.
+
+---
+
 ## ✂️✅ Table had no selection-change event
 
 Disabling the toolbar's Delete button until a row is selected needed to react to
