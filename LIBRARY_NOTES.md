@@ -32,6 +32,26 @@ selector from one — audit other `#${id}` / `'#' + id` sites for the same gap.
 
 ---
 
+## ✂️ Subclassing the callable component export drops instance methods (external `.d.ts`)
+
+`class SqlAdminShell extends Panel { ... this.addComponent(...) }` type-checks
+inside the library's own source (where `@jimka/typescript-ui/*` resolves to
+source) but **fails for an external consumer** resolving the built `.d.ts`:
+`tsc` reports *"Property 'addComponent' does not exist on type 'SqlAdminShell'"*.
+The public `Panel` is the `callable()`-wrapped export, whose value type is a
+call/construct signature that doesn't carry the class's instance members through
+`extends` in the emitted declarations.
+
+**App workaround:** build components with the callable factory form
+(`const shell = Panel({...}); shell.addComponent(...)`) instead of subclassing —
+which is the recommended construction idiom anyway (`shell/SqlAdminShell.ts`).
+
+**Suggestion:** expose a subclassable class type for external consumers (there is
+a `_Panel` raw export, but it reads as private), or make the callable export type
+a proper subclassable constructor in the built `.d.ts`.
+
+---
+
 ## ✂️ Remote `AjaxStore` silently needs a page size to parse an envelope
 
 A remote store whose backend returns a `{rows, totalCount}` envelope only parses
