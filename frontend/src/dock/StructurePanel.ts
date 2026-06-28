@@ -28,5 +28,8 @@ function buildStructureTable(columns: ColumnMeta[]): Component {
 
     const store = new MemoryStore({ model, data: columns, autoLoad: true });
 
-    return Table(store);
+    // Enforce read-only: editing column metadata would need ALTER TABLE DDL the
+    // backend does not have yet, so every cell is locked (rowReadOnly applies to
+    // all auto-appended columns). Make this editable when DDL support lands.
+    return Table(store, { columns: [], rowReadOnly: () => true });
 }
