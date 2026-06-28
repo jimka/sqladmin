@@ -8,6 +8,18 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞✅ MenuBar menu stayed open when empty bar space was clicked
+
+Opening a menubar menu and then clicking empty space *in the menubar* (beside the
+buttons) left the menu open. `MenuBar.openMenu` excluded the whole bar element
+from the dropdown's outside-click dismissal (to stop the opener button's own
+mousedown self-closing it), which also exempted the empty bar background.
+
+**Fix (library):** exclude only the opener button, not the whole bar — empty-bar
+clicks now fall through to the menu's dismissal. No app change.
+
+---
+
 ## 🐞✅ Boolean table cells ignored read-only
 
 Locking the structure grid (`Table` with `rowReadOnly: () => true`) stopped text
