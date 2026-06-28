@@ -11,6 +11,7 @@ import { Panel } from "@jimka/typescript-ui/core";
 import { Placement } from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
 import { ToolBar } from "@jimka/typescript-ui/component/menubar";
+import { Spacer } from "@jimka/typescript-ui/component/container";
 import { Button } from "@jimka/typescript-ui/component/button";
 import { Table } from "@jimka/typescript-ui/component/table";
 import type { ColumnSpec } from "@jimka/typescript-ui/component/table";
@@ -53,10 +54,12 @@ function buildColumnSpec(columns: ColumnMeta[]): ColumnSpec {
 function buildToolBar(store: AjaxStore, dataGrid: Table): ToolBar {
     const bar = new ToolBar();
 
-    bar.addComponent(glyphButton("refresh", BLUE, "Refresh", () => void store.load()));
     bar.addComponent(glyphButton("plus", GREEN, "Add row", () => store.add({})));
     bar.addComponent(glyphButton("minus", RED, "Delete row", () => dataGrid.getSelectedRecords().forEach((r: ModelRecord) => store.remove(r))));
     bar.addComponent(glyphButton("save", BLUE, "Save", () => void store.sync()));
+    // Flex spacer pushes Refresh to the far right, away from the edit actions.
+    bar.addComponent(Spacer.flex());
+    bar.addComponent(glyphButton("refresh", BLUE, "Refresh", () => void store.load()));
 
     return bar;
 }
