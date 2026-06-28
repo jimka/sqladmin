@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node (frontend — added in later Phase 0 steps)
+node_modules/
+dist/
+
+# Environment
+.env
+.env.*
