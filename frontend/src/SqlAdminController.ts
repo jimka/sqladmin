@@ -141,7 +141,7 @@ export class SqlAdminController {
 
     /** Hover tooltip for a tab: the table name, its database, and its schema. */
     private panelTooltip(ref: DbObjectRef): string {
-        return `${ref.name}\nDatabase: ${ref.database}\nSchema: ${ref.schema}`;
+        return `${ref.name}\n\nDatabase: ${ref.database}\nSchema: ${ref.schema}`;
     }
 
     /** Drop a closed panel's store from the registry. */
