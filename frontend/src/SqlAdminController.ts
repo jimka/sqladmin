@@ -62,6 +62,7 @@ export class SqlAdminController {
         this._openPanels.set(id, store);
 
         this.dock.addPanel({ id, title: ref.name ?? id, content: Table(store) });
+        this.dock.focusPanel(id);
 
         try {
             await store.load();

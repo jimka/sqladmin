@@ -2,7 +2,7 @@
 // error body ({detail}) directly and returns contract types. It does NOT go
 // through the proxy/store (that is the row-CRUD path; see stores.ts).
 
-import type { ColumnMeta, DbObjectRef } from "../contract";
+import type { ColumnMeta, DbObjectKind, DbObjectRef } from "../contract";
 
 /** Pull the backend's `{detail}` error message off a non-OK response. */
 async function readDetail(response: Response): Promise<string> {
@@ -28,6 +28,25 @@ async function getJson<T>(url: string): Promise<T> {
     }
 
     return (await response.json()) as T;
+}
+
+/** The navigator's database level. */
+export function getDatabases(connectionId: string): Promise<{ name: string }[]> {
+    return getJson(`/api/${connectionId}/databases`);
+}
+
+/** The navigator's schema level. */
+export function getSchemas(connectionId: string, database: string): Promise<{ name: string }[]> {
+    return getJson(`/api/${connectionId}/${database}/schemas`);
+}
+
+/** The navigator's table/view level. */
+export function getObjects(
+    connectionId: string,
+    database: string,
+    schema: string,
+): Promise<{ name: string; kind: DbObjectKind }[]> {
+    return getJson(`/api/${connectionId}/${database}/${schema}/objects`);
 }
 
 /** Introspect a table's columns (drives the Model + data grid). */

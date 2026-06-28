@@ -11,12 +11,12 @@
 
 import { Component, Panel } from "@jimka/typescript-ui/core";
 import { Placement } from "@jimka/typescript-ui/primitive";
-import { Border as BorderLayout, VBox } from "@jimka/typescript-ui/layout";
+import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
 import { MenuBar } from "@jimka/typescript-ui/component/menubar";
-import { Text } from "@jimka/typescript-ui/component/input";
+import { NavigatorTree } from "../navigator/NavigatorTree";
 import type { SqlAdminController } from "../SqlAdminController";
 
-// Sidebar width until the real activity-bar rail + navigator replace it.
+// Sidebar width until the activity-bar rail + Accordion explorer replace it.
 const SIDEBAR_WIDTH = 240;
 
 /** Build the shell Panel, hosting the controller's Dock and StatusBar. */
@@ -24,7 +24,7 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
     const shell = Panel({ layoutManager: new BorderLayout() });
 
     shell.addComponent(buildMenuBar(), { placement: Placement.NORTH });
-    shell.addComponent(buildSidebar(), { placement: Placement.WEST, collapsible: true });
+    shell.addComponent(buildSidebar(controller), { placement: Placement.WEST, collapsible: true });
     shell.addComponent(controller.dock, { placement: Placement.CENTER });
     shell.addComponent(controller.statusBar, { placement: Placement.SOUTH });
 
@@ -44,11 +44,11 @@ function buildMenuBar(): MenuBar {
     return bar;
 }
 
-/** Placeholder WEST sidebar (the lazy navigator replaces this next). */
-function buildSidebar(): Component {
+/** WEST sidebar: the lazy object navigator, fixed to the sidebar width. */
+function buildSidebar(controller: SqlAdminController): Component {
     const sidebar = Panel({
-        layoutManager: VBox(),
-        components: [Text("Database explorer"), Text("Navigator — coming next")],
+        layoutManager: new Fit(),
+        components: [NavigatorTree(controller)],
     });
 
     sidebar.setPreferredSize(SIDEBAR_WIDTH, 0);
