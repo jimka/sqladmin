@@ -86,7 +86,7 @@ export class SqlAdminController {
         this._openPanels.set(id, { ref, node, store });
 
         // addPanel activates the newly opened panel; no explicit focus needed.
-        this.dock.addPanel({ id, title: ref.name ?? id, content: TableWorkPanel(store, columns) });
+        this.dock.addPanel({ id, title: ref.name ?? id, tooltip: this.panelTooltip(ref), content: TableWorkPanel(store, columns) });
 
         try {
             await store.load();
@@ -115,7 +115,7 @@ export class SqlAdminController {
         }
 
         this._openPanels.set(id, { ref, node });
-        this.dock.addPanel({ id, title: `${ref.name ?? id} (structure)`, content: StructurePanel(columns) });
+        this.dock.addPanel({ id, title: `${ref.name ?? id} (structure)`, tooltip: this.panelTooltip(ref), content: StructurePanel(columns) });
         this.syncToPanel(id);
     }
 
@@ -137,6 +137,11 @@ export class SqlAdminController {
     /** Stable id for a table's structure tab, distinct from its data tab. */
     private structurePanelId(ref: DbObjectRef): string {
         return `${this.panelId(ref)}::structure`;
+    }
+
+    /** Hover tooltip for a tab: the table name, its database, and its schema. */
+    private panelTooltip(ref: DbObjectRef): string {
+        return `${ref.name}\nDatabase: ${ref.database}\nSchema: ${ref.schema}`;
     }
 
     /** Drop a closed panel's store from the registry. */

@@ -8,6 +8,19 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️✅ Dock tabs had no tooltip option
+
+A dock tab showed only its title; there was no way to give it a hover tooltip
+(the app wanted each tab to show the table's name, database, and schema).
+`DockPanelSpec` carried `title`/`glyph`/`closeable` but nothing for a tooltip.
+
+**Fix (library):** added `DockPanelSpec.tooltip` (carried via
+`LayoutConstraints.tooltip`); `TabBar` attaches it to the tab button with
+`Tooltip.attach` and detaches on removal. The controller passes a
+`name\nDatabase: …\nSchema: …` string for each opened tab (`SqlAdminController`).
+
+---
+
 ## ✂️✅ Tree had no programmatic selection setter
 
 Syncing the navigator's highlighted node to the active dock tab needed to set
