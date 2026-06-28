@@ -1,8 +1,8 @@
 // The app shell: a Border-laid Panel with the four regions — MenuBar (NORTH),
-// the explorer sidebar (WEST, collapsible), the Dock work area (CENTER), and the
-// StatusBar (SOUTH). The Dock and StatusBar are owned by the controller; the
-// shell only arranges them. The WEST region is a placeholder until the activity
-// bar + navigator land next.
+// the activity bar (WEST), the Dock work area (CENTER), and the StatusBar
+// (SOUTH). The Dock and StatusBar are owned by the controller; the shell only
+// arranges them. The activity bar manages its own collapse (the rail stays
+// visible, only its deck hides), so the WEST region is not Border-collapsible.
 //
 // Built as a callable factory (not `extends Panel`): subclassing the callable
 // Panel export type-checks against the library source but not against its built
@@ -13,31 +13,27 @@ import { Component, Panel } from "@jimka/typescript-ui/core";
 import { Placement } from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout } from "@jimka/typescript-ui/layout";
 import { MenuBar } from "@jimka/typescript-ui/component/menubar";
-import { AccordionPanel } from "@jimka/typescript-ui/component/container";
 import { Glyph } from "@jimka/typescript-ui/component/display";
 import { database } from "@jimka/typescript-ui/glyphs/solid/database";
 import { circle_info } from "@jimka/typescript-ui/glyphs/solid/circle_info";
-import { NavigatorTree } from "../navigator/NavigatorTree";
+import { ActivityBar } from "./ActivityBar";
+import { DatabaseExplorerView } from "./DatabaseExplorerView";
 import type { SqlAdminController } from "../SqlAdminController";
 
-// Accordion section-header glyphs: a database for the object navigator, an info
-// circle for the metadata inspector.
+// Glyphs used across the sidebar subtree: a database for the Database view (rail
+// button + navigator section), an info circle for the Properties section. Registered
+// once here, the composition root, and referenced by name downstream.
 Glyph.register(database, circle_info);
 
-// Sidebar width until the activity-bar rail replaces it.
-const SIDEBAR_WIDTH = 240;
-
-// A preferred height large enough to always overflow the sidebar, so the
-// accordion's shrink hands the navigator section all the space the fixed-height
-// Properties section leaves — i.e. the navigator fills, Properties stays compact.
-const NAV_FILL_HINT = 10000;
+// The single Phase-1 view container's id (its rail button selects it by this).
+const DATABASE_VIEW_ID = "database";
 
 /** Build the shell Panel, hosting the controller's Dock and StatusBar. */
 export function SqlAdminShell(controller: SqlAdminController): Panel {
     const shell = Panel({ layoutManager: new BorderLayout() });
 
     shell.addComponent(buildMenuBar(), { placement: Placement.NORTH });
-    shell.addComponent(buildSidebar(controller), { placement: Placement.WEST, collapsible: true });
+    shell.addComponent(buildSidebar(controller), { placement: Placement.WEST });
     shell.addComponent(controller.dock, { placement: Placement.CENTER });
     shell.addComponent(controller.statusBar, { placement: Placement.SOUTH });
 
@@ -58,27 +54,15 @@ function buildMenuBar(): MenuBar {
 }
 
 /**
- * WEST sidebar: a compact Accordion of two collapsible sections, fixed to the
- * sidebar width — the lazy object navigator on top, the Properties inspector
- * below it. The navigator carries an outsized preferred height so the accordion's
- * shrink gives it every pixel the fixed-height Properties section leaves, letting
- * the navigator fill while Properties stays compact. The inspector tracks the
- * navigator selection; the controller owns and updates it.
+ * WEST sidebar: a VSCode-style activity bar whose icon rail toggles its deck.
+ * Phase 1 ships one view — the Database explorer (navigator + properties
+ * accordion) — which is also the documented Phase-2 seam (one more rail button +
+ * one more deck page adds a view).
  */
 function buildSidebar(controller: SqlAdminController): Component {
-    const navigator = NavigatorTree(controller);
+    const explorer = DatabaseExplorerView(controller, DATABASE_VIEW_ID);
 
-    navigator.setPreferredSize(0, NAV_FILL_HINT);
-
-    const sidebar = new AccordionPanel({
-        sections: [
-            { label: "Navigator", component: navigator, initiallyOpen: true, glyph: "database" },
-            { label: "Properties", component: controller.properties.component, initiallyOpen: true, glyph: "circle-info" },
-        ],
-    });
-
-    sidebar.getAccordion().setCompact(true);
-    sidebar.setPreferredSize(SIDEBAR_WIDTH, 0);
-
-    return sidebar;
+    return ActivityBar([
+        { id: DATABASE_VIEW_ID, label: "Database", glyph: "database", component: explorer },
+    ]);
 }
