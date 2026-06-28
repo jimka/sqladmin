@@ -11,6 +11,7 @@ import { getColumns } from "./data/api";
 import { buildModel } from "./data/buildModel";
 import { buildStore } from "./data/stores";
 import { TableWorkPanel } from "./dock/TableWorkPanel";
+import { StructurePanel } from "./dock/StructurePanel";
 
 export class SqlAdminController {
     readonly dock: Dock;
@@ -73,6 +74,27 @@ export class SqlAdminController {
         }
     }
 
+    /** Open a read-only structure (column metadata) tab for a table/view. */
+    async openStructure(ref: DbObjectRef): Promise<void> {
+        const id = this.structurePanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        let columns: ColumnMeta[];
+
+        try {
+            columns = await getColumns(ref);
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return;
+        }
+
+        this.dock.addPanel({ id, title: `${ref.name ?? id} (structure)`, content: StructurePanel(columns) });
+    }
+
     /** Surface an error (AjaxError detail, or any thrown value) to the StatusBar. */
     notifyError(error: unknown, ref?: DbObjectRef): void {
         const where = ref?.name ? ` (${ref.name})` : "";
@@ -82,6 +104,11 @@ export class SqlAdminController {
     /** Stable panel id so re-opening focuses the existing panel. */
     private panelId(ref: DbObjectRef): string {
         return `${ref.schema}.${ref.name}`;
+    }
+
+    /** Stable id for a table's structure tab, distinct from its data tab. */
+    private structurePanelId(ref: DbObjectRef): string {
+        return `${ref.schema}.${ref.name}::structure`;
     }
 
     /** Drop a closed panel's store from the registry. */

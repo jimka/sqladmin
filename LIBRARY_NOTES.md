@@ -8,6 +8,19 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️✅ Tree had no right-click / context-menu hook
+
+`Tree` emitted only `selection` and `loaderror`, so there was no way to offer a
+right-click action on a node (the navigator needed "open the table's structure in
+its own tab"). Re-clicking selection was the only signal, and it is wired to
+opening the data tab — unsuitable for a secondary action.
+
+**Fix (library):** added a `"contextmenu"` event firing `(node, MouseEvent)`; it
+suppresses the native menu and leaves selection unchanged. The navigator pairs it
+with a rebuild-mode `Menu` (`navigator/NavigatorTree.ts`) to show "Open structure".
+
+---
+
 ## 🐞✅ Card: a child first shown at runtime renders blank
 
 `Card` (used for the table panel's Data | Structure toggle) showed the structure
@@ -197,12 +210,17 @@ shorthand, `components:`/`layoutManager:` nesting, and which exports are callabl
 
 ---
 
-## ✂️ Glyph barrel import pulls ~2,000 modules in dev
+## ✂️✅ Glyph barrel import pulls ~2,000 modules in dev
 
 Importing from `@jimka/typescript-ui/glyphs/solid` (the barrel) makes Vite's dev
 server fetch every glyph module on page load. Per-glyph subpath imports
-(`.../glyphs/solid/file`) + `Glyph.register(...)` are required. (Documented in
-`MenuBarPanel.ts`; flagging here as a real consumer papercut.)
+(`.../glyphs/solid/file`) + `Glyph.register(...)` avoid it — but the built
+package only exported the barrel, so an external consumer *couldn't* import a
+single glyph (the subpath didn't resolve).
+
+**Fix (library):** added a `"./glyphs/solid/*"` wildcard export mapping to the
+per-glyph files the build already emits. The toolbar now imports just
+`refresh`/`plus`/`minus`/`save` (see `dock/TableWorkPanel.ts`) and registers them.
 
 ---
 

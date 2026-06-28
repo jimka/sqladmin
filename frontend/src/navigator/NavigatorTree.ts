@@ -6,6 +6,7 @@
 
 import { Tree } from "@jimka/typescript-ui/component/tree";
 import type { TreeNode } from "@jimka/typescript-ui/component/tree";
+import { Menu } from "@jimka/typescript-ui/overlay";
 import type { DbObjectRef } from "../contract";
 import { getDatabases, getObjects, getSchemas } from "../data/api";
 import type { SqlAdminController } from "../SqlAdminController";
@@ -14,12 +15,24 @@ import type { SqlAdminController } from "../SqlAdminController";
 export function NavigatorTree(controller: SqlAdminController): Tree {
     const conn = controller.connectionId;
     const tree = Tree();
+    const contextMenu = Menu();
 
     tree.on("selection", (nodes: TreeNode[]) => {
         const ref = nodes[0]?.data as DbObjectRef | undefined;
 
         if (ref && (ref.kind === "table" || ref.kind === "view")) {
             void controller.openTable(ref);
+        }
+    });
+
+    // Right-clicking a table/view offers its structure in a separate tab.
+    tree.on("contextmenu", (node: TreeNode, event: MouseEvent) => {
+        const ref = node.data as DbObjectRef | undefined;
+
+        if (ref && (ref.kind === "table" || ref.kind === "view")) {
+            contextMenu.show(event.clientX, event.clientY, [
+                { text: "Open structure", action: () => void controller.openStructure(ref) },
+            ]);
         }
     });
 
