@@ -1,0 +1,56 @@
+# SQLAdmin local stack.
+#
+# Phase 0 brings up the database. The backend (FastAPI + asyncpg) and frontend
+# (Vite) services are added to this same file as they are built — their stubs
+# are sketched below so the intended topology is visible.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sqladmin-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sqladmin
+      POSTGRES_PASSWORD: sqladmin
+      POSTGRES_DB: sqladmin
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Seed scripts run once, only when the data volume is first created.
+      # Re-seed with: docker compose down -v && docker compose up -d db
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sqladmin -d sqladmin"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:                         # FastAPI + asyncpg
+    build: ./backend
+    container_name: sqladmin-backend
+    restart: unless-stopped
+    environment:
+      # in-container the host is the `db` service, not localhost
+      DATABASE_URL: postgresql://sqladmin:sqladmin@db:5432/sqladmin
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # --- added in later Phase 0 steps ---
+  #
+  # frontend:                      # Vite dev server
+  #   build: ./frontend
+  #   ports:
+  #     - "5173:5173"
+  #   depends_on:
+  #     - backend
+  #   # NOTE: a host `npm link` to ../typescript-ui does NOT survive into a
+  #   #   container. A containerized frontend must consume the library via
+  #   #   file:../typescript-ui (with the lib's dist mounted into the build
+  #   #   context) or an `npm pack` tarball. For the tight dev loop we run the
+  #   #   frontend on the host (npm link) and containerize only db (+ backend).
+
+volumes:
+  db-data:
