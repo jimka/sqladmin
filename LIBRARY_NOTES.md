@@ -8,6 +8,29 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🔎 AjaxStore batches writes by default, with no per-record opt-out
+
+`store.sync()` sends a **single batch array** to the collection URL for each
+phase — `createBatch`/`updateBatch`/`destroyBatch` POST/PUT/DELETE
+`writeRecords(records)` (a JSON array) to `{url}`. `AbstractStore.sync` uses the
+batch method whenever the proxy defines it, and `AjaxProxy` *always* defines
+them, so there is no way to opt into per-record writes (the documented
+`POST {url}` single-object / `PUT|DELETE {url}/{id}` per-id endpoints are only
+hit when the proxy lacks the batch methods).
+
+**Impact:** the SQLAdmin backend's per-record endpoints (`POST /rows` expects a
+single dict; `PUT|DELETE /rows/{id}`) receive a batch array instead — e.g. adding
+a row then Save posts body `[{}]`, which FastAPI rejects with 422 "Input should
+be a valid dictionary". So Save currently never reaches the DB.
+
+**Options (open):** (a) make the backend's collection endpoints accept batch
+arrays (`POST /rows` dict-or-list; add batch `PUT`/`DELETE /rows`); or (b) add a
+`batch?: boolean` opt-out to `AjaxProxy`/`AjaxStore` so a consumer can use the
+per-record endpoints the backend already implements and tests. (A full happy-path
+insert also needs editable grid cells to fill NOT NULL columns.)
+
+---
+
 ## 🐞✅ Dock: `addPanel` crashed after the last tab was closed (empty dock)
 
 After closing every tab, no table could be opened again. Closing the last tab

@@ -5,12 +5,12 @@
 import { Dock } from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent } from "@jimka/typescript-ui/overlay";
 import { StatusBar } from "@jimka/typescript-ui/component/container";
-import { Table } from "@jimka/typescript-ui/component/table";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
-import type { DbObjectRef } from "./contract";
+import type { ColumnMeta, DbObjectRef } from "./contract";
 import { getColumns } from "./data/api";
 import { buildModel } from "./data/buildModel";
 import { buildStore } from "./data/stores";
+import { TableWorkPanel } from "./dock/TableWorkPanel";
 
 export class SqlAdminController {
     readonly dock: Dock;
@@ -47,9 +47,10 @@ export class SqlAdminController {
         }
 
         let store: AjaxStore;
+        let columns: ColumnMeta[];
 
         try {
-            const columns = await getColumns(ref);
+            columns = await getColumns(ref);
             store = buildStore(ref, buildModel(columns), columns);
         } catch (err) {
             this.notifyError(err, ref);
@@ -62,7 +63,7 @@ export class SqlAdminController {
         this._openPanels.set(id, store);
 
         // addPanel activates the newly opened panel; no explicit focus needed.
-        this.dock.addPanel({ id, title: ref.name ?? id, content: Table(store) });
+        this.dock.addPanel({ id, title: ref.name ?? id, content: TableWorkPanel(store, columns) });
 
         try {
             await store.load();
@@ -96,19 +97,41 @@ export class SqlAdminController {
     /** Prefer an AjaxError's parsed {detail}; fall back to a message or string. */
     private errorMessage(error: unknown): string {
         const e = error as { body?: unknown; message?: unknown };
+        const detail = this.detailOf(e?.body);
 
-        if (e?.body && typeof e.body === "object" && e.body !== null && "detail" in e.body) {
-            const detail = (e.body as { detail?: unknown }).detail;
-
-            if (detail != null) {
-                return String(detail);
-            }
+        if (detail) {
+            return detail;
         }
 
-        if (e?.message != null) {
-            return String(e.message);
+        if (typeof e?.message === "string" && e.message) {
+            return e.message;
         }
 
         return String(error);
+    }
+
+    /**
+     * Extract a readable message from a backend error body. A domain error's
+     * `detail` is a string; a FastAPI validation error's `detail` is an array of
+     * `{msg, ...}` entries, which are joined.
+     */
+    private detailOf(body: unknown): string | null {
+        if (!body || typeof body !== "object") {
+            return null;
+        }
+
+        const detail = (body as { detail?: unknown }).detail;
+
+        if (typeof detail === "string") {
+            return detail;
+        }
+
+        if (Array.isArray(detail)) {
+            return detail
+                .map(d => (d && typeof d === "object" && "msg" in d ? String((d as { msg: unknown }).msg) : String(d)))
+                .join("; ");
+        }
+
+        return null;
     }
 }
