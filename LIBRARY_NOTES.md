@@ -8,6 +8,21 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞✅ Dock: `addPanel` crashed after the last tab was closed (empty dock)
+
+After closing every tab, no table could be opened again. Closing the last tab
+prunes its (root) region — `pruneRegion` removed the emptied region from its
+parent, which for the root *is the dock* — leaving the dock with no region. The
+next `addPanel` → `activeTabRegion` → `isTab(undefined)` →
+`undefined.getLayoutManager()` threw (`Cannot read properties of undefined`),
+rejected the `openTable` promise, and nothing opened.
+
+**Fix (library):** `pruneRegion` keeps an emptied **root** region (its parent is
+the dock) as the dock's add/drop target; only nested regions are pruned. An empty
+dock now retains a valid empty region, so `addPanel` works again.
+
+---
+
 ## 🐞✅ Dock: opening a panel didn't activate it
 
 `dock.addPanel(spec)` added the tab but left the previously-active tab showing —
