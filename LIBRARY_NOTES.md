@@ -8,6 +8,21 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞✅ Boolean table cells ignored read-only
+
+Locking the structure grid (`Table` with `rowReadOnly: () => true`) stopped text
+cells from editing but **not** boolean cells — their checkboxes stayed
+interactive, so a user could still toggle `nullable`/`isPrimaryKey`/etc. A
+`BooleanCell`'s checkbox is its always-on renderer, so the cell's read-only flag
+never reached it (and `BooleanCell.startEdit` overrode the base's `isReadOnly`
+guard, leaving the dblclick / keyboard toggle paths open too).
+
+**Fix (library):** `BooleanCell.setReadOnly` forwards to the checkbox and
+`startEdit` short-circuits when read-only. No app change — the app already
+requested read-only correctly; the library now honors it.
+
+---
+
 ## ✂️✅ Dock tabs had no tooltip option
 
 A dock tab showed only its title; there was no way to give it a hover tooltip
