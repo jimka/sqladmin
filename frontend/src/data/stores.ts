@@ -22,6 +22,9 @@ export function buildStore(ref: DbObjectRef, model: Model, columns: ColumnMeta[]
             url: `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/rows`,
             reader: new JsonReader({ rootProperty: "rows", totalProperty: "totalCount" }),
             writer: new SqlAdminWriter(generated),
+            // The backend exposes per-record write endpoints (POST /rows with a
+            // single object, PUT/DELETE /rows/{id}), so opt out of batch writes.
+            batch: false,
         },
         pageSize: PAGE_SIZE,
         remoteSort: true,

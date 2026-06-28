@@ -12,13 +12,14 @@ import { Border as BorderLayout, Card, Fit } from "@jimka/typescript-ui/layout";
 import { ToolBar } from "@jimka/typescript-ui/component/menubar";
 import { Button } from "@jimka/typescript-ui/component/button";
 import { Table } from "@jimka/typescript-ui/component/table";
+import type { ColumnSpec } from "@jimka/typescript-ui/component/table";
 import { MemoryStore, Model } from "@jimka/typescript-ui/data";
 import type { AjaxStore, ModelRecord } from "@jimka/typescript-ui/data";
 import type { ColumnMeta } from "../contract";
 
 /** Build the work panel hosting a table's data grid + structure view. */
 export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[]): Panel {
-    const dataGrid = Table(store);
+    const dataGrid = Table(store, buildColumnSpec(columns));
     const dataView = Panel({ layoutManager: new Fit(), components: [dataGrid] });
     const structureView = Panel({ layoutManager: new Fit(), components: [buildStructureTable(columns)] });
 
@@ -36,6 +37,15 @@ export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[]): Panel {
     panel.addComponent(body, { placement: Placement.CENTER });
 
     return panel;
+}
+
+/**
+ * Build the data grid's column spec. Cells are inline-editable by default;
+ * generated columns are marked read-only since the DB assigns their values
+ * (the SqlAdminWriter also strips them from writes).
+ */
+function buildColumnSpec(columns: ColumnMeta[]): ColumnSpec {
+    return { columns: columns.map(c => ({ field: c.name, readOnly: c.isGenerated })) };
 }
 
 /** Toolbar wired to the store (CRUD) and the Data/Structure card toggle. */
