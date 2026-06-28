@@ -20,7 +20,9 @@ import { ToolBar } from "@jimka/typescript-ui/component/menubar";
 import { ToggleButton } from "@jimka/typescript-ui/component/button";
 import { Tooltip } from "@jimka/typescript-ui/overlay";
 
-// Width of the always-visible icon rail, and of the deck beside it when expanded.
+// Width of the always-visible icon rail — one icon-button column, matching the
+// narrow VSCode activity-bar strip — and of the explorer deck beside it when
+// expanded (a comfortable navigator/properties column).
 const RAIL_WIDTH = 40;
 const DECK_WIDTH = 240;
 
@@ -51,12 +53,12 @@ export function ActivityBar(views: ActivityView[]): Component {
     const activityBar = Panel({ layoutManager: new BorderLayout() });
 
     // Collapse hides the deck and shrinks the bar to the rail width; the rail
-    // stays visible. setPreferredSize does not relayout the parent, so ask the
-    // shell to re-lay out its regions and reclaim the freed width for the Dock.
+    // stays visible. Changing the bar's preferred size notifies the shell to
+    // re-lay out its regions (Component wires a child's preferred-size change to
+    // the parent's scheduleLayout), so the Dock reclaims the freed width.
     const setCollapsed = (collapsed: boolean): void => {
         deck.setDisplayed(!collapsed);
         activityBar.setPreferredSize(collapsed ? RAIL_WIDTH : RAIL_WIDTH + DECK_WIDTH, 0);
-        activityBar.getParentComponent()?.scheduleLayout();
     };
 
     for (const view of views) {
