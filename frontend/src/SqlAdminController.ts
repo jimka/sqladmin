@@ -125,14 +125,18 @@ export class SqlAdminController {
         this.statusBar.setMessage(`Error${where}: ${this.errorMessage(error)}`);
     }
 
-    /** Stable panel id so re-opening focuses the existing panel. */
+    /**
+     * Stable panel id so re-opening focuses the existing panel. Includes the
+     * connection and database so same-named tables in different databases (e.g.
+     * `postgres` vs `sqladmin`, both with `public.customers`) never collide.
+     */
     private panelId(ref: DbObjectRef): string {
-        return `${ref.schema}.${ref.name}`;
+        return `${ref.connectionId}/${ref.database}/${ref.schema}.${ref.name}`;
     }
 
     /** Stable id for a table's structure tab, distinct from its data tab. */
     private structurePanelId(ref: DbObjectRef): string {
-        return `${ref.schema}.${ref.name}::structure`;
+        return `${this.panelId(ref)}::structure`;
     }
 
     /** Drop a closed panel's store from the registry. */
