@@ -12,7 +12,7 @@ import asyncpg
 from ..contract import ColumnMeta, TableRef
 from ..errors import NotFound, ValidationError
 from ..sql.compiler import quote_ident
-from ..wire import rows_to_wire
+from ..wire import from_wire_value, rows_to_wire
 from .base import Command
 from .common import qualified, single_pk
 
@@ -49,19 +49,19 @@ class UpdateRowCommand(Command):
         self._columns: list[ColumnMeta] = columns
         self._pk: str = single_pk(columns)
         self._row_id: Any = row_id
-        allowed = {c.name for c in columns}
+        by_name = {c.name: c for c in columns}
         self._assign: list[str] = []
         self._values: list[Any] = []
 
         for k, v in (data or {}).items():
-            if k not in allowed:
+            if k not in by_name:
                 raise ValidationError(f"Unknown column '{k}'")
 
             if k == self._pk:
                 continue  # never update the PK
 
             self._assign.append(k)
-            self._values.append(v)
+            self._values.append(from_wire_value(v, by_name[k]))
 
         if not self._assign:
             raise ValidationError("No updatable columns supplied")

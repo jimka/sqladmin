@@ -12,7 +12,7 @@ import asyncpg
 from ..contract import ColumnMeta, TableRef
 from ..errors import ValidationError
 from ..sql.compiler import quote_ident
-from ..wire import rows_to_wire
+from ..wire import from_wire_value, rows_to_wire
 from .base import Command
 from .common import qualified
 
@@ -44,16 +44,16 @@ class InsertRowCommand(Command):
         self._conn: asyncpg.Connection = conn
         self._table: TableRef = table
         self._columns: list[ColumnMeta] = columns
-        allowed = {c.name for c in columns}
+        by_name = {c.name: c for c in columns}
         self._cols: list[str] = []
         self._values: list[Any] = []
 
         for k, v in (data or {}).items():
-            if k not in allowed:
+            if k not in by_name:
                 raise ValidationError(f"Unknown column '{k}'")
 
             self._cols.append(k)
-            self._values.append(v)
+            self._values.append(from_wire_value(v, by_name[k]))
 
         self._raw: Mapping[str, Any] | None = None
 

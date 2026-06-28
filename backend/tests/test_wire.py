@@ -10,8 +10,10 @@ import decimal
 
 import pytest
 
+import uuid
+
 from app.contract import WireType
-from app.wire import pg_type_to_wire, rows_to_wire, to_wire_value
+from app.wire import from_wire_value, pg_type_to_wire, rows_to_wire, to_wire_value
 from tests.conftest import col
 
 
@@ -89,3 +91,79 @@ def test_rows_to_wire_unknown_column_defaults_to_string() -> None:
     rows = [{"extra": 5}]
 
     assert rows_to_wire(rows, []) == [{"extra": "5"}]
+
+
+def test_from_wire_none_passes_through() -> None:
+    assert from_wire_value(None, col("x", WireType.ISO_STRING, data_type="date")) is None
+
+
+def test_from_wire_number_and_boolean_pass_through() -> None:
+    assert from_wire_value(42, col("n", WireType.NUMBER, data_type="integer")) == 42
+    assert from_wire_value(True, col("b", WireType.BOOLEAN, data_type="boolean")) is True
+
+
+def test_from_wire_text_passes_through() -> None:
+    assert from_wire_value("hi", col("t", WireType.STRING, data_type="text")) == "hi"
+
+
+def test_from_wire_numeric_string_to_decimal() -> None:
+    result = from_wire_value("1240.50", col("balance", WireType.STRING, data_type="numeric"))
+
+    assert result == decimal.Decimal("1240.50")
+    assert isinstance(result, decimal.Decimal)
+
+
+def test_from_wire_uuid_string_to_uuid() -> None:
+    text = "12345678-1234-5678-1234-567812345678"
+    result = from_wire_value(text, col("uid", WireType.STRING, data_type="uuid"))
+
+    assert result == uuid.UUID(text)
+
+
+def test_from_wire_timestamptz_parses_js_z_suffix() -> None:
+    # JS Date.toISOString() emits a trailing 'Z'; Python 3.10 fromisoformat
+    # cannot parse it, so the mapping must normalise it to a UTC offset.
+    result = from_wire_value(
+        "2026-06-28T12:04:59.110Z",
+        col("created_at", WireType.ISO_STRING, data_type="timestamp with time zone"),
+    )
+
+    assert result == datetime.datetime(
+        2026, 6, 28, 12, 4, 59, 110000, tzinfo=datetime.timezone.utc
+    )
+
+
+def test_from_wire_timestamp_without_tz() -> None:
+    result = from_wire_value(
+        "2026-06-28T12:04:59",
+        col("ts", WireType.ISO_STRING, data_type="timestamp without time zone"),
+    )
+
+    assert result == datetime.datetime(2026, 6, 28, 12, 4, 59)
+
+
+def test_from_wire_date_and_time() -> None:
+    assert from_wire_value(
+        "2026-06-28", col("d", WireType.ISO_STRING, data_type="date")
+    ) == datetime.date(2026, 6, 28)
+    assert from_wire_value(
+        "12:04:59", col("t", WireType.ISO_STRING, data_type="time without time zone")
+    ) == datetime.time(12, 4, 59)
+
+
+def test_from_wire_date_accepts_full_datetime_string() -> None:
+    # A date column whose value arrived as a full ISO datetime keeps just the date.
+    assert from_wire_value(
+        "2026-06-28T12:04:59.110Z", col("d", WireType.ISO_STRING, data_type="date")
+    ) == datetime.date(2026, 6, 28)
+
+
+def test_from_wire_base64_to_bytes() -> None:
+    encoded = base64.b64encode(b"hi").decode()
+
+    assert from_wire_value(encoded, col("blob", WireType.BASE64, data_type="bytea")) == b"hi"
+
+
+def test_from_wire_json_to_text() -> None:
+    # asyncpg binds json/jsonb columns from a JSON text string.
+    assert from_wire_value({"a": 1}, col("doc", WireType.JSON, data_type="jsonb")) == '{"a": 1}'

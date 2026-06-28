@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import datetime
 import decimal
+import json
 import uuid
 from typing import Any, Iterable
 
@@ -41,6 +42,10 @@ _DATETIME_TYPES = frozenset(
 _STRING_TYPES = frozenset(
     {"text", "character varying", "varchar", "character", "char", "bpchar", "name", "uuid", "citext"}
 )
+# Subsets of the datetime family, used by from_wire_value to pick the Python
+# temporal type (date / time / datetime) an ISO string is parsed into.
+_DATE_TYPES = frozenset({"date"})
+_TIME_TYPES = frozenset({"time", "time without time zone", "time with time zone", "timetz"})
 
 
 def pg_type_to_wire(data_type: str) -> WireType:
@@ -134,6 +139,69 @@ def to_wire_value(value: Any, wire_type: WireType) -> Any:
 
     if wire_type is WireType.JSON_ARRAY:
         return _jsonable(value)
+
+    return value
+
+
+def _parse_iso_datetime(text: str) -> datetime.datetime:
+    """
+    Parse an ISO-8601 timestamp, normalising the JS ``Z`` suffix.
+
+    ``datetime.fromisoformat`` only accepts a ``Z`` offset from Python 3.11, but
+    ``Date.toISOString()`` always emits one, so it is rewritten to ``+00:00``.
+    """
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+
+    return datetime.datetime.fromisoformat(text)
+
+
+def from_wire_value(value: Any, column: ColumnMeta) -> Any:
+    """
+    Map one wire scalar back to the Python value asyncpg binds for ``column``.
+
+    This is the inverse of ``to_wire_value``, applied to incoming write payloads
+    so a JSON string/number lands as the native type the column expects (an ISO
+    string becomes a ``datetime``/``date``/``time``, a numeric string becomes a
+    ``Decimal``, base64 becomes ``bytes``). Values that asyncpg already binds
+    directly (numbers, booleans, plain text, arrays) pass through unchanged.
+
+    Args:
+        value: the wire scalar from the decoded JSON payload.
+        column: the target column, whose wire and Postgres types pick the mapping.
+
+    Returns:
+        The Python value to bind for this column.
+    """
+    if value is None:
+        return None
+
+    wire_type = column.wire_type
+    data_type = column.data_type.lower()
+
+    if wire_type is WireType.ISO_STRING:
+        if data_type in _DATE_TYPES:
+            return datetime.date.fromisoformat(value[:10])
+
+        if data_type in _TIME_TYPES:
+            return datetime.time.fromisoformat(value)
+
+        return _parse_iso_datetime(value)
+
+    if wire_type is WireType.STRING:
+        if data_type in _NUMERIC_AS_STRING:
+            return decimal.Decimal(value)
+
+        if data_type == "uuid":
+            return uuid.UUID(value)
+
+        return value
+
+    if wire_type is WireType.JSON:
+        return json.dumps(value)
+
+    if wire_type is WireType.BASE64:
+        return base64.b64decode(value)
 
     return value
 
