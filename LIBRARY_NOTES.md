@@ -8,6 +8,36 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞✅ Dock: opening a panel didn't activate it
+
+`dock.addPanel(spec)` added the tab but left the previously-active tab showing —
+the newly opened panel opened *behind* the current one. A `dock.focusPanel(id)`
+immediately after `addPanel` was a no-op, because the Tab creates a child's tab
+cell lazily during its next `doLayout` pass, so right after `addPanel` the frame
+isn't in the Tab's content list yet (`indexOfContent` → -1). Re-selecting an
+already-open panel focused fine (its cell existed by then).
+
+**Fix (library):** added `Tab.setActiveContent(content)` that activates the tab,
+deferring to the next `doLayout` if the cell doesn't exist yet; `Dock.addPanel`
+calls it so opening a panel shows it. The app's manual post-`addPanel`
+`focusPanel` is removed.
+
+---
+
+## ✂️✅ Dock: tabs were not closeable, with no way to enable it
+
+`DockPanelSpec` had no closeable option and `Dock`'s internal `leafConstraints`
+never set `closeable`, so dock tabs never showed a close button — and a consumer
+had no way to turn it on. (The Tab layer fully supports it via
+`LayoutConstraints.closeable`, and the Dock already wires tab close → its
+`"close"` lifecycle event; only the toggle was missing.)
+
+**Fix (library):** added `DockPanelSpec.closeable` (default `true`) and had
+`leafConstraints` request it. Closing a tab now fires the Dock `"close"` event,
+which the app's controller already maps to disposing the panel's store.
+
+---
+
 ## 🐞✅ Component `#id` CSS rule not escaped → breaks on ids with `.`/`:`
 
 **Symptom:** A `Dock` panel rendered with its tab bar *behind* the content — the

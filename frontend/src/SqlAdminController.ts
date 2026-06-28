@@ -61,8 +61,8 @@ export class SqlAdminController {
         store.on("sync", (e: StoreSyncEvent) => e.failures.forEach((f: StoreExceptionEvent) => this.notifyError(f.error, ref)));
         this._openPanels.set(id, store);
 
+        // addPanel activates the newly opened panel; no explicit focus needed.
         this.dock.addPanel({ id, title: ref.name ?? id, content: Table(store) });
-        this.dock.focusPanel(id);
 
         try {
             await store.load();
