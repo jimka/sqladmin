@@ -8,6 +8,22 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞✅ Card: a child first shown at runtime renders blank
+
+`Card` (used for the table panel's Data | Structure toggle) showed the structure
+view blank the first time the Structure button was pressed; switching dock tabs
+and back made it appear. `Card.doLayout` only ever lays out the *visible* child,
+so the structure view — hidden during the panel's initial layout pass — was never
+sized. `setVisibleComponentId` flipped visibility but scheduled no layout, so the
+newly shown child stayed unsized until an unrelated relayout (the dock tab switch)
+laid the whole subtree out again.
+
+**Fix (library):** `Card.setVisibleComponentId` now calls
+`getContainer()?.scheduleLayout()` after switching, so the newly shown child is
+sized on the next frame. No app change needed.
+
+---
+
 ## ✂️ AjaxProxy.writeRecord sends the WHOLE record, so the backend must coerce wire types
 
 On a per-record write, `AjaxProxy.create`/`update` serialize the *entire* record
