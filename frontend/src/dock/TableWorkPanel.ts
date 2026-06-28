@@ -56,10 +56,17 @@ function buildToolBar(store: AjaxStore, dataGrid: Table): ToolBar {
 
     bar.addComponent(glyphButton("plus", GREEN, "Add row", () => store.add({})));
     bar.addComponent(glyphButton("minus", RED, "Delete row", () => dataGrid.getSelectedRecords().forEach((r: ModelRecord) => store.remove(r))));
-    bar.addComponent(glyphButton("save", BLUE, "Save", () => void store.sync()));
+    const saveButton = glyphButton("save", BLUE, "Save", () => void store.sync());
+    bar.addComponent(saveButton);
     // Flex spacer pushes Refresh to the far right, away from the edit actions.
     bar.addComponent(Spacer.flex());
     bar.addComponent(glyphButton("refresh", BLUE, "Refresh", () => void store.load()));
+
+    // Save is only meaningful with unsaved edits/adds/removes; 'datachanged'
+    // fires on each of those (and after a sync clears them).
+    const syncSaveEnabled = (): void => void saveButton.setEnabled(store.hasPendingChanges());
+    syncSaveEnabled();
+    store.on("datachanged", syncSaveEnabled);
 
     return bar;
 }
