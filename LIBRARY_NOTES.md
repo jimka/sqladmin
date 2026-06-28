@@ -8,6 +8,19 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️✅ Table had no selection-change event
+
+Disabling the toolbar's Delete button until a row is selected needed to react to
+the grid's selection changing, but `Table` exposed only `getSelectedRecords()` —
+no event, and the `Body` it wraps is private.
+
+**Fix (library):** `Body` now emits `"selectionchange"` (current selection) from
+every mutation point, and `Table` gained its own event surface forwarding it.
+The toolbar enables Delete only when a still-live row is selected
+(`TableWorkPanel`, re-checked on `selectionchange` and store `datachanged`).
+
+---
+
 ## 🔎 No built-in "required" cell affordance (enhancement, deferred)
 
 The table has no way to mark a column/cell as required and visually flag it —

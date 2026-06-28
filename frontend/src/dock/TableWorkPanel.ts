@@ -60,7 +60,8 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
     const bar = new ToolBar();
 
     bar.addComponent(glyphButton("plus", GREEN, "Add row", () => store.add({})));
-    bar.addComponent(glyphButton("minus", RED, "Delete row", () => void confirmDelete(store, dataGrid)));
+    const deleteButton = glyphButton("minus", RED, "Delete row", () => void confirmDelete(store, dataGrid));
+    bar.addComponent(deleteButton);
     const saveButton = glyphButton("save", BLUE, "Save", () => save_(store, columns, notify));
     bar.addComponent(saveButton);
     // Flex spacer pushes Refresh to the far right, away from the edit actions.
@@ -76,6 +77,19 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
     const syncSaveEnabled = (): void => void saveButton.setEnabled(store.hasPendingChanges());
     syncSaveEnabled();
     store.on("datachanged", syncSaveEnabled);
+
+    // Delete needs at least one selected row that still exists. Re-check on
+    // selection changes and on 'datachanged' (a removal drops rows from the
+    // store, so a now-deleted selection no longer counts).
+    const syncDeleteEnabled = (): void => {
+        const live = new Set(store.getAll());
+        const hasLiveSelection = dataGrid.getSelectedRecords().some((r: ModelRecord) => live.has(r));
+
+        deleteButton.setEnabled(hasLiveSelection);
+    };
+    syncDeleteEnabled();
+    dataGrid.on("selectionchange", syncDeleteEnabled);
+    store.on("datachanged", syncDeleteEnabled);
 
     return bar;
 }
