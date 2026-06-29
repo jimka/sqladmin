@@ -37,6 +37,9 @@ export class SqlAdminController {
     private _propsSeq: number = 0;
 
     /**
+     * Wire the Dock, StatusBar, and Properties inspector, and subscribe to the
+     * Dock's panel-close and focus events.
+     *
      * @param connectionId - The connection these operations target (Phase 0-1: "default").
      */
     constructor(connectionId: string = "default") {
@@ -93,9 +96,15 @@ export class SqlAdminController {
         store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
         this._openPanels.set(id, { ref, node, store, columns });
 
-        // addPanel activates the newly opened panel; no explicit focus needed.
+        // Open lazily: the tab appears at once, and the grid UI builds on first
+        // activation behind a spinner, so a wide table never blocks the tab.
         const notify = (message: string): void => this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: ${message}`);
-        this.dock.addPanel({ id, title: ref.name ?? id, tooltip: this.panelTooltip(ref), content: TableWorkPanel(store, columns, notify) });
+        this.dock.addLazyPanel({
+            id,
+            title  : ref.name ?? id,
+            tooltip: this.panelTooltip(ref),
+            content: () => TableWorkPanel(store, columns, notify)
+        });
 
         try {
             await store.load();
