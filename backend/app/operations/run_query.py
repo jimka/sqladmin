@@ -161,7 +161,17 @@ class RunQueryCommand(Command):
 
         if self._attrs:
             columns = _query_columns(self._attrs)
-            rows = rows_to_wire([dict(r) for r in (self._records or [])], _as_colmeta(columns))
+            names   = [c["name"] for c in columns]
+
+            # Build each row positionally against the de-duplicated names. asyncpg
+            # collapses duplicate/unnamed keys under dict(record) (last wins), which
+            # would drop a value and leave a renamed column (e.g. column_2) matching
+            # no key; indexing by position keeps every column's value.
+            raw_rows = [
+                {names[i]: record[i] for i in range(len(names))}
+                for record in (self._records or [])
+            ]
+            rows = rows_to_wire(raw_rows, _as_colmeta(columns))
 
             return {"kind": "rows", "columns": columns, "rows": rows, "rowCount": len(rows)}
 

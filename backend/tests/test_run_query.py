@@ -37,10 +37,13 @@ def test_get_result_before_apply_raises() -> None:
         op.get_result()
 
 
+# asyncpg Records are positional (indexable by column position), so the row
+# fixtures below are tuples — get_result reads values by position, which is what
+# lets duplicate/unnamed result columns keep distinct values (see the dedup test).
 def test_rows_result_maps_columns_and_scalars() -> None:
     op = RunQueryCommand(NO_CONN, "select id, amount from t")
     op._attrs = [_attr("id", "int4"), _attr("amount", "numeric")]
-    op._records = [{"id": 1, "amount": decimal.Decimal("5.00")}]
+    op._records = [(1, decimal.Decimal("5.00"))]
     op._status = "SELECT 1"
 
     assert op.get_result() == {
@@ -68,21 +71,26 @@ def test_empty_rowset_with_description_is_rows_not_status() -> None:
     assert result["rowCount"] == 0
 
 
-def test_duplicate_and_unnamed_columns_disambiguated() -> None:
-    op = RunQueryCommand(NO_CONN, "select 1, 1")
+def test_duplicate_and_unnamed_columns_keep_distinct_values() -> None:
+    # `SELECT 1, 1`: both result columns report the unnamed marker "?column?".
+    # The names disambiguate to column/column_2 AND each keeps its own value —
+    # positional row-building is what prevents the second value being dropped.
+    op = RunQueryCommand(NO_CONN, "select 1, 2")
     op._attrs = [_attr("?column?", "int4"), _attr("?column?", "int4")]
-    op._records = []
+    op._records = [(1, 2)]
     op._status = "SELECT 1"
 
-    cols = op.get_result()["columns"]
+    result = op.get_result()
 
-    assert [c["name"] for c in cols] == ["column", "column_2"]
+    assert [c["name"] for c in result["columns"]] == ["column", "column_2"]
+    assert result["rows"] == [{"column": 1, "column_2": 2}]
+    assert result["rowCount"] == 1
 
 
 def test_short_name_type_mapping() -> None:
     op = RunQueryCommand(NO_CONN, "select a, b, c")
     op._attrs = [_attr("a", "int4"), _attr("b", "bool"), _attr("c", "timestamptz")]
-    op._records = [{"a": 1, "b": True, "c": datetime.datetime(2020, 1, 1)}]
+    op._records = [(1, True, datetime.datetime(2020, 1, 1))]
     op._status = "SELECT 1"
 
     by_name = {c["name"]: c["wireType"] for c in op.get_result()["columns"]}
