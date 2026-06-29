@@ -8,6 +8,35 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️🔎 Accordion sections should be resizable
+
+The `Accordion` has no way to resize its open sections — section heights are fixed
+by each section's preferred/min size plus `fillHeight` (which only grows the
+bottommost open section; see the note below). A VSCode-style explorer wants
+draggable splitters between sections so the user can apportion height (e.g.
+navigator vs properties) instead of one section being pinned to a fixed height.
+
+**Possible library improvement:** add resizable gutters between open Accordion
+sections (or a documented recipe for composing the Accordion with `Split`).
+Investigate later.
+
+---
+
+## ✂️🔎 Consider a zero-inset default for rail-style containers
+
+Building the activity bar, the containing Border panel's default content insets
+(~4px per side) squeezed the narrow WEST rail once the bar collapsed to the rail
+width — the rail (and its icon column) changed size across collapse/expand. Worked
+around with `activityBar.setInsets(new Insets(0, 0, 0, 0))`.
+
+**Possible library improvement:** let rail-style containers — a vertical `ToolBar`
+used as an activity rail, or narrow fixed-width Border regions — default to zero
+content insets, so a fixed-width strip stays a constant width regardless of the
+host's size. Investigate later (confirm it doesn't regress normal ToolBar/ Border
+spacing first).
+
+---
+
 ## 🐞🩹 `ToggleButton` ignores the `glyph` option (renders no icon)
 
 **Symptom:** `new ToggleButton("", { glyph: "database" })` produced a button with
