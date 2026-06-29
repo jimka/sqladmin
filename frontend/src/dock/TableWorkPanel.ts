@@ -8,29 +8,29 @@
 // table's structure opens in its own tab from the navigator's right-click menu
 // (see StructurePanel / SqlAdminController).
 
-import { Panel } from "@jimka/typescript-ui/core";
-import { Placement } from "@jimka/typescript-ui/primitive";
+import { Panel }                       from "@jimka/typescript-ui/core";
+import { Placement }                   from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
-import { ToolBar } from "@jimka/typescript-ui/component/menubar";
-import { Spacer } from "@jimka/typescript-ui/component/container";
-import { Button } from "@jimka/typescript-ui/component/button";
-import { Table } from "@jimka/typescript-ui/component/table";
-import type { ColumnSpec } from "@jimka/typescript-ui/component/table";
-import { Glyph } from "@jimka/typescript-ui/component/display";
-import { Dialog, DialogButtons } from "@jimka/typescript-ui/overlay";
+import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
+import { Spacer }                      from "@jimka/typescript-ui/component/container";
+import { Button }                      from "@jimka/typescript-ui/component/button";
+import { Table }                       from "@jimka/typescript-ui/component/table";
+import type { ColumnSpec }             from "@jimka/typescript-ui/component/table";
+import { Glyph }                       from "@jimka/typescript-ui/component/display";
+import { Dialog, DialogButtons }       from "@jimka/typescript-ui/overlay";
 import type { AjaxStore, ModelRecord } from "@jimka/typescript-ui/data";
-import { refresh } from "@jimka/typescript-ui/glyphs/solid/refresh";
-import { plus } from "@jimka/typescript-ui/glyphs/solid/plus";
-import { minus } from "@jimka/typescript-ui/glyphs/solid/minus";
-import { save } from "@jimka/typescript-ui/glyphs/solid/save";
-import type { ColumnMeta } from "../contract";
+import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
+import { plus }                        from "@jimka/typescript-ui/glyphs/solid/plus";
+import { minus }                       from "@jimka/typescript-ui/glyphs/solid/minus";
+import { save }                        from "@jimka/typescript-ui/glyphs/solid/save";
+import type { ColumnMeta }             from "../contract";
 
 Glyph.register(refresh, plus, minus, save);
 
 /** Toolbar glyph colors: blue for neutral actions, green to add, red to delete. */
-const BLUE = "rgb(30, 100, 200)";
+const BLUE  = "rgb(30, 100, 200)";
 const GREEN = "rgb(46, 125, 50)";
-const RED = "rgb(198, 40, 40)";
+const RED   = "rgb(198, 40, 40)";
 
 /** Surface a short status message (validation / save feedback) to the user. */
 export type Notify = (message: string) => void;
@@ -57,20 +57,23 @@ function buildColumnSpec(columns: ColumnMeta[]): ColumnSpec {
 
 /** Glyph-only toolbar wired to the store (CRUD) with validation + confirmation. */
 function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], notify: Notify): ToolBar {
-    const bar = new ToolBar();
-
-    bar.addComponent(glyphButton("plus", GREEN, "Add row", () => store.add({})));
     const deleteButton = glyphButton("minus", RED, "Delete row", () => void confirmDelete(store, dataGrid));
-    bar.addComponent(deleteButton);
     const saveButton = glyphButton("save", BLUE, "Save", () => save_(store, columns, notify));
-    bar.addComponent(saveButton);
-    // Flex spacer pushes Refresh to the far right, away from the edit actions.
-    bar.addComponent(Spacer.flex());
-    // Refresh discards unsaved edits then reloads from the server. reject()
-    // must precede load(): load() replaces the records but leaves pending
-    // removals queued, so without it a deleted row would reappear yet stay
-    // marked for deletion on the next Save.
-    bar.addComponent(glyphButton("refresh", BLUE, "Refresh", () => { store.reject(); void store.load(); }));
+
+    const bar = new ToolBar({
+        components: [
+            glyphButton("plus", GREEN, "Add row", () => store.add({})),
+            deleteButton,
+            saveButton,
+            // Flex spacer pushes Refresh to the far right, away from the edit actions.
+            Spacer.flex(),
+            // Refresh discards unsaved edits then reloads from the server. reject()
+            // must precede load(): load() replaces the records but leaves pending
+            // removals queued, so without it a deleted row would reappear yet stay
+            // marked for deletion on the next Save.
+            glyphButton("refresh", BLUE, "Refresh", () => { store.reject(); void store.load(); })
+        ]
+    });
 
     // Save is only meaningful with unsaved edits/adds/removes; 'datachanged'
     // fires on each of those (and after a sync clears them).
@@ -82,7 +85,7 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
     // selection changes and on 'datachanged' (a removal drops rows from the
     // store, so a now-deleted selection no longer counts).
     const syncDeleteEnabled = (): void => {
-        const live = new Set(store.getAll());
+        const live             = new Set(store.getAll());
         const hasLiveSelection = dataGrid.getSelectedRecords().some((r: ModelRecord) => live.has(r));
 
         deleteButton.setEnabled(hasLiveSelection);

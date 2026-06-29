@@ -2,11 +2,11 @@
 // column), shown in its own dock tab opened from the navigator's right-click
 // menu. Backed by an in-memory store over the ColumnMeta list.
 
-import { Component, Panel } from "@jimka/typescript-ui/core";
-import { Fit } from "@jimka/typescript-ui/layout";
-import { Table } from "@jimka/typescript-ui/component/table";
+import { Component, Panel }   from "@jimka/typescript-ui/core";
+import { Fit }                from "@jimka/typescript-ui/layout";
+import { Table }              from "@jimka/typescript-ui/component/table";
 import { MemoryStore, Model } from "@jimka/typescript-ui/data";
-import type { ColumnMeta } from "../contract";
+import type { ColumnMeta }    from "../contract";
 
 /** Build a panel showing one table's column metadata as a read-only grid. */
 export function StructurePanel(columns: ColumnMeta[]): Panel {

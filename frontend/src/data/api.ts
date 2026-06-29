@@ -43,8 +43,8 @@ export function getSchemas(connectionId: string, database: string): Promise<{ na
 /** The navigator's table/view level. */
 export function getObjects(
     connectionId: string,
-    database: string,
-    schema: string,
+    database    : string,
+    schema      : string,
 ): Promise<{ name: string; kind: DbObjectKind }[]> {
     return getJson(`/api/${connectionId}/${database}/${schema}/objects`);
 }

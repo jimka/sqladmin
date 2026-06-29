@@ -2,18 +2,18 @@
 // the open-panel registry (deduped by panel id). Components stay dumb: they emit,
 // the controller decides. All app-side errors funnel to notifyError.
 
-import { Dock } from "@jimka/typescript-ui/overlay";
-import type { DockPanelEvent } from "@jimka/typescript-ui/overlay";
-import { StatusBar } from "@jimka/typescript-ui/component/container";
-import type { Tree, TreeNode } from "@jimka/typescript-ui/component/tree";
+import { Dock }                                                from "@jimka/typescript-ui/overlay";
+import type { DockPanelEvent }                                 from "@jimka/typescript-ui/overlay";
+import { StatusBar }                                           from "@jimka/typescript-ui/component/container";
+import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef } from "./contract";
-import { getColumns } from "./data/api";
-import { buildModel } from "./data/buildModel";
-import { buildStore } from "./data/stores";
-import { TableWorkPanel } from "./dock/TableWorkPanel";
-import { StructurePanel } from "./dock/StructurePanel";
-import { PropertiesPanel } from "./properties/PropertiesPanel";
+import type { ColumnMeta, DbObjectRef }                        from "./contract";
+import { getColumns }                                          from "./data/api";
+import { buildModel }                                          from "./data/buildModel";
+import { buildStore }                                          from "./data/stores";
+import { TableWorkPanel }                                      from "./dock/TableWorkPanel";
+import { StructurePanel }                                      from "./dock/StructurePanel";
+import { PropertiesPanel }                                     from "./properties/PropertiesPanel";
 
 /** Registry entry for one open dock panel; `store` is absent for structure tabs. */
 interface OpenPanel {
@@ -24,13 +24,13 @@ interface OpenPanel {
 }
 
 export class SqlAdminController {
-    readonly dock: Dock;
-    readonly statusBar: StatusBar;
+    readonly dock      : Dock;
+    readonly statusBar : StatusBar;
     readonly properties: PropertiesPanel;
 
     private readonly _connectionId: string;
-    private readonly _openPanels: Map<string, OpenPanel> = new Map();
-    private _navigator: Tree | null = null;
+    private readonly _openPanels  : Map<string, OpenPanel> = new Map();
+    private _navigator            : Tree | null = null;
 
     // Bumped on every showProperties call so a slow column fetch whose selection
     // has since moved on is discarded instead of clobbering the current view.
@@ -41,9 +41,9 @@ export class SqlAdminController {
      */
     constructor(connectionId: string = "default") {
         this._connectionId = connectionId;
-        this.dock = Dock();
-        this.statusBar = new StatusBar();
-        this.properties = new PropertiesPanel();
+        this.dock          = Dock();
+        this.statusBar     = new StatusBar();
+        this.properties    = new PropertiesPanel();
 
         // Disposal is wired once: the dock fires "close" only on genuine
         // destruction (a tear-off fires "detach" and the panel survives).
@@ -124,7 +124,12 @@ export class SqlAdminController {
         }
 
         this._openPanels.set(id, { ref, node, columns });
-        this.dock.addPanel({ id, title: `${ref.name ?? id} (structure)`, tooltip: this.panelTooltip(ref), content: StructurePanel(columns) });
+        this.dock.addPanel({
+            id,
+            title  : `${ref.name ?? id} (structure)`,
+            tooltip: this.panelTooltip(ref),
+            content: StructurePanel(columns)
+        });
         this.syncToPanel(id);
     }
 
@@ -145,7 +150,7 @@ export class SqlAdminController {
         }
 
         const cached = this._openPanels.get(this.panelId(ref))?.columns
-            ?? this._openPanels.get(this.structurePanelId(ref))?.columns;
+                       ?? this._openPanels.get(this.structurePanelId(ref))?.columns;
 
         if (cached) {
             this.properties.show(ref, cached);

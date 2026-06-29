@@ -37,10 +37,10 @@ export class PropertiesPanel {
         this._store = new MemoryStore({ model, data: [], autoLoad: true });
         this.component = Panel({
             layoutManager: new Fit(),
-            components: [Table(this._store, { columns: [], rowReadOnly: () => true })],
+            preferredSize: { width: 0, height: PANEL_HEIGHT },
+            minSize      : { width: 0, height: PANEL_HEIGHT },
+            components   : [Table(this._store, { columns: [], rowReadOnly: () => true })],
         });
-        this.component.setPreferredSize(0, PANEL_HEIGHT);
-        this.component.setMinSize(0, PANEL_HEIGHT);
     }
 
     /**

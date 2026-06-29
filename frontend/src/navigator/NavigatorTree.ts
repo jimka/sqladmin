@@ -4,22 +4,22 @@
 // it in the Dock through the controller. The Tree caches loaded children, so a
 // collapse/re-expand does not refetch.
 
-import { Tree } from "@jimka/typescript-ui/component/tree";
-import type { TreeNode } from "@jimka/typescript-ui/component/tree";
-import { Menu } from "@jimka/typescript-ui/overlay";
-import type { DbObjectRef } from "../contract";
+import { Tree }                                 from "@jimka/typescript-ui/component/tree";
+import type { TreeNode }                        from "@jimka/typescript-ui/component/tree";
+import { Menu }                                 from "@jimka/typescript-ui/overlay";
+import type { DbObjectRef }                     from "../contract";
 import { getDatabases, getObjects, getSchemas } from "../data/api";
-import type { SqlAdminController } from "../SqlAdminController";
+import type { SqlAdminController }              from "../SqlAdminController";
 
 /** Build the navigator Tree, wired to open tables and report load errors. */
 export function NavigatorTree(controller: SqlAdminController): Tree {
-    const conn = controller.connectionId;
-    const tree = Tree();
+    const conn        = controller.connectionId;
+    const tree        = Tree();
     const contextMenu = Menu();
 
     tree.on("selection", (nodes: TreeNode[]) => {
         const node = nodes[0];
-        const ref = node?.data as DbObjectRef | undefined;
+        const ref  = node?.data as DbObjectRef | undefined;
 
         if (!node || !ref) {
             return;
@@ -65,9 +65,9 @@ async function loadDatabases(conn: string): Promise<TreeNode[]> {
 
 function databaseNode(conn: string, database: string): TreeNode {
     return {
-        label: database,
-        hasChildren: true,
-        data: { connectionId: conn, database, kind: "database" } satisfies DbObjectRef,
+        label       : database,
+        hasChildren : true,
+        data        : { connectionId: conn, database, kind: "database" } satisfies DbObjectRef,
         loadChildren: () => loadSchemas(conn, database),
     };
 }
@@ -80,9 +80,9 @@ async function loadSchemas(conn: string, database: string): Promise<TreeNode[]> 
 
 function schemaNode(conn: string, database: string, schema: string): TreeNode {
     return {
-        label: schema,
-        hasChildren: true,
-        data: { connectionId: conn, database, schema, kind: "schema" } satisfies DbObjectRef,
+        label       : schema,
+        hasChildren : true,
+        data        : { connectionId: conn, database, schema, kind: "schema" } satisfies DbObjectRef,
         loadChildren: () => loadObjects(conn, database, schema),
     };
 }
@@ -92,6 +92,6 @@ async function loadObjects(conn: string, database: string, schema: string): Prom
 
     return objects.map(o => ({
         label: o.name,
-        data: { connectionId: conn, database, schema, name: o.name, kind: o.kind } satisfies DbObjectRef,
+        data : { connectionId: conn, database, schema, name: o.name, kind: o.kind } satisfies DbObjectRef,
     }));
 }

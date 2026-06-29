@@ -5,10 +5,10 @@
 // only parses the {rows, totalCount} envelope in paginated mode, so without it
 // the reader would expect a top-level array and fail.
 
-import { AjaxStore, JsonReader } from "@jimka/typescript-ui/data";
-import type { Model } from "@jimka/typescript-ui/data";
+import { AjaxStore, JsonReader }        from "@jimka/typescript-ui/data";
+import type { Model }                   from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef } from "../contract";
-import { SqlAdminWriter } from "./SqlAdminWriter";
+import { SqlAdminWriter }               from "./SqlAdminWriter";
 
 const PAGE_SIZE = 100;
 

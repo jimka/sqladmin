@@ -6,9 +6,9 @@
 // navigator fills, Properties stays compact. (The accordion has no per-section
 // fill weight; see LIBRARY_NOTES.md.)
 
-import { Component } from "@jimka/typescript-ui/core";
-import { AccordionPanel } from "@jimka/typescript-ui/component/container";
-import { NavigatorTree } from "../navigator/NavigatorTree";
+import { Component }               from "@jimka/typescript-ui/core";
+import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
+import { NavigatorTree }           from "../navigator/NavigatorTree";
 import type { SqlAdminController } from "../SqlAdminController";
 
 // A preferred height large enough to always overflow the sidebar, so the

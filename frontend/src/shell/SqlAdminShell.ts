@@ -9,16 +9,16 @@
 // .d.ts (the callable constructor type drops instance methods for external
 // consumers). See LIBRARY_NOTES.md.
 
-import { Panel } from "@jimka/typescript-ui/core";
-import { Placement } from "@jimka/typescript-ui/primitive";
-import { Border as BorderLayout } from "@jimka/typescript-ui/layout";
-import { MenuBar } from "@jimka/typescript-ui/component/menubar";
-import { Glyph } from "@jimka/typescript-ui/component/display";
-import { database } from "@jimka/typescript-ui/glyphs/solid/database";
-import { circle_info } from "@jimka/typescript-ui/glyphs/solid/circle_info";
-import { ActivityBar } from "./ActivityBar";
-import type { ActivityBarHandle } from "./ActivityBar";
-import { DatabaseExplorerView } from "./DatabaseExplorerView";
+import { Panel }                   from "@jimka/typescript-ui/core";
+import { Placement }               from "@jimka/typescript-ui/primitive";
+import { Border as BorderLayout }  from "@jimka/typescript-ui/layout";
+import { MenuBar }                 from "@jimka/typescript-ui/component/menubar";
+import { Glyph }                   from "@jimka/typescript-ui/component/display";
+import { database }                from "@jimka/typescript-ui/glyphs/solid/database";
+import { circle_info }             from "@jimka/typescript-ui/glyphs/solid/circle_info";
+import { ActivityBar }             from "./ActivityBar";
+import type { ActivityBarHandle }  from "./ActivityBar";
+import { DatabaseExplorerView }    from "./DatabaseExplorerView";
 import type { SqlAdminController } from "../SqlAdminController";
 
 // Glyphs used across the sidebar subtree: a database for the Database view (rail
@@ -31,15 +31,17 @@ const DATABASE_VIEW_ID = "database";
 
 /** Build the shell Panel, hosting the controller's Dock and StatusBar. */
 export function SqlAdminShell(controller: SqlAdminController): Panel {
-    const shell = Panel({ layoutManager: new BorderLayout() });
     const sidebar = buildSidebar(controller);
 
-    shell.addComponent(buildMenuBar(sidebar.toggleCollapsed), { placement: Placement.NORTH });
-    shell.addComponent(sidebar.component, { placement: Placement.WEST });
-    shell.addComponent(controller.dock, { placement: Placement.CENTER });
-    shell.addComponent(controller.statusBar, { placement: Placement.SOUTH });
-
-    return shell;
+    return Panel({
+        layoutManager: new BorderLayout(),
+        components: [
+            { component: buildMenuBar(sidebar.toggleCollapsed), constraints: { placement: Placement.NORTH } },
+            { component: sidebar.component,                     constraints: { placement: Placement.WEST } },
+            { component: controller.dock,                       constraints: { placement: Placement.CENTER } },
+            { component: controller.statusBar,                  constraints: { placement: Placement.SOUTH } },
+        ],
+    });
 }
 
 /**
@@ -49,15 +51,13 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
  * @param onToggleSidebar - Collapses/expands the activity bar.
  */
 function buildMenuBar(onToggleSidebar: () => void): MenuBar {
-    const bar = new MenuBar();
-
-    bar.setMenus([
-        { label: "File", items: [{ text: "Close Tab", enabled: false }, { separator: true }, { text: "Exit", enabled: false }] },
-        { label: "View", items: [{ text: "Toggle Sidebar", action: onToggleSidebar }] },
-        { label: "Tools", items: [{ text: "Run SQL…", enabled: false }] },
-    ]);
-
-    return bar;
+    return MenuBar({
+        menus: [
+            { label: "File", items: [{ text: "Close Tab", enabled: false }, { separator: true }, { text: "Exit", enabled: false }] },
+            { label: "View", items: [{ text: "Toggle Sidebar", action: onToggleSidebar }] },
+            { label: "Tools", items: [{ text: "Run SQL…", enabled: false }] },
+        ],
+    });
 }
 
 /**

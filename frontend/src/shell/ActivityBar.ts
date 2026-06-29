@@ -14,12 +14,12 @@
 // The same collapse/expand is exposed as `toggleCollapsed` for the menu's
 // "Toggle Sidebar" command.
 
-import { Component, Panel } from "@jimka/typescript-ui/core";
-import { Placement, Insets } from "@jimka/typescript-ui/primitive";
+import { Component, Panel }             from "@jimka/typescript-ui/core";
+import { Placement, Insets }            from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Card } from "@jimka/typescript-ui/layout";
-import { ToolBar } from "@jimka/typescript-ui/component/menubar";
-import { ToggleButton } from "@jimka/typescript-ui/component/button";
-import { Tooltip } from "@jimka/typescript-ui/overlay";
+import { ToolBar }                      from "@jimka/typescript-ui/component/menubar";
+import { ToggleButton }                 from "@jimka/typescript-ui/component/button";
+import { Tooltip }                      from "@jimka/typescript-ui/overlay";
 
 // Width of the always-visible icon rail — one icon-button column, matching the
 // narrow VSCode activity-bar strip — and of the explorer deck beside it when
@@ -59,11 +59,11 @@ export interface ActivityBarHandle {
  * @returns The activity-bar component and its collapse toggle.
  */
 export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
-    const card = new Card();
-    const deck = Panel({ layoutManager: card });
-    const rail = new ToolBar({ orientation: "vertical" });
+    const card        = new Card();
+    const deck        = Panel({ layoutManager: card });
+    const rail        = new ToolBar({ orientation: "vertical" });
     const activityBar = Panel({ layoutManager: new BorderLayout() });
-    const buttonById = new Map<string, ToggleButton>();
+    const buttonById  = new Map<string, ToggleButton>();
 
     // The last-shown view (restored on expand) and the current collapsed state.
     let activeId = views[0].id;
