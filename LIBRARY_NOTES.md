@@ -8,6 +8,25 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞✅ Menu item hover highlight stuck after clicking a command
+
+After clicking **View → Toggle Sidebar** once, the item stayed highlighted, and
+the highlight reappeared every time the View menu was reopened. Only View showed
+it (its item is the only enabled one; disabled items never take the hover style).
+
+**Root cause (library):** hover paints the item via `setFocused(true)` and relies
+on `mouseout` (`setFocused(false)`) to clear it. The click that activates the item
+closes and **detaches** the menu under the pointer, so the browser fires no
+`mouseout` (same class as the orphaned-tooltip bug). `close()`'s
+`setFocusedIndex(-1)` only resets the *keyboard*-tracked item, not one highlighted
+by hover. Persistent-mode (MenuBar) menus reuse their item elements across
+open/close, so the stale highlight persisted.
+
+**Fix (library):** `Menu.close()` now sweeps every item with `setFocused(false)`.
+Regression test added. No app change.
+
+---
+
 ## 🐞✅ MenuBar dropdown item actions never fired
 
 Wiring **View → Toggle Sidebar** to a `MenuBar` menu item's `action` did nothing —
