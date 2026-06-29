@@ -51,6 +51,7 @@ class ColumnMeta:
     nullable: bool
     is_primary_key: bool
     is_generated: bool       # serial / identity / generated — omitted from INSERT body
+    has_default: bool        # has a column default (e.g. now()) — not user-required on INSERT
     wire_type: WireType      # the contract scalar a row value of this column arrives as
 
     def to_contract(self) -> dict:
@@ -59,7 +60,7 @@ class ColumnMeta:
 
         Returns:
             A dict with name, dataType, nullable, isPrimaryKey, isGenerated,
-            and wireType.
+            hasDefault, and wireType.
         """
         return {
             "name": self.name,
@@ -67,5 +68,6 @@ class ColumnMeta:
             "nullable": self.nullable,
             "isPrimaryKey": self.is_primary_key,
             "isGenerated": self.is_generated,
+            "hasDefault": self.has_default,
             "wireType": self.wire_type.value,
         }

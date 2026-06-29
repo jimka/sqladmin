@@ -12,8 +12,8 @@ from app.operations import ListColumnsQuery
 from tests.conftest import NO_CONN, TABLE
 
 _RAW = [
-    {"name": "id", "data_type": "integer", "nullable": False, "is_primary_key": True, "is_generated": True},
-    {"name": "balance", "data_type": "numeric", "nullable": False, "is_primary_key": False, "is_generated": False},
+    {"name": "id", "data_type": "integer", "nullable": False, "is_primary_key": True, "is_generated": True, "has_default": True},
+    {"name": "balance", "data_type": "numeric", "nullable": False, "is_primary_key": False, "is_generated": False, "has_default": False},
 ]
 
 
@@ -43,6 +43,7 @@ def test_get_result_contract_shape() -> None:
         "nullable": False,
         "isPrimaryKey": True,
         "isGenerated": True,
+        "hasDefault": True,
         "wireType": "number",
     }
 

@@ -22,6 +22,7 @@ def col(
     *,
     pk: bool = False,
     generated: bool = False,
+    has_default: bool = False,
     data_type: str = "text",
 ) -> ColumnMeta:
     """
@@ -33,6 +34,7 @@ def col(
         nullable=True,
         is_primary_key=pk,
         is_generated=generated,
+        has_default=has_default,
         wire_type=wire,
     )
 

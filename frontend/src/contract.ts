@@ -32,6 +32,7 @@ export interface ColumnMeta {
     nullable: boolean;
     isPrimaryKey: boolean;
     isGenerated: boolean;
+    hasDefault: boolean; // has a column default; not user-required on insert
     wireType: WireType;
 }
 

@@ -34,6 +34,7 @@ class ListColumnsQuery(Query):
                 OR c.column_default LIKE 'nextval(%',
                 false
             ) AS is_generated,
+            (c.column_default IS NOT NULL) AS has_default,
             COALESCE(pk.is_pk, false) AS is_primary_key
         FROM information_schema.columns c
         LEFT JOIN (
@@ -83,6 +84,7 @@ class ListColumnsQuery(Query):
                 nullable=r["nullable"],
                 is_primary_key=r["is_primary_key"],
                 is_generated=r["is_generated"],
+                has_default=r["has_default"],
                 wire_type=pg_type_to_wire(r["data_type"]),
             )
             for r in self._raw
