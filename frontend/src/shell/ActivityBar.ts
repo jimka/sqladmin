@@ -14,7 +14,7 @@
 // selected <=> expanded is the single source of truth.
 
 import { Component, Panel } from "@jimka/typescript-ui/core";
-import { Placement } from "@jimka/typescript-ui/primitive";
+import { Placement, Insets } from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Card } from "@jimka/typescript-ui/layout";
 import { ToolBar } from "@jimka/typescript-ui/component/menubar";
 import { ToggleButton } from "@jimka/typescript-ui/component/button";
@@ -25,6 +25,10 @@ import { Tooltip } from "@jimka/typescript-ui/overlay";
 // expanded (a comfortable navigator/properties column).
 const RAIL_WIDTH = 40;
 const DECK_WIDTH = 240;
+
+// Square size of the rail icons, pinned so they stay this size regardless of
+// theme font metrics. Sized to read clearly within the RAIL_WIDTH column.
+const GLYPH_SIZE = 24;
 
 /** One view container in the activity bar: a rail button plus its deck page. */
 export interface ActivityView {
@@ -71,6 +75,7 @@ export function ActivityBar(views: ActivityView[]): Component {
         // to super, so the glyph passed in its options bag is recorded but never
         // rendered — the constructor-time glyph build already ran. See LIBRARY_NOTES.md.
         button.setGlyph(view.glyph);
+        button.pinGlyphSize(GLYPH_SIZE);
         Tooltip.attach(button, view.label);
 
         button.on("action", () => {
@@ -90,6 +95,11 @@ export function ActivityBar(views: ActivityView[]): Component {
     rail.setPreferredSize(RAIL_WIDTH, 0);
     card.setVisibleComponentId(views[0].id);
 
+    // Zero the bar's content insets: with the default inset, collapsing the bar
+    // to RAIL_WIDTH would squeeze the rail (the Border insets eat into the WEST
+    // region), so the rail width — and thus the icon column — would change across
+    // toggles. Flush insets keep the rail a constant width in both states.
+    activityBar.setInsets(new Insets(0, 0, 0, 0));
     activityBar.addComponent(rail, { placement: Placement.WEST });
     activityBar.addComponent(deck, { placement: Placement.CENTER });
     activityBar.setPreferredSize(RAIL_WIDTH + DECK_WIDTH, 0);
