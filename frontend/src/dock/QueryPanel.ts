@@ -10,7 +10,7 @@
 // to it, so closing the dock tab disposes the component subtree and the
 // MemoryStore is collected — no controller-side disposal is needed.
 
-import { Component, Panel, Event }            from "@jimka/typescript-ui/core";
+import { Component, Panel }                   from "@jimka/typescript-ui/core";
 import { Placement }                          from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Fit, Split } from "@jimka/typescript-ui/layout";
 import { ToolBar }                            from "@jimka/typescript-ui/component/menubar";
@@ -120,8 +120,8 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
         }
     }
 
-    // Ctrl/Cmd+Enter runs from within the editor.
-    Event.addSubtreeListener(editor, "keydown", (e: KeyboardEvent) => {
+    // Ctrl/Cmd+Enter runs, wired through the editor's own typed keydown surface.
+    editor.on("keydown", (e: KeyboardEvent) => {
         if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
             e.preventDefault();
             void run();
