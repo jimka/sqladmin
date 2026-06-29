@@ -8,8 +8,8 @@ import { SqlAdminController } from "./SqlAdminController";
 import { SqlAdminShell }      from "./shell/SqlAdminShell";
 
 const controller = new SqlAdminController("default");
-const shell = SqlAdminShell(controller);
 
-const body = Body.getInstance();
-body.setLayoutManager(Fit());
-body.addComponent(shell);
+Body.init({
+    layoutManager: Fit(),
+    components:    [SqlAdminShell(controller)],
+});
