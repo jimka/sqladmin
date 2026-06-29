@@ -68,7 +68,7 @@ The shell's menubar **already declares** a disabled `Tools → "Run SQL…"` ite
 
 A table in the navigator can be opened **as a query** in addition to the CRUD `TableWorkPanel`: a `SELECT * FROM "schema"."table" LIMIT n` is generated and dropped into a fresh query panel, the phpMyAdmin "edit the generated SQL" affordance. This is *additive reuse* — it never replaces `openTable`. The CRUD path stays the navigator's primary open (it is the only path with inline editing, server-side pagination, and remote sort/filter — none of which a one-shot `MemoryStore` query result has), so a query panel is the power-user "drop to SQL" complement, not a substitute. The decision to keep the two panels distinct mirrors the Phase 0/1 *two data paths* split (CRUD ⇒ `AjaxStore`; one-shot ⇒ `api.ts` + `MemoryStore`).
 
-- **Generated SQL** is built by a small pure helper `buildSelectSql(ref, limit)` in `frontend/src/data/sql.ts`, quoting each identifier (wrap in `"`, double any embedded `"`) — the front-end mirror of the backend's `quote_ident`. A `LIMIT` (default **1000**) is appended so "open as query" on a huge table does not pull the whole table into the `MemoryStore` (a query panel has no pagination — see Non-Goals); the user can edit or delete the `LIMIT` and re-run.
+- **Generated SQL** is built by a small pure helper `buildSelectSql(ref, limit)` in `frontend/src/data/sql.ts`, quoting each identifier (wrap in `"`, double any embedded `"`) — the front-end mirror of the backend's `quote_ident`. A `LIMIT` (default **50**) is appended so "open as query" on a huge table does not pull the whole table into the `MemoryStore` (a query panel has no pagination — see Non-Goals); the user can raise, lower, or delete the `LIMIT` and re-run.
 - **Affordance:** a new item on the navigator's existing right-click menu — the same `contextmenu` handler ([`frontend/src/navigator/NavigatorTree.ts:38`](#)) that already offers "Open structure" ([`:43`](#)), already gated to `kind === "table" | "view"` — labelled "Open as query". Selecting it calls `controller.openQueryFor(ref)`.
 - **Controller:** `openQueryFor(ref)` builds the SQL via `buildSelectSql(ref)` and delegates to `openQuery(seedSql)`; the seeded SQL prefills the panel's `TextArea`. Whether the seeded query auto-runs on open vs. waits for the user to press Run is a small UX choice — the plan's default is **auto-run** (open-as-query implies "show me the rows"), with the run going through the panel's normal run path so errors/status behave identically to a typed query.
 
@@ -118,7 +118,7 @@ export function runQuery(connectionId: string, sql: string): Promise<QueryResult
 ```typescript
 // frontend/src/data/sql.ts — new pure helper: generate a browse query for a table/view
 export function buildSelectSql(ref: DbObjectRef, limit?: number): string;
-//   -> `SELECT * FROM "schema"."table" LIMIT 1000`  (identifiers quoted; default limit 1000)
+//   -> `SELECT * FROM "schema"."table" LIMIT 50`  (identifiers quoted; default limit 50)
 ```
 
 ```typescript
@@ -186,7 +186,7 @@ QueryPanel (Panel, Border layout)
 
 ### `buildSelectSql` (frontend `data/sql.ts`, new)
 
-`buildSelectSql(ref, limit = 1000)` returns `SELECT * FROM "<schema>"."<name>" LIMIT <limit>`, quoting each identifier with a tiny `quoteIdent(s) = '"' + s.replace(/"/g, '""') + '"'` (the front-end mirror of the backend's `quote_ident`). Pure and trivially unit-testable. It is the only "generate SQL" surface; the backend never round-trips a `DbObjectRef` for this — the SQL is produced client-side and submitted through the normal `runQuery` path.
+`buildSelectSql(ref, limit = 50)` returns `SELECT * FROM "<schema>"."<name>" LIMIT <limit>`, quoting each identifier with a tiny `quoteIdent(s) = '"' + s.replace(/"/g, '""') + '"'` (the front-end mirror of the backend's `quote_ident`). Pure and trivially unit-testable. It is the only "generate SQL" surface; the backend never round-trips a `DbObjectRef` for this — the SQL is produced client-side and submitted through the normal `runQuery` path.
 
 ### `buildQueryModel` (frontend `data/buildModel.ts`, new export)
 
@@ -258,7 +258,7 @@ All steps are in the **external app workspace** (`/home/jika/typescript/sqladmin
 6. `frontend/src/contract.ts`: add `QueryColumnMeta`, `QueryRowsResult`, `QueryStatusResult`, `QueryResult`. Verify: `tsc` clean.
 7. `frontend/src/data/api.ts`: add `runQuery(connectionId, sql)` — a **new POST** function (POST `/api/${connectionId}/query`, body `{ sql }`, parse JSON, reuse the existing `readDetail` error helper at [`frontend/src/data/api.ts:8`](#)). Note `getJson` ([`:23`](#)) is GET-only (`fetch(url)` with no method/body), so it cannot be reused — only `readDetail` is. Verify: `tsc` clean.
 8. `frontend/src/data/buildModel.ts`: add `buildQueryModel(columns: QueryColumnMeta[]): Model` (no PK). Verify: unit test maps wire types to field types and assigns order.
-9. `frontend/src/data/sql.ts`: add the pure `buildSelectSql(ref, limit = 1000)` + `quoteIdent` helper. Verify: unit test covers quoting (embedded `"` doubled) and the default `LIMIT`.
+9. `frontend/src/data/sql.ts`: add the pure `buildSelectSql(ref, limit = 50)` + `quoteIdent` helper. Verify: unit test covers quoting (embedded `"` doubled) and the default `LIMIT`.
 10. `frontend/src/dock/QueryPanel.ts`: the callable factory per *Internal Structure* — `TextArea` (prefilled from `initialSql`) + Run toolbar + vertical `Split` + swappable result `Table`; Ctrl/Cmd+Enter run; run-state disable; `autoRun` seeded-run; `onError` wiring. `glyphButton` is **module-private** in `TableWorkPanel.ts` ([`:162`](#)) — copy/re-implement it here (it cannot be imported); reuse the `Notify` type by copying its one-line definition (also module-local). Verify: `tsc` clean.
 11. `frontend/src/SqlAdminController.ts`: add `_queryCounter`, `openQuery(seedSql?)` and `openQueryFor(ref)`. `openQuery` mints `query-${++this._queryCounter}` and calls `dock.addPanel({ id, title: \`Query ${n}\`, content: QueryPanel({ runQuery: sql => runQuery(this._connectionId, sql), notify, onError: e => this.notifyError(e), initialSql: seedSql, autoRun: seedSql !== undefined }) })`. **Do NOT add the panel to `_openPanels`** — the `OpenPanel` interface and `syncToPanel`/`disposePanel` are untouched (see *Query panels are NOT registered in `_openPanels`*). `openQueryFor(ref)` = `this.openQuery(buildSelectSql(ref))`. Verify: `tsc` clean; `_openPanels` references unchanged.
 12. `frontend/src/navigator/NavigatorTree.ts`: add an "Open as query" item to the existing `contextmenu` handler's item list ([`:38`](#)–`:43`), beside "Open structure", inside the same `kind === "table" | "view"` gate, calling `controller.openQueryFor(ref)`. Verify: `tsc` clean; item appears only for tables/views.
@@ -316,7 +316,7 @@ All steps are in the **external app workspace** (`/home/jika/typescript/sqladmin
 - POSTs `{ sql }` to `/api/${connectionId}/query`; on non-OK throws the backend `{detail}` (reusing `readDetail`).
 
 **Frontend `buildSelectSql` — unit-testable offline:**
-- Returns `SELECT * FROM "schema"."name" LIMIT 1000` for a table ref; embedded `"` in an identifier is doubled (`weird"col` → `"weird""col"`); a custom `limit` argument overrides the default.
+- Returns `SELECT * FROM "schema"."name" LIMIT 50` for a table ref; embedded `"` in an identifier is doubled (`weird"col` → `"weird""col"`); a custom `limit` argument overrides the default.
 
 **Query panel + dock wiring (needs live verification — DOM events, layout, focus):**
 - `Tools → Run SQL…` opens a new, empty Query panel; invoking it again opens a *second* panel (monotonic id, no dedup).
@@ -325,7 +325,7 @@ All steps are in the **external app workspace** (`/home/jika/typescript/sqladmin
 - A second run replaces the grid's columns/rows (no column bleed from the prior run).
 - A blank SQL run is a no-op with an "Enter a SQL statement" message (no request).
 - A SQL error surfaces its `{detail}` via the controller's `notifyError` on the StatusBar; the Run button re-enables.
-- **Open as query:** the navigator right-click menu shows "Open as query" only for a table/view; selecting it opens a query panel prefilled with `SELECT * FROM "schema"."table" LIMIT 1000` and (auto-run) immediately renders its rows. Each invocation opens a fresh panel.
+- **Open as query:** the navigator right-click menu shows "Open as query" only for a table/view; selecting it opens a query panel prefilled with `SELECT * FROM "schema"."table" LIMIT 50` and (auto-run) immediately renders its rows. Each invocation opens a fresh panel.
 - **Focus:** focusing a query panel does **not** change the navigator selection or the Properties inspector (it is absent from `_openPanels`, so `syncToPanel` no-ops) — in contrast to focusing a table/structure panel, which still syncs both.
 - **Close:** closing a query panel disposes its component subtree via the Dock; the `MemoryStore` is released by GC. `disposePanel` no-ops (the id was never in `_openPanels`), and `OpenPanel`/`syncToPanel` for table panels are unaffected.
 
@@ -337,7 +337,7 @@ All steps are in the **external app workspace** (`/home/jika/typescript/sqladmin
 - **Frontend:** the app's `tsc`/`npm run typecheck` clean resolving `@jimka/typescript-ui/component/input` for `TextArea`; Vitest covers `buildQueryModel`, `buildSelectSql`, and `runQuery`.
 - **Decoupling invariant:** `grep -rn "@jimka/typescript-ui/" frontend/src` — every import is a published subpath; zero `~/`/`dist/lib/` deep imports.
 - **Registry invariant:** `grep -n "_openPanels" frontend/src/SqlAdminController.ts` — only `openTable`/`openStructure` write it; `OpenPanel` unchanged.
-- **Manual smoke (DOM/async the harness can't exercise):** open via `Tools → Run SQL…`; run a `SELECT` (grid renders, columns in order), an `UPDATE` (status line + count), a syntax error (status-bar detail, Run re-enables), a blank run (no-op), Ctrl/Cmd+Enter, a second run (no column bleed), open two panels, close one; right-click a table → "Open as query" (seeded `SELECT … LIMIT 1000`, auto-runs); focus a query panel (navigator selection + Properties unchanged).
+- **Manual smoke (DOM/async the harness can't exercise):** open via `Tools → Run SQL…`; run a `SELECT` (grid renders, columns in order), an `UPDATE` (status line + count), a syntax error (status-bar detail, Run re-enables), a blank run (no-op), Ctrl/Cmd+Enter, a second run (no column bleed), open two panels, close one; right-click a table → "Open as query" (seeded `SELECT … LIMIT 50`, auto-runs); focus a query panel (navigator selection + Properties unchanged).
 - **Library repo:** unaffected — no source change in `/home/jika/typescript/typescript-ui`; the only artefact is this plan, which lives in the app repo (`sqladmin/plans/`).
 
 ---
