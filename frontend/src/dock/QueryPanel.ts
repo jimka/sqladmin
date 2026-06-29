@@ -113,6 +113,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
                 autoLoad: true,
             });
 
+            // Read-only: editing a query result is a Non-Goal (no PK, no write-back).
             resultHost.addComponent(Table(store, { columns: [], rowReadOnly: () => true }));
             notify(`${result.rowCount} row(s)`);
         } else {
