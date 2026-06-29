@@ -6,12 +6,13 @@
 // The rail is an app-managed mode selector (ToggleButton has no built-in radio
 // group) and stays visible at all times — only the deck collapses, VSCode-style.
 // A click flips the button's selected state, then the handler reconciles:
-//   - now selected (an inactive view was chosen) -> deselect the others, switch
-//     the deck to that view, and expand;
+//   - now selected (an inactive view was chosen) -> show that view (deselect the
+//     others, switch the deck, expand);
 //   - now deselected (the active view was clicked again) -> collapse the deck.
 // Collapsing hides the deck and shrinks the bar to the rail width (so the Dock
 // reclaims the space) while the rail stays put; clicking the icon again expands.
-// selected <=> expanded is the single source of truth.
+// The same collapse/expand is exposed as `toggleCollapsed` for the menu's
+// "Toggle Sidebar" command.
 
 import { Component, Panel } from "@jimka/typescript-ui/core";
 import { Placement, Insets } from "@jimka/typescript-ui/primitive";
@@ -42,34 +43,69 @@ export interface ActivityView {
     component: Component;
 }
 
+/** The activity bar plus the external collapse control the menu drives. */
+export interface ActivityBarHandle {
+    /** The activity-bar component to mount in the shell's WEST region. */
+    component: Component;
+    /** Collapse the deck if expanded, or re-open the active view if collapsed. */
+    toggleCollapsed(): void;
+}
+
 /**
  * Build the activity bar for the shell's WEST region.
  *
  * @param views - The view containers; the first starts active and expanded.
  *
- * @returns The activity-bar component (rail + deck).
+ * @returns The activity-bar component and its collapse toggle.
  */
-export function ActivityBar(views: ActivityView[]): Component {
+export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
     const card = new Card();
     const deck = Panel({ layoutManager: card });
     const rail = new ToolBar({ orientation: "vertical" });
-    const buttons: ToggleButton[] = [];
     const activityBar = Panel({ layoutManager: new BorderLayout() });
+    const buttonById = new Map<string, ToggleButton>();
+
+    // The last-shown view (restored on expand) and the current collapsed state.
+    let activeId = views[0].id;
+    let collapsed = false;
 
     // Collapse hides the deck and shrinks the bar to the rail width; the rail
     // stays visible. Changing the bar's preferred size notifies the shell to
     // re-lay out its regions (Component wires a child's preferred-size change to
     // the parent's scheduleLayout), so the Dock reclaims the freed width.
-    const setCollapsed = (collapsed: boolean): void => {
-        deck.setDisplayed(!collapsed);
-        activityBar.setPreferredSize(collapsed ? RAIL_WIDTH : RAIL_WIDTH + DECK_WIDTH, 0);
+    const setCollapsed = (value: boolean): void => {
+        collapsed = value;
+        deck.setDisplayed(!value);
+        activityBar.setPreferredSize(value ? RAIL_WIDTH : RAIL_WIDTH + DECK_WIDTH, 0);
+    };
+
+    // Make `id` the active view: select only its rail button, show its deck page,
+    // and ensure the deck is expanded.
+    const showView = (id: string): void => {
+        buttonById.forEach((button, buttonId) => button.setSelected(buttonId === id));
+        card.setVisibleComponentId(id);
+        activeId = id;
+        setCollapsed(false);
+    };
+
+    // Collapse the deck; the rail stays, with no active highlight while collapsed.
+    const collapse = (): void => {
+        buttonById.forEach(button => button.setSelected(false));
+        setCollapsed(true);
+    };
+
+    const toggleCollapsed = (): void => {
+        if (collapsed) {
+            showView(activeId);
+        } else {
+            collapse();
+        }
     };
 
     for (const view of views) {
         deck.addComponent(view.component);
 
-        const isFirst = view === views[0];
-        const button = new ToggleButton("", { selected: isFirst });
+        const button = new ToggleButton("", { selected: view.id === activeId });
 
         // setGlyph (not the `glyph` option): a ToggleButton forwards only `text`
         // to super, so the glyph passed in its options bag is recorded but never
@@ -78,22 +114,16 @@ export function ActivityBar(views: ActivityView[]): Component {
         button.pinGlyphSize(GLYPH_SIZE);
         Tooltip.attach(button, view.label);
 
-        button.on("action", () => {
-            if (button.isSelected()) {
-                buttons.forEach(other => { if (other !== button) other.setSelected(false); });
-                card.setVisibleComponentId(view.id);
-                setCollapsed(false);
-            } else {
-                setCollapsed(true);
-            }
-        });
+        // The click already flipped `selected`: now-selected means this view was
+        // chosen (show it); now-deselected means the active view was clicked off.
+        button.on("action", () => (button.isSelected() ? showView(view.id) : collapse()));
 
         rail.addComponent(button);
-        buttons.push(button);
+        buttonById.set(view.id, button);
     }
 
     rail.setPreferredSize(RAIL_WIDTH, 0);
-    card.setVisibleComponentId(views[0].id);
+    card.setVisibleComponentId(activeId);
 
     // Zero the bar's content insets: with the default inset, collapsing the bar
     // to RAIL_WIDTH would squeeze the rail (the Border insets eat into the WEST
@@ -104,5 +134,5 @@ export function ActivityBar(views: ActivityView[]): Component {
     activityBar.addComponent(deck, { placement: Placement.CENTER });
     activityBar.setPreferredSize(RAIL_WIDTH + DECK_WIDTH, 0);
 
-    return activityBar;
+    return { component: activityBar, toggleCollapsed };
 }

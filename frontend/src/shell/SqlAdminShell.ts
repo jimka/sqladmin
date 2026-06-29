@@ -9,7 +9,7 @@
 // .d.ts (the callable constructor type drops instance methods for external
 // consumers). See LIBRARY_NOTES.md.
 
-import { Component, Panel } from "@jimka/typescript-ui/core";
+import { Panel } from "@jimka/typescript-ui/core";
 import { Placement } from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout } from "@jimka/typescript-ui/layout";
 import { MenuBar } from "@jimka/typescript-ui/component/menubar";
@@ -17,6 +17,7 @@ import { Glyph } from "@jimka/typescript-ui/component/display";
 import { database } from "@jimka/typescript-ui/glyphs/solid/database";
 import { circle_info } from "@jimka/typescript-ui/glyphs/solid/circle_info";
 import { ActivityBar } from "./ActivityBar";
+import type { ActivityBarHandle } from "./ActivityBar";
 import { DatabaseExplorerView } from "./DatabaseExplorerView";
 import type { SqlAdminController } from "../SqlAdminController";
 
@@ -31,22 +32,28 @@ const DATABASE_VIEW_ID = "database";
 /** Build the shell Panel, hosting the controller's Dock and StatusBar. */
 export function SqlAdminShell(controller: SqlAdminController): Panel {
     const shell = Panel({ layoutManager: new BorderLayout() });
+    const sidebar = buildSidebar(controller);
 
-    shell.addComponent(buildMenuBar(), { placement: Placement.NORTH });
-    shell.addComponent(buildSidebar(controller), { placement: Placement.WEST });
+    shell.addComponent(buildMenuBar(sidebar.toggleCollapsed), { placement: Placement.NORTH });
+    shell.addComponent(sidebar.component, { placement: Placement.WEST });
     shell.addComponent(controller.dock, { placement: Placement.CENTER });
     shell.addComponent(controller.statusBar, { placement: Placement.SOUTH });
 
     return shell;
 }
 
-/** File / View / Tools menus (items stubbed/disabled until their features land). */
-function buildMenuBar(): MenuBar {
+/**
+ * File / View / Tools menus. View → Toggle Sidebar drives the activity bar's
+ * collapse; the remaining items are stubbed/disabled until their features land.
+ *
+ * @param onToggleSidebar - Collapses/expands the activity bar.
+ */
+function buildMenuBar(onToggleSidebar: () => void): MenuBar {
     const bar = new MenuBar();
 
     bar.setMenus([
         { label: "File", items: [{ text: "Close Tab", enabled: false }, { separator: true }, { text: "Exit", enabled: false }] },
-        { label: "View", items: [{ text: "Toggle Sidebar", enabled: false }] },
+        { label: "View", items: [{ text: "Toggle Sidebar", action: onToggleSidebar }] },
         { label: "Tools", items: [{ text: "Run SQL…", enabled: false }] },
     ]);
 
@@ -59,7 +66,7 @@ function buildMenuBar(): MenuBar {
  * accordion) — which is also the documented Phase-2 seam (one more rail button +
  * one more deck page adds a view).
  */
-function buildSidebar(controller: SqlAdminController): Component {
+function buildSidebar(controller: SqlAdminController): ActivityBarHandle {
     const explorer = DatabaseExplorerView(controller, DATABASE_VIEW_ID);
 
     return ActivityBar([
