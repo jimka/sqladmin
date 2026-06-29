@@ -8,6 +8,24 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞✅ MenuBar dropdown item actions never fired
+
+Wiring **View → Toggle Sidebar** to a `MenuBar` menu item's `action` did nothing —
+the dropdown closed but the command never ran.
+
+**Root cause (library):** a persistent-mode `Menu` (what a `MenuBar` dropdown uses)
+wired each item's activation to **only** call the menu's `onClose`, never the
+item's `config.action`. The rebuild-mode `show()` path (context menus) called
+`config.action` correctly, so right-click menus worked while menu-bar commands
+silently no-op'd. `MenuItemConfig.action` is documented as "called when the item
+is activated".
+
+**Fix (library):** `Menu.buildPersistentItems` now calls `config.action?.()`
+before `onClose`, mirroring the `show()` path. Regression test added (the prior
+test had codified the missing call). No app change beyond wiring the menu item.
+
+---
+
 ## ✂️🔎 Accordion sections should be resizable
 
 The `Accordion` has no way to resize its open sections — section heights are fixed
