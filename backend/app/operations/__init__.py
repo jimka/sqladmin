@@ -11,6 +11,7 @@ from .list_databases import ListDatabasesQuery
 from .list_objects import ListObjectsQuery
 from .list_rows import ListRowsQuery
 from .list_schemas import ListSchemasQuery
+from .run_query import RunQueryCommand
 from .update_row import UpdateRowCommand
 
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "InsertRowCommand",
     "UpdateRowCommand",
     "DeleteRowCommand",
+    "RunQueryCommand",
 ]

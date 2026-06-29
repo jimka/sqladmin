@@ -8,11 +8,13 @@ import { StatusBar }                                           from "@jimka/type
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef }                        from "./contract";
-import { getColumns }                                          from "./data/api";
+import { getColumns, runQuery }                                from "./data/api";
 import { buildModel }                                          from "./data/buildModel";
+import { buildSelectSql }                                      from "./data/sql";
 import { buildStore }                                          from "./data/stores";
 import { TableWorkPanel }                                      from "./dock/TableWorkPanel";
 import { StructurePanel }                                      from "./dock/StructurePanel";
+import { QueryPanel }                                          from "./dock/QueryPanel";
 import { PropertiesPanel }                                     from "./properties/PropertiesPanel";
 
 /** Registry entry for one open dock panel; `store` is absent for structure tabs. */
@@ -31,6 +33,10 @@ export class SqlAdminController {
     private readonly _connectionId: string;
     private readonly _openPanels  : Map<string, OpenPanel> = new Map();
     private _navigator            : Tree | null = null;
+
+    // Monotonic counter minting unique ids for scratch query panels, which are
+    // never deduped (each "New Query" / "Open as query" opens a fresh panel).
+    private _queryCounter: number = 0;
 
     // Bumped on every showProperties call so a slow column fetch whose selection
     // has since moved on is discarded instead of clobbering the current view.
@@ -140,6 +146,51 @@ export class SqlAdminController {
             content: StructurePanel(columns)
         });
         this.syncToPanel(id);
+    }
+
+    /**
+     * Open a fresh scratch query panel, optionally seeded with SQL to run on
+     * open. Each call mints a new id, so re-invoking always opens a new panel
+     * (no dedup — the natural behaviour for a scratch buffer).
+     *
+     * Query panels are deliberately NOT registered in `_openPanels`: they carry
+     * no `ref`/`node`/`columns`, need no dedup or focus-sync, and the controller
+     * holds no reference back to them (the injected `notify`/`runQuery`/`onError`
+     * closures point panel -> controller, not the reverse). So the Dock disposes
+     * the subtree on close with no controller-side cleanup, and the table-panel
+     * lifecycle (`OpenPanel`/`syncToPanel`/`disposePanel`) stays untouched.
+     *
+     * @param seedSql - SQL to prefill the editor with and run on open.
+     */
+    openQuery(seedSql?: string): void {
+        const n  = ++this._queryCounter;
+        const id = `query-${n}`;
+
+        const notify = (message: string): void =>
+            this.statusBar.setMessage(`${this._connectionId} · Query ${n}: ${message}`);
+
+        this.dock.addPanel({
+            id,
+            title  : `Query ${n}`,
+            content: QueryPanel({
+                runQuery  : sql => runQuery(this._connectionId, sql),
+                notify,
+                onError   : error => this.notifyError(error),
+                initialSql: seedSql,
+                autoRun   : seedSql !== undefined
+            })
+        });
+    }
+
+    /**
+     * Open a table/view "as a query": a generated `SELECT * FROM … LIMIT n` in a
+     * new query panel (the phpMyAdmin drop-to-SQL affordance). Additive to
+     * `openTable`, never a replacement — the CRUD panel stays the primary open.
+     *
+     * @param ref - The table/view to browse as a query.
+     */
+    openQueryFor(ref: DbObjectRef): void {
+        this.openQuery(buildSelectSql(ref));
     }
 
     /**

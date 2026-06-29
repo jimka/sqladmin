@@ -34,13 +34,15 @@ export function NavigatorTree(controller: SqlAdminController): Tree {
         }
     });
 
-    // Right-clicking a table/view offers its structure in a separate tab.
+    // Right-clicking a table/view offers its structure and an "open as query"
+    // (a generated SELECT in a query panel) in separate tabs.
     tree.on("contextmenu", (node: TreeNode, event: MouseEvent) => {
         const ref = node.data as DbObjectRef | undefined;
 
         if (ref && (ref.kind === "table" || ref.kind === "view")) {
             contextMenu.show(event.clientX, event.clientY, [
                 { text: "Open structure", action: () => void controller.openStructure(ref, node) },
+                { text: "Open as query", action: () => controller.openQueryFor(ref) },
             ]);
         }
     });
