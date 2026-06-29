@@ -9,7 +9,7 @@ depends-on:
 
 Phase 1.5 adds **arbitrary-SQL query panels** to tsuiSQLAdmin: a Dock work-panel in which the user types raw SQL into a plain multi-line text input, runs it, and sees the result rendered in a `Table` grid (for statements that return rows) or a status line with the affected row count (for statements that do not), with backend errors surfaced through the existing error sink. This is the "run SQL → arbitrary result grid" feature that the Phase 0/1 plan reserved only as a seam ([`plans/tsui-sql-admin.md:208`](./implemented/tsui-sql-admin.md#L208) — *Phase-1.5 query panels are a seam, not a feature*; Non-Goal at [`:699`](./implemented/tsui-sql-admin.md#L699)). There is **no** SQL syntax-highlighting / code editor — a plain `TextArea` is the explicit choice (the editor stays a deferred Non-Goal, [`:700`](./implemented/tsui-sql-admin.md#L700)).
 
-**Where the code lands:** the standalone external app workspace `/home/jika/typescript/sqladmin` — frontend at `frontend/src/`, backend (Python/FastAPI + asyncpg) at `backend/app/`. This plan itself lives in the app repo (`sqladmin/plans/`, alongside the implemented Phase 0/1 plan under `plans/implemented/`). **It adds no changes to the `@jimka/typescript-ui` library repo.** The whole feature composes already-published library pieces — `TextArea` ([`src/typescript/lib/component/input/TextArea.ts:44`](../../typescript-ui/src/typescript/lib/component/input/TextArea.ts#L44), re-exported [`component/input/index.ts:32`](../../typescript-ui/src/typescript/lib/component/input/index.ts#L32), bucket `./component/input` present at [`package.json:32`](../../typescript-ui/package.json#L32)), `Table` + `MemoryStore`, `Dock.addPanel`/`addLazyPanel` ([`src/typescript/lib/overlay/Dock.ts:273`](../../typescript-ui/src/typescript/lib/overlay/Dock.ts#L273), [`:316`](../../typescript-ui/src/typescript/lib/overlay/Dock.ts#L316)), `Border`/`Split`/`Fit` layout, `Button`/`ToolBar` — all already imported by the existing app.
+**Where the code lands:** the standalone external app workspace `/home/jika/typescript/sqladmin` — frontend at `frontend/src/`, backend (Python/FastAPI + asyncpg) at `backend/app/`. This plan itself lives in the app repo (`sqladmin/plans/`, alongside the implemented Phase 0/1 plan under `plans/implemented/`). **It needs one small additive `@jimka/typescript-ui` change** — a `keydown` event on `TextInput.on()` so the editor's Ctrl/Cmd+Enter shortcut can be wired through the component's own typed surface instead of the raw `Event` API (see *Ctrl/Cmd+Enter needs a TextInput keydown event* below). Everything else composes already-published library pieces — `TextArea` ([`src/typescript/lib/component/input/TextArea.ts:44`](../../typescript-ui/src/typescript/lib/component/input/TextArea.ts#L44), re-exported [`component/input/index.ts:32`](../../typescript-ui/src/typescript/lib/component/input/index.ts#L32), bucket `./component/input` present at [`package.json:32`](../../typescript-ui/package.json#L32)), `Table` + `MemoryStore`, `Dock.addPanel`/`addLazyPanel` ([`src/typescript/lib/overlay/Dock.ts:273`](../../typescript-ui/src/typescript/lib/overlay/Dock.ts#L273), [`:316`](../../typescript-ui/src/typescript/lib/overlay/Dock.ts#L316)), `Border`/`Split`/`Fit` layout, `Button`/`ToolBar` — all already imported by the existing app.
 
 The feature mirrors the existing app's structure almost exactly: the panel is built like [`frontend/src/dock/TableWorkPanel.ts:39`](#) and [`frontend/src/dock/StructurePanel.ts:12`](#) (callable factory returning a `Panel`); the dock open/dedup/disposal discipline reuses [`frontend/src/SqlAdminController.ts`](#) (`focusPanel` dedup, the single `dock.on("close")` disposal subscription, `notifyError`); the backend endpoint is one more CQRS operation following [`backend/app/operations/list_rows.py:26`](#) and the thin **POST**-route shape of `insert_row` at [`backend/app/main.py:242`](#).
 
@@ -76,11 +76,15 @@ A table in the navigator can be opened **as a query** in addition to the CRUD `T
 
 The panel runs on a **Run** toolbar button (glyph-only, matching `TableWorkPanel`'s button style, [`frontend/src/dock/TableWorkPanel.ts:162`](#)) and on **Ctrl/Cmd+Enter** in the `TextArea`. While a run is in flight the Run button is disabled and the status line reads "Running…"; a monotonic run-sequence guard (mirroring `showProperties`'s `_propsSeq`, [`frontend/src/SqlAdminController.ts:153`](#)) discards a superseded run's result so a slow first run cannot clobber a faster second one. Empty/whitespace-only SQL is a no-op with a "Enter a SQL statement" status message (no round-trip).
 
+### Ctrl/Cmd+Enter needs a TextInput keydown event (a small library addition)
+
+Wiring the editor's Ctrl/Cmd+Enter requires listening to the `TextArea`'s `keydown`. ARCHITECTURE.md reserves the raw `Event` API for *self* (`Event.addListener(this, …)` from inside the owning component) and forbids a consumer reaching into another component's event routing; it prescribes instead *widening that component's typed `on()` surface*. `TextInput` exposed only `action`/`change`/`binding`, and the app cannot subclass the callable `TextArea`/`Component` exports to own the listener (the built `.d.ts` callable type drops instance methods — the same constraint that makes `SqlAdminShell` a factory). So this feature adds **one small additive library change**: a `keydown` shorthand on `TextInput.on()`/`off()`, routing to `Event.addListener(this, "keydown", …)` exactly as the existing `action` shorthand routes to `input`. The app then wires `editor.on("keydown", …)` — fully compliant. This is the only library change; it is additive (a new overload) and breaks nothing.
+
 ---
 
 ## Public API
 
-**No library API changes** — verified: `TextArea`, `Table`, `MemoryStore`, `Dock.addPanel`/`addLazyPanel`, `Button`, `ToolBar`, `Split`/`Border`/`Fit` are all already published and already imported by the app.
+**One additive library change:** `TextInput.on("keydown", listener)` / `off("keydown", listener)` — a typed shorthand over the native `keydown` DOM event (see the architecture decision above). Everything else is already published: `TextArea`, `Table`, `MemoryStore`, `Dock.addPanel`/`addLazyPanel`, `Button`, `ToolBar`, `Split`/`Border`/`Fit`.
 
 App-level additions (external workspace, not exported from any library barrel):
 
@@ -214,7 +218,11 @@ class RunQueryCommand(Command):
             raise RuntimeError("get_result() called before apply()")
         if self._attrs:                                     # had a row description -> rows result
             columns = _query_columns(self._attrs)           # unique names + pg_type_to_wire per attr
-            rows = rows_to_wire([dict(r) for r in self._records], _as_colmeta(columns))
+            names = [c["name"] for c in columns]
+            # Build rows POSITIONALLY against the de-duplicated names: dict(record)
+            # collapses asyncpg's duplicate/unnamed keys, dropping a value.
+            raw = [{names[i]: r[i] for i in range(len(names))} for r in (self._records or [])]
+            rows = rows_to_wire(raw, _as_colmeta(columns))
             return {"kind": "rows", "columns": columns,
                     "rows": rows, "rowCount": len(rows)}
         return {"kind": "status", "command": self._status or "",
@@ -223,7 +231,7 @@ class RunQueryCommand(Command):
 
 - `_query_columns(attrs)` turns each asyncpg `Attribute` into `{name, wireType}` using `pg_type_to_wire` ([`backend/app/wire.py:51`](#)) on **`attr.type.name`** — the pg_catalog *short* type name (e.g. `int4`, `int8`, `bool`, `timestamptz`, `bpchar`), which `pg_type_to_wire` already keys on (not the OID and not an `information_schema` long name) — deduplicating empty/repeated names to `column`, `column_2`, …. `pg_type_to_wire`'s unknown-type fallback to `STRING` keeps the contract well-formed for exotic result types. **Implementer note:** `pg_type_to_wire`'s docstring frames its input as an `information_schema` type name, but its frozensets ([`wire.py:24`](#)–`44`) contain the pg_catalog short aliases too, so feeding `attr.type.name` is correct despite the docstring — pin it with an explicit `int4`→`number` (and one date/bool) assertion in the step-4 test. **Emit the `WireType` *value* (the string), not the bare enum member** — i.e. `pg_type_to_wire(...).value`, matching the existing serialization in `ColumnMeta.to_contract()` ([`backend/app/contract.py:72`](#), `self.wire_type.value`); `WireType` is a `(str, Enum)` so a bare member would still serialize, but `.value` keeps this consistent with the rest of the backend.
 - `_affected(status)` parses the trailing integer off the command tag (`"INSERT 0 3"` → 3, `"UPDATE 5"` → 5, `"CREATE TABLE"` → 0).
-- `_as_colmeta(columns)` adapts the `{name, wireType}` dicts into the real `ColumnMeta` dataclass instances `rows_to_wire` expects ([`wire.py:213`](#) keys on `c.name`/`c.wire_type`). `ColumnMeta` is a **frozen 7-field dataclass** ([`backend/app/contract.py:49`](#)–`55`), so the adapter must supply every field — `name`, `data_type`, `nullable`, `is_primary_key`, `is_generated`, `default`, `wire_type` — using the query column's name + `WireType` and inert defaults for the introspection-only fields (a query result has no PK/nullability/default metadata). Only `name` and `wire_type` actually affect `rows_to_wire`'s value mapping.
+- `_as_colmeta(columns)` adapts the `{name, wireType}` dicts into the real `ColumnMeta` dataclass instances `rows_to_wire` expects ([`wire.py:213`](#) keys on `c.name`/`c.wire_type`). `ColumnMeta` is a **frozen 7-field dataclass** ([`backend/app/contract.py:49`](#)–`55`), so the adapter must supply every field — `name`, `data_type`, `nullable`, `is_primary_key`, `is_generated`, `has_default`, `wire_type` — using the query column's name + `WireType` and inert defaults for the introspection-only fields (a query result has no PK/nullability/default metadata). Only `name` and `wire_type` actually affect `rows_to_wire`'s value mapping.
 - Registered in [`backend/app/operations/__init__.py`](#) (`RunQueryCommand` added to imports + `__all__`).
 
 ### Route (backend `main.py`)
@@ -300,7 +308,7 @@ All steps are in the **external app workspace** (`/home/jika/typescript/sqladmin
 - A statement with a row description (`self._attrs` non-empty) → `kind:"rows"` with one `QueryColumnMeta` per attribute, `rowCount === len(rows)`, values wire-mapped (`Decimal`→string, `datetime`→ISO, etc., via `rows_to_wire`).
 - An empty result set **with** a row description → `kind:"rows"` with columns and `rows: []` (empty grid, not a status line).
 - A statement with no row description → `kind:"status"`, `command` = the tag, `rowCount` = the parsed affected count (`"INSERT 0 3"`→3, `"UPDATE 5"`→5, `"CREATE TABLE"`→0).
-- Duplicate/empty result column names are disambiguated to unique names (`SELECT 1, 1` → `column`, `column_2`).
+- Duplicate/empty result column names are disambiguated to unique names (`SELECT 1, 2` → `column`, `column_2`), and **each keeps its own value** (rows built positionally, not via `dict(record)` which would collapse the duplicate key).
 - `get_result()` before `apply()` raises `RuntimeError` (temporal-coupling guard).
 - Constructor with empty/whitespace SQL raises `ValidationError` before any I/O.
 
@@ -382,4 +390,4 @@ All steps are in the **external app workspace** (`/home/jika/typescript/sqladmin
 - **Pagination / streaming of large result sets** — the whole result is fetched into a `MemoryStore` in one shot; capping/streaming large results is out of scope (acceptable for a demo, consistent with the Phase 0/1 `count(*) OVER()` stance).
 - **Multi-statement scripts** — exactly one statement per run; a `;`-separated multi-statement submission is rejected by the extended query protocol (surfaced as a `(400, {detail})` error). The panel neither splits scripts nor runs them via the simple protocol.
 - **Auth / per-statement permission checks** — none in Phase 0–1 ([`tsui-sql-admin.md:707`](./implemented/tsui-sql-admin.md#L707)); arbitrary SQL runs on the trusted `"default"` connection.
-- **Library changes** — none; the feature composes already-published components.
+- **Library changes beyond the keydown event** — the only `@jimka/typescript-ui` change is the additive `TextInput.on("keydown")` shorthand (see *Ctrl/Cmd+Enter needs a TextInput keydown event*); everything else composes already-published components.
