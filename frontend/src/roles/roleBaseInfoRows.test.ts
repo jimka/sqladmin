@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { roleDetailRows } from "./roleDetailRows";
+import { roleBaseInfoRows } from "./roleBaseInfoRows";
 import type { RoleDetail, RoleSummary } from "../contract";
 
 function summary(overrides: Partial<RoleSummary> = {}): RoleSummary {
@@ -21,9 +21,9 @@ function detail(overrides: Partial<RoleDetail> = {}): RoleDetail {
     return { role: summary(), memberOf: [], privileges: [], ...overrides };
 }
 
-describe("roleDetailRows", () => {
+describe("roleBaseInfoRows", () => {
     it("maps the nine attributes in order with yes/no and sentinels", () => {
-        const rows = roleDetailRows(detail());
+        const rows = roleBaseInfoRows(detail());
 
         expect(rows).toEqual([
             { property: "Name", value: "app" },
@@ -39,20 +39,20 @@ describe("roleDetailRows", () => {
     });
 
     it("renders a positive connection limit as its number", () => {
-        const rows = roleDetailRows(detail({ role: summary({ connectionLimit: 5 }) }));
+        const rows = roleBaseInfoRows(detail({ role: summary({ connectionLimit: 5 }) }));
 
         expect(rows.find(r => r.property === "Connection limit")!.value).toBe("5");
     });
 
     it("renders a set validUntil as its ISO string", () => {
         const iso = "2030-01-02T03:04:05";
-        const rows = roleDetailRows(detail({ role: summary({ validUntil: iso }) }));
+        const rows = roleBaseInfoRows(detail({ role: summary({ validUntil: iso }) }));
 
         expect(rows.find(r => r.property === "Valid until")!.value).toBe(iso);
     });
 
     it("appends one 'Member of' row per membership, flagging admin", () => {
-        const rows = roleDetailRows(
+        const rows = roleBaseInfoRows(
             detail({ memberOf: [{ roleName: "app_rw", admin: true }, { roleName: "app_ro", admin: false }] }),
         );
 
@@ -60,22 +60,16 @@ describe("roleDetailRows", () => {
         expect(members).toEqual(["app_rw (admin)", "app_ro"]);
     });
 
-    it("appends one 'Grant' row per privilege, flagging grantable", () => {
-        const rows = roleDetailRows(
-            detail({
-                privileges: [
-                    { schema: "public", table: "t", privilege: "SELECT", grantable: false },
-                    { schema: "public", table: "t", privilege: "INSERT", grantable: true },
-                ],
-            }),
+    it("excludes grant rows — grants live in the Dock grants table, not the sidebar", () => {
+        const rows = roleBaseInfoRows(
+            detail({ privileges: [{ schema: "public", table: "t", privilege: "SELECT", grantable: true }] }),
         );
 
-        const grants = rows.filter(r => r.property === "Grant").map(r => r.value);
-        expect(grants).toEqual(["public.t: SELECT", "public.t: INSERT (grantable)"]);
+        expect(rows.some(r => r.property === "Grant")).toBe(false);
     });
 
-    it("shows only the attribute rows when there are no memberships or privileges", () => {
-        const rows = roleDetailRows(detail());
+    it("shows only the attribute rows when there are no memberships", () => {
+        const rows = roleBaseInfoRows(detail());
 
         expect(rows).toHaveLength(9);
     });

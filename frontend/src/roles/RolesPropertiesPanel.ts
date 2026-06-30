@@ -1,41 +1,27 @@
-// A read-only Property/Value inspector for the selected role — the Roles view's
-// counterpart to PropertiesPanel. It summarises the selected role's attributes,
-// the roles it belongs to, and the table grants it holds.
+// A read-only Property/Value inspector for the selected role's BASE information —
+// its attributes and the roles it belongs to. The Roles view's counterpart to
+// PropertiesPanel; its table grants are shown separately in a paginated Dock
+// table (RoleGrantsPanel), so this panel stays small and needs no pagination.
 //
-// The rows are paged through a Store + an in-memory paging proxy + a
-// PaginationBar (mirroring the MiscPanel paginated-table demo): a superuser can
-// hold ~1500 grants, and the Table is never handed more than one page at a time
-// — both phpMyAdmin-style UX and a guard against the library's large
-// MemoryStore.loadData render limit (see LIBRARY_NOTES.md). Each selection
-// replaces the paged dataset and shows its first page.
+// Backed by a single persistent MemoryStore: each selection replaces its rows
+// via loadData (synchronous, fires 'load'), so the Table re-renders in place.
 
-import { Panel }            from "@jimka/typescript-ui/core";
-import { Border }           from "@jimka/typescript-ui/layout";
-import { Placement }        from "@jimka/typescript-ui/primitive";
-import { Table }            from "@jimka/typescript-ui/component/table";
-import { Store, Model }     from "@jimka/typescript-ui/data";
-import { PaginationBar }    from "@jimka/typescript-ui/component/display";
-import type { RoleDetail }  from "../contract";
-import { roleDetailRows }   from "./roleDetailRows";
-import type { RoleDetailRow } from "./roleDetailRows";
-import { PagingMemoryProxy } from "./PagingMemoryProxy";
+import { Panel }              from "@jimka/typescript-ui/core";
+import { Fit }                from "@jimka/typescript-ui/layout";
+import { Table }              from "@jimka/typescript-ui/component/table";
+import { MemoryStore, Model } from "@jimka/typescript-ui/data";
+import type { RoleDetail }    from "../contract";
+import { roleBaseInfoRows }   from "./roleBaseInfoRows";
 
 // Fixed height the inspector occupies at the bottom of the roles accordion; the
-// tree above it takes the rest (mirrors PropertiesPanel, plus room for the
-// pagination bar).
-const PANEL_HEIGHT = 240;
+// tree above it takes the rest (mirrors PropertiesPanel).
+const PANEL_HEIGHT = 220;
 
-// Rows per page. Comfortably below the row count at which the library's Table
-// render limit bites, so every page renders; small enough to keep the narrow
-// sidebar responsive.
-const PAGE_SIZE = 50;
-
-/** The selected role's detail, shown as a paged read-only Property/Value grid. */
+/** The selected role's base info, shown as a read-only Property/Value grid. */
 export class RolesPropertiesPanel {
     readonly component: Panel;
 
-    private readonly _store: Store;
-    private readonly _proxy: PagingMemoryProxy;
+    private readonly _store: MemoryStore;
 
     constructor() {
         const model = new Model({
@@ -45,44 +31,24 @@ export class RolesPropertiesPanel {
             ],
         });
 
-        this._proxy = new PagingMemoryProxy();
-        this._store = new Store({ model, proxy: this._proxy });
-        this._store.setPageSize(PAGE_SIZE);
-
+        this._store = new MemoryStore({ model, data: [], autoLoad: true });
         this.component = Panel({
-            layoutManager: new Border(),
+            layoutManager: new Fit(),
             preferredSize: { width: 0, height: PANEL_HEIGHT },
             minSize      : { width: 0, height: PANEL_HEIGHT },
-            components   : [
-                { component: Table(this._store, { columns: [], rowReadOnly: () => true }), constraints: { placement: Placement.CENTER } },
-                { component: new PaginationBar(this._store),                               constraints: { placement: Placement.SOUTH } },
-            ],
+            components   : [Table(this._store, { columns: [], rowReadOnly: () => true })],
         });
 
         this.clear();
     }
 
-    /** Replace the grid with the given role's attributes, memberships, and privileges. */
+    /** Replace the grid with the given role's attributes and memberships. */
     show(detail: RoleDetail): void {
-        this._load(roleDetailRows(detail));
+        this._store.loadData(roleBaseInfoRows(detail));
     }
 
     /** Empty state shown before any role is selected. */
     clear(): void {
-        this._load([{ property: "Role", value: "Select a role to view its details." }]);
-    }
-
-    /** Swap in a new paged dataset and show its first page. */
-    private _load(rows: RoleDetailRow[]): void {
-        this._proxy.setData(rows);
-
-        // Reset to page 1 for the new role. goToPage(1) reloads only when the
-        // page actually changes, so when already on page 1 load() is called
-        // directly to fetch the new first page.
-        if (this._store.getPage() === 1) {
-            void this._store.load();
-        } else {
-            this._store.goToPage(1);
-        }
+        this._store.loadData([{ property: "Role", value: "Select a role to view its details." }]);
     }
 }

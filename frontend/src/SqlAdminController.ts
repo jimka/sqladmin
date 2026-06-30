@@ -7,7 +7,7 @@ import type { DockPanelEvent }                                 from "@jimka/type
 import { StatusBar }                                           from "@jimka/typescript-ui/component/container";
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef, RoleSummary }           from "./contract";
+import type { ColumnMeta, DbObjectRef, RolePrivilege, RoleSummary } from "./contract";
 import { getColumns, getRoleDetail, getRoles, runQuery }       from "./data/api";
 import { buildModel }                                          from "./data/buildModel";
 import { buildSelectSql }                                      from "./data/sql";
@@ -15,6 +15,7 @@ import { buildStore }                                          from "./data/stor
 import { TableWorkPanel }                                      from "./dock/TableWorkPanel";
 import { StructurePanel }                                      from "./dock/StructurePanel";
 import { QueryPanel }                                          from "./dock/QueryPanel";
+import { RoleGrantsPanel }                                     from "./dock/RoleGrantsPanel";
 import { PropertiesPanel }                                     from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                from "./roles/RolesPropertiesPanel";
 
@@ -247,9 +248,10 @@ export class SqlAdminController {
     }
 
     /**
-     * Show the named role's attributes, memberships, and table privileges in the
-     * roles inspector. A monotonic guard discards a stale fetch whose selection
-     * has since changed, so rapid role clicks never render the wrong role.
+     * Show the selected role's base info (attributes + memberships) in the roles
+     * inspector and open (or focus) its grants tab in the Dock work area. A
+     * monotonic guard discards a stale fetch whose selection has since changed,
+     * so rapid role clicks never render the wrong role.
      */
     async showRole(name: string): Promise<void> {
         const seq = ++this._roleSeq;
@@ -259,12 +261,33 @@ export class SqlAdminController {
 
             if (seq === this._roleSeq) {
                 this.rolesProperties.show(detail);
+                this.openRoleGrants(name, detail.privileges);
             }
         } catch (err) {
             if (seq === this._roleSeq) {
                 this.notifyError(err);
             }
         }
+    }
+
+    /**
+     * Open the role's table grants in a Dock tab, or focus the existing one. The
+     * tab is deduped by role (mirroring how a table opens its data tab); the
+     * grids are read-only and a role's grants do not change within a session, so
+     * a re-selection focuses the open tab without refetching its contents.
+     */
+    private openRoleGrants(role: string, privileges: RolePrivilege[]): void {
+        const id = `grants/${this._connectionId}/${role}`;
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        this.dock.addPanel({
+            id,
+            title  : `Grants: ${role}`,
+            content: RoleGrantsPanel(privileges),
+        });
     }
 
     /** Report a sync outcome: each failure as an error, or a success message. */

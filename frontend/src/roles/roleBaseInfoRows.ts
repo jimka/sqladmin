@@ -1,25 +1,28 @@
-// Pure flattening of a RoleDetail into the Property/Value rows the read-only
-// RolesPropertiesPanel renders. Kept separate from the panel component so the
-// mapping is unit-testable in the node test env (no Table/DOM import).
+// Pure flattening of a role's base information (attributes + memberships) into
+// the Property/Value rows the read-only RolesPropertiesPanel renders. Grants are
+// NOT included here — they are shown in their own paginated Dock table
+// (RoleGrantsPanel). Kept separate from the panel component so the mapping is
+// unit-testable in the node test env (no Table/DOM import).
 
 import type { RoleDetail } from "../contract";
 
-/** One Property/Value row in the role inspector grid. */
-export interface RoleDetailRow {
+/** One Property/Value row in the role base-info inspector grid. */
+export interface RoleBaseInfoRow {
     property: string;
     value: string;
 }
 
 /**
- * Flatten a role's attributes, memberships, and privileges into Property/Value
- * rows: the nine attribute rows first (booleans as Yes/No, the `-1` connection
- * limit as "No limit", a missing `validUntil` as "—"), then one "Member of" row
- * per parent role and one "Grant" row per table privilege.
+ * Flatten a role's base information into Property/Value rows: the nine attribute
+ * rows first (booleans as Yes/No, the `-1` connection limit as "No limit", a
+ * missing `validUntil` as "—"), then one "Member of" row per parent role. The
+ * role's table grants are deliberately excluded — they live in the Dock grants
+ * table, not the narrow sidebar.
  */
-export function roleDetailRows(detail: RoleDetail): RoleDetailRow[] {
+export function roleBaseInfoRows(detail: RoleDetail): RoleBaseInfoRow[] {
     const role = detail.role;
 
-    const rows: RoleDetailRow[] = [
+    const rows: RoleBaseInfoRow[] = [
         { property: "Name", value: role.name },
         { property: "Can login", value: yesNo(role.canLogin) },
         { property: "Superuser", value: yesNo(role.isSuperuser) },
@@ -33,11 +36,6 @@ export function roleDetailRows(detail: RoleDetail): RoleDetailRow[] {
 
     for (const member of detail.memberOf) {
         rows.push({ property: "Member of", value: member.admin ? `${member.roleName} (admin)` : member.roleName });
-    }
-
-    for (const grant of detail.privileges) {
-        const base = `${grant.schema}.${grant.table}: ${grant.privilege}`;
-        rows.push({ property: "Grant", value: grant.grantable ? `${base} (grantable)` : base });
     }
 
     return rows;
