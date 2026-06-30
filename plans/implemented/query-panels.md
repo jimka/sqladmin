@@ -171,22 +171,24 @@ async def run_query(connection_id: str, body: dict = Body(...)) -> dict: ...  # 
 
 ## Internal Structure
 
-### `QueryPanel` (frontend) — editor over result, split vertically
+### `QueryPanel` (frontend) — editor, with a result grid that appears only after a run
 
 ```
 QueryPanel (Panel, Border layout)
 ├─ NORTH  : ToolBar  (Run [glyph] — disabled while running)
-└─ CENTER : Split (vertical)
-            ├─ top    : TextArea            (the raw SQL input; Ctrl/Cmd+Enter runs)
-            └─ bottom : Panel(Fit)          host swapped between:
-                        ├─ Table(MemoryStore, { columns: [] })   when kind === "rows"
-                        └─ (empty until first run / status shown on the StatusBar via notify)
+└─ CENTER : body (Component) — layout swapped per state:
+            • before any run / after a non-row statement:
+                Fit → TextArea fills the whole body (no result grid shown)
+            • after a rows result:
+                Border → TextArea at NORTH (150px preferred height)
+                         Table(MemoryStore, { columns: [] }) at CENTER (fills the rest)
 ```
 
-- The editor is `new TextArea("", { ... })` ([`TextArea.ts:44`](../../typescript-ui/src/typescript/lib/component/input/TextArea.ts#L44)), prefilled with `opts.initialSql` when given; SQL text read via `editor.getValue()` ([`TextInput.ts:460`](../../typescript-ui/src/typescript/lib/component/input/TextInput.ts#L460)).
-- Run handler: read SQL → if blank, `notify("Enter a SQL statement")` and return; else disable Run, `notify("Running…")`, `await runQuery(sql)`; on `kind:"rows"` build a fresh `MemoryStore` from `buildQueryModel(result.columns)` + `result.rows`, replace the result `Table` in the Fit host, and `notify(\`${result.rowCount} rows\`)`; on `kind:"status"` clear the result host and `notify(result.command)`; on throw, call the injected `onError(err)` (= `controller.notifyError`) — re-enable Run in a `finally`.
-- **Seeded open:** when `opts.autoRun` is set (the "Open as query" path), the panel invokes the same run handler once after mount, so a generated `SELECT` shows its rows immediately with identical error/status behaviour to a typed run.
-- The result `Table` is rebuilt per run (a fresh `MemoryStore` + fresh column set); the previous one is removed from the Fit host so columns never bleed across runs. This mirrors `StructurePanel`'s `Table(store, { columns: [] })` auto-append ([`frontend/src/dock/StructurePanel.ts:34`](#)).
+- The editor is `new TextArea()`; the seed is applied with **`editor.setValue(initialSql)`**, NOT the positional constructor text. `new TextArea(text)`'s positional `text` lands in `_defaultOptions`, which `getValue()`/`render()` never consult (they read `_options.text`), so it is silently dropped — `setValue` writes `_options.text`. (This is a latent library bug in `TextArea`/`TextInput`; the app sidesteps it by using the setter, the documented runtime path.) The editor's preferred height is pinned to **150px** (`setPreferredSize`), used only when it sits at Border NORTH above a result; a Border NORTH child fills the region width, so the width is irrelevant.
+- **Two body states, swapped by `setLayoutManager` + re-adding the editor** (`removeAllComponents` detaches without disposing, so the editor — and its value — survive the re-parent): `showEditorOnly()` (Fit, editor fills) is the initial/pre-execution state and the state after a non-row statement; `showEditorWithResult(table)` (Border, editor NORTH 150px, table CENTER) is shown after a rows result.
+- Run handler: read SQL → if blank, `notify("Enter a SQL statement")` and return; else disable Run, `notify("Running…")`, `await runQuery(sql)`; on `kind:"rows"` build a fresh `MemoryStore` from `buildQueryModel(result.columns)` + `result.rows` and `showEditorWithResult(Table(...))`, then `notify(\`${result.rowCount} row(s)\`)`; on `kind:"status"` `showEditorOnly()` (clear any prior grid) and `notify(result.command)`; on throw, call the injected `onError(err)` (= `controller.notifyError`) — re-enable Run in a `finally`.
+- **Seeded open:** when `opts.autoRun` is set (the "Open as query" path), the panel invokes the run handler once; `editor.getValue()` returns the seed (set via `setValue`) so the generated `SELECT` shows in the editor and its rows render immediately.
+- The result `Table` is rebuilt per run (a fresh `MemoryStore` + fresh column set), so columns never bleed across runs. This mirrors `StructurePanel`'s `Table(store, { columns: [] })` auto-append ([`frontend/src/dock/StructurePanel.ts:34`](#)).
 
 ### `buildSelectSql` (frontend `data/sql.ts`, new)
 
@@ -267,7 +269,7 @@ All steps are in the **external app workspace** (`/home/jika/typescript/sqladmin
 7. `frontend/src/data/api.ts`: add `runQuery(connectionId, sql)` — a **new POST** function (POST `/api/${connectionId}/query`, body `{ sql }`, parse JSON, reuse the existing `readDetail` error helper at [`frontend/src/data/api.ts:8`](#)). Note `getJson` ([`:23`](#)) is GET-only (`fetch(url)` with no method/body), so it cannot be reused — only `readDetail` is. Verify: `tsc` clean.
 8. `frontend/src/data/buildModel.ts`: add `buildQueryModel(columns: QueryColumnMeta[]): Model` (no PK). Verify: unit test maps wire types to field types and assigns order.
 9. `frontend/src/data/sql.ts`: add the pure `buildSelectSql(ref, limit = 50)` + `quoteIdent` helper. Verify: unit test covers quoting (embedded `"` doubled) and the default `LIMIT`.
-10. `frontend/src/dock/QueryPanel.ts`: the callable factory per *Internal Structure* — `TextArea` (prefilled from `initialSql`) + Run toolbar + vertical `Split` + swappable result `Table`; Ctrl/Cmd+Enter run; run-state disable; `autoRun` seeded-run; `onError` wiring. `glyphButton` is **module-private** in `TableWorkPanel.ts` ([`:162`](#)) — copy/re-implement it here (it cannot be imported); reuse the `Notify` type by copying its one-line definition (also module-local). Verify: `tsc` clean.
+10. `frontend/src/dock/QueryPanel.ts`: the callable factory per *Internal Structure* — `TextArea` seeded via `setValue(initialSql)` (NOT the positional constructor text, which is dropped) with a 150px preferred height + Run toolbar; the body swaps between Fit (editor fills, pre-run) and Border (editor NORTH 150px / result `Table` CENTER) via `setLayoutManager`; Ctrl/Cmd+Enter run; run-state disable; `autoRun` seeded-run; `onError` wiring. `glyphButton` is **module-private** in `TableWorkPanel.ts` ([`:162`](#)) — copy/re-implement it here (it cannot be imported); reuse the `Notify` type by copying its one-line definition (also module-local). Verify: `tsc` clean.
 11. `frontend/src/SqlAdminController.ts`: add `_queryCounter`, `openQuery(seedSql?)` and `openQueryFor(ref)`. `openQuery` mints `query-${++this._queryCounter}` and calls `dock.addPanel({ id, title: \`Query ${n}\`, content: QueryPanel({ runQuery: sql => runQuery(this._connectionId, sql), notify, onError: e => this.notifyError(e), initialSql: seedSql, autoRun: seedSql !== undefined }) })`. **Do NOT add the panel to `_openPanels`** — the `OpenPanel` interface and `syncToPanel`/`disposePanel` are untouched (see *Query panels are NOT registered in `_openPanels`*). `openQueryFor(ref)` = `this.openQuery(buildSelectSql(ref))`. Verify: `tsc` clean; `_openPanels` references unchanged.
 12. `frontend/src/navigator/NavigatorTree.ts`: add an "Open as query" item to the existing `contextmenu` handler's item list ([`:38`](#)–`:43`), beside "Open structure", inside the same `kind === "table" | "view"` gate, calling `controller.openQueryFor(ref)`. Verify: `tsc` clean; item appears only for tables/views.
 13. `frontend/src/shell/SqlAdminShell.ts`: thread an `onRunSql` callback into `buildMenuBar`, change the `Tools → "Run SQL…"` item from `{ enabled: false }` to `{ action: onRunSql }` ([`:58`](#)), and pass `() => controller.openQuery()` from `SqlAdminShell`. Verify: `tsc` clean.
@@ -328,8 +330,9 @@ All steps are in the **external app workspace** (`/home/jika/typescript/sqladmin
 
 **Query panel + dock wiring (needs live verification — DOM events, layout, focus):**
 - `Tools → Run SQL…` opens a new, empty Query panel; invoking it again opens a *second* panel (monotonic id, no dedup).
+- **Before any run, the editor fills the whole panel and no result grid is shown** (Fit). After a rows result, the editor drops to a 150px-tall band at the top and the grid fills the rest (Border NORTH/CENTER).
 - Typing a `SELECT` and pressing Run (or Ctrl/Cmd+Enter) renders the result rows in the grid with one column per result column, in order; the status line shows the row count.
-- Running an `UPDATE`/DDL shows the command tag + affected count on the status line and clears the result grid.
+- Running an `UPDATE`/DDL shows the command tag + affected count on the status line and clears the result grid (the editor returns to full height).
 - A second run replaces the grid's columns/rows (no column bleed from the prior run).
 - A blank SQL run is a no-op with an "Enter a SQL statement" message (no request).
 - A SQL error surfaces its `{detail}` via the controller's `notifyError` on the StatusBar; the Run button re-enables.
