@@ -24,10 +24,12 @@ deck page (the activity-bar Roles view) and shown later; collapsing/re-expanding
 viewport-measure-on-show issue. Needs a dedicated debug pass on the
 Table/`VirtualScroller` large-`loadData` render in the library.
 
-**App handling (🩹):** the role detail renders through a *paginated* store (`Store`
-+ an in-memory paging proxy + `PaginationBar`, ≤ 50 rows/page, mirroring the
-MiscPanel paginated-table demo), so the Table never loads more than a page at
-once. This is also better UX (phpMyAdmin-style), but it sidesteps rather than
+**App handling (🩹):** the role's grants render in a *paginated* Dock table
+(`Store` + an in-memory `PagingMemoryProxy` + `PaginationBar`, ≤ 100 rows/page,
+mirroring the MiscPanel paginated-table demo), so the Table never loads more than
+a page at once. (The sidebar Details panel shows only base info — attributes +
+memberships, always small — so it uses a plain `MemoryStore` and never hits the
+limit.) Paging is also better UX (phpMyAdmin-style), but it sidesteps rather than
 fixes the underlying library limit, which stays **open**.
 
 ---

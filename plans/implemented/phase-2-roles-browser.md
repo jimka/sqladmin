@@ -4,7 +4,7 @@
 
 Phase 2a adds a **read-only** PostgreSQL roles browser to tsuiSQLAdmin. It rides the activity-bar seam the Phase-1 bible reserved precisely for this ([`plans/implemented/tsui-sql-admin.md:61`](plans/implemented/tsui-sql-admin.md#L61) — *Phase-2 view containers are a Card seam*, and the Non-Goal at [:697](plans/implemented/tsui-sql-admin.md#L697)): **exactly one** more rail `ToggleButton` + **one** more `Card` deck page, disturbing the Database explorer not at all.
 
-The feature spans both halves of the app. **Backend:** four new CQRS `Query` operations over `pg_catalog` (roles list, one role's attributes, its memberships, its table privileges) plus their FastAPI routes, all read-only and following the strict `__init__`/`apply`/`get_result` three-phase contract ([`backend/app/operations/base.py:21`](backend/app/operations/base.py#L21)). **Frontend:** a new `RolesExplorerView` Card page (a `Tree` of roles over a read-only key/value `RolesPropertiesPanel`), wired into `SqlAdminController` and registered through the existing `ActivityBar(views)` API ([`frontend/src/shell/ActivityBar.ts:61`](frontend/src/shell/ActivityBar.ts#L61)), with a thin typed-fetch data path added to [`frontend/src/data/api.ts`](frontend/src/data/api.ts) and matching contract types in [`frontend/src/contract.ts`](frontend/src/contract.ts) / [`backend/app/contract.py`](backend/app/contract.py).
+The feature spans both halves of the app. **Backend:** four new CQRS `Query` operations over `pg_catalog` (roles list, one role's attributes, its memberships, its table privileges) plus their FastAPI routes, all read-only and following the strict `__init__`/`apply`/`get_result` three-phase contract ([`backend/app/operations/base.py:21`](backend/app/operations/base.py#L21)). **Frontend:** a new `RolesExplorerView` Card page (a `Tree` of roles over a read-only key/value `RolesPropertiesPanel` showing the selected role's **base info** — attributes + memberships), wired into `SqlAdminController` and registered through the existing `ActivityBar(views)` API ([`frontend/src/shell/ActivityBar.ts:61`](frontend/src/shell/ActivityBar.ts#L61)); the role's **table grants** open in a per-role paginated `RoleGrantsPanel` tab in the Dock work area. A thin typed-fetch data path is added to [`frontend/src/data/api.ts`](frontend/src/data/api.ts) and matching contract types in [`frontend/src/contract.ts`](frontend/src/contract.ts) / [`backend/app/contract.py`](backend/app/contract.py).
 
 It introduces no mutation, no `Form` component, and no multi-connection fan-out — it reuses the single `"default"` connection seam end to end.
 
@@ -20,11 +20,15 @@ It introduces no mutation, no `Form` component, and no multi-connection fan-out 
 
 The roles are a flat set, so a single-select `List` would also fit — `List extends AbstractCustomList<string>` with `selectedIndex`/`value` and `reduceSelection` is a genuine selection picker ([`component/list/List.d.ts`](../../typescript-ui/dist/lib/types/component/list/List.d.ts); the *bullets* components are the separate `BulletedList`/`NumberedList`). A flat `Tree` is chosen instead because it **reuses the navigator's already-proven selection→detail wiring verbatim**: `tree.on("selection", nodes => …)` reads `node.data` and routes to the controller ([`frontend/src/navigator/NavigatorTree.ts:20`](frontend/src/navigator/NavigatorTree.ts#L20)), with `Tree.setNodes` / `selectNode` the established API ([`tree/Tree.d.ts`](../../typescript-ui/dist/lib/types/component/tree/Tree.d.ts) lines 31/36/37). A flat `Tree` (leaf nodes, no `hasChildren`/`loadChildren`) matches the navigator the user already knows with zero new component wiring. Roles load **eagerly** (a single small list) via `setNodes`, unlike the navigator's lazy `loadChildren` levels — there is no hierarchy to defer.
 
-### Read-only detail is a paged key/value Table, mirroring `PropertiesPanel`
+### Sidebar Details shows base info only; grants go to a Dock table
 
-The detail panel follows `PropertiesPanel`'s read-only key/value shape ([`frontend/src/properties/PropertiesPanel.ts:24`](frontend/src/properties/PropertiesPanel.ts#L24)): a two-field (`property`,`value`) `Model` rendered by a `Table(store, { columns: [], rowReadOnly: () => true })`. The role's attributes, memberships, and privileges are flattened into property/value rows (one row per membership, one per privilege grant — see `roleDetailRows`), so no second component is needed. The bible's binding note ([`tsui-sql-admin.md:449`](plans/implemented/tsui-sql-admin.md#L449)) confirms a plain key/value layout is the baseline and **no `Form` exists**, so `Binding`/`Bindable` is not introduced.
+The selection splits across two surfaces. The **sidebar Details** panel shows the role's **base information only** — its attributes plus the roles it belongs to — as a read-only key/value grid mirroring `PropertiesPanel` ([`frontend/src/properties/PropertiesPanel.ts:24`](frontend/src/properties/PropertiesPanel.ts#L24)): a two-field (`property`,`value`) `MemoryStore` rendered by `Table(store, { columns: [], rowReadOnly: () => true })`, refreshed per selection via `store.loadData(roleBaseInfoRows(detail))`. Base info is small (≤ ~12 rows), so it needs no pagination. The bible's binding note ([`tsui-sql-admin.md:449`](plans/implemented/tsui-sql-admin.md#L449)) confirms a plain key/value layout is the baseline and **no `Form` exists**, so `Binding`/`Bindable` is not introduced.
 
-**Paging deviation from `PropertiesPanel`:** a superuser can hold ~1500 grants, and the library's `Table` silently renders zero rows when handed a large in-memory dataset in one `loadData` (logged in `LIBRARY_NOTES.md`; `AbstractStore.loadData` updates the store correctly, but the Table's large-dataset render path fails). So instead of a plain `MemoryStore` + `loadData`, the panel pages the rows through a `Store` + a small in-memory `PagingMemoryProxy` (slices a settable array by `page`/`pageSize`, reports the full count) + a `PaginationBar`, ≤50 rows per page — mirroring the MiscPanel paginated-table demo. The Table never receives more than a page, which is both phpMyAdmin-style UX and a guard against the library limit. Each selection calls `proxy.setData(rows)` then resets to page 1 and reloads.
+The role's **table grants** are shown in the **Dock work area**, not the narrow sidebar: selecting a role opens (or focuses) a per-role `Grants: <role>` Dock tab — deduped by role, mirroring how selecting a navigator table opens its data tab (`SqlAdminController.openRoleGrants`). The tab's `RoleGrantsPanel` is a four-column read-only grid (Schema / Table / Privilege / Grantable).
+
+### The grants grid is paged through `Store` + `PagingMemoryProxy` + `PaginationBar`
+
+A superuser can hold ~1500 grants, and the library's `Table` silently renders zero rows when handed a large in-memory dataset in one `loadData` (logged in `LIBRARY_NOTES.md`; `AbstractStore.loadData` updates the store correctly, but the Table's large-dataset render path fails). So the grants grid pages the rows through a `Store` + a small in-memory `PagingMemoryProxy` (slices a settable array by `page`/`pageSize`, reports the full count) + a `PaginationBar`, ≤100 rows per page — mirroring the MiscPanel paginated-table demo. The Table never receives more than a page, both phpMyAdmin-style UX and a guard against the library limit. `RolePrivilege`'s keys map one-to-one onto the grid model, so the contract objects load with no remapping.
 
 ### Data path: one-shot typed fetch (`api.ts`), not `AjaxStore`
 
@@ -94,12 +98,16 @@ export function getRoleDetail(connectionId: string, role: string): Promise<RoleD
 
 ```ts
 // frontend/src/roles/RolesPropertiesPanel.ts
-/** Read-only key/value inspector for the selected role (mirrors PropertiesPanel). */
+/** Read-only key/value inspector for the selected role's base info (mirrors PropertiesPanel). */
 export class RolesPropertiesPanel {
     readonly component: Panel;
-    show(detail: RoleDetail): void;
-    clear(): void;                 // empty state before any selection
+    show(detail: RoleDetail): void;  // renders attributes + memberships (not grants)
+    clear(): void;                   // empty state before any selection
 }
+
+// frontend/src/dock/RoleGrantsPanel.ts
+/** A per-role paginated read-only grid of table grants, for the Dock work area. */
+export function RoleGrantsPanel(privileges: RolePrivilege[]): Panel;
 
 // frontend/src/roles/RolesTree.ts
 /** Flat Tree of roles; selection drives the controller's role detail. */
@@ -170,17 +178,20 @@ ORDER BY table_schema, table_name, privilege_type
 
 `information_schema.role_table_grants` is the privilege-aware view (it shows only grants the current user may see), already used elsewhere in the bible's introspection approach. `is_grantable` is the text `'YES'`/`'NO'`; `get_result()` maps it to a bool (`r["is_grantable"] == "YES"`) and emits `[{"schema", "table", "privilege", "grantable"}]`.
 
-### `RolesPropertiesPanel.show` row flattening
+### Sidebar `roleBaseInfoRows` flattening; grants as Dock-grid columns
+
+The sidebar Details (`roleBaseInfoRows`) flattens **base info only** into property/value rows:
 
 ```
 Attributes  → "Name", "Can login" (Yes/No), "Superuser", "Inherit", "Create role",
               "Create DB", "Replication", "Connection limit" ("-1" → "No limit"),
               "Valid until" (ISO string or "—")
 Member of   → one row per membership: property "Member of", value `${roleName}${admin ? " (admin)" : ""}`
-Privileges  → one row per grant: property "Grant", value `${schema}.${table}: ${privilege}${grantable ? " (grantable)" : ""}`
 ```
 
-Empty memberships / privileges contribute no rows (the section simply has none), matching the navigator-Properties "show what's there" style.
+Empty memberships contribute no rows (the section simply has none), matching the navigator-Properties "show what's there" style.
+
+The **grants** are not flattened into property/value rows — they populate the `RoleGrantsPanel` Dock grid directly, one record per `RolePrivilege` over a four-field model (`schema`, `table`, `privilege`, `grantable`; `grantable` renders as a read-only boolean cell, as `StructurePanel` does for its boolean columns). An empty grant set yields a one-page empty grid.
 
 ---
 
@@ -193,9 +204,9 @@ Empty memberships / privileges contribute no rows (the section simply has none),
 5. **Routes.** In [`backend/app/main.py`](backend/app/main.py), under a new `# --- Role introspection ---` banner, add `GET /api/{connection_id}/roles` (acquire → `ListRolesQuery` → apply → get_result) and `GET /api/{connection_id}/roles/{role}` (acquire once → run the three detail ops in sequence; if `RoleAttributesQuery.get_result()` is `None`, raise `NotFound` → 404 via the existing handler, mirroring `_columns_for` at [`main.py:111`](backend/app/main.py#L111); else assemble `{role, memberOf, privileges}`). Import the four ops. Group the two `roles` routes with the other 2-segment routes (see Potential Challenges — ordering is not load-bearing).
 6. **Contract types (frontend).** In [`frontend/src/contract.ts`](frontend/src/contract.ts), add `RoleSummary`, `RoleMembership`, `RolePrivilege`, `RoleDetail` (the TS shapes above).
 7. **Frontend data path.** In [`frontend/src/data/api.ts`](frontend/src/data/api.ts), add `getRoles` and `getRoleDetail` using `getJson<T>` against the two routes.
-8. **`RolesPropertiesPanel` + paging.** New `frontend/src/roles/roleDetailRows.ts` (pure `roleDetailRows(detail)` flattening per *Internal Structure*, unit-tested in `roleDetailRows.test.ts`) and `frontend/src/roles/PagingMemoryProxy.ts` (an in-memory `Proxy` slicing a settable array by `page`/`pageSize`, `getLastTotalCount` = full length). `frontend/src/roles/RolesPropertiesPanel.ts` follows `PropertiesPanel`'s key/value `Table` but over a `Store` + `PagingMemoryProxy` + `PaginationBar` (`setPageSize(50)`); `show(detail)`/`clear()` call `proxy.setData(rows)` then reset to page 1 and reload (see the paging deviation in *Architecture Decisions*).
+8. **Base-info detail + grants Dock table.** New `frontend/src/roles/roleBaseInfoRows.ts` (pure `roleBaseInfoRows(detail)` flattening the attributes + memberships per *Internal Structure*, unit-tested in `roleBaseInfoRows.test.ts` — no grant rows). `frontend/src/roles/RolesPropertiesPanel.ts` follows `PropertiesPanel`'s plain `MemoryStore` + key/value `Table`; `show(detail)`/`clear()` call `store.loadData(...)` (small, no pagination). New `frontend/src/data/PagingMemoryProxy.ts` (an in-memory `Proxy` slicing a settable array by `page`/`pageSize`, `getLastTotalCount` = full length) and `frontend/src/dock/RoleGrantsPanel.ts` — a four-column read-only grid (schema/table/privilege/grantable) over a `Store` + `PagingMemoryProxy` + `PaginationBar` (`setPageSize(100)`), loaded directly from `RolePrivilege[]`.
 9. **`RolesTree`.** New `frontend/src/roles/RolesTree.ts`: build a `Tree`, eagerly `getRoles` → `setNodes(leaf nodes)` (each `node.data = role.name`, glyph differentiating login roles vs groups optional), wire `on("selection", …)` → `controller.showRole(name)`, route load errors to `controller.notifyError`.
-10. **Controller wiring.** In [`frontend/src/SqlAdminController.ts`](frontend/src/SqlAdminController.ts), add the `rolesProperties` field (built in the ctor like `properties`, [:55](frontend/src/SqlAdminController.ts#L55)), `loadRoles()`, and `showRole(name)` with a monotonic stale-guard mirroring `showProperties`/`_propsSeq` ([:203](frontend/src/SqlAdminController.ts#L203)).
+10. **Controller wiring.** In [`frontend/src/SqlAdminController.ts`](frontend/src/SqlAdminController.ts), add the `rolesProperties` field (built in the ctor like `properties`, [:55](frontend/src/SqlAdminController.ts#L55)), `loadRoles()`, and `showRole(name)` with a monotonic stale-guard mirroring `showProperties`/`_propsSeq` ([:203](frontend/src/SqlAdminController.ts#L203)). `showRole` updates the sidebar base info **and** calls `openRoleGrants(name, detail.privileges)`, which opens or focuses a per-role `Grants: <role>` Dock tab (deduped by id, like `openTable`).
 11. **`RolesExplorerView`.** New `frontend/src/shell/RolesExplorerView.ts`, copied from `DatabaseExplorerView` ([`DatabaseExplorerView.ts:29`](frontend/src/shell/DatabaseExplorerView.ts#L29)): an `AccordionPanel` with a "Roles" navigator section (the `RolesTree`, `NAV_FILL_HINT` preferred height) over a "Details" section (`controller.rolesProperties.component`), `setCompact(true)`.
 12. **Register the view.** In [`frontend/src/shell/SqlAdminShell.ts`](frontend/src/shell/SqlAdminShell.ts): import the `users` glyph (`@jimka/typescript-ui/glyphs/solid/users`) and add it to the `Glyph.register(...)` call ([:27](frontend/src/shell/SqlAdminShell.ts#L27)); add a `ROLES_VIEW_ID = "roles"` const; in `buildSidebar` ([:70](frontend/src/shell/SqlAdminShell.ts#L70)) append a second `ActivityView` `{ id: ROLES_VIEW_ID, label: "Roles", glyph: "users", component: RolesExplorerView(controller, ROLES_VIEW_ID) }`.
 13. **Backend tests.** Add `backend/tests/test_roles.py` and `test_role_detail.py` covering the `get_result()` cases enumerated in *Expected Behaviour* (set `op._raw` by hand, `NO_CONN`), mirroring `test_list_objects.py`.
@@ -211,10 +222,11 @@ Empty memberships / privileges contribute no rows (the section simply has none),
 | Create | `backend/app/operations/role_detail.py` |
 | Create | `backend/tests/test_roles.py` |
 | Create | `backend/tests/test_role_detail.py` |
-| Create | `frontend/src/roles/RolesPropertiesPanel.ts` (paged key/value detail) |
-| Create | `frontend/src/roles/roleDetailRows.ts` (pure row flattening) |
-| Create | `frontend/src/roles/roleDetailRows.test.ts` (unit test) |
-| Create | `frontend/src/roles/PagingMemoryProxy.ts` (in-memory paging proxy) |
+| Create | `frontend/src/roles/RolesPropertiesPanel.ts` (sidebar base-info key/value detail) |
+| Create | `frontend/src/roles/roleBaseInfoRows.ts` (pure base-info row flattening) |
+| Create | `frontend/src/roles/roleBaseInfoRows.test.ts` (unit test) |
+| Create | `frontend/src/data/PagingMemoryProxy.ts` (in-memory paging proxy) |
+| Create | `frontend/src/dock/RoleGrantsPanel.ts` (paginated grants Dock table) |
 | Create | `frontend/src/roles/RolesTree.ts` |
 | Create | `frontend/src/shell/RolesExplorerView.ts` |
 | Modify | `backend/app/contract.py` (role dataclasses) |
@@ -248,8 +260,9 @@ Run frontend `:5173` + backend `:8000` against a real Postgres. `RolesExplorerVi
 
 - A **second rail button** ("Roles", `users` glyph) appears below the Database button; its tooltip reads "Roles".
 - Clicking it shows the Roles Card page (a tree of roles + an empty/"select a role" detail) and deselects the Database button; clicking Database returns to the explorer with **no roles-view residue**.
-- Selecting a role populates the detail with its attributes, memberships, and privileges; selecting another role replaces them in place (no flicker, `loadData` re-render).
-- A role with **no memberships / no privileges** shows only the attribute rows.
+- Selecting a role populates the sidebar Details with its **base info** (attributes + memberships) and opens (or focuses) a per-role `Grants: <role>` Dock tab; selecting another role updates the sidebar in place and opens a second grants tab (deduped by role).
+- The grants Dock grid lists one row per table privilege (Schema / Table / Privilege / Grantable) and **paginates** — a superuser (~1500 grants) shows e.g. "Page 1 of 15" with working first/prev/next/last; a role with no grants shows an empty one-page grid.
+- A role with **no memberships** shows only the attribute rows in the sidebar.
 - A role with **expired-or-no `validUntil`** shows "—"; `connectionLimit -1` shows "No limit".
 - Rapid role clicks never render a stale role (the `showRole` stale-guard).
 - A backend error (e.g. permission denied on `role_table_grants`) surfaces in the status bar via `notifyError`, not as a blank panel.
