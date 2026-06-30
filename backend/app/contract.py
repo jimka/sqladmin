@@ -71,3 +71,76 @@ class ColumnMeta:
             "hasDefault": self.has_default,
             "wireType": self.wire_type.value,
         }
+
+
+@dataclass(frozen=True)
+class RoleSummary:
+    """
+    One PostgreSQL role (user or group) with its ``pg_roles`` attribute flags.
+    A role with ``can_login`` reads as a "user"; without it, as a "group".
+    """
+
+    name: str                     # rolname
+    can_login: bool               # rolcanlogin
+    is_superuser: bool            # rolsuper
+    inherit: bool                 # rolinherit
+    create_role: bool             # rolcreaterole
+    create_db: bool               # rolcreatedb
+    replication: bool             # rolreplication
+    connection_limit: int         # rolconnlimit; -1 means "no limit"
+    valid_until: str | None       # rolvaliduntil as ISO-8601, or None for no expiry
+
+    def to_contract(self) -> dict:
+        """
+        Serialize to the contract JSON the ``/roles`` routes emit.
+        """
+        return {
+            "name": self.name,
+            "canLogin": self.can_login,
+            "isSuperuser": self.is_superuser,
+            "inherit": self.inherit,
+            "createRole": self.create_role,
+            "createDb": self.create_db,
+            "replication": self.replication,
+            "connectionLimit": self.connection_limit,
+            "validUntil": self.valid_until,
+        }
+
+
+@dataclass(frozen=True)
+class RoleMembership:
+    """
+    One membership edge: the subject role is a member of ``role_name``.
+    """
+
+    role_name: str                # the granting/parent role
+    admin: bool                   # admin_option on the membership
+
+    def to_contract(self) -> dict:
+        """
+        Serialize to the contract JSON for one membership row.
+        """
+        return {"roleName": self.role_name, "admin": self.admin}
+
+
+@dataclass(frozen=True)
+class RolePrivilege:
+    """
+    One table privilege held by a role.
+    """
+
+    schema: str                   # table_schema
+    table: str                    # table_name
+    privilege: str                # privilege_type (SELECT/INSERT/...)
+    grantable: bool               # is_grantable
+
+    def to_contract(self) -> dict:
+        """
+        Serialize to the contract JSON for one privilege grant.
+        """
+        return {
+            "schema": self.schema,
+            "table": self.table,
+            "privilege": self.privilege,
+            "grantable": self.grantable,
+        }

@@ -11,6 +11,8 @@ from .list_databases import ListDatabasesQuery
 from .list_objects import ListObjectsQuery
 from .list_rows import ListRowsQuery
 from .list_schemas import ListSchemasQuery
+from .role_detail import RoleAttributesQuery, RoleMembershipsQuery, RolePrivilegesQuery
+from .roles import ListRolesQuery
 from .run_query import RunQueryCommand
 from .update_row import UpdateRowCommand
 
@@ -23,6 +25,10 @@ __all__ = [
     "ListObjectsQuery",
     "ListColumnsQuery",
     "ListRowsQuery",
+    "ListRolesQuery",
+    "RoleAttributesQuery",
+    "RoleMembershipsQuery",
+    "RolePrivilegesQuery",
     "InsertRowCommand",
     "UpdateRowCommand",
     "DeleteRowCommand",
