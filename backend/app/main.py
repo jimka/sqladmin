@@ -30,8 +30,12 @@ from .operations import (
     ListColumnsQuery,
     ListDatabasesQuery,
     ListObjectsQuery,
+    ListRolesQuery,
     ListRowsQuery,
     ListSchemasQuery,
+    RoleAttributesQuery,
+    RoleMembershipsQuery,
+    RolePrivilegesQuery,
     RunQueryCommand,
     UpdateRowCommand,
 )
@@ -198,6 +202,61 @@ async def columns(connection_id: str, database: str, schema: str, table: str) ->
         await op.apply()
 
         return op.get_result()
+
+
+# --- Role introspection ---------------------------------------------------
+
+
+@app.get("/api/{connection_id}/roles")
+async def roles(connection_id: str) -> list[dict]:
+    """
+    List the roles (users and groups) on a connection with their attributes.
+
+    Route: ``GET /api/{connection_id}/roles``.
+
+    Returns:
+        ``[RoleSummary]`` as contract JSON — one entry per role, name-ordered.
+    """
+    async with get_pool(connection_id).acquire() as c:
+        op = ListRolesQuery(c)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.get("/api/{connection_id}/roles/{role}")
+async def role_detail(connection_id: str, role: str) -> dict:
+    """
+    One role's attributes plus the roles it belongs to and the table grants it
+    holds.
+
+    Route: ``GET /api/{connection_id}/roles/{role}``.
+
+    Raises:
+        NotFound: if no role by that name exists (mapped to 404).
+
+    Returns:
+        The ``RoleDetail`` contract shape ``{role, memberOf, privileges}``.
+    """
+    async with get_pool(connection_id).acquire() as c:
+        attrs = RoleAttributesQuery(c, role)
+        await attrs.apply()
+        summary = attrs.get_result()
+
+        if summary is None:
+            raise NotFound(f"Role '{role}' not found")
+
+        memberships = RoleMembershipsQuery(c, role)
+        await memberships.apply()
+
+        privileges = RolePrivilegesQuery(c, role)
+        await privileges.apply()
+
+        return {
+            "role": summary,
+            "memberOf": memberships.get_result(),
+            "privileges": privileges.get_result(),
+        }
 
 
 # --- Table data CRUD ------------------------------------------------------

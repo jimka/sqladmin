@@ -16,18 +16,22 @@ import { MenuBar }                 from "@jimka/typescript-ui/component/menubar"
 import { Glyph }                   from "@jimka/typescript-ui/component/display";
 import { database }                from "@jimka/typescript-ui/glyphs/solid/database";
 import { circle_info }             from "@jimka/typescript-ui/glyphs/solid/circle_info";
+import { users }                   from "@jimka/typescript-ui/glyphs/solid/users";
 import { ActivityBar }             from "./ActivityBar";
 import type { ActivityBarHandle }  from "./ActivityBar";
 import { DatabaseExplorerView }    from "./DatabaseExplorerView";
+import { RolesExplorerView }       from "./RolesExplorerView";
 import type { SqlAdminController } from "../SqlAdminController";
 
 // Glyphs used across the sidebar subtree: a database for the Database view (rail
-// button + navigator section), an info circle for the Properties section. Registered
+// button + navigator section), an info circle for the Properties/Details sections,
+// and a people icon for the Roles view (rail button + roles section). Registered
 // once here, the composition root, and referenced by name downstream.
-Glyph.register(database, circle_info);
+Glyph.register(database, circle_info, users);
 
-// The single Phase-1 view container's id (its rail button selects it by this).
+// The view-container ids; each view's rail button selects it by this id.
 const DATABASE_VIEW_ID = "database";
+const ROLES_VIEW_ID    = "roles";
 
 /** Build the shell Panel, hosting the controller's Dock and StatusBar. */
 export function SqlAdminShell(controller: SqlAdminController): Panel {
@@ -69,8 +73,10 @@ function buildMenuBar(onToggleSidebar: () => void, onRunSql: () => void): MenuBa
  */
 function buildSidebar(controller: SqlAdminController): ActivityBarHandle {
     const explorer = DatabaseExplorerView(controller, DATABASE_VIEW_ID);
+    const roles    = RolesExplorerView(controller, ROLES_VIEW_ID);
 
     return ActivityBar([
         { id: DATABASE_VIEW_ID, label: "Database", glyph: "database", component: explorer },
+        { id: ROLES_VIEW_ID,    label: "Roles",    glyph: "users",    component: roles },
     ]);
 }
