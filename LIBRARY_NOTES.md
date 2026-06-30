@@ -8,6 +8,30 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎🩹 Large `MemoryStore.loadData` renders zero rows in a Table
+
+Selecting a PostgreSQL superuser in the Phase-2 roles browser (~1500 detail rows:
+9 attributes + ~1477 table grants) left the role-detail Table blank — `loadData`
+replaced the store records but the Table rendered zero/stale rows, with **no
+error**. Small roles (≤ ~12 rows) render fine; the failure scales with row count.
+
+**Root cause (so far):** `AbstractStore.loadData` is synchronous and *does* update
+the records (`ingestRaw` → `applyView` → emit `'load'`), so the store is correct —
+the failure is downstream in the Table's load→render / `VirtualScroller` path for
+a large in-memory dataset. The Table is built inside an initially-hidden `Card`
+deck page (the activity-bar Roles view) and shown later; collapsing/re-expanding
+(forcing a fresh layout) does **not** recover it, so it is not purely a
+viewport-measure-on-show issue. Needs a dedicated debug pass on the
+Table/`VirtualScroller` large-`loadData` render in the library.
+
+**App handling (🩹):** the role detail renders through a *paginated* store (`Store`
++ an in-memory paging proxy + `PaginationBar`, ≤ 50 rows/page, mirroring the
+MiscPanel paginated-table demo), so the Table never loads more than a page at
+once. This is also better UX (phpMyAdmin-style), but it sidesteps rather than
+fixes the underlying library limit, which stays **open**.
+
+---
+
 ## 🐞✅ Menu item hover highlight stuck after clicking a command
 
 After clicking **View → Toggle Sidebar** once, the item stayed highlighted, and
