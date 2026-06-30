@@ -21,13 +21,17 @@ import { TextArea }                      from "@jimka/typescript-ui/component/in
 import { MemoryStore }                   from "@jimka/typescript-ui/data";
 import { Glyph }                         from "@jimka/typescript-ui/component/display";
 import { play }                          from "@jimka/typescript-ui/glyphs/solid/play";
+import { eraser }                        from "@jimka/typescript-ui/glyphs/solid/eraser";
 import { buildQueryModel }               from "../data/buildModel";
 import type { QueryResult }              from "../contract";
 
-Glyph.register(play);
+Glyph.register(play, eraser);
 
 // Green for the affirmative Run action, matching TableWorkPanel's add-action color.
 const RUN_COLOR = "rgb(46, 125, 50)";
+
+// Neutral gray for the Clear (reset) action.
+const CLEAR_COLOR = "rgb(120, 120, 120)";
 
 // The editor's starting height once the result pane is shown below it; the Split
 // gutter lets the user resize from there.
@@ -68,10 +72,11 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     body.setLayoutManager(split);
     body.addComponent(editor);
 
-    const runButton = glyphButton("play", RUN_COLOR, "Run (Ctrl+Enter)", () => void run());
+    const runButton   = glyphButton("play", RUN_COLOR, "Run (Ctrl+Enter)", () => void run());
+    const clearButton = glyphButton("eraser", CLEAR_COLOR, "Clear", () => clear());
 
     const panel = Panel({ layoutManager: new BorderLayout() });
-    panel.addComponent(new ToolBar({ components: [runButton] }), { placement: Placement.NORTH });
+    panel.addComponent(new ToolBar({ components: [runButton, clearButton] }), { placement: Placement.NORTH });
     panel.addComponent(body, { placement: Placement.CENTER });
 
     let resultShown = false;
@@ -116,6 +121,12 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
             resultShown = false;
             body.doLayout();
         }
+    }
+
+    /** Reset the panel to its initial state: empty editor, no result pane. */
+    function clear(): void {
+        editor.setValue("");
+        hideResultPane();
     }
 
     // Monotonic guard: a slow run whose result arrives after a newer run started
