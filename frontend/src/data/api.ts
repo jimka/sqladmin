@@ -2,7 +2,14 @@
 // error body ({detail}) directly and returns contract types. It does NOT go
 // through the proxy/store (that is the row-CRUD path; see stores.ts).
 
-import type { ColumnMeta, DbObjectKind, DbObjectRef, QueryResult } from "../contract";
+import type {
+    ColumnMeta,
+    DbObjectKind,
+    DbObjectRef,
+    QueryResult,
+    RoleDetail,
+    RoleSummary,
+} from "../contract";
 
 /** Pull the backend's `{detail}` error message off a non-OK response. */
 async function readDetail(response: Response): Promise<string> {
@@ -78,4 +85,14 @@ export function getColumns(ref: DbObjectRef): Promise<ColumnMeta[]> {
  */
 export function runQuery(connectionId: string, sql: string): Promise<QueryResult> {
     return postJson<QueryResult>(`/api/${connectionId}/query`, { sql });
+}
+
+/** The Roles view's role list (introspection one-shot). */
+export function getRoles(connectionId: string): Promise<RoleSummary[]> {
+    return getJson<RoleSummary[]>(`/api/${connectionId}/roles`);
+}
+
+/** One role's combined attributes, memberships, and table privileges. */
+export function getRoleDetail(connectionId: string, role: string): Promise<RoleDetail> {
+    return getJson<RoleDetail>(`/api/${connectionId}/roles/${encodeURIComponent(role)}`);
 }

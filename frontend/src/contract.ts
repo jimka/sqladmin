@@ -65,3 +65,37 @@ export interface QueryStatusResult {
 
 /** The result of running one arbitrary SQL statement. */
 export type QueryResult = QueryRowsResult | QueryStatusResult;
+
+/** One PostgreSQL role (user or group), with its pg_roles attribute flags. */
+export interface RoleSummary {
+    name: string; // rolname
+    canLogin: boolean; // rolcanlogin (a "user" can log in; a "group" cannot)
+    isSuperuser: boolean; // rolsuper
+    inherit: boolean; // rolinherit
+    createRole: boolean; // rolcreaterole
+    createDb: boolean; // rolcreatedb
+    replication: boolean; // rolreplication
+    connectionLimit: number; // rolconnlimit; -1 means "no limit"
+    validUntil: string | null; // rolvaliduntil as ISO-8601, or null for no expiry
+}
+
+/** One membership edge: this role is a member of `roleName`. */
+export interface RoleMembership {
+    roleName: string; // the granting/parent role
+    admin: boolean; // admin_option on the membership
+}
+
+/** One table privilege held by a role. */
+export interface RolePrivilege {
+    schema: string;
+    table: string;
+    privilege: string; // SELECT / INSERT / ...
+    grantable: boolean; // is_grantable
+}
+
+/** The combined per-role detail the detail endpoint returns. */
+export interface RoleDetail {
+    role: RoleSummary;
+    memberOf: RoleMembership[]; // roles this role belongs to
+    privileges: RolePrivilege[]; // table grants held by this role
+}

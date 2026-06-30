@@ -7,8 +7,8 @@ import type { DockPanelEvent }                                 from "@jimka/type
 import { StatusBar }                                           from "@jimka/typescript-ui/component/container";
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef }                        from "./contract";
-import { getColumns, runQuery }                                from "./data/api";
+import type { ColumnMeta, DbObjectRef, RoleSummary }           from "./contract";
+import { getColumns, getRoleDetail, getRoles, runQuery }       from "./data/api";
 import { buildModel }                                          from "./data/buildModel";
 import { buildSelectSql }                                      from "./data/sql";
 import { buildStore }                                          from "./data/stores";
@@ -16,6 +16,7 @@ import { TableWorkPanel }                                      from "./dock/Tabl
 import { StructurePanel }                                      from "./dock/StructurePanel";
 import { QueryPanel }                                          from "./dock/QueryPanel";
 import { PropertiesPanel }                                     from "./properties/PropertiesPanel";
+import { RolesPropertiesPanel }                                from "./roles/RolesPropertiesPanel";
 
 /** Registry entry for one open dock panel; `store` is absent for structure tabs. */
 interface OpenPanel {
@@ -26,9 +27,10 @@ interface OpenPanel {
 }
 
 export class SqlAdminController {
-    readonly dock      : Dock;
-    readonly statusBar : StatusBar;
-    readonly properties: PropertiesPanel;
+    readonly dock           : Dock;
+    readonly statusBar      : StatusBar;
+    readonly properties     : PropertiesPanel;
+    readonly rolesProperties: RolesPropertiesPanel;
 
     private readonly _connectionId: string;
     private readonly _openPanels  : Map<string, OpenPanel> = new Map();
@@ -42,6 +44,9 @@ export class SqlAdminController {
     // has since moved on is discarded instead of clobbering the current view.
     private _propsSeq: number = 0;
 
+    // The same monotonic guard for the Roles view's detail fetch.
+    private _roleSeq: number = 0;
+
     /**
      * Wire the Dock, StatusBar, and Properties inspector, and subscribe to the
      * Dock's panel-close and focus events.
@@ -50,9 +55,10 @@ export class SqlAdminController {
      */
     constructor(connectionId: string = "default") {
         this._connectionId = connectionId;
-        this.dock          = Dock();
-        this.statusBar     = new StatusBar();
-        this.properties    = new PropertiesPanel();
+        this.dock            = Dock();
+        this.statusBar       = new StatusBar();
+        this.properties      = new PropertiesPanel();
+        this.rolesProperties = new RolesPropertiesPanel();
 
         // Disposal is wired once: the dock fires "close" only on genuine
         // destruction (a tear-off fires "detach" and the panel survives).
@@ -227,6 +233,36 @@ export class SqlAdminController {
         } catch (err) {
             if (seq === this._propsSeq) {
                 this.notifyError(err, ref);
+            }
+        }
+    }
+
+    /**
+     * Fetch the role list for the Roles view's tree. The connection id stays
+     * encapsulated here; the caller maps the result to nodes and reports any
+     * failure via {@link notifyError}.
+     */
+    loadRoles(): Promise<RoleSummary[]> {
+        return getRoles(this._connectionId);
+    }
+
+    /**
+     * Show the named role's attributes, memberships, and table privileges in the
+     * roles inspector. A monotonic guard discards a stale fetch whose selection
+     * has since changed, so rapid role clicks never render the wrong role.
+     */
+    async showRole(name: string): Promise<void> {
+        const seq = ++this._roleSeq;
+
+        try {
+            const detail = await getRoleDetail(this._connectionId, name);
+
+            if (seq === this._roleSeq) {
+                this.rolesProperties.show(detail);
+            }
+        } catch (err) {
+            if (seq === this._roleSeq) {
+                this.notifyError(err);
             }
         }
     }
