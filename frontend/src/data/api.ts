@@ -2,7 +2,7 @@
 // error body ({detail}) directly and returns contract types. It does NOT go
 // through the proxy/store (that is the row-CRUD path; see stores.ts).
 
-import type { ColumnMeta, DbObjectKind, DbObjectRef } from "../contract";
+import type { ColumnMeta, DbObjectKind, DbObjectRef, QueryResult } from "../contract";
 
 /** Pull the backend's `{detail}` error message off a non-OK response. */
 async function readDetail(response: Response): Promise<string> {
@@ -22,6 +22,21 @@ async function readDetail(response: Response): Promise<string> {
 /** Fetch JSON from `url`, throwing the backend's detail message on failure. */
 async function getJson<T>(url: string): Promise<T> {
     const response = await fetch(url);
+
+    if (!response.ok) {
+        throw new Error(await readDetail(response));
+    }
+
+    return (await response.json()) as T;
+}
+
+/** POST `body` as JSON to `url`, throwing the backend's detail on failure. */
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+    const response = await fetch(url, {
+        method : "POST",
+        headers: { "Content-Type": "application/json" },
+        body   : JSON.stringify(body),
+    });
 
     if (!response.ok) {
         throw new Error(await readDetail(response));
@@ -54,4 +69,13 @@ export function getColumns(ref: DbObjectRef): Promise<ColumnMeta[]> {
     const url = `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/columns`;
 
     return getJson<ColumnMeta[]>(url);
+}
+
+/**
+ * Run one arbitrary SQL statement — the query panel's one-shot data path. Unlike
+ * row CRUD (an AjaxStore), an arbitrary result has no PK or collection URL, so it
+ * goes through this typed fetch and loads into a MemoryStore.
+ */
+export function runQuery(connectionId: string, sql: string): Promise<QueryResult> {
+    return postJson<QueryResult>(`/api/${connectionId}/query`, { sql });
 }

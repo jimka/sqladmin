@@ -36,7 +36,7 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
     return Panel({
         layoutManager: new BorderLayout(),
         components: [
-            { component: buildMenuBar(sidebar.toggleCollapsed), constraints: { placement: Placement.NORTH } },
+            { component: buildMenuBar(sidebar.toggleCollapsed, () => controller.openQuery()), constraints: { placement: Placement.NORTH } },
             { component: sidebar.component,                     constraints: { placement: Placement.WEST } },
             { component: controller.dock,                       constraints: { placement: Placement.CENTER } },
             { component: controller.statusBar,                  constraints: { placement: Placement.SOUTH } },
@@ -49,13 +49,14 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
  * collapse; the remaining items are stubbed/disabled until their features land.
  *
  * @param onToggleSidebar - Collapses/expands the activity bar.
+ * @param onRunSql - Opens a new SQL query panel in the Dock.
  */
-function buildMenuBar(onToggleSidebar: () => void): MenuBar {
+function buildMenuBar(onToggleSidebar: () => void, onRunSql: () => void): MenuBar {
     return MenuBar({
         menus: [
             { label: "File", items: [{ text: "Close Tab", enabled: false }, { separator: true }, { text: "Exit", enabled: false }] },
             { label: "View", items: [{ text: "Toggle Sidebar", action: onToggleSidebar }] },
-            { label: "Tools", items: [{ text: "Run SQL…", enabled: false }] },
+            { label: "Tools", items: [{ text: "Run SQL…", action: onRunSql }] },
         ],
     });
 }

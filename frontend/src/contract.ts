@@ -41,3 +41,27 @@ export interface TableListEnvelope {
     rows: Record<string, unknown>[];
     totalCount: number;
 }
+
+/** One result column from an arbitrary query (name + inferred wire scalar). */
+export interface QueryColumnMeta {
+    name: string;
+    wireType: WireType;
+}
+
+/** A query that returned a result set (any SELECT / RETURNING). */
+export interface QueryRowsResult {
+    kind: "rows";
+    columns: QueryColumnMeta[];
+    rows: Record<string, unknown>[];
+    rowCount: number;
+}
+
+/** A query that returned no result set (INSERT/UPDATE/DDL). */
+export interface QueryStatusResult {
+    kind: "status";
+    command: string; // the backend's command tag, e.g. "INSERT 0 3"
+    rowCount: number;
+}
+
+/** The result of running one arbitrary SQL statement. */
+export type QueryResult = QueryRowsResult | QueryStatusResult;

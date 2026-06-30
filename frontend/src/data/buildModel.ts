@@ -3,9 +3,9 @@
 // primary key so record.getId() resolves for PUT/DELETE URLs. Column order is
 // carried through so the data grid renders columns in table order.
 
-import { Model }                     from "@jimka/typescript-ui/data";
-import type { FieldType }            from "@jimka/typescript-ui/data";
-import type { ColumnMeta, WireType } from "../contract";
+import { Model }                                      from "@jimka/typescript-ui/data";
+import type { FieldType }                             from "@jimka/typescript-ui/data";
+import type { ColumnMeta, QueryColumnMeta, WireType } from "../contract";
 
 const WIRE_TO_FIELD: Record<WireType, FieldType> = {
     number   : "number",
@@ -28,5 +28,19 @@ export function buildModel(columns: ColumnMeta[]): Model {
             order: i,
         })),
         primaryKey,
+    });
+}
+
+/**
+ * Map arbitrary-query result columns to a Model. Like {@link buildModel} but
+ * with no primary key — a query result set has none and is never written back.
+ */
+export function buildQueryModel(columns: QueryColumnMeta[]): Model {
+    return new Model({
+        fields: columns.map((c, i) => ({
+            name : c.name,
+            type : WIRE_TO_FIELD[c.wireType],
+            order: i,
+        })),
     });
 }

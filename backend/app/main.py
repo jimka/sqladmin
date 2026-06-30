@@ -32,6 +32,7 @@ from .operations import (
     ListObjectsQuery,
     ListRowsQuery,
     ListSchemasQuery,
+    RunQueryCommand,
     UpdateRowCommand,
 )
 
@@ -314,3 +315,29 @@ async def delete_row(
         await op.apply()
 
         return Response(status_code=204)
+
+
+# --- Arbitrary SQL --------------------------------------------------------
+
+
+@app.post("/api/{connection_id}/query")
+async def run_query(connection_id: str, body: dict = Body(...)) -> dict:
+    """
+    Run one arbitrary SQL statement and return its result.
+
+    Route: ``POST /api/{connection_id}/query``.
+
+    Args:
+        body: ``{"sql": str}`` — exactly one statement (a ``;``-separated script
+            is rejected by the extended query protocol as a 400).
+
+    Returns:
+        ``{"kind": "rows", "columns", "rows", "rowCount"}`` for a statement that
+        returned a result set, or ``{"kind": "status", "command", "rowCount"}``
+        for one that did not (INSERT/UPDATE/DDL).
+    """
+    async with get_pool(connection_id).acquire() as c:
+        op = RunQueryCommand(c, body.get("sql", ""))
+        await op.apply()
+
+        return op.get_result()
