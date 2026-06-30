@@ -7,9 +7,10 @@ import { Tree }                      from "@jimka/typescript-ui/component/tree";
 import type { TreeNode }             from "@jimka/typescript-ui/component/tree";
 import type { RoleSummary }          from "../contract";
 import type { SqlAdminController }   from "../SqlAdminController";
+import type { ExplorerTree }         from "../navigator/NavigatorTree";
 
 /** Build the roles Tree, wired to show a role's detail and report load errors. */
-export function RolesTree(controller: SqlAdminController): Tree {
+export function RolesTree(controller: SqlAdminController): ExplorerTree {
     const tree = Tree();
 
     tree.on("selection", (nodes: TreeNode[]) => {
@@ -20,11 +21,16 @@ export function RolesTree(controller: SqlAdminController): Tree {
         }
     });
 
-    void controller.loadRoles()
-        .then(roles => tree.setNodes(roles.map(roleNode)))
-        .catch(error => controller.notifyError(error));
+    // (Re)load the role list; used for the initial load and the refresh tool.
+    const refresh = (): void => {
+        void controller.loadRoles()
+            .then(roles => tree.setNodes(roles.map(roleNode)))
+            .catch(error => controller.notifyError(error));
+    };
 
-    return tree;
+    refresh();
+
+    return { tree, refresh };
 }
 
 /** A leaf node for one role; node.data is the role name the detail loads by. */

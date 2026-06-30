@@ -8,6 +8,7 @@
 import { Component }               from "@jimka/typescript-ui/core";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
 import { RolesTree }               from "../roles/RolesTree";
+import { refreshTool }             from "./refreshTool";
 import type { SqlAdminController } from "../SqlAdminController";
 
 // A preferred height large enough to always overflow the sidebar, so the
@@ -25,19 +26,20 @@ const ROLES_FILL_HINT = 10000;
  * @returns The explorer view component.
  */
 export function RolesExplorerView(controller: SqlAdminController, id: string): Component {
-    const roles = RolesTree(controller);
+    const { tree, refresh } = RolesTree(controller);
 
-    roles.setPreferredSize(0, ROLES_FILL_HINT);
+    tree.setPreferredSize(0, ROLES_FILL_HINT);
 
     const view = new AccordionPanel({
         id,
         sections: [
-            { label: "Roles", component: roles, initiallyOpen: true, glyph: "users" },
+            { label: "Roles", component: tree, initiallyOpen: true, glyph: "users", tools: [refreshTool(refresh)] },
             { label: "Details", component: controller.rolesProperties.component, initiallyOpen: true, glyph: "circle-info" },
         ],
     });
 
     view.getAccordion().setCompact(true);
+    view.getAccordion().setToolsVisibility("always");
 
     return view;
 }
