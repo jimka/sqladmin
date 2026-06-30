@@ -30,8 +30,9 @@ Glyph.register(play, eraser);
 // Green for the affirmative Run action, matching TableWorkPanel's add-action color.
 const RUN_COLOR = "rgb(46, 125, 50)";
 
-// Neutral gray for the Clear (reset) action.
-const CLEAR_COLOR = "rgb(120, 120, 120)";
+// Amber for the Clear (reset) action — distinct from the green Run, signalling
+// "discards your input" without the finality of a delete-red.
+const CLEAR_COLOR = "rgb(204, 102, 0)";
 
 // The editor's starting height once the result pane is shown below it; the Split
 // gutter lets the user resize from there.
@@ -93,6 +94,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
         }
 
         body.doLayout();
+        syncClearEnabled();
     }
 
     // Split the body so the editor starts at EDITOR_HEIGHT and the grid gets the
@@ -121,12 +123,21 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
             resultShown = false;
             body.doLayout();
         }
+
+        syncClearEnabled();
     }
 
     /** Reset the panel to its initial state: empty editor, no result pane. */
     function clear(): void {
         editor.setValue("");
         hideResultPane();
+    }
+
+    // Clear is meaningful only when there is something to reset: text in the
+    // editor or a result on screen. (setValue/setText don't fire "change", so
+    // clear() re-syncs via hideResultPane.)
+    function syncClearEnabled(): void {
+        clearButton.setEnabled(editor.getValue().trim() !== "" || resultShown);
     }
 
     // Monotonic guard: a slow run whose result arrives after a newer run started
@@ -190,6 +201,15 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
             void run();
         }
     });
+
+    // Keep Clear's enabled state in step with the editor's content as the user
+    // types. Use "action" (the input-event shorthand), registered after the
+    // editor's own onInput, so getValue() already reflects the new text — the
+    // "change" bridge fires before onInput and would read the stale value.
+    editor.on("action", () => syncClearEnabled());
+
+    // Initial state: disabled for an empty panel, enabled when seeded.
+    syncClearEnabled();
 
     if (autoRun && initialSql.trim()) {
         void run();
