@@ -57,14 +57,7 @@ export interface QueryPanelOptions {
 export function QueryPanel(options: QueryPanelOptions): Panel {
     const { runQuery, notify, onError, initialSql = "", autoRun = false } = options;
 
-    const editor = new TextArea();
-
-    // Seed via the setter, NOT the positional constructor text: that lands in
-    // _defaultOptions (class defaults), which getValue()/render() never consult,
-    // so it would be dropped. setValue writes the instance's _options.text.
-    if (initialSql) {
-        editor.setValue(initialSql);
-    }
+    const editor = new TextArea(initialSql);
 
     const resultHost = Panel({ layoutManager: new Fit() });
 
