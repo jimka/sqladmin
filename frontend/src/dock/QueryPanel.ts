@@ -218,11 +218,12 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     return panel;
 }
 
-/** A glyph-only toolbar button: colored icon, accessible label, click handler. */
+/** A glyph-only toolbar button: colored icon, hover tooltip + accessible name, click handler. */
 function glyphButton(glyph: string, color: string, label: string, handler: () => void): Button {
-    const button = Button({ glyph, foregroundColor: color, compact: true });
+    // showText:false keeps the face glyph-only while the label drives both the
+    // hover tooltip and the aria-label (accessible name) — no manual setLabel.
+    const button = Button({ glyph, text: label, showText: false, foregroundColor: color, compact: true });
 
-    button.getAria().setLabel(label);
     button.on("action", handler);
 
     return button;
