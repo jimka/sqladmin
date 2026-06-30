@@ -20,9 +20,11 @@ It introduces no mutation, no `Form` component, and no multi-connection fan-out 
 
 The roles are a flat set, so a single-select `List` would also fit — `List extends AbstractCustomList<string>` with `selectedIndex`/`value` and `reduceSelection` is a genuine selection picker ([`component/list/List.d.ts`](../../typescript-ui/dist/lib/types/component/list/List.d.ts); the *bullets* components are the separate `BulletedList`/`NumberedList`). A flat `Tree` is chosen instead because it **reuses the navigator's already-proven selection→detail wiring verbatim**: `tree.on("selection", nodes => …)` reads `node.data` and routes to the controller ([`frontend/src/navigator/NavigatorTree.ts:20`](frontend/src/navigator/NavigatorTree.ts#L20)), with `Tree.setNodes` / `selectNode` the established API ([`tree/Tree.d.ts`](../../typescript-ui/dist/lib/types/component/tree/Tree.d.ts) lines 31/36/37). A flat `Tree` (leaf nodes, no `hasChildren`/`loadChildren`) matches the navigator the user already knows with zero new component wiring. Roles load **eagerly** (a single small list) via `setNodes`, unlike the navigator's lazy `loadChildren` levels — there is no hierarchy to defer.
 
-### Read-only detail is a key/value `MemoryStore`-backed Table, mirroring `PropertiesPanel`
+### Read-only detail is a paged key/value Table, mirroring `PropertiesPanel`
 
-The detail panel copies `PropertiesPanel` exactly ([`frontend/src/properties/PropertiesPanel.ts:24`](frontend/src/properties/PropertiesPanel.ts#L24)): a persistent `MemoryStore` over a two-field (`property`,`value`) `Model`, rendered by a `Table(store, { columns: [], rowReadOnly: () => true })`, refreshed per selection via `store.loadData(rows)` (synchronous, fires `load`, re-renders in place). Memberships and privileges are flattened into the same property/value rows (one row per membership, one per privilege grant), so no second component is needed. The bible's binding note ([`tsui-sql-admin.md:449`](plans/implemented/tsui-sql-admin.md#L449)) confirms a plain key/value layout is the baseline and **no `Form` exists**; the existing code uses the `MemoryStore`+`Table` form, not `Binding`/`Bindable`, so we mirror that and do **not** introduce binding.
+The detail panel follows `PropertiesPanel`'s read-only key/value shape ([`frontend/src/properties/PropertiesPanel.ts:24`](frontend/src/properties/PropertiesPanel.ts#L24)): a two-field (`property`,`value`) `Model` rendered by a `Table(store, { columns: [], rowReadOnly: () => true })`. The role's attributes, memberships, and privileges are flattened into property/value rows (one row per membership, one per privilege grant — see `roleDetailRows`), so no second component is needed. The bible's binding note ([`tsui-sql-admin.md:449`](plans/implemented/tsui-sql-admin.md#L449)) confirms a plain key/value layout is the baseline and **no `Form` exists**, so `Binding`/`Bindable` is not introduced.
+
+**Paging deviation from `PropertiesPanel`:** a superuser can hold ~1500 grants, and the library's `Table` silently renders zero rows when handed a large in-memory dataset in one `loadData` (logged in `LIBRARY_NOTES.md`; `AbstractStore.loadData` updates the store correctly, but the Table's large-dataset render path fails). So instead of a plain `MemoryStore` + `loadData`, the panel pages the rows through a `Store` + a small in-memory `PagingMemoryProxy` (slices a settable array by `page`/`pageSize`, reports the full count) + a `PaginationBar`, ≤50 rows per page — mirroring the MiscPanel paginated-table demo. The Table never receives more than a page, which is both phpMyAdmin-style UX and a guard against the library limit. Each selection calls `proxy.setData(rows)` then resets to page 1 and reloads.
 
 ### Data path: one-shot typed fetch (`api.ts`), not `AjaxStore`
 
@@ -191,7 +193,7 @@ Empty memberships / privileges contribute no rows (the section simply has none),
 5. **Routes.** In [`backend/app/main.py`](backend/app/main.py), under a new `# --- Role introspection ---` banner, add `GET /api/{connection_id}/roles` (acquire → `ListRolesQuery` → apply → get_result) and `GET /api/{connection_id}/roles/{role}` (acquire once → run the three detail ops in sequence; if `RoleAttributesQuery.get_result()` is `None`, raise `NotFound` → 404 via the existing handler, mirroring `_columns_for` at [`main.py:111`](backend/app/main.py#L111); else assemble `{role, memberOf, privileges}`). Import the four ops. Group the two `roles` routes with the other 2-segment routes (see Potential Challenges — ordering is not load-bearing).
 6. **Contract types (frontend).** In [`frontend/src/contract.ts`](frontend/src/contract.ts), add `RoleSummary`, `RoleMembership`, `RolePrivilege`, `RoleDetail` (the TS shapes above).
 7. **Frontend data path.** In [`frontend/src/data/api.ts`](frontend/src/data/api.ts), add `getRoles` and `getRoleDetail` using `getJson<T>` against the two routes.
-8. **`RolesPropertiesPanel`.** New `frontend/src/roles/RolesPropertiesPanel.ts`, copied from `PropertiesPanel` (same `MemoryStore`/`Model`/`Table`), with `show(detail)` flattening per *Internal Structure* and a `clear()` empty state.
+8. **`RolesPropertiesPanel` + paging.** New `frontend/src/roles/roleDetailRows.ts` (pure `roleDetailRows(detail)` flattening per *Internal Structure*, unit-tested in `roleDetailRows.test.ts`) and `frontend/src/roles/PagingMemoryProxy.ts` (an in-memory `Proxy` slicing a settable array by `page`/`pageSize`, `getLastTotalCount` = full length). `frontend/src/roles/RolesPropertiesPanel.ts` follows `PropertiesPanel`'s key/value `Table` but over a `Store` + `PagingMemoryProxy` + `PaginationBar` (`setPageSize(50)`); `show(detail)`/`clear()` call `proxy.setData(rows)` then reset to page 1 and reload (see the paging deviation in *Architecture Decisions*).
 9. **`RolesTree`.** New `frontend/src/roles/RolesTree.ts`: build a `Tree`, eagerly `getRoles` → `setNodes(leaf nodes)` (each `node.data = role.name`, glyph differentiating login roles vs groups optional), wire `on("selection", …)` → `controller.showRole(name)`, route load errors to `controller.notifyError`.
 10. **Controller wiring.** In [`frontend/src/SqlAdminController.ts`](frontend/src/SqlAdminController.ts), add the `rolesProperties` field (built in the ctor like `properties`, [:55](frontend/src/SqlAdminController.ts#L55)), `loadRoles()`, and `showRole(name)` with a monotonic stale-guard mirroring `showProperties`/`_propsSeq` ([:203](frontend/src/SqlAdminController.ts#L203)).
 11. **`RolesExplorerView`.** New `frontend/src/shell/RolesExplorerView.ts`, copied from `DatabaseExplorerView` ([`DatabaseExplorerView.ts:29`](frontend/src/shell/DatabaseExplorerView.ts#L29)): an `AccordionPanel` with a "Roles" navigator section (the `RolesTree`, `NAV_FILL_HINT` preferred height) over a "Details" section (`controller.rolesProperties.component`), `setCompact(true)`.
@@ -209,7 +211,10 @@ Empty memberships / privileges contribute no rows (the section simply has none),
 | Create | `backend/app/operations/role_detail.py` |
 | Create | `backend/tests/test_roles.py` |
 | Create | `backend/tests/test_role_detail.py` |
-| Create | `frontend/src/roles/RolesPropertiesPanel.ts` |
+| Create | `frontend/src/roles/RolesPropertiesPanel.ts` (paged key/value detail) |
+| Create | `frontend/src/roles/roleDetailRows.ts` (pure row flattening) |
+| Create | `frontend/src/roles/roleDetailRows.test.ts` (unit test) |
+| Create | `frontend/src/roles/PagingMemoryProxy.ts` (in-memory paging proxy) |
 | Create | `frontend/src/roles/RolesTree.ts` |
 | Create | `frontend/src/shell/RolesExplorerView.ts` |
 | Modify | `backend/app/contract.py` (role dataclasses) |
@@ -219,6 +224,7 @@ Empty memberships / privileges contribute no rows (the section simply has none),
 | Modify | `frontend/src/data/api.ts` (`getRoles`, `getRoleDetail`) |
 | Modify | `frontend/src/SqlAdminController.ts` (`rolesProperties`, `loadRoles`, `showRole`) |
 | Modify | `frontend/src/shell/SqlAdminShell.ts` (glyph register + second `ActivityView`) |
+| Modify | `LIBRARY_NOTES.md` (large `MemoryStore.loadData` Table render limit) |
 
 ---
 
