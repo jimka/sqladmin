@@ -152,6 +152,7 @@ All geometry behaviours below are **manual-verify only**: sqladmin's vitest runs
 6. **Expand restores remembered width:** after dragging the sidebar to, say, 340px then collapsing and re-expanding, the sidebar reopens to ~340px (not the default 280); a fresh session with no drag reopens to 280.
 7. **Gutter draggable only when expanded:** while collapsed the sidebar is pinned (min == max) and the gutter cannot resize it; expanding restores drag.
 8. **No inner-Border regression:** the sidebar's internal rail/deck Card Border, the navigator, and the properties accordion render and behave exactly as before — only the outer shell WEST/CENTER became a Split.
+9. **View switch preserves sidebar width:** switching between views (Databases <-> Roles) while expanded must NOT resize the sidebar — the deck content swaps but the pane keeps its current (default or user-dragged) width. Only an actual collapse/expand transition changes the width. (`setCollapsed` guards on the collapsed-state transition; `showView` calls it with `false` on every switch, which would otherwise re-run `expand()` and let the pane creep wider.)
 
 ---
 
