@@ -8,6 +8,42 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️🩹🔎 Consumers must set `keepNames` in their own minifier
+
+The library derives every component's CSS class (via `init()` ->
+`classList.add(this.constructor.name)`) and its Dock layout-serialization keys
+from `this.constructor.name`. A production minifier mangles class identifiers by
+default, so `constructor.name` returns a short string (e.g. `"Zt"`) — every
+component ends up with the same wrong class, all CSS scoping breaks, and the app
+renders unstyled/non-functional. The library's *own* Vite build already sets
+`keepNames`, and its `dist/lib` bundle preserves class names — but that is **not
+enough**: when a consuming app bundles and **re-minifies** `dist/lib`, its own
+minifier re-mangles the names unless it too keeps them.
+
+**Symptom in sqladmin's prod build:** `npm run build` produced a bundle where
+`document.querySelectorAll('.Component').length === 0` and the DOM carried a
+single mangled class (`Zt`). Dev (`npm run dev`, unminified) was fine, which is
+why it hid until a production build.
+
+**Worked around (app):** sqladmin is on Vite 6 (esbuild minifier), so
+`frontend/vite.config.ts` now sets `esbuild: { keepNames: true }` (esbuild
+injects `__name` helpers so `.name` survives mangling). Verified in a browser
+against the prod build: `.Component` = 20, `.Button` = 3, `.Dock`/`.MenuBar`/
+`.TabBar` present again. (A Vite 8 / rolldown-oxc consumer instead needs
+`build.rollupOptions.output.minify.{compress,mangle}.keepNames`, as the library's
+own config uses.)
+
+**Verify:** `npm run build` in the consumer, then `npm run preview` and check
+`document.querySelectorAll('.Component').length > 0` in the browser — the class
+names must be the real ones, not a single mangled token.
+
+**Possible library improvement:** stop deriving CSS classes / serialization keys
+from `constructor.name` (use an explicit static class-name registry), so a
+consumer's minifier settings can't break styling. Until then, every consumer must
+be told to keep names.
+
+---
+
 ## ✂️ Usage note: `Split.setPaneSize` is a raw, relative primitive — apportion *all* panes
 
 `setPaneSize(pane, px)` just seeds/overrides that one pane's stored size; it does
