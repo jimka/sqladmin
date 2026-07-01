@@ -71,7 +71,11 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     const split = new Split({ orientation: "vertical" });
     const body  = new Component();
     body.setLayoutManager(split);
-    body.addComponent(editor);
+    // weight 0 pins the editor's height on a vertical viewport/panel resize — the
+    // result grid below absorbs the change instead. A gutter-drag still resizes
+    // the editor. (While the editor is the only pane it fills regardless: with no
+    // positive-weight sibling the split falls back to filling the container.)
+    body.addComponent(editor, { weight: 0 });
 
     const runButton   = glyphButton("play", RUN_COLOR, "Run (Ctrl+Enter)", () => void run());
     const clearButton = glyphButton("eraser", CLEAR_COLOR, "Clear", () => clear());
