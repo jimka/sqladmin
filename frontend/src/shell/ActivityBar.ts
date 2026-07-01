@@ -97,7 +97,18 @@ export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
     // preferred size after its one-time seed, so the width is driven through the
     // sizer's min/max pin rather than by mutating this bar's preferred size. The
     // sizer is absent only before the shell wires it (never during a toggle).
+    //
+    // Only act on an actual collapsed-state transition: showView calls this with
+    // `false` on every view switch, but switching Databases <-> Roles is an
+    // expanded->expanded change that must not touch the sidebar width. Re-running
+    // sizer.expand() (setPaneSize + doLayout) on each switch let the pane creep
+    // wider, and would also discard a width the user had dragged. Guarding on the
+    // transition leaves the pane's width untouched across switches.
     const setCollapsed = (value: boolean): void => {
+        if (value === collapsed) {
+            return;
+        }
+
         collapsed = value;
         deck.setDisplayed(!value);
 
