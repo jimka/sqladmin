@@ -7,6 +7,16 @@ import { defineConfig } from "vite";
 //   - /api proxy: the frontend issues relative /api/... calls; forward them to
 //     the FastAPI backend so requests stay same-origin (no CORS in dev).
 export default defineConfig({
+    // The library derives every component's CSS class (and its Dock layout
+    // serialization keys) from `this.constructor.name`, so the production
+    // minifier must not mangle class identifiers — otherwise constructor.name
+    // returns a short string, breaking all CSS scoping and layout save/restore
+    // (the page renders unstyled/non-functional). esbuild's keepNames preserves
+    // function/class .name through minification, mirroring the keepNames the
+    // library's own Vite build already sets.
+    esbuild: {
+        keepNames: true,
+    },
     server: {
         port: 5173,
         fs: { strict: false },
