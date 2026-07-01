@@ -11,8 +11,14 @@ import type { DbObjectRef }                     from "../contract";
 import { getDatabases, getObjects, getSchemas } from "../data/api";
 import type { SqlAdminController }              from "../SqlAdminController";
 
+/** A built explorer tree plus a refresh action that reloads its top level. */
+export interface ExplorerTree {
+    tree:    Tree;
+    refresh: () => void;
+}
+
 /** Build the navigator Tree, wired to open tables and report load errors. */
-export function NavigatorTree(controller: SqlAdminController): Tree {
+export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
     const conn        = controller.connectionId;
     const tree        = Tree();
     const contextMenu = Menu();
@@ -52,11 +58,17 @@ export function NavigatorTree(controller: SqlAdminController): Tree {
     // Let the controller drive selection when a dock tab is focused.
     controller.setNavigator(tree);
 
-    void loadDatabases(conn)
-        .then(nodes => tree.setNodes(nodes))
-        .catch(error => controller.notifyError(error));
+    // (Re)load the top-level databases; the lazy schema/object levels reload on
+    // their next expansion. Used for the initial load and the section refresh tool.
+    const refresh = (): void => {
+        void loadDatabases(conn)
+            .then(nodes => tree.setNodes(nodes))
+            .catch(error => controller.notifyError(error));
+    };
 
-    return tree;
+    refresh();
+
+    return { tree, refresh };
 }
 
 async function loadDatabases(conn: string): Promise<TreeNode[]> {
