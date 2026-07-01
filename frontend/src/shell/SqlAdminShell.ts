@@ -1,25 +1,30 @@
-// The app shell: a Border-laid Panel with the four regions — MenuBar (NORTH),
-// the activity bar (WEST), the Dock work area (CENTER), and the StatusBar
-// (SOUTH). The Dock and StatusBar are owned by the controller; the shell only
-// arranges them. The activity bar manages its own collapse (the rail stays
-// visible, only its deck hides), so the WEST region is not Border-collapsible.
+// The app shell: a Border-laid Panel with MenuBar (NORTH), the StatusBar
+// (SOUTH), and a horizontal Split (CENTER) holding the activity bar beside the
+// Dock work area. The Dock and StatusBar are owned by the controller; the shell
+// only arranges them. The sidebar seeds at its natural width and stays fixed on
+// viewport resize (weight 0) while the Dock absorbs the slack (weight 1); the
+// gutter between them is user-drag-resizable. Collapse runs through the Split:
+// the shell injects a SidebarSizer into the activity bar that pins the sidebar
+// pane to the rail width (min == max) to collapse and restores a draggable width
+// to expand — the Split ignores a pane's preferred size after its one-time seed,
+// so preferred can no longer drive collapse.
 //
 // Built as a callable factory (not `extends Panel`): subclassing the callable
 // Panel export type-checks against the library source but not against its built
 // .d.ts (the callable constructor type drops instance methods for external
 // consumers). See LIBRARY_NOTES.md.
 
-import { Panel }                   from "@jimka/typescript-ui/core";
-import { Placement }               from "@jimka/typescript-ui/primitive";
-import { Border as BorderLayout }  from "@jimka/typescript-ui/layout";
+import { Panel, Component }        from "@jimka/typescript-ui/core";
+import { Placement, UNBOUNDED }    from "@jimka/typescript-ui/primitive";
+import { Border as BorderLayout, Split } from "@jimka/typescript-ui/layout";
 import { MenuBar }                 from "@jimka/typescript-ui/component/menubar";
 import { Glyph }                   from "@jimka/typescript-ui/component/display";
 import { database }                from "@jimka/typescript-ui/glyphs/solid/database";
 import { circle_info }             from "@jimka/typescript-ui/glyphs/solid/circle_info";
 import { users }                   from "@jimka/typescript-ui/glyphs/solid/users";
 import { arrows_rotate }           from "@jimka/typescript-ui/glyphs/solid/arrows_rotate";
-import { ActivityBar }             from "./ActivityBar";
-import type { ActivityBarHandle }  from "./ActivityBar";
+import { ActivityBar, SIDEBAR_RAIL_WIDTH, SIDEBAR_DEFAULT_WIDTH } from "./ActivityBar";
+import type { ActivityBarHandle, SidebarSizer } from "./ActivityBar";
 import { DatabaseExplorerView }    from "./DatabaseExplorerView";
 import { RolesExplorerView }       from "./RolesExplorerView";
 import type { SqlAdminController } from "../SqlAdminController";
@@ -37,17 +42,72 @@ const ROLES_VIEW_ID    = "roles";
 
 /** Build the shell Panel, hosting the controller's Dock and StatusBar. */
 export function SqlAdminShell(controller: SqlAdminController): Panel {
-    const sidebar = buildSidebar(controller);
+    const sidebar  = buildSidebar(controller);
+    const workArea = buildWorkArea(sidebar, controller.dock);
 
     return Panel({
         layoutManager: new BorderLayout(),
         components: [
             { component: buildMenuBar(sidebar.toggleCollapsed, () => controller.openQuery()), constraints: { placement: Placement.NORTH } },
-            { component: sidebar.component,                     constraints: { placement: Placement.WEST } },
-            { component: controller.dock,                       constraints: { placement: Placement.CENTER } },
-            { component: controller.statusBar,                  constraints: { placement: Placement.SOUTH } },
+            { component: workArea,             constraints: { placement: Placement.CENTER } },
+            { component: controller.statusBar, constraints: { placement: Placement.SOUTH } },
         ],
     });
+}
+
+/**
+ * The CENTER work area: a horizontal Split with the activity bar (left) beside
+ * the Dock (right). The sidebar pane takes weight 0 (fixed on viewport resize,
+ * seeded at its natural width via its preferred size); the Dock MUST take a
+ * positive weight so it is the absorber — a bare, unweighted Dock would report no
+ * preferred size and steal the sidebar's seed back toward an equal split. A
+ * SidebarSizer is wired into the bar so its collapse/expand drives the pane's
+ * width through the Split's live min/max instead of a (now-ignored) preferred.
+ */
+function buildWorkArea(sidebar: ActivityBarHandle, dock: Component): Component {
+    const split = new Split({ orientation: "horizontal" });
+    const body  = Panel({ layoutManager: split });
+    const pane  = sidebar.component;
+
+    body.addComponent(pane, { weight: 0 });
+    body.addComponent(dock, { weight: 1 });
+
+    // A rail-width floor so a gutter drag can't shrink the sidebar below the rail
+    // (max stays unbounded, so it is draggable, not pinned — pinning is collapse).
+    pane.setMinSize(SIDEBAR_RAIL_WIDTH, 0);
+
+    // The width to reopen to on expand: the user's last dragged width, else the
+    // natural default. Session-scoped closure state, not persisted across reloads.
+    let lastWidth = SIDEBAR_DEFAULT_WIDTH;
+
+    const sizer: SidebarSizer = {
+        collapse(): void {
+            // Capture the live (possibly dragged) width before the pin overwrites
+            // the stored pane size, so expand can restore it.
+            const current = split.getPaneSize(pane);
+            if (current !== undefined && current > SIDEBAR_RAIL_WIDTH) {
+                lastWidth = current;
+            }
+
+            // Pin the pane to the rail width (min == max). The constraint change
+            // reschedules the Split's layout, whose pin-aware refill holds the
+            // sidebar here and lets the weighted Dock reclaim the freed width.
+            pane.setMinSize(SIDEBAR_RAIL_WIDTH, 0);
+            pane.setMaxSize(SIDEBAR_RAIL_WIDTH, UNBOUNDED);
+        },
+        expand(): void {
+            // Unpin (max unbounded → draggable again), keep the rail floor, then
+            // reopen to the remembered width; the Dock gives the space back.
+            pane.setMaxSize(UNBOUNDED, UNBOUNDED);
+            pane.setMinSize(SIDEBAR_RAIL_WIDTH, 0);
+            split.setPaneSize(pane, lastWidth);
+            body.doLayout();
+        },
+    };
+
+    sidebar.setSizer(sizer);
+
+    return body;
 }
 
 /**
