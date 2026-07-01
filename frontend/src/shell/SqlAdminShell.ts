@@ -69,7 +69,12 @@ function buildWorkArea(sidebar: ActivityBarHandle, dock: Component): Component {
     const body  = Panel({ layoutManager: split });
     const pane  = sidebar.component;
 
-    body.addComponent(pane, { weight: 0 });
+    // collapsible: false suppresses the gutter's native collapse chevron and
+    // double-click — the sidebar collapses only through the rail icon / menu (to
+    // the rail width, not the Split's collapse-to-strip) — while the gutter stays
+    // draggable for resize. The single gutter serves the leading (sidebar) pane,
+    // so opting it out is what removes the chevron.
+    body.addComponent(pane, { weight: 0, collapsible: false });
     body.addComponent(dock, { weight: 1 });
 
     // A rail-width floor so a gutter drag can't shrink the sidebar below the rail
