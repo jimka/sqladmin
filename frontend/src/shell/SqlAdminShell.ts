@@ -96,11 +96,24 @@ function buildWorkArea(sidebar: ActivityBarHandle, dock: Component): Component {
             pane.setMaxSize(SIDEBAR_RAIL_WIDTH, UNBOUNDED);
         },
         expand(): void {
-            // Unpin (max unbounded → draggable again), keep the rail floor, then
-            // reopen to the remembered width; the Dock gives the space back.
+            // Unpin (max unbounded → draggable again), keep the rail floor.
             pane.setMaxSize(UNBOUNDED, UNBOUNDED);
             pane.setMinSize(SIDEBAR_RAIL_WIDTH, 0);
+
+            // Reopen to the remembered width and hand the remainder back to the
+            // Dock. Both panes are flexible once expanded, so the Split reconciles
+            // any Σ ≠ available by scaling the flexible panes *proportionally* —
+            // and collapse inflated the Dock to fill the freed space. Setting only
+            // the sidebar would leave Σ overshooting, and the proportional refill
+            // would shrink the sidebar below lastWidth (compounding on every
+            // collapse/expand cycle). Set the Dock explicitly to
+            // available − lastWidth so the sum stays exact and the sidebar lands
+            // precisely at lastWidth. The two stored sizes always sum to the
+            // available extent (the refill's Σ invariant), collapsed or not, so
+            // their current total is a reliable stand-in for it.
+            const total = (split.getPaneSize(pane) ?? lastWidth) + (split.getPaneSize(dock) ?? 0);
             split.setPaneSize(pane, lastWidth);
+            split.setPaneSize(dock, Math.max(0, total - lastWidth));
             body.doLayout();
         },
     };
