@@ -8,36 +8,37 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
-## ✂️🩹🔎 Forcing one `Split` pane to a size distorts it unless you rebalance the sibling
+## ✂️ Usage note: `Split.setPaneSize` is a raw, relative primitive — apportion *all* panes
 
-Driving the shell sidebar's collapse/expand through the `Split` (sidebar
-`weight 0`, dock `weight 1`): **collapse** pins the sidebar `min == max ==
-RAIL_WIDTH`, and the Split's pin-aware refill correctly inflates the weighted
-dock to fill the freed space. **Expand** then unpins and calls
-`split.setPaneSize(sidebar, lastWidth)` to reopen — but that alone shrank the
-sidebar a little on every collapse/expand cycle (280 → 226 → 190 → 165 → …).
+`setPaneSize(pane, px)` just seeds/overrides that one pane's stored size; it does
+**not** rebalance the siblings. To force a pane to a specific size you must set
+the other panes too, so the stored sizes sum to the available extent — the same
+thing [`dock/QueryPanel.ts`](frontend/src/dock/QueryPanel.ts) already does when it
+splits the editor over the result grid (it sets both panes). This is by design,
+not a defect: `weight` is consulted only by the *container-resize* delta path
+(when `available` changes); a same-extent refill scales the flexible panes
+**proportionally**.
 
-**Root cause (library behaviour, by design):** once expanded, both panes are
-flexible (`min < max`). `recalculateSizes` reconciles any `Σ ≠ available` by
-scaling the flexible panes **proportionally** — the `weight` constraint is
-consulted only by the *container-resize* delta path (when `available` changes),
-**not** by this same-extent refill. So setting only the sidebar left the dock at
-its collapse-inflated width, Σ overshot `available`, and the refill scaled the
-sidebar back down below `lastWidth` — compounding each cycle. Confirmed offline
-in the library's `Split` TestDOM harness (buggy 280→226→190→165→147; correct
-280→280→…).
+The shell sidebar hit this by deviating from that pattern. Collapse pins the
+sidebar `min == max == RAIL_WIDTH`, and the pin-aware refill inflates the weighted
+dock to fill the freed space. Expand then called `setPaneSize(sidebar, lastWidth)`
+**alone** — leaving the dock at its inflated width, so Σ overshot `available` and
+the proportional refill scaled the sidebar back *below* `lastWidth`, compounding
+every cycle (280 → 226 → 190 → 165 → …; confirmed offline in the library's `Split`
+TestDOM harness). Fixed in the app by setting the dock too on expand —
+`setPaneSize(dock, (paneSize(sidebar) + paneSize(dock)) − lastWidth)` — since the
+two stored sizes always sum to the available extent (the refill's Σ invariant), so
+their current total is a reliable stand-in for it (`shell/SqlAdminShell.ts`,
+`buildWorkArea`).
 
-**Worked around (app):** on expand, set the dock explicitly too —
-`setPaneSize(dock, (paneSize(sidebar) + paneSize(dock)) − lastWidth)` — so the
-sum stays exact and the sidebar lands precisely at `lastWidth`
-(`shell/SqlAdminShell.ts`, `buildWorkArea`). The two stored sizes always sum to
-the available extent (the refill's Σ invariant), so their current total is a
-reliable stand-in for it.
-
-**Possible library improvement:** make `setPaneSize` optionally absorb the delta
-from the sibling panes by weight (mirroring the resize-delta path), or add a
-`setPaneSizes(map)` batch that preserves the Σ invariant — so a consumer forcing
-one pane to a width doesn't have to hand-rebalance the others.
+**Not a library gap.** An auto-rebalancing `setPaneSize` would be a breaking
+change for the apportion-all-panes callers above, so it isn't wanted. The only
+plausible library candidate — and only if the VSCode-rail pattern recurs in
+another consumer — is a **collapsed-size option on the existing native collapse**
+(`setPaneCollapsed` collapses a pane to 0 + a `COLLAPSE_STRIP_SIZE` strip; the
+shell instead wants collapse-to-rail-width so the icon rail stays visible, which
+is why it pins `min == max` rather than using native collapse). Deferred until a
+second consumer needs it.
 
 ---
 
