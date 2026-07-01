@@ -9,10 +9,11 @@
 //   - now selected (an inactive view was chosen) -> show that view (deselect the
 //     others, switch the deck, expand);
 //   - now deselected (the active view was clicked again) -> collapse the deck.
-// Collapsing hides the deck and shrinks the bar to the rail width (so the Dock
-// reclaims the space) while the rail stays put; clicking the icon again expands.
-// The same collapse/expand is exposed as `toggleCollapsed` for the menu's
-// "Toggle Sidebar" command.
+// Collapsing hides the deck and asks the shell to pin the sidebar to the rail
+// width (via an injected SidebarSizer that drives the shell's Split — see
+// setSizer) so the Dock reclaims the space, while the rail stays put; clicking
+// the icon again expands. The same collapse/expand is exposed as
+// `toggleCollapsed` for the menu's "Toggle Sidebar" command.
 
 import { Component, Panel }             from "@jimka/typescript-ui/core";
 import { Placement, Insets }            from "@jimka/typescript-ui/primitive";
@@ -26,6 +27,12 @@ import { Tooltip }                      from "@jimka/typescript-ui/overlay";
 // expanded (a comfortable navigator/properties column).
 const RAIL_WIDTH = 40;
 const DECK_WIDTH = 240;
+
+// The shell (which owns the Split hosting this bar) needs the collapsed rail
+// width to pin the sidebar pane, and the natural expanded width to seed it.
+// Exported so those magic numbers stay single-sourced here.
+export const SIDEBAR_RAIL_WIDTH    = RAIL_WIDTH;
+export const SIDEBAR_DEFAULT_WIDTH = RAIL_WIDTH + DECK_WIDTH;
 
 // Square size of the rail icons, pinned so they stay this size regardless of
 // theme font metrics. Sized to read clearly within the RAIL_WIDTH column.
@@ -43,12 +50,26 @@ export interface ActivityView {
     component: Component;
 }
 
+/**
+ * Drives the width of the sidebar pane in the shell's Split. The shell owns the
+ * Split and injects this so the bar can collapse/expand without knowing about
+ * the Split, its pane references, or its remembered width.
+ */
+export interface SidebarSizer {
+    /** Pin the sidebar pane to the rail width (min == max) and hold it there. */
+    collapse(): void;
+    /** Restore a draggable width (min < max) and reopen to the remembered width. */
+    expand(): void;
+}
+
 /** The activity bar plus the external collapse control the menu drives. */
 export interface ActivityBarHandle {
-    /** The activity-bar component to mount in the shell's WEST region. */
+    /** The activity-bar component to mount in the shell's sidebar pane. */
     component: Component;
     /** Collapse the deck if expanded, or re-open the active view if collapsed. */
     toggleCollapsed(): void;
+    /** Wire the Split-backed sizer once the shell has built the Split. */
+    setSizer(sizer: SidebarSizer): void;
 }
 
 /**
@@ -65,18 +86,37 @@ export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
     const activityBar = Panel({ layoutManager: new BorderLayout() });
     const buttonById  = new Map<string, ToggleButton>();
 
-    // The last-shown view (restored on expand) and the current collapsed state.
+    // The last-shown view (restored on expand), the current collapsed state, and
+    // the shell-injected sizer that drives the sidebar pane in the Split.
     let activeId = views[0].id;
     let collapsed = false;
+    let sizer: SidebarSizer | null = null;
 
-    // Collapse hides the deck and shrinks the bar to the rail width; the rail
-    // stays visible. Changing the bar's preferred size notifies the shell to
-    // re-lay out its regions (Component wires a child's preferred-size change to
-    // the parent's scheduleLayout), so the Dock reclaims the freed width.
+    // Collapse hides the deck and asks the shell's Split to pin the sidebar to
+    // the rail width; the rail stays visible. The Split ignores a pane's
+    // preferred size after its one-time seed, so the width is driven through the
+    // sizer's min/max pin rather than by mutating this bar's preferred size. The
+    // sizer is absent only before the shell wires it (never during a toggle).
+    //
+    // Only act on an actual collapsed-state transition: showView calls this with
+    // `false` on every view switch, but switching Databases <-> Roles is an
+    // expanded->expanded change that must not touch the sidebar width. Re-running
+    // sizer.expand() (setPaneSize + doLayout) on each switch let the pane creep
+    // wider, and would also discard a width the user had dragged. Guarding on the
+    // transition leaves the pane's width untouched across switches.
     const setCollapsed = (value: boolean): void => {
+        if (value === collapsed) {
+            return;
+        }
+
         collapsed = value;
         deck.setDisplayed(!value);
-        activityBar.setPreferredSize(value ? RAIL_WIDTH : RAIL_WIDTH + DECK_WIDTH, 0);
+
+        if (value) {
+            sizer?.collapse();
+        } else {
+            sizer?.expand();
+        }
     };
 
     // Make `id` the active view: select only its rail button, show its deck page,
@@ -134,5 +174,9 @@ export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
     activityBar.addComponent(deck, { placement: Placement.CENTER });
     activityBar.setPreferredSize(RAIL_WIDTH + DECK_WIDTH, 0);
 
-    return { component: activityBar, toggleCollapsed };
+    return {
+        component: activityBar,
+        toggleCollapsed,
+        setSizer: (value: SidebarSizer): void => { sizer = value; },
+    };
 }

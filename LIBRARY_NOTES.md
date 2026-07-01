@@ -8,6 +8,40 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️ Usage note: `Split.setPaneSize` is a raw, relative primitive — apportion *all* panes
+
+`setPaneSize(pane, px)` just seeds/overrides that one pane's stored size; it does
+**not** rebalance the siblings. To force a pane to a specific size you must set
+the other panes too, so the stored sizes sum to the available extent — the same
+thing [`dock/QueryPanel.ts`](frontend/src/dock/QueryPanel.ts) already does when it
+splits the editor over the result grid (it sets both panes). This is by design,
+not a defect: `weight` is consulted only by the *container-resize* delta path
+(when `available` changes); a same-extent refill scales the flexible panes
+**proportionally**.
+
+The shell sidebar hit this by deviating from that pattern. Collapse pins the
+sidebar `min == max == RAIL_WIDTH`, and the pin-aware refill inflates the weighted
+dock to fill the freed space. Expand then called `setPaneSize(sidebar, lastWidth)`
+**alone** — leaving the dock at its inflated width, so Σ overshot `available` and
+the proportional refill scaled the sidebar back *below* `lastWidth`, compounding
+every cycle (280 → 226 → 190 → 165 → …; confirmed offline in the library's `Split`
+TestDOM harness). Fixed in the app by setting the dock too on expand —
+`setPaneSize(dock, (paneSize(sidebar) + paneSize(dock)) − lastWidth)` — since the
+two stored sizes always sum to the available extent (the refill's Σ invariant), so
+their current total is a reliable stand-in for it (`shell/SqlAdminShell.ts`,
+`buildWorkArea`).
+
+**Not a library gap.** An auto-rebalancing `setPaneSize` would be a breaking
+change for the apportion-all-panes callers above, so it isn't wanted. The only
+plausible library candidate — and only if the VSCode-rail pattern recurs in
+another consumer — is a **collapsed-size option on the existing native collapse**
+(`setPaneCollapsed` collapses a pane to 0 + a `COLLAPSE_STRIP_SIZE` strip; the
+shell instead wants collapse-to-rail-width so the icon rail stays visible, which
+is why it pins `min == max` rather than using native collapse). Deferred until a
+second consumer needs it.
+
+---
+
 ## 🐞🔎🩹 Large `MemoryStore.loadData` renders zero rows in a Table
 
 Selecting a PostgreSQL superuser in the Phase-2 roles browser (~1500 detail rows:
