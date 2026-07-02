@@ -73,6 +73,7 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
                 onNewQuery     : () => controller.openQuery(),
                 onOpenSaved    : () => controller.showQueriesView("saved"),
                 onQueryHistory : () => controller.showQueriesView("recent"),
+                onExportResults: format => controller.exportActiveQuery(format),
             }), constraints: { placement: Placement.NORTH } },
             { component: workArea,             constraints: { placement: Placement.CENTER } },
             { component: controller.statusBar, constraints: { placement: Placement.SOUTH } },
@@ -227,6 +228,8 @@ interface MenuBarActions {
     onOpenSaved: () => void;
     /** Selects the Queries view's Recent section (Query → Query History…). */
     onQueryHistory: () => void;
+    /** Exports the active query panel's result (Query → Export results ▸ CSV/JSON). */
+    onExportResults: (format: "csv" | "json") => void;
 }
 
 /**
@@ -247,7 +250,13 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
                 { separator: true },
                 { text: "Open Saved…",    shortcut: OPEN_SAVED_SHORTCUT,    action: actions.onOpenSaved },
                 { text: "Query History…", shortcut: QUERY_HISTORY_SHORTCUT, action: actions.onQueryHistory },
-                // Seam: "Export results…" is added here by the result-export plan.
+                { separator: true },
+                // Convenience surface for the active panel's export; the panel's
+                // own toolbar button is the primary, always-correct surface.
+                { text: "Export results…", submenu: { label: "Export results…", items: [
+                    { text: "CSV",  action: () => actions.onExportResults("csv") },
+                    { text: "JSON", action: () => actions.onExportResults("json") },
+                ] } },
             ] },
             { label: "View", items: [{ text: "Toggle Sidebar", action: actions.onToggleSidebar }] },
         ],
