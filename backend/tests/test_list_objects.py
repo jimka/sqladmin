@@ -15,11 +15,13 @@ def test_get_result_shape() -> None:
     op._raw = [
         {"name": "customers", "kind": "table"},
         {"name": "active_customers", "kind": "view"},
+        {"name": "customer_totals", "kind": "materializedView"},
     ]
 
     assert op.get_result() == [
         {"name": "customers", "kind": "table"},
         {"name": "active_customers", "kind": "view"},
+        {"name": "customer_totals", "kind": "materializedView"},
     ]
 
 

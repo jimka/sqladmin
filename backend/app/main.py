@@ -173,12 +173,12 @@ async def schemas(connection_id: str, database: str) -> list[dict]:
 @app.get("/api/{connection_id}/{database}/{schema}/objects")
 async def objects(connection_id: str, database: str, schema: str) -> list[dict]:
     """
-    List the tables and views in a schema.
+    List the tables, views, and materialized views in a schema.
 
     Route: ``GET /api/{connection_id}/{database}/{schema}/objects``.
 
     Returns:
-        ``[{"name": str, "kind": "table" | "view"}]``.
+        ``[{"name": str, "kind": "table" | "view" | "materializedView"}]``.
     """
     async with get_pool(connection_id).acquire() as c:
         op = ListObjectsQuery(c, schema)
