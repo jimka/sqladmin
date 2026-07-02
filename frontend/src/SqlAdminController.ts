@@ -7,8 +7,8 @@ import type { DockPanelEvent }                                 from "@jimka/type
 import { StatusBar }                                           from "@jimka/typescript-ui/component/container";
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef, RolePrivilege, RoleSummary } from "./contract";
-import { getColumns, getRoleDetail, getRoles, getViewDefinition, runQuery } from "./data/api";
+import type { ColumnMeta, DbObjectRef, RolePrivilege, RoleSummary, TableStructure } from "./contract";
+import { getColumns, getRoleDetail, getRoles, getViewDefinition, getStructure, runQuery } from "./data/api";
 import { buildModel }                                          from "./data/buildModel";
 import { buildSelectSql }                                      from "./data/sql";
 import { buildStore }                                          from "./data/stores";
@@ -35,7 +35,7 @@ export type QueriesSection = "saved" | "recent";
  */
 interface OpenPanel {
     ref: DbObjectRef;
-    node: TreeNode;
+    node: TreeNode | null; // null when opened without a navigator node (e.g. an FK target)
     store?: AjaxStore;
     columns?: ColumnMeta[];
     detail?: string;
@@ -144,8 +144,11 @@ export class SqlAdminController {
      * view or materialized view opens the read-only ViewWorkPanel (a plain data
      * grid — its structure and definition open as separate tabs from the
      * navigator's right-click menu).
+     *
+     * The `node` is optional: an FK-referenced table may have no currently-loaded
+     * navigator node, so its tab still opens but the focus-sync skips the reveal.
      */
-    async openTable(ref: DbObjectRef, node: TreeNode): Promise<void> {
+    async openTable(ref: DbObjectRef, node?: TreeNode): Promise<void> {
         const id = this.panelId(ref);
 
         if (this.dock.focusPanel(id)) {
@@ -174,8 +177,12 @@ export class SqlAdminController {
             store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
         }
 
-        this._openPanels.set(id, { ref, node, store, columns });
-        this.rememberTable(ref, node);
+        this._openPanels.set(id, { ref, node: node ?? null, store, columns });
+
+        if (node) {
+            this.rememberTable(ref, node);
+        }
+
         this.panelOpened();
 
         // Open lazily: the tab appears at once, and the grid UI builds on first
@@ -242,9 +249,10 @@ export class SqlAdminController {
         }
 
         let columns: ColumnMeta[];
+        let structure: TableStructure;
 
         try {
-            columns = await getColumns(ref);
+            [columns, structure] = await Promise.all([getColumns(ref), getStructure(ref)]);
         } catch (err) {
             this.notifyError(err, ref);
 
@@ -257,9 +265,30 @@ export class SqlAdminController {
             id,
             title  : `${ref.name ?? id} (structure)`,
             tooltip: this.panelTooltip(ref),
-            content: StructurePanel(columns)
+            content: StructurePanel(columns, structure, (refSchema, refTable) =>
+                this.openReferencedTable({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : refSchema,
+                    name        : refTable,
+                    kind        : "table",
+                })),
         });
         this.syncToPanel(id);
+    }
+
+    /**
+     * Open a foreign key's referenced table in the Dock, revealing it in the
+     * navigator when its node is already loaded. The reveal is best-effort: an
+     * FK target under a collapsed or not-yet-loaded branch has no loaded node
+     * and no library API forces the expand, so only the Dock tab opens.
+     *
+     * @param ref - The referenced table to open.
+     */
+    openReferencedTable(ref: DbObjectRef): void {
+        const node = this.findLoadedNode(ref);
+
+        void this.openTable(ref, node);
     }
 
     /**
@@ -661,9 +690,42 @@ export class SqlAdminController {
             return;
         }
 
-        this._navigator?.selectNode(panel.node);
+        if (panel.node) {
+            this._navigator?.selectNode(panel.node);
+        }
+
         this.updateStatusFor(panel);
         void this.showProperties(panel.ref);
+    }
+
+    /**
+     * Find an already-loaded navigator node for `ref`, matching on the node's
+     * `DbObjectRef` by database/schema/name. Walks only nodes whose children are
+     * loaded (never forcing a lazy load), so an FK target under an unexpanded
+     * branch yields undefined and the caller opens the tab without a reveal.
+     *
+     * @param ref - The object to locate.
+     *
+     * @returns The matching loaded node, or undefined when none is loaded.
+     */
+    private findLoadedNode(ref: DbObjectRef): TreeNode | undefined {
+        const roots = this._navigator?.getNodes() ?? [];
+        const stack = [...roots];
+
+        while (stack.length > 0) {
+            const node = stack.pop() as TreeNode;
+            const data = node.data as DbObjectRef | undefined;
+
+            if (data && data.database === ref.database && data.schema === ref.schema && data.name === ref.name) {
+                return node;
+            }
+
+            if (node.children) {
+                stack.push(...node.children);
+            }
+        }
+
+        return undefined;
     }
 
     /** Status line for a panel: row count for a data tab, else the detail label. */
