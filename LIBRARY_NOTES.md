@@ -204,6 +204,45 @@ reason in the accelerator note above.
 
 ---
 
+## ✂️🩹🔎 No `Tree` expand-to-node / reveal-by-predicate seam
+
+The Structure view's foreign-key click-through opens the referenced table and
+then tries to reveal it in the navigator. But `Tree.selectNode` is a **no-op
+when the target is not in the currently-visible flattened set** (an ancestor is
+collapsed, or its lazy children have not loaded), and `Tree` exposes no public
+API to expand a path to a node or find a node by predicate — `getNodes()`
+returns only the roots and expansion is user-click-driven. So an FK whose target
+lives under an unexpanded schema cannot be revealed at all.
+
+**Worked around (app):** `SqlAdminController.findLoadedNode` walks only the
+**already-loaded** nodes from `tree.getNodes()` and matches on the node's
+`DbObjectRef`; if the target is loaded and visible, `selectNode` highlights it,
+otherwise the reveal silently no-ops and only the Dock tab opens (best-effort,
+never forcing a lazy load).
+
+**Possible library improvement:** a `Tree.revealByPredicate((data) => boolean)`
+(or expand-path) seam that expands lazy branches as needed and scrolls the node
+into view, so a consumer can reveal an object the user has not manually expanded
+to.
+
+---
+
+## ✂️🩹 No `ColumnConfig` cell renderer for a link-styled cell
+
+The Foreign Keys grid would ideally render its referenced table as a clickable
+link cell. `Table` now emits a `"cellclick"` event (record + column), but
+`ColumnConfig` still has no `renderer` hook, so a cell cannot be styled as a
+link or carry custom markup.
+
+**Worked around (app):** the FK click-through rides the grid's
+`"selectionchange"` instead — selecting an FK row opens its referenced table,
+reading the referenced schema/table straight off the selected record's fields.
+
+**Possible library improvement:** a `ColumnConfig.renderer` returning a
+component or markup per cell, so consumers can render link/badge/action cells.
+
+---
+
 ## ✂️🩹🔎 Consumers must set `keepNames` in their own minifier
 
 The library derives every component's CSS class (via `init()` ->
