@@ -10,7 +10,6 @@ Deferred features and known issues. Items with an implementation plan live in
 - **result-export** — CSV / JSON export (query results and navigator table export).
 - **structure-detail** — indexes, constraints, foreign keys in the Structure
   panel, with foreign-key click-through.
-- **query-explain** — EXPLAIN / EXPLAIN ANALYZE run mode + plan view.
 
 ## Backlog (no plan yet)
 
