@@ -8,11 +8,12 @@ import { StatusBar }                                           from "@jimka/type
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef, RolePrivilege, RoleSummary } from "./contract";
-import { getColumns, getRoleDetail, getRoles, runQuery }       from "./data/api";
+import { getColumns, getRoleDetail, getRoles, getViewDefinition, runQuery } from "./data/api";
 import { buildModel }                                          from "./data/buildModel";
 import { buildSelectSql }                                      from "./data/sql";
 import { buildStore }                                          from "./data/stores";
 import { TableWorkPanel }                                      from "./dock/TableWorkPanel";
+import { ViewWorkPanel }                                       from "./dock/ViewWorkPanel";
 import { StructurePanel }                                      from "./dock/StructurePanel";
 import { QueryPanel }                                          from "./dock/QueryPanel";
 import { RoleGrantsPanel }                                     from "./dock/RoleGrantsPanel";
@@ -130,7 +131,12 @@ export class SqlAdminController {
         this._navigator = tree;
     }
 
-    /** Open a table in the Dock (deduping by panel id), wiring its store errors. */
+    /**
+     * Open a table, view, or materialized view in the Dock (deduping by panel
+     * id), wiring its store errors. A table opens the editable TableWorkPanel; a
+     * view or materialized view opens the read-only ViewWorkPanel (grid plus a
+     * lazily-loaded Definition tab).
+     */
     async openTable(ref: DbObjectRef, node: TreeNode): Promise<void> {
         const id = this.panelId(ref);
 
@@ -150,8 +156,16 @@ export class SqlAdminController {
             return;
         }
 
+        // A view/matview is read-only: it opens the ViewWorkPanel and never
+        // writes, so the 'sync' write-feedback listener is not attached.
+        const isReadOnly = ref.kind === "view" || ref.kind === "materializedView";
+
         store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
-        store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
+
+        if (!isReadOnly) {
+            store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
+        }
+
         this._openPanels.set(id, { ref, node, store, columns });
         this.rememberTable(ref, node);
         this.panelOpened();
@@ -163,7 +177,9 @@ export class SqlAdminController {
             id,
             title  : ref.name ?? id,
             tooltip: this.panelTooltip(ref),
-            content: () => TableWorkPanel(store, columns, notify)
+            content: isReadOnly
+                ? () => ViewWorkPanel(store, columns, () => this.loadViewDefinition(ref), err => this.notifyError(err, ref))
+                : () => TableWorkPanel(store, columns, notify)
         });
 
         try {
@@ -172,6 +188,17 @@ export class SqlAdminController {
         } catch {
             // load() rethrows, but the 'exception' listener already surfaced it.
         }
+    }
+
+    /**
+     * Fetch a view/matview's definition SQL for its ViewWorkPanel. Bound to the
+     * ref and invoked lazily on the first switch to the Definition tab; a failed
+     * fetch is surfaced by the panel through its onError callback.
+     */
+    private async loadViewDefinition(ref: DbObjectRef): Promise<string> {
+        const result = await getViewDefinition(ref);
+
+        return result.definition;
     }
 
     /** Open a read-only structure (column metadata) tab for a table/view. */
@@ -439,15 +466,16 @@ export class SqlAdminController {
 
     /**
      * Show the selected object's metadata in the Properties inspector. A database
-     * or schema renders immediately; a table/view needs its columns (for the
-     * count and primary key), reused from an open panel when possible and fetched
-     * otherwise. A monotonic guard discards a stale fetch whose selection has
-     * since changed, so rapid clicks never render the wrong object.
+     * or schema renders immediately; a table, view, or materialized view needs
+     * its columns (for the count and primary key), reused from an open panel when
+     * possible and fetched otherwise. A monotonic guard discards a stale fetch
+     * whose selection has since changed, so rapid clicks never render the wrong
+     * object.
      */
     async showProperties(ref: DbObjectRef): Promise<void> {
         const seq = ++this._propsSeq;
 
-        if (ref.kind !== "table" && ref.kind !== "view") {
+        if (ref.kind !== "table" && ref.kind !== "view" && ref.kind !== "materializedView") {
             this.properties.show(ref);
 
             return;
