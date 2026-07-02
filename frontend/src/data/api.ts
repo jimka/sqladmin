@@ -10,6 +10,7 @@ import type {
     RoleDetail,
     RoleSummary,
     ViewDefinition,
+    TableStructure,
 } from "../contract";
 
 /** Pull the backend's `{detail}` error message off a non-OK response. */
@@ -84,6 +85,13 @@ export function getViewDefinition(ref: DbObjectRef): Promise<ViewDefinition> {
     const url = `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/definition`;
 
     return getJson<ViewDefinition>(url);
+}
+
+/** Fetch a table's indexes, constraints, and foreign keys in one round trip. */
+export function getStructure(ref: DbObjectRef): Promise<TableStructure> {
+    const url = `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/structure`;
+
+    return getJson<TableStructure>(url);
 }
 
 /**

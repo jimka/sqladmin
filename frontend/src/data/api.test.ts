@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { getViewDefinition, runQuery } from "./api";
+import { getViewDefinition, getStructure, runQuery } from "./api";
 import type { DbObjectRef } from "../contract";
 
 afterEach(() => vi.restoreAllMocks());
@@ -36,6 +36,43 @@ describe("getViewDefinition", () => {
         vi.stubGlobal("fetch", fetchMock);
 
         await expect(getViewDefinition(ref)).rejects.toThrow("View 'public.active_customers' not found");
+    });
+});
+
+describe("getStructure", () => {
+    const ref: DbObjectRef = {
+        connectionId: "default",
+        database    : "sqladmin",
+        schema      : "public",
+        name        : "customers",
+        kind        : "table",
+    };
+
+    it("GETs the table's /structure endpoint and returns the parsed payload", async () => {
+        const structure = {
+            indexes    : [{ name: "customers_pkey", definition: "CREATE UNIQUE INDEX …", unique: true, primary: true }],
+            constraints: [{ name: "customers_pkey", type: "primaryKey", columns: ["id"], definition: "PRIMARY KEY (id)" }],
+            foreignKeys: [],
+        };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => structure });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const result = await getStructure(ref);
+
+        expect(result).toEqual(structure);
+        expect(fetchMock).toHaveBeenCalledWith("/api/default/sqladmin/public/customers/structure");
+    });
+
+    it("throws the backend {detail} on a non-OK response", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok        : false,
+            status    : 500,
+            statusText: "Internal Server Error",
+            json      : async () => ({ detail: "boom" }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(getStructure(ref)).rejects.toThrow("boom");
     });
 });
 

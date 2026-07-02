@@ -104,3 +104,37 @@ export interface RoleDetail {
     memberOf: RoleMembership[]; // roles this role belongs to
     privileges: RolePrivilege[]; // table grants held by this role
 }
+
+/** One index on a table (from pg_indexes / pg_index). */
+export interface IndexMeta {
+    name: string; // indexname
+    definition: string; // full CREATE INDEX … text (indexdef)
+    unique: boolean;
+    primary: boolean; // backs the primary key
+}
+
+/** One non-FK constraint (primary key / unique / check). */
+export interface ConstraintMeta {
+    name: string;
+    type: "primaryKey" | "unique" | "check";
+    columns: string[]; // constrained columns (empty for a table-level check)
+    definition: string; // pg_get_constraintdef(oid) — the reconstructed clause
+}
+
+/** One foreign key, with its referenced relation and referential actions. */
+export interface ForeignKeyMeta {
+    name: string;
+    columns: string[]; // local FK columns, in key order
+    refSchema: string;
+    refTable: string;
+    refColumns: string[]; // referenced columns, positionally paired with `columns`
+    onUpdate: string; // "NO ACTION" | "RESTRICT" | "CASCADE" | "SET NULL" | "SET DEFAULT"
+    onDelete: string; // same set
+}
+
+/** The combined structure payload the /structure route returns. */
+export interface TableStructure {
+    indexes: IndexMeta[];
+    constraints: ConstraintMeta[];
+    foreignKeys: ForeignKeyMeta[];
+}
