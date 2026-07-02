@@ -6,7 +6,18 @@
 // through the browser locale and collapses NULL and "" to the same empty field.
 // A SQL export must be stable and lossless (ISO timestamps, precision numerics)
 // and must keep NULL distinguishable from an empty string, so the app owns this
-// dialect and mirrors it byte-for-byte in the backend (backend/app/export_format.py).
+// dialect and mirrors it in the backend (backend/app/export_format.py).
+//
+// Byte-identity with the backend export holds for every wire type EXCEPT
+// floating-point `number` values. These query rows have already crossed JSON
+// transport, so a `double precision` 1.0 arrives here as the JS number 1
+// (String(1) === "1") while the backend streams the native float (str(1.0) ===
+// "1.0"); exponent notation likewise differs (1e16 vs 1e+16). That loss is
+// inherent to the query path (the rows are JS numbers), not this serializer, so
+// the backend full-table export is the authoritative full-fidelity surface.
+// String-based types stay byte-identical: numeric/decimal/money arrive as
+// precision strings, timestamps as ISO, bytea as base64, and non-float json is
+// stringified identically (with raw UTF-8 on both sides).
 
 import type { WireType } from "../contract";
 
@@ -53,7 +64,10 @@ function csvCell(value: unknown, wireType: WireType): CsvCell {
 
         default:
             // number / string (incl. precision numerics) / isoString / base64:
-            // the wire string verbatim, so no float rounding or locale drift.
+            // the wire string verbatim, so no locale drift. A `number` here is a
+            // JS number (already JSON-parsed), so String() gives its shortest
+            // round-trip form — which may differ from the backend's native-float
+            // rendering for floats (see the module header's byte-identity note).
             return { text: String(value), isNull: false };
     }
 }

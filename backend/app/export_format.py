@@ -1,9 +1,18 @@
 """
-The pure CSV/JSON export dialect, mirroring the frontend ``serialize.ts``
-byte-for-byte so a streamed full-table CSV is identical to a query-result CSV of
-the same wire data. Values fed to these formatters are already wire scalars (the
-operation runs each raw asyncpg row through ``to_wire_value`` first), so a
-numeric is its precision string, a timestamptz is ISO, a bytea is base64.
+The pure CSV/JSON export dialect, mirroring the frontend ``serialize.ts``.
+Values fed to these formatters are already wire scalars (the operation runs each
+raw asyncpg row through ``to_wire_value`` first), so a numeric is its precision
+string, a timestamptz is ISO, a bytea is base64.
+
+A streamed full-table CSV is byte-identical to a query-result CSV of the same
+data for every wire type EXCEPT floating-point ``number`` values. This side sees
+the native asyncpg float (``str(1.0) == "1.0"``, ``str(1e16) == "1e+16"``), while
+the frontend's query rows have already crossed JSON transport and arrive as JS
+numbers (``String(1) == "1"``, ``String(1e16) == "10000000000000000"``). That
+loss is inherent to the query path, not this serializer, so this full-table
+export is the authoritative full-fidelity surface; the string-based types
+(numeric/decimal as precision strings, timestamps, bytea, booleans, and
+non-float json — with ``ensure_ascii=False`` for raw UTF-8) stay byte-identical.
 
 Neither function touches a database, so both are trivially unit-testable; only
 the cursor iteration in ``ExportRowsQuery.stream`` is I/O.
@@ -47,7 +56,10 @@ def _csv_field(value: object, wire_type: WireType) -> str:
         # breaks if Python escapes é/emoji to \uXXXX while JS emits raw bytes.
         text = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
     else:
-        # number / string (incl. precision numerics) / isoString / base64.
+        # number / string (incl. precision numerics) / isoString / base64. A
+        # native float renders with Python's repr (str(1.0) == "1.0"), which may
+        # differ from the frontend's JS-number rendering for floats (see the
+        # module docstring's byte-identity note); every other case is a string.
         text = str(value)
 
     if text == "" or any(ch in text for ch in ('"', ",", "\r", "\n")):
