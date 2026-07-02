@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { getViewDefinition, getStructure, runQuery } from "./api";
+import { getViewDefinition, getStructure, runQuery, tableExportUrl } from "./api";
 import type { DbObjectRef } from "../contract";
 
 afterEach(() => vi.restoreAllMocks());
@@ -73,6 +73,36 @@ describe("getStructure", () => {
         vi.stubGlobal("fetch", fetchMock);
 
         await expect(getStructure(ref)).rejects.toThrow("boom");
+    });
+});
+
+describe("tableExportUrl", () => {
+    it("builds the streaming-export URL with the format query param", () => {
+        const ref: DbObjectRef = {
+            connectionId: "default",
+            database    : "sqladmin",
+            schema      : "public",
+            name        : "customers",
+            kind        : "table",
+        };
+
+        expect(tableExportUrl(ref, "csv"))
+            .toBe("/api/default/sqladmin/public/customers/export?format=csv");
+        expect(tableExportUrl(ref, "json"))
+            .toBe("/api/default/sqladmin/public/customers/export?format=json");
+    });
+
+    it("percent-encodes path segments so odd identifiers stay well-formed", () => {
+        const ref: DbObjectRef = {
+            connectionId: "default",
+            database    : "sqladmin",
+            schema      : "public",
+            name        : "my table",
+            kind        : "view",
+        };
+
+        expect(tableExportUrl(ref, "csv"))
+            .toBe("/api/default/sqladmin/public/my%20table/export?format=csv");
     });
 });
 
