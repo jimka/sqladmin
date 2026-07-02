@@ -7,8 +7,9 @@ import type { DockPanelEvent }                                 from "@jimka/type
 import { StatusBar }                                           from "@jimka/typescript-ui/component/container";
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef, RolePrivilege, RoleSummary, TableStructure } from "./contract";
-import { getColumns, getRoleDetail, getRoles, getViewDefinition, getStructure, runQuery } from "./data/api";
+import type { ColumnMeta, DbObjectRef, QueryRowsResult, RolePrivilege, RoleSummary, TableStructure } from "./contract";
+import { getColumns, getRoleDetail, getRoles, getViewDefinition, getStructure, runQuery, tableExportUrl } from "./data/api";
+import { exportQueryResult }                                   from "./dock/exportQueryResult";
 import { buildModel }                                          from "./data/buildModel";
 import { buildSelectSql }                                      from "./data/sql";
 import { buildStore }                                          from "./data/stores";
@@ -93,6 +94,13 @@ export class SqlAdminController {
     // has since moved on is discarded instead of clobbering the current view.
     private _propsSeq: number = 0;
 
+    // The latest rows result each query panel displayed, keyed by panel id (set
+    // via the panel's injected onResult), plus the currently focused panel id.
+    // Together they let the Query-menu "Export results…" item act on the active
+    // panel without the controller holding a reference back to the panel object.
+    private readonly _activeQueryResult: Map<string, QueryRowsResult | null> = new Map();
+    private _activePanelId: string | null = null;
+
     // The same monotonic guard for the Roles view's detail fetch.
     private _roleSeq: number = 0;
 
@@ -115,13 +123,19 @@ export class SqlAdminController {
         this._saved   = new SavedQueryStore(connectionId, window.localStorage);
 
         // Disposal is wired once: the dock fires "close" only on genuine
-        // destruction (a tear-off fires "detach" and the panel survives).
-        this.dock.on("close", (e: DockPanelEvent) => this.disposePanel(e.id));
+        // destruction (a tear-off fires "detach" and the panel survives). A
+        // closed query panel's held result is dropped so it can't be exported.
+        this.dock.on("close", (e: DockPanelEvent) => {
+            this.disposePanel(e.id);
+            this._activeQueryResult.delete(e.id);
+        });
 
         // Switching tabs syncs the navigator selection and the status bar to the
-        // now-active panel. A null payload means no panel is focused.
+        // now-active panel, and records the active panel id so the Query-menu
+        // export targets it. A null payload means no panel is focused.
         this.dock.on("focus", (e: DockPanelEvent | null) => {
             if (e) {
+                this._activePanelId = e.id;
                 this.syncToPanel(e.id);
             }
         });
@@ -335,9 +349,52 @@ export class SqlAdminController {
                 getHistory: () => this._history.list().map(e => e.sql),
                 // The Save toolbar button hands back the trimmed SQL; the
                 // controller owns the naming modal and the saved-query store.
-                onSave    : (sql: string) => void this.promptAndSaveQuery(sql)
+                onSave    : (sql: string) => void this.promptAndSaveQuery(sql),
+                // Mirror this panel's latest result so the Query-menu export can
+                // reach it while it is the active panel.
+                onResult  : (result: QueryRowsResult | null) => this._activeQueryResult.set(id, result)
             })
         });
+    }
+
+    /**
+     * Export the active query panel's loaded result as CSV or JSON (the Query
+     * menu's "Export results…" convenience). Notifies when the focused panel has
+     * no rows result. The panel's own toolbar button is the primary surface;
+     * this routes to whichever panel is focused via the tracked active id.
+     *
+     * @param format - The export format, "csv" or "json".
+     */
+    exportActiveQuery(format: "csv" | "json"): void {
+        const result = this._activePanelId ? this._activeQueryResult.get(this._activePanelId) : null;
+
+        if (!result) {
+            this.statusBar.setMessage("No query result to export");
+
+            return;
+        }
+
+        exportQueryResult(result, format, message =>
+            this.statusBar.setMessage(`${this._connectionId} · export: ${message}`));
+    }
+
+    /**
+     * Open the backend streaming export for a table/view: navigate a hidden
+     * anchor to the export URL so the `attachment` response downloads the full
+     * relation without buffering it in the browser (a big table exports without
+     * freezing the grid). Works identically for a table and a view.
+     *
+     * @param ref - The table/view to export.
+     * @param format - The export format, "csv" or "json".
+     */
+    exportTable(ref: DbObjectRef, format: "csv" | "json"): void {
+        const anchor = document.createElement("a");
+        anchor.href          = tableExportUrl(ref, format);
+        anchor.style.display = "none";
+
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
     }
 
     /**
