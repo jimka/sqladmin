@@ -1,32 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildExplainSql, isReadOnlyStatement } from "./explain";
-
-describe("buildExplainSql", () => {
-    it("prefixes a plain EXPLAIN with the parenthesized FORMAT option", () => {
-        expect(buildExplainSql("SELECT 1", { analyze: false, format: "text" }))
-            .toBe("EXPLAIN (FORMAT TEXT) SELECT 1");
-    });
-
-    it("adds ANALYZE to the option list when analyze is set", () => {
-        expect(buildExplainSql("SELECT 1", { analyze: true, format: "text" }))
-            .toBe("EXPLAIN (ANALYZE, FORMAT TEXT) SELECT 1");
-    });
-
-    it("uses FORMAT JSON for the json format", () => {
-        expect(buildExplainSql("SELECT 1", { analyze: false, format: "json" }))
-            .toBe("EXPLAIN (FORMAT JSON) SELECT 1");
-        expect(buildExplainSql("SELECT 1", { analyze: true, format: "json" }))
-            .toBe("EXPLAIN (ANALYZE, FORMAT JSON) SELECT 1");
-    });
-
-    it("trims surrounding whitespace of the statement without mutating the input", () => {
-        const sql = "  SELECT 1\n";
-
-        expect(buildExplainSql(sql, { analyze: false, format: "text" }))
-            .toBe("EXPLAIN (FORMAT TEXT) SELECT 1");
-        expect(sql).toBe("  SELECT 1\n");
-    });
-});
+import { isReadOnlyStatement } from "./explain";
 
 describe("isReadOnlyStatement", () => {
     it("treats SELECT / TABLE / VALUES / SHOW as read-only, case- and space-insensitively", () => {

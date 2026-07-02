@@ -1,13 +1,14 @@
-// Pure, DOM-free helpers for the EXPLAIN / EXPLAIN ANALYZE feature: build the
-// EXPLAIN prefix client-side (the backend runs it as opaque SQL) and a
-// best-effort read-only classifier that gates the EXPLAIN ANALYZE warning.
-// Kept here beside sql.ts so the app's node-only vitest can red-green both
-// without a backend or a DOM. The editor's own text is never mutated — the
-// prefix is applied only to the copy sent to the run path.
+// Pure, DOM-free helpers for the EXPLAIN / EXPLAIN ANALYZE feature. The backend
+// ExplainQueryCommand is the sole authority that wraps the raw SQL in
+// `EXPLAIN (...)` — so a plain EXPLAIN provably never executes and an ANALYZE run
+// is provably rolled back regardless of what the client sends. The frontend's
+// only pre-run responsibility is this best-effort read-only classifier, which
+// gates the EXPLAIN ANALYZE warning. Kept here beside sql.ts so the app's
+// node-only vitest can red-green it without a backend or a DOM.
 
 import type { ExplainFormat } from "../contract";
 
-/** How to build an EXPLAIN run: whether to ANALYZE (execute) and the output format. */
+/** How to run an EXPLAIN: whether to ANALYZE (execute) and the output format. */
 export interface ExplainOptions {
     analyze: boolean;
     format: ExplainFormat;
@@ -23,23 +24,6 @@ const READ_KEYWORDS: ReadonlySet<string> = new Set(["SELECT", "TABLE", "VALUES",
 // find where the CTE list ends and classify the main statement.
 const BODY_KEYWORDS: ReadonlySet<string> =
     new Set(["SELECT", "VALUES", "TABLE", "INSERT", "UPDATE", "DELETE", "MERGE"]);
-
-/**
- * Build `EXPLAIN [(ANALYZE, )FORMAT …] <sql>` from a statement and options.
- *
- * Uses PostgreSQL's parenthesized option list (`EXPLAIN (ANALYZE, FORMAT TEXT)
- * <sql>`) for clarity. Returns a new string; `sql` is trimmed but not mutated.
- *
- * @param sql - The user's statement to explain.
- * @param opts - Whether to ANALYZE and which output format to request.
- * @returns The prefixed EXPLAIN SQL to send to the run path.
- */
-export function buildExplainSql(sql: string, opts: ExplainOptions): string {
-    const format  = opts.format === "json" ? "JSON" : "TEXT";
-    const options = opts.analyze ? `(ANALYZE, FORMAT ${format})` : `(FORMAT ${format})`;
-
-    return `EXPLAIN ${options} ${sql.trim()}`;
-}
 
 /**
  * Best-effort lexical check: is `sql`'s first statement a read (SELECT / TABLE /
