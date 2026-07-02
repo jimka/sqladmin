@@ -19,13 +19,14 @@ from typing import AsyncIterator
 import asyncpg
 from fastapi import Body, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from .connections import close_pools, get_pool, open_pools
 from .contract import ColumnMeta, TableRef
 from .errors import DomainError, NotFound, ValidationError
 from .operations import (
     DeleteRowCommand,
+    ExportRowsQuery,
     InsertRowCommand,
     ListColumnsQuery,
     ListConstraintsQuery,
@@ -456,3 +457,65 @@ async def run_query(connection_id: str, body: dict = Body(...)) -> dict:
         await op.apply()
 
         return op.get_result()
+
+
+# --- Full-table streaming export ------------------------------------------
+
+
+# The content type and file extension per export format.
+_EXPORT_MEDIA = {"csv": ("text/csv", "csv"), "json": ("application/json", "json")}
+
+
+@app.get("/api/{connection_id}/{database}/{schema}/{table}/export")
+async def export_rows(
+    connection_id: str, database: str, schema: str, table: str, format: str = "csv"
+) -> StreamingResponse:
+    """
+    Stream a table/view's full contents as CSV or JSON (attachment download).
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/{table}/export``.
+
+    The connection is acquired for the streaming lifetime (a server-side cursor
+    needs its connection alive across the response) and released in the body
+    generator's ``finally`` — the one place a connection outlives the
+    ``async with acquire()`` sugar. A relation that does not exist is a 404 (the
+    ``_columns_for`` gate); an unsupported ``format`` is a 422 (the operation's
+    constructor validation), with the connection released before re-raising.
+
+    Args:
+        format: the export format, "csv" (default) or "json".
+
+    Returns:
+        A ``StreamingResponse`` whose ``Content-Disposition`` marks it an
+        attachment named ``<schema>.<table>.<ext>``.
+    """
+    ref = TableRef(database, schema, table)
+    pool = get_pool(connection_id)
+    conn = await pool.acquire()
+
+    try:
+        cols = await _columns_for(conn, ref)
+        op = ExportRowsQuery(conn, ref, format, cols)
+    except BaseException:
+        # Release before propagating so a 404/422 never leaks the connection.
+        await pool.release(conn)
+        raise
+
+    media, ext = _EXPORT_MEDIA[format]
+
+    async def body() -> AsyncIterator[str]:
+        """
+        Stream the export chunks, releasing the connection when exhausted or on a
+        client-aborted download (the generator's ``finally`` runs on close/GC).
+        """
+        try:
+            async for chunk in op.stream():
+                yield chunk
+        finally:
+            await pool.release(conn)
+
+    return StreamingResponse(
+        body(),
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{schema}.{table}.{ext}"'},
+    )
