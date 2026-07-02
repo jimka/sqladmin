@@ -144,7 +144,9 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     const runButton     = glyphButton("play", RUN_COLOR, "Run (Ctrl+Enter)", () => void run());
     const saveButton    = glyphButton("floppy-disk", SAVE_COLOR, "Save query (Ctrl+S)", () => save());
     const clearButton   = glyphButton("eraser", CLEAR_COLOR, "Clear (Alt+C)", () => clear());
-    const explainButton = glyphButton("diagram_project", NEUTRAL_COLOR, "Explain",
+    // The glyph registers under its hyphenated name ("diagram-project"), even
+    // though the ESM export identifier uses an underscore.
+    const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, "Explain",
                                       () => void runExplainRun(false));
     const analyzeButton = glyphButton("flask", CLEAR_COLOR, "Explain Analyze (executes the statement)",
                                       () => void runExplainRun(true));
