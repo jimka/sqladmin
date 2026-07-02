@@ -12,7 +12,8 @@
 // floating-point `number` values. These query rows have already crossed JSON
 // transport, so a `double precision` 1.0 arrives here as the JS number 1
 // (String(1) === "1") while the backend streams the native float (str(1.0) ===
-// "1.0"); exponent notation likewise differs (1e16 vs 1e+16). That loss is
+// "1.0"); large magnitudes likewise differ (here String(1e16) ===
+// "10000000000000000", the backend str(1e16) === "1e+16"). That loss is
 // inherent to the query path (the rows are JS numbers), not this serializer, so
 // the backend full-table export is the authoritative full-fidelity surface.
 // String-based types stay byte-identical: numeric/decimal/money arrive as

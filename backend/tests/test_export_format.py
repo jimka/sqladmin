@@ -1,7 +1,10 @@
 """
 export_format: the pure CSV/JSON dialect that mirrors the frontend serialize.ts,
 so a streamed full-table CSV is byte-identical to a query-result CSV of the same
-wire data (NULL vs empty, quoting, each wire type, header).
+wire data (NULL vs empty, quoting, each string-based wire type, header) —
+floating-point numbers excepted, since the query path stringifies them from JS
+numbers (see export_format.py's byte-identity note). The cases below use integer
+numbers, where both sides agree.
 """
 
 from __future__ import annotations

@@ -4,7 +4,9 @@ import type { ExportColumn }    from "./serialize";
 
 // The CSV dialect: comma delimiter, CRLF record separator, a header row, and
 // every line (header included) terminated by CRLF so the string is byte-
-// identical to the backend's streamed export of the same wire data.
+// identical to the backend's streamed export of the same wire data — for every
+// wire type except floating-point numbers, which the query path has already
+// stringified from JS numbers (see serialize.ts's byte-identity note).
 const CRLF = "\r\n";
 
 describe("toCSV", () => {
