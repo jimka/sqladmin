@@ -436,10 +436,11 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     /** Render an EXPLAIN plan in the result pane as a read-only monospace block. */
     function showPlan(result: QueryExplainResult): void {
         // Reuse the same result pane/gutter as a rows Table — just different
-        // content: a disabled TextArea seeded with the joined plan text.
+        // content: a read-only TextArea seeded with the joined plan text. Read-only
+        // (not disabled) keeps the plan selectable and copyable while blocking edits.
         const view = new TextArea(result.plan, { styleRules: [{ suffix: "", styles: PLAN_STYLE }] });
 
-        view.setEnabled(false);
+        view.setReadOnly(true);
         showResultPane(view);
         notify(result.analyze ? "EXPLAIN ANALYZE plan (side-effects rolled back)" : "EXPLAIN plan");
     }
