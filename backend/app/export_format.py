@@ -42,7 +42,10 @@ def _csv_field(value: object, wire_type: WireType) -> str:
     if wire_type is WireType.BOOLEAN:
         text = "true" if value else "false"
     elif wire_type in (WireType.JSON, WireType.JSON_ARRAY):
-        text = json.dumps(value, separators=(",", ":"))
+        # ensure_ascii=False so non-ASCII stays raw UTF-8, byte-matching JS
+        # JSON.stringify — the CSV byte-identity contract with serialize.ts
+        # breaks if Python escapes é/emoji to \uXXXX while JS emits raw bytes.
+        text = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
     else:
         # number / string (incl. precision numerics) / isoString / base64.
         text = str(value)
@@ -104,7 +107,10 @@ def json_row(row: dict, columns: list[ColumnMeta], first: bool) -> str:
     """
     prefix = "" if first else ",\n"
 
-    return prefix + json.dumps(_row_object(row, columns))
+    # ensure_ascii=False keeps non-ASCII raw UTF-8, matching the frontend's
+    # JSON.stringify output so the two JSON surfaces stay representationally
+    # consistent (not a hard byte-identity requirement, but the honest encoding).
+    return prefix + json.dumps(_row_object(row, columns), ensure_ascii=False)
 
 
 def json_close() -> str:

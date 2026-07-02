@@ -80,6 +80,15 @@ def test_csv_json_is_compact_stringified_then_escaped() -> None:
     assert csv_row({"j": {"a": 1}, "a": [1, 2]}, cols) == f'"{{""a"":1}}","[1,2]"{CRLF}'
 
 
+def test_csv_json_keeps_non_ascii_raw_utf8() -> None:
+    # ensure_ascii=False: a non-ASCII json value must stay raw UTF-8 (not \uXXXX)
+    # so the field is byte-identical to the frontend's JSON.stringify. The value
+    # contains a quote, so the whole field is CSV-quoted with doubled quotes.
+    cols = [col("j", WireType.JSON)]
+
+    assert csv_row({"j": {"name": "café"}}, cols) == f'"{{""name"":""café""}}"{CRLF}'
+
+
 def test_json_open_and_close() -> None:
     assert json_open() == "["
     assert json_close() == "]"

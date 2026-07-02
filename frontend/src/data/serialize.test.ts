@@ -99,6 +99,15 @@ describe("toCSV", () => {
         expect(toCSV(cols, [{ j: { a: 1 }, a: [1, 2] }]))
             .toBe(`j,a${CRLF}"{""a"":1}","[1,2]"${CRLF}`);
     });
+
+    it("keeps non-ASCII in a json field as raw UTF-8 (byte-identical to the backend)", () => {
+        const cols: ExportColumn[] = [{ name: "j", wireType: "json" }];
+
+        // JSON.stringify emits raw UTF-8 (not \uXXXX); the backend mirrors this
+        // with ensure_ascii=False so the CSV field is byte-identical.
+        expect(toCSV(cols, [{ j: { name: "café" } }]))
+            .toBe(`j${CRLF}"{""name"":""café""}"${CRLF}`);
+    });
 });
 
 describe("toJSON", () => {
