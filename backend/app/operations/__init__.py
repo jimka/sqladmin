@@ -14,6 +14,11 @@ from .list_schemas import ListSchemasQuery
 from .role_detail import RoleAttributesQuery, RoleMembershipsQuery, RolePrivilegesQuery
 from .roles import ListRolesQuery
 from .run_query import RunQueryCommand
+from .table_structure import (
+    ListConstraintsQuery,
+    ListForeignKeysQuery,
+    ListIndexesQuery,
+)
 from .update_row import UpdateRowCommand
 from .view_definition import ViewDefinitionQuery
 
@@ -30,6 +35,9 @@ __all__ = [
     "RoleAttributesQuery",
     "RoleMembershipsQuery",
     "RolePrivilegesQuery",
+    "ListIndexesQuery",
+    "ListConstraintsQuery",
+    "ListForeignKeysQuery",
     "InsertRowCommand",
     "UpdateRowCommand",
     "DeleteRowCommand",
