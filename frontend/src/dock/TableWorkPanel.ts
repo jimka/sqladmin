@@ -23,14 +23,19 @@ import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/r
 import { plus }                        from "@jimka/typescript-ui/glyphs/solid/plus";
 import { minus }                       from "@jimka/typescript-ui/glyphs/solid/minus";
 import { save }                        from "@jimka/typescript-ui/glyphs/solid/save";
+import { filter }                      from "@jimka/typescript-ui/glyphs/solid/filter";
 import type { ColumnMeta }             from "../contract";
+import { openFilterDialog }            from "./FilterDialog";
 
-Glyph.register(refresh, plus, minus, save);
+Glyph.register(refresh, plus, minus, save, filter);
 
 /** Toolbar glyph colors: blue for neutral actions, green to add, red to delete. */
 const BLUE  = "rgb(30, 100, 200)";
 const GREEN = "rgb(46, 125, 50)";
 const RED   = "rgb(198, 40, 40)";
+
+/** Amber tints the Filter button while a filter is active, signalling the grid is narrowed. */
+const FILTER_ACTIVE = "rgb(230, 145, 30)";
 
 /** Surface a short status message (validation / save feedback) to the user. */
 export type Notify = (message: string) => void;
@@ -59,14 +64,17 @@ function buildColumnSpec(columns: ColumnMeta[]): ColumnSpec {
 function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], notify: Notify): ToolBar {
     const deleteButton = glyphButton("minus", RED, "Delete row", () => void confirmDelete(store, dataGrid));
     const saveButton = glyphButton("save", BLUE, "Save", () => save_(store, columns, notify));
+    const filterButton = glyphButton("filter", BLUE, "Filter rows", () => openFilterDialog(store, columns));
 
     const bar = new ToolBar({
         components: [
             glyphButton("plus", GREEN, "Add row", () => store.add({})),
             deleteButton,
             saveButton,
-            // Flex spacer pushes Refresh to the far right, away from the edit actions.
+            // Flex spacer pushes the view actions (Filter, Refresh) to the far
+            // right, away from the edit actions.
             Spacer.flex(),
+            filterButton,
             // Refresh discards unsaved edits then reloads from the server. reject()
             // must precede load(): load() replaces the records but leaves pending
             // removals queued, so without it a deleted row would reappear yet stay
@@ -74,6 +82,18 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
             glyphButton("refresh", BLUE, "Refresh", () => { store.reject(); void store.load(); })
         ]
     });
+
+    // Tint the Filter button and mark its tooltip while any filter is active.
+    // 'filterchange' fires whenever the store's active-filter set changes (the
+    // dialog's Apply/Clear drive it through filterBy/clearFilter).
+    const syncFilterActive = (): void => {
+        const active = store.getActiveFilters().length > 0;
+
+        filterButton.setForegroundColor(active ? FILTER_ACTIVE : BLUE);
+        filterButton.setDescription(active ? "Filter rows (active)" : "Filter rows");
+    };
+    syncFilterActive();
+    store.on("filterchange", syncFilterActive);
 
     // Save is only meaningful with unsaved edits/adds/removes; 'datachanged'
     // fires on each of those (and after a sync clears them).
