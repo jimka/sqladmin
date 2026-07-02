@@ -9,6 +9,7 @@ import type {
     QueryResult,
     RoleDetail,
     RoleSummary,
+    ViewDefinition,
 } from "../contract";
 
 /** Pull the backend's `{detail}` error message off a non-OK response. */
@@ -76,6 +77,13 @@ export function getColumns(ref: DbObjectRef): Promise<ColumnMeta[]> {
     const url = `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/columns`;
 
     return getJson<ColumnMeta[]>(url);
+}
+
+/** Fetch a (materialized) view's definition SQL (pg_get_viewdef). */
+export function getViewDefinition(ref: DbObjectRef): Promise<ViewDefinition> {
+    const url = `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/definition`;
+
+    return getJson<ViewDefinition>(url);
 }
 
 /**

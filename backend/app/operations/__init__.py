@@ -15,6 +15,7 @@ from .role_detail import RoleAttributesQuery, RoleMembershipsQuery, RolePrivileg
 from .roles import ListRolesQuery
 from .run_query import RunQueryCommand
 from .update_row import UpdateRowCommand
+from .view_definition import ViewDefinitionQuery
 
 __all__ = [
     "Operation",
@@ -33,4 +34,5 @@ __all__ = [
     "UpdateRowCommand",
     "DeleteRowCommand",
     "RunQueryCommand",
+    "ViewDefinitionQuery",
 ]

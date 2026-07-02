@@ -1,7 +1,43 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { runQuery } from "./api";
+import { getViewDefinition, runQuery } from "./api";
+import type { DbObjectRef } from "../contract";
 
 afterEach(() => vi.restoreAllMocks());
+
+describe("getViewDefinition", () => {
+    const ref: DbObjectRef = {
+        connectionId: "default",
+        database    : "sqladmin",
+        schema      : "public",
+        name        : "active_customers",
+        kind        : "view",
+    };
+
+    it("GETs the view's definition endpoint and returns the parsed shape", async () => {
+        const payload   = { definition: "SELECT id FROM customers WHERE active" };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => payload });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const result = await getViewDefinition(ref);
+
+        expect(result).toEqual(payload);
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/default/sqladmin/public/active_customers/definition",
+        );
+    });
+
+    it("throws the backend {detail} on a non-OK response", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok        : false,
+            status    : 404,
+            statusText: "Not Found",
+            json      : async () => ({ detail: "View 'public.active_customers' not found" }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(getViewDefinition(ref)).rejects.toThrow("View 'public.active_customers' not found");
+    });
+});
 
 describe("runQuery", () => {
     it("POSTs { sql } to the connection's query endpoint and returns the envelope", async () => {

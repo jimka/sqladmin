@@ -50,6 +50,29 @@ class ListColumnsQuery(Query):
         ORDER BY c.ordinal_position
     """
 
+    # information_schema.columns (SQL-standard) omits materialized views, so a
+    # matview's columns come from pg_catalog instead. pg_attribute + format_type
+    # yield the same name/data_type/nullable shape; a matview has no primary key,
+    # generated column, or default, so those flags are constant-false. data_type
+    # arrives as a format_type() string (e.g. "numeric", "integer") which
+    # pg_type_to_wire maps exactly as it does the information_schema names.
+    _MATVIEW_SQL = """
+        SELECT
+            a.attname                              AS name,
+            format_type(a.atttypid, a.atttypmod)   AS data_type,
+            (NOT a.attnotnull)                     AS nullable,
+            false                                  AS is_generated,
+            false                                  AS has_default,
+            false                                  AS is_primary_key
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c     ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND c.relkind = 'm'
+          AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY a.attnum
+    """
+
     def __init__(self, conn: asyncpg.Connection, table: TableRef) -> None:
         """
         Capture the connection and the table to introspect.
@@ -60,9 +83,19 @@ class ListColumnsQuery(Query):
 
     async def apply(self) -> None:
         """
-        Fetch the column metadata rows for the table.
+        Fetch the column metadata rows for the relation.
+
+        Tables and regular views resolve through ``information_schema``; a
+        materialized view returns no rows there, so an empty first result falls
+        back to the ``pg_catalog`` query. A relation missing from both stays
+        empty, which the route's ``_columns_for`` gate maps to a 404.
         """
         self._raw = await self._conn.fetch(self._SQL, self._table.schema, self._table.name)
+
+        if not self._raw:
+            self._raw = await self._conn.fetch(
+                self._MATVIEW_SQL, self._table.schema, self._table.name
+            )
 
     def get_columns_result(self) -> list[ColumnMeta]:
         """

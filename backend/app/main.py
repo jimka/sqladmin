@@ -38,6 +38,7 @@ from .operations import (
     RolePrivilegesQuery,
     RunQueryCommand,
     UpdateRowCommand,
+    ViewDefinitionQuery,
 )
 
 # The Vite dev server and the library gallery dev server.
@@ -199,6 +200,26 @@ async def columns(connection_id: str, database: str, schema: str, table: str) ->
     """
     async with get_pool(connection_id).acquire() as c:
         op = ListColumnsQuery(c, TableRef(database, schema, table))
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.get("/api/{connection_id}/{database}/{schema}/{table}/definition")
+async def view_definition(connection_id: str, database: str, schema: str, table: str) -> dict:
+    """
+    Return a (materialized) view's reconstructed ``SELECT`` (pg_get_viewdef).
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/{table}/definition``.
+
+    Raises:
+        NotFound: if no view/matview by that name exists (mapped to 404).
+
+    Returns:
+        ``{"definition": str}`` — the pretty-printed view definition SQL.
+    """
+    async with get_pool(connection_id).acquire() as c:
+        op = ViewDefinitionQuery(c, TableRef(database, schema, table))
         await op.apply()
 
         return op.get_result()
