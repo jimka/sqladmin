@@ -11,14 +11,15 @@
 //   - Apply: clear the store's filter, then apply one descriptor per complete
 //     row; an all-empty form therefore just clears the filter.
 //   - Clear: clear the store's filter regardless of the form.
-//   - Cancel: leave the filter untouched.
+//   - Cancel — and every dismiss gesture (Escape, backdrop click, title-bar
+//     close), which all resolve to the same result — leave the filter untouched.
 // `filterBy` appends, so Apply always `clearFilter()`s first to avoid stacking
 // filters across re-applies.
 
 import { Panel }                     from "@jimka/typescript-ui/core";
 import { HBox, VBox }                from "@jimka/typescript-ui/layout";
 import { ComboBox, TextField }       from "@jimka/typescript-ui/component/input";
-import { Dialog, DialogButtons }     from "@jimka/typescript-ui/overlay";
+import { Dialog }                    from "@jimka/typescript-ui/overlay";
 import type { DialogButtonConfig }   from "@jimka/typescript-ui/overlay";
 import type { AjaxStore }            from "@jimka/typescript-ui/data";
 import type { ColumnMeta }           from "../contract";
@@ -58,7 +59,7 @@ const NO_COLUMN = "";
 /**
  * Open the filter dialog for a store. On Apply, translate the form's rows into
  * FilterDescriptors and apply them (AND-combined) to the store; on Clear, clear
- * the store's filter; on Cancel, do nothing.
+ * the store's filter; on Cancel or any dismiss gesture, do nothing.
  *
  * @param store - the table's AjaxStore (remoteFilter drives the server reload).
  * @param columns - the table's introspected columns, for the column list and coercion.
@@ -88,25 +89,36 @@ async function runFilterDialog(
         title:            "Filter rows",
         contentComponent: form,
         width:            DIALOG_WIDTH,
-        buttons:          [DialogButtons.Cancel, CLEAR_BUTTON, APPLY_BUTTON],
+        buttons:          [CANCEL_BUTTON, CLEAR_BUTTON, APPLY_BUTTON],
     });
 
+    // Apply commits the form; Clear (result "cancel") drops the filter; Cancel
+    // (result "close") — and every dismiss gesture, which the library also
+    // resolves to "close" — leaves the active filter untouched.
     if (result === "confirm") {
         await applyFilters(store, columns, readConditions());
 
         return;
     }
 
-    if (result === "close") {
+    if (result === "cancel") {
         await store.clearFilter();
     }
 }
 
-/** Apply (confirm) button — build and apply the filters. */
-const APPLY_BUTTON: DialogButtonConfig = { text: "Apply", result: "confirm", primary: true, glyph: "circle-check" };
+// The Dialog exposes only three result codes ("confirm" | "cancel" | "close"),
+// and every dismiss gesture (Escape, backdrop click, title-bar close) resolves
+// to "close". To keep dismissing safe, the Cancel button carries "close" too,
+// so a dismiss behaves exactly like Cancel (leave the filter untouched); the
+// explicit Clear button therefore takes the remaining "cancel" code, and Apply
+// takes "confirm". Glyphs are omitted so no consumer-registered glyph is needed.
+const APPLY_BUTTON: DialogButtonConfig = { text: "Apply", result: "confirm", primary: true };
 
-/** Clear (close) button — drop the active filter regardless of the form. */
-const CLEAR_BUTTON: DialogButtonConfig = { text: "Clear", result: "close", glyph: "eraser" };
+/** Clear button — drops the active filter regardless of the form. */
+const CLEAR_BUTTON: DialogButtonConfig = { text: "Clear", result: "cancel" };
+
+/** Cancel button — shares "close" with every dismiss gesture, so both no-op. */
+const CANCEL_BUTTON: DialogButtonConfig = { text: "Cancel", result: "close" };
 
 /**
  * Clear the store's filter, then apply one descriptor per complete condition.
