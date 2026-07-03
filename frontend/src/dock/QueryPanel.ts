@@ -41,9 +41,10 @@ import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
 import { capRows, MAX_RESULT_ROWS }      from "./capRows";
 import { exportQueryResult }             from "./exportQueryResult";
-import type { ExplainOptions }           from "../data/explain";
+import { exportExplainPlan }             from "./exportExplainResult";
+import type { ActiveExport, RunExplain } from "../data/explain";
 import type { HistoryEntry }             from "../data/queryStore";
-import type { QueryExplainResult, QueryResult, QueryRowsResult } from "../contract";
+import type { QueryExplainResult, QueryResult } from "../contract";
 
 Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, diagram_project, flask);
 
@@ -86,9 +87,6 @@ export type Notify = (message: string) => void;
 /** Runs one SQL statement and resolves its result. */
 export type RunQuery = (sql: string) => Promise<QueryResult>;
 
-/** Runs EXPLAIN / EXPLAIN ANALYZE for one statement and resolves its plan. */
-export type RunExplain = (sql: string, opts: ExplainOptions) => Promise<QueryExplainResult>;
-
 /** Construction inputs for {@link QueryPanel}. */
 export interface QueryPanelOptions {
     /** Executes the SQL (bound to the connection by the controller). */
@@ -103,6 +101,13 @@ export interface QueryPanelOptions {
     initialSql?: string;
     /** Run the seeded SQL immediately on open (true for "Open as query"). */
     autoRun?: boolean;
+    /**
+     * EXPLAIN the seeded SQL immediately on open instead of running it — `"plain"`
+     * for EXPLAIN, `"analyze"` for EXPLAIN ANALYZE. Takes precedence over
+     * {@link autoRun}; used by the view panel's Explain actions, which open a
+     * query tab seeded with the view's SELECT and show its plan here.
+     */
+    autoExplain?: "plain" | "analyze";
     /** Record a completed run in history (the controller binds this to the store). */
     onRun?: (entry: HistoryEntry) => void;
     /** Newest-first SQL snapshot for the Ctrl+↑/↓ history recall (from the store). */
@@ -114,17 +119,18 @@ export interface QueryPanelOptions {
      */
     onSave?: (sql: string) => void;
     /**
-     * Called whenever the displayed result changes: the rows result on a
-     * successful SELECT/RETURNING, or null on a clear or a status-only result.
-     * Lets the controller route the Query-menu "Export results…" item to this
-     * (the active) panel without holding a reference back to it.
+     * Called whenever the exportable result changes: a rows result on a
+     * successful SELECT/RETURNING, an EXPLAIN plan after an Explain run, or null
+     * on a clear or a status-only result. Lets the controller route the menubar
+     * "Export results…" item to this (the active) panel without holding a
+     * reference back to it.
      */
-    onResult?: (result: QueryRowsResult | null) => void;
+    onResult?: (active: ActiveExport | null) => void;
 }
 
 /** Build a query panel: a SQL editor over a (resizable) result grid. */
 export function QueryPanel(options: QueryPanelOptions): Panel {
-    const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, onRun, getHistory, onSave, onResult } = options;
+    const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult } = options;
 
     const editor = new TextArea(initialSql);
 
@@ -170,35 +176,44 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
 
     let resultShown = false;
 
-    // The panel's latest rows result, exposed to the controller via onResult and
-    // serialized by the Export button. Null for an empty panel or a status-only
-    // result; the Export button is enabled iff this is non-null.
-    let currentResult: QueryRowsResult | null = null;
+    // The panel's latest exportable result — a rows grid or an EXPLAIN plan —
+    // exposed to the controller via onResult and serialized by the Export button.
+    // Null for an empty panel or a status-only result; the Export button is
+    // enabled iff this is non-null, and its menu adapts to the kind.
+    let activeExport: ActiveExport | null = null;
 
-    /** Record the displayed result, mirror it to the controller, and sync Export. */
-    function setCurrentResult(result: QueryRowsResult | null): void {
-        currentResult = result;
-        onResult?.(result);
-        exportButton.setEnabled(result !== null);
+    /** Record the exportable result, mirror it to the controller, and sync Export. */
+    function setActiveExport(active: ActiveExport | null): void {
+        activeExport = active;
+        onResult?.(active);
+        exportButton.setEnabled(active !== null);
     }
 
     /**
-     * Open the CSV/JSON export chooser at the click point, exporting the panel's
-     * held result. A no-op when there is no rows result (the button is disabled
-     * then, so this is defensive).
+     * Open the export chooser at the click point, serializing whatever the panel
+     * currently shows: a rows grid as CSV / JSON, or an EXPLAIN plan as text /
+     * JSON. A no-op when there is nothing to export (the button is disabled then,
+     * so this is defensive).
      *
      * @param event - The Export button's click, for the menu's placement.
      */
     function openExportMenu(event: MouseEvent): void {
-        if (!currentResult) {
+        if (!activeExport) {
             return;
         }
 
-        const result = currentResult;
-        exportMenu.show(event.clientX, event.clientY, [
-            { text: "Export CSV",  action: () => exportQueryResult(result, "csv", notify) },
-            { text: "Export JSON", action: () => exportQueryResult(result, "json", notify) },
-        ]);
+        const active = activeExport;
+        const items = active.kind === "rows"
+            ? [
+                { text: "Export CSV (.csv)",   action: () => exportQueryResult(active.result, "csv", notify) },
+                { text: "Export JSON (.json)", action: () => exportQueryResult(active.result, "json", notify) },
+            ]
+            : [
+                { text: "Export text (.txt)",  action: () => void exportExplainPlan(active.plan, "txt", notify) },
+                { text: "Export JSON (.json)", action: () => void exportExplainPlan(active.plan, "json", notify) },
+            ];
+
+        exportMenu.show(event.clientX, event.clientY, items);
     }
 
     /** Swap in the result grid, adding (and sizing) the result pane on first use. */
@@ -250,7 +265,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     function clear(): void {
         editor.setValue("");
         hideResultPane();
-        setCurrentResult(null);
+        setActiveExport(null);
     }
 
     /**
@@ -372,7 +387,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
             const result = await runExplain(sql, { analyze, format: "text" });
 
             if (seq === runSeq) {
-                showResult(result);
+                showPlan(result, sql);
             }
         } catch (error) {
             if (seq === runSeq) {
@@ -403,7 +418,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
             // Read-only: editing a query result is a Non-Goal (no PK, no write-back).
             // A fresh store + columns per run means columns never bleed across runs.
             showResultPane(Table(store, { columns: [], rowReadOnly: () => true }));
-            setCurrentResult(result);
+            setActiveExport({ kind: "rows", result });
             notify(truncated
                 ? `showing first ${rows.length} of ${result.rows.length} — results truncated`
                 : `${result.rowCount} row(s)`);
@@ -411,18 +426,12 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
             return;
         }
 
-        if (result.kind === "explain") {
-            // A plan replaces any prior rows grid, so it is not exportable.
-            setCurrentResult(null);
-            showPlan(result);
-
-            return;
-        }
-
         // No result set (INSERT/UPDATE/DDL): drop the grid, editor fills again.
+        // (An explain result never reaches here — runExplainRun routes it to
+        // showPlan directly, which needs the source SQL this path lacks.)
         hideResultPane();
-        setCurrentResult(null);
-        notify(result.command || "OK");
+        setActiveExport(null);
+        notify(result.kind === "status" ? result.command || "OK" : "OK");
     }
 
     /**
@@ -433,8 +442,15 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
         return result.kind === "explain" ? 0 : result.rowCount;
     }
 
-    /** Render an EXPLAIN plan in the result pane as a read-only monospace block. */
-    function showPlan(result: QueryExplainResult): void {
+    /**
+     * Render an EXPLAIN plan in the result pane as a read-only monospace block and
+     * mark it the panel's exportable result (text / JSON via the Export button).
+     *
+     * @param result - The FORMAT TEXT plan to display.
+     * @param sql - The exact statement explained, kept so a JSON export can
+     *     re-request it as a FORMAT JSON plan tree.
+     */
+    function showPlan(result: QueryExplainResult, sql: string): void {
         // Reuse the same result pane/gutter as a rows Table — just different
         // content: a read-only TextArea seeded with the joined plan text. Read-only
         // (not disabled) keeps the plan selectable and copyable while blocking edits.
@@ -442,6 +458,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
 
         view.setReadOnly(true);
         showResultPane(view);
+        setActiveExport({ kind: "plan", plan: { result, sql, runExplain } });
         notify(result.analyze ? "EXPLAIN ANALYZE plan (side-effects rolled back)" : "EXPLAIN plan");
     }
 
@@ -535,7 +552,9 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     // mid-wait can't loop forever).
     focusEditorWhenReady(0);
 
-    if (autoRun && initialSql.trim()) {
+    if (autoExplain && initialSql.trim()) {
+        void runExplainRun(autoExplain === "analyze");
+    } else if (autoRun && initialSql.trim()) {
         void run();
     }
 

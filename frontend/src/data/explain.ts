@@ -6,13 +6,39 @@
 // gates the EXPLAIN ANALYZE warning. Kept here beside sql.ts so the app's
 // node-only vitest can red-green it without a backend or a DOM.
 
-import type { ExplainFormat } from "../contract";
+import type { ExplainFormat, QueryExplainResult, QueryRowsResult } from "../contract";
 
 /** How to run an EXPLAIN: whether to ANALYZE (execute) and the output format. */
 export interface ExplainOptions {
     analyze: boolean;
     format: ExplainFormat;
 }
+
+/** Runs EXPLAIN / EXPLAIN ANALYZE for one statement and resolves its plan. */
+export type RunExplain = (sql: string, opts: ExplainOptions) => Promise<QueryExplainResult>;
+
+/**
+ * A displayed EXPLAIN plan plus everything needed to export it. The held
+ * {@link QueryExplainResult} is the FORMAT TEXT plan shown on screen; `sql` and
+ * `runExplain` let the JSON export lazily re-request the same statement as a
+ * FORMAT JSON plan tree (a second EXPLAIN — an ANALYZE re-executes, rolled back
+ * on the backend), so the text view never pays for a JSON tree it may not need.
+ */
+export interface PlanSource {
+    result: QueryExplainResult;
+    sql: string;
+    runExplain: RunExplain;
+}
+
+/**
+ * What a work panel currently has on screen to export: either a tabular rows
+ * result (CSV / JSON) or an EXPLAIN plan (text / JSON). A panel reports this to
+ * the controller so the menubar "Export results" can act on the focused tab,
+ * mirroring the tab's own Export button.
+ */
+export type ActiveExport =
+    | { kind: "rows"; result: QueryRowsResult }
+    | { kind: "plan"; plan: PlanSource };
 
 // First-keyword classes for the read-only guard. A plain read starts with one
 // of these; a WITH is read-only only when its top-level body keyword is one of

@@ -74,6 +74,8 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
                 onOpenSaved    : () => controller.showQueriesView("saved"),
                 onQueryHistory : () => controller.showQueriesView("recent"),
                 onExportResults: format => controller.exportActive(format),
+                activeExportKind: () => controller.activeExportKind(),
+                canExportActive: () => controller.canExportActive(),
             }), constraints: { placement: Placement.NORTH } },
             { component: workArea,             constraints: { placement: Placement.CENTER } },
             { component: controller.statusBar, constraints: { placement: Placement.SOUTH } },
@@ -230,6 +232,10 @@ interface MenuBarActions {
     onQueryHistory: () => void;
     /** Exports the active work tab's data (Tools → Export results ▸ CSV/JSON). */
     onExportResults: (format: "csv" | "json") => void;
+    /** The active tab's export family, so the submenu can label its items live. */
+    activeExportKind: () => "plan" | "tabular";
+    /** Whether the active tab has anything to export, to grey the item when not. */
+    canExportActive: () => boolean;
 }
 
 /**
@@ -252,14 +258,24 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
                 { text: "Open Saved…",    shortcut: OPEN_SAVED_SHORTCUT,    action: actions.onOpenSaved },
                 { text: "Query History…", shortcut: QUERY_HISTORY_SHORTCUT, action: actions.onQueryHistory },
             ] },
-            { label: "Tools", items: [
+            { label: "Tools", items: () => [
                 // Exports the active work tab's data — a query result, a table/view's
-                // rows, or a role's grants. Each tab's own toolbar button is the
-                // primary surface; this acts on whichever tab is focused.
-                { text: "Export results…", submenu: { label: "Export results…", items: [
-                    { text: "CSV",  action: () => actions.onExportResults("csv") },
-                    { text: "JSON", action: () => actions.onExportResults("json") },
-                ] } },
+                // rows, a role's grants, or a shown EXPLAIN plan. Each tab's own
+                // toolbar button is the primary surface; this acts on whichever tab
+                // is focused. Both this list and the submenu are providers, re-run
+                // each time their menu opens: the item greys out when the focused
+                // tab has nothing to export, and the submenu labels track its kind
+                // (a plan shows text / JSON, everything else CSV / JSON).
+                { text: "Export results…", enabled: actions.canExportActive(),
+                  submenu: { label: "Export results…", items: () => {
+                    const plan = actions.activeExportKind() === "plan";
+
+                    return [
+                        // First slot: plain-text plan vs. CSV; second is JSON either way.
+                        { text: plan ? "Text (.txt)" : "CSV (.csv)", action: () => actions.onExportResults("csv") },
+                        { text: "JSON (.json)",                      action: () => actions.onExportResults("json") },
+                    ];
+                } } },
             ] },
             { label: "View", items: [{ text: "Toggle Sidebar", action: actions.onToggleSidebar }] },
         ],
