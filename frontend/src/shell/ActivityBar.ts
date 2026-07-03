@@ -70,6 +70,8 @@ export interface ActivityBarHandle {
     toggleCollapsed(): void;
     /** Wire the Split-backed sizer once the shell has built the Split. */
     setSizer(sizer: SidebarSizer): void;
+    /** Select and expand a view by its id (the menu's entry point to a view). */
+    selectView(id: string): void;
 }
 
 /**
@@ -178,5 +180,6 @@ export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
         component: activityBar,
         toggleCollapsed,
         setSizer: (value: SidebarSizer): void => { sizer = value; },
+        selectView: showView,
     };
 }

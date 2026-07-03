@@ -5,9 +5,6 @@ Deferred features and known issues. Items with an implementation plan live in
 
 ## Planned (see `plans/`)
 
-- **query-workspace** — query history + saved queries (localStorage), the Query
-  menu (replaces File, absorbs Tools' Run SQL), Ctrl+↑/↓ history browsing in the
-  editor, and an empty-workspace start page.
 - **schema-views** — views & materialized views in the navigator, read-only grid
   + a Definition tab.
 - **result-export** — CSV / JSON export (query results and navigator table export).
