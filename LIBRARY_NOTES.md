@@ -46,30 +46,26 @@ transition self-clears the same way the fit→overflow transition self-engages.
 
 ---
 
-## ✂️🩹🔎 `Button` can't tint the glyph independently of the text — no `glyphColor` option
+## ✂️✅ `Button` can't tint the glyph independently of the text — no `glyphColor` option
 
 `Button`'s `foregroundColor` sets CSS `color` on the whole button, and both the
 title and the leading glyph inherit it (the glyph's SVG fills with
-`currentColor`). So there's no first-class way to render, say, a green glyph
-beside default-black text — a single button-level color paints both.
+`currentColor`). So there was no first-class way to render, say, a green glyph
+beside default-black text — a single button-level color painted both.
 
 **Repro (sqladmin):** the filter dialog's "Add condition" button wants a green
 `plus` glyph with a normal black label. Setting `foregroundColor: green` turned
 the *text* green too.
 
-**Worked around (app):** leave the button's `foregroundColor` unset (so the text
-keeps the inherited default) and tint only the glyph by reaching into its
-component — `addButton.getGlyph()?.setForegroundColor(green)` — which sets `color`
-on the glyph element alone, picked up by its `currentColor` fill
-(`dock/FilterDialog.ts`). Works, but relies on the `getGlyph()` escape hatch
-rather than a declared option, and there is no matching option for the
-description either.
+**Fix (library):** added `glyphColor` and `descriptionColor` options (with
+`setGlyphColor` / `setDescriptionColor` runtime setters) that colour the glyph or
+the description element independently of the button's `foregroundColor`. The tint
+is stored on the options bag, so a later `setGlyph` re-applies it to the swapped
+glyph and a lazily-created description picks it up. Regression test added.
 
-**Possible library improvement:** add a `glyphColor` (and `descriptionColor`)
-option / setter so each content part can be tinted independently of the button's
-`foregroundColor`, without reaching into `getGlyph()`.
-
-**Status:** 🩹 worked around in the app; 🔎 enhancement belongs in the library.
+**App change:** the "Add condition" button passes `glyphColor: ADD_COLOR` in its
+options bag instead of reaching into `getGlyph().setForegroundColor(...)`
+(`dock/FilterDialog.ts`).
 
 ---
 
