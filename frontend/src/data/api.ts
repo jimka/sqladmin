@@ -6,12 +6,14 @@ import type {
     ColumnMeta,
     DbObjectKind,
     DbObjectRef,
+    QueryExplainResult,
     QueryResult,
     RoleDetail,
     RoleSummary,
     ViewDefinition,
     TableStructure,
 } from "../contract";
+import type { ExplainOptions } from "./explain";
 
 /** Pull the backend's `{detail}` error message off a non-OK response. */
 async function readDetail(response: Response): Promise<string> {
@@ -119,6 +121,28 @@ export function tableExportUrl(ref: DbObjectRef, format: "csv" | "json"): string
     const path = `${seg(ref.connectionId)}/${seg(ref.database ?? "")}/${seg(ref.schema ?? "")}/${seg(ref.name ?? "")}`;
 
     return `/api/${path}/export?format=${format}`;
+}
+
+/**
+ * Run EXPLAIN / EXPLAIN ANALYZE for one statement and return its plan envelope.
+ * A sibling of {@link runQuery} on the dedicated `/explain` route: the backend
+ * rolls ANALYZE's execution back, so this never commits a side-effect.
+ *
+ * @param connectionId - The target connection.
+ * @param sql - The statement to explain (the raw user SQL, unprefixed).
+ * @param opts - Whether to ANALYZE and which output format to request.
+ * @returns The explain result (joined plan text for the FORMAT TEXT cut).
+ */
+export function runExplain(
+    connectionId: string,
+    sql         : string,
+    opts        : ExplainOptions,
+): Promise<QueryExplainResult> {
+    return postJson<QueryExplainResult>(`/api/${connectionId}/explain`, {
+        sql,
+        analyze: opts.analyze,
+        format : opts.format,
+    });
 }
 
 /** The Roles view's role list (introspection one-shot). */

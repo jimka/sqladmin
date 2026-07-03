@@ -5,6 +5,7 @@ sites import from ``app.operations`` regardless of file layout.
 
 from .base import Command, Operation, Query
 from .delete_row import DeleteRowCommand
+from .explain_query import ExplainQueryCommand
 from .export_rows import ExportRowsQuery
 from .insert_row import InsertRowCommand
 from .list_columns import ListColumnsQuery
@@ -45,4 +46,5 @@ __all__ = [
     "RunQueryCommand",
     "ViewDefinitionQuery",
     "ExportRowsQuery",
+    "ExplainQueryCommand",
 ]

@@ -26,6 +26,7 @@ from .contract import ColumnMeta, TableRef
 from .errors import DomainError, NotFound, ValidationError
 from .operations import (
     DeleteRowCommand,
+    ExplainQueryCommand,
     ExportRowsQuery,
     InsertRowCommand,
     ListColumnsQuery,
@@ -454,6 +455,35 @@ async def run_query(connection_id: str, body: dict = Body(...)) -> dict:
     """
     async with get_pool(connection_id).acquire() as c:
         op = RunQueryCommand(c, body.get("sql", ""))
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/explain")
+async def explain_query(connection_id: str, body: dict = Body(...)) -> dict:
+    """
+    Run EXPLAIN / EXPLAIN ANALYZE for one statement and return its query plan.
+
+    Route: ``POST /api/{connection_id}/explain``.
+
+    Args:
+        body: ``{"sql": str, "analyze": bool, "format": "text"|"json"}`` — the
+            statement to explain (a ``;``-separated script is rejected by the
+            extended query protocol as a 400). ANALYZE executes the statement,
+            but the operation rolls the transaction back so no write is committed.
+
+    Returns:
+        ``{"kind": "explain", "format", "analyze", "plan"}`` — the joined plan
+        text for FORMAT TEXT, plus a ``planJson`` tree for FORMAT JSON.
+    """
+    async with get_pool(connection_id).acquire() as c:
+        op = ExplainQueryCommand(
+            c,
+            body.get("sql", ""),
+            bool(body.get("analyze", False)),
+            str(body.get("format", "text")),
+        )
         await op.apply()
 
         return op.get_result()

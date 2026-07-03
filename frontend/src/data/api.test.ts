@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { getViewDefinition, getStructure, runQuery, tableExportUrl } from "./api";
+import { getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./api";
 import type { DbObjectRef } from "../contract";
 
 afterEach(() => vi.restoreAllMocks());
@@ -135,5 +135,38 @@ describe("runQuery", () => {
         vi.stubGlobal("fetch", fetchMock);
 
         await expect(runQuery("default", "slect 1")).rejects.toThrow('syntax error at or near "slect"');
+    });
+});
+
+describe("runExplain", () => {
+    it("POSTs { sql, analyze, format } to the explain endpoint and returns the envelope", async () => {
+        const envelope  = { kind: "explain", format: "text", analyze: false, plan: "Seq Scan" };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => envelope });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const result = await runExplain("default", "select 1", { analyze: false, format: "text" });
+
+        expect(result).toEqual(envelope);
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/default/explain",
+            expect.objectContaining({
+                method : "POST",
+                headers: { "Content-Type": "application/json" },
+                body   : JSON.stringify({ sql: "select 1", analyze: false, format: "text" }),
+            }),
+        );
+    });
+
+    it("throws the backend {detail} on a non-OK response", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok        : false,
+            status    : 400,
+            statusText: "Bad Request",
+            json      : async () => ({ detail: "syntax error" }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(runExplain("default", "slect 1", { analyze: true, format: "text" }))
+            .rejects.toThrow("syntax error");
     });
 });

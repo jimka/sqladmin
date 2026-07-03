@@ -8,7 +8,7 @@ import { StatusBar }                                           from "@jimka/type
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef, QueryRowsResult, RolePrivilege, RoleSummary, TableStructure } from "./contract";
-import { getColumns, getRoleDetail, getRoles, getViewDefinition, getStructure, runQuery, tableExportUrl } from "./data/api";
+import { getColumns, getRoleDetail, getRoles, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";
 import { exportQueryResult }                                   from "./dock/exportQueryResult";
 import { buildModel }                                          from "./data/buildModel";
 import { buildSelectSql }                                      from "./data/sql";
@@ -344,6 +344,7 @@ export class SqlAdminController {
             title  : label,
             content: QueryPanel({
                 runQuery  : sql => runQuery(this._connectionId, sql),
+                runExplain: (sql, opts) => runExplain(this._connectionId, sql, opts),
                 notify,
                 onError   : error => this.notifyError(error),
                 initialSql: seedSql,

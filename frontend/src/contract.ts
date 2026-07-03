@@ -68,8 +68,22 @@ export interface QueryStatusResult {
     rowCount: number;
 }
 
+/** EXPLAIN output format. TEXT is the first cut; JSON is the follow-on tree source. */
+export type ExplainFormat = "text" | "json";
+
+/** The result of an EXPLAIN / EXPLAIN ANALYZE run. */
+export interface QueryExplainResult {
+    kind: "explain";
+    format: ExplainFormat;
+    analyze: boolean;
+    /** FORMAT TEXT: the joined plan text (one plan line per source row). */
+    plan: string;
+    /** FORMAT JSON: the raw parsed plan tree (follow-on; omitted in the text cut). */
+    planJson?: unknown;
+}
+
 /** The result of running one arbitrary SQL statement. */
-export type QueryResult = QueryRowsResult | QueryStatusResult;
+export type QueryResult = QueryRowsResult | QueryStatusResult | QueryExplainResult;
 
 /** One PostgreSQL role (user or group), with its pg_roles attribute flags. */
 export interface RoleSummary {

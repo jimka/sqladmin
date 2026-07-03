@@ -7,6 +7,12 @@
 // (INSERT/UPDATE/DDL) reports its command tag on the status line and removes the
 // result pane (editor back to full height). Errors funnel to onError.
 //
+// Two more toolbar buttons run EXPLAIN and EXPLAIN ANALYZE on the editor's
+// statement: the plan comes back through the same result pane as a read-only
+// monospace text block. Explain Analyze executes the statement (the backend
+// rolls it back), so the frontend blocks it for a statement that does not look
+// read-only — plain Explain is always safe.
+//
 // Built as a callable factory mirroring TableWorkPanel/StructurePanel. The panel
 // is self-contained: the controller holds no reference back to it, so closing
 // the dock tab disposes the subtree and the MemoryStore is collected.
@@ -28,14 +34,18 @@ import { floppy_disk }                   from "@jimka/typescript-ui/glyphs/solid
 import { angle_up }                      from "@jimka/typescript-ui/glyphs/solid/angle_up";
 import { angle_down }                    from "@jimka/typescript-ui/glyphs/solid/angle_down";
 import { file_export }                   from "@jimka/typescript-ui/glyphs/solid/file_export";
+import { diagram_project }               from "@jimka/typescript-ui/glyphs/solid/diagram_project";
+import { flask }                         from "@jimka/typescript-ui/glyphs/solid/flask";
 import { buildQueryModel }               from "../data/buildModel";
 import { HistoryCursor }                 from "../data/historyCursor";
+import { isReadOnlyStatement }           from "../data/explain";
 import { capRows, MAX_RESULT_ROWS }      from "./capRows";
 import { exportQueryResult }             from "./exportQueryResult";
+import type { ExplainOptions }           from "../data/explain";
 import type { HistoryEntry }             from "../data/queryStore";
-import type { QueryResult, QueryRowsResult } from "../contract";
+import type { QueryExplainResult, QueryResult, QueryRowsResult } from "../contract";
 
-Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export);
+Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, diagram_project, flask);
 
 // Green for the affirmative Run action, matching TableWorkPanel's add-action color.
 const RUN_COLOR = "rgb(46, 125, 50)";
@@ -45,7 +55,8 @@ const RUN_COLOR = "rgb(46, 125, 50)";
 const SAVE_COLOR = "rgb(21, 101, 192)";
 
 // Amber for the Clear (reset) action — distinct from the green Run, signalling
-// "discards your input" without the finality of a delete-red.
+// "discards your input" without the finality of a delete-red. Reused for the
+// Explain Analyze action to warn that it executes the statement.
 const CLEAR_COLOR = "rgb(204, 102, 0)";
 
 // Neutral grey for the history-recall arrows — secondary navigation, kept
@@ -55,6 +66,15 @@ const HISTORY_COLOR = "rgb(90, 90, 90)";
 // Blue for the Export action — a neutral "read out" action, distinct from the
 // green Run and amber Clear.
 const EXPORT_COLOR = "rgb(21, 101, 192)";
+
+// Neutral dark grey for the plain Explain action — it neither mutates input nor
+// executes the statement, so it carries no warning color (unlike Run/Analyze).
+const NEUTRAL_COLOR = "rgb(66, 66, 66)";
+
+// Inline style for the read-only plan view: a monospace face with preserved
+// whitespace so EXPLAIN's indented tree lines up and long lines scroll rather
+// than wrap. Applied via the suffix-"" style rule (targets the element itself).
+const PLAN_STYLE: Record<string, string> = { "font-family": "monospace", "white-space": "pre" };
 
 // The editor's starting height once the result pane is shown below it; the Split
 // gutter lets the user resize from there.
@@ -66,10 +86,15 @@ export type Notify = (message: string) => void;
 /** Runs one SQL statement and resolves its result. */
 export type RunQuery = (sql: string) => Promise<QueryResult>;
 
+/** Runs EXPLAIN / EXPLAIN ANALYZE for one statement and resolves its plan. */
+export type RunExplain = (sql: string, opts: ExplainOptions) => Promise<QueryExplainResult>;
+
 /** Construction inputs for {@link QueryPanel}. */
 export interface QueryPanelOptions {
     /** Executes the SQL (bound to the connection by the controller). */
     runQuery: RunQuery;
+    /** Runs EXPLAIN / EXPLAIN ANALYZE (bound to the connection by the controller). */
+    runExplain: RunExplain;
     /** Reports row count / command tag / hint to the status bar. */
     notify: Notify;
     /** Surfaces a failed run (the controller's notifyError). */
@@ -99,7 +124,7 @@ export interface QueryPanelOptions {
 
 /** Build a query panel: a SQL editor over a (resizable) result grid. */
 export function QueryPanel(options: QueryPanelOptions): Panel {
-    const { runQuery, notify, onError, initialSql = "", autoRun = false, onRun, getHistory, onSave, onResult } = options;
+    const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, onRun, getHistory, onSave, onResult } = options;
 
     const editor = new TextArea(initialSql);
 
@@ -116,24 +141,30 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     // positive-weight sibling the split falls back to filling the container.)
     body.addComponent(editor, { weight: 0 });
 
-    const runButton    = glyphButton("play", RUN_COLOR, "Run (Ctrl+Enter)", () => void run());
-    const saveButton   = glyphButton("floppy-disk", SAVE_COLOR, "Save query (Ctrl+S)", () => save());
-    const clearButton  = glyphButton("eraser", CLEAR_COLOR, "Clear (Alt+C)", () => clear());
-    const exportButton = glyphButton("file-export", EXPORT_COLOR, "Export results (CSV / JSON)", (e: MouseEvent) => openExportMenu(e));
+    const runButton     = glyphButton("play", RUN_COLOR, "Run (Ctrl+Enter)", () => void run());
+    const saveButton    = glyphButton("floppy-disk", SAVE_COLOR, "Save query (Ctrl+S)", () => save());
+    const clearButton   = glyphButton("eraser", CLEAR_COLOR, "Clear (Alt+C)", () => clear());
+    // The glyph registers under its hyphenated name ("diagram-project"), even
+    // though the ESM export identifier uses an underscore.
+    const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, "Explain",
+                                      () => void runExplainRun(false));
+    const analyzeButton = glyphButton("flask", CLEAR_COLOR, "Explain Analyze (executes the statement)",
+                                      () => void runExplainRun(true));
+    const exportButton  = glyphButton("file-export", EXPORT_COLOR, "Export results (CSV / JSON)", (e: MouseEvent) => openExportMenu(e));
 
     // The CSV/JSON chooser shown under the Export button; reused across clicks.
     const exportMenu = Menu();
 
     // History recall as toolbar buttons, mirroring the editor's Ctrl+↑/↓: Older
     // walks back, Newer forward. Pushed to the far right by a flexible Spacer,
-    // set apart from the left-aligned Run/Save/Clear/Export actions. Each recall
-    // refocuses the editor so keyboard recall / typing continues seamlessly.
+    // set apart from the left-aligned Run/Save/Clear/Explain/Export actions. Each
+    // recall refocuses the editor so keyboard recall / typing continues seamlessly.
     const olderButton = glyphButton("angle-up", HISTORY_COLOR, "Older query (Ctrl+↑)", () => recallInEditor(true));
     const newerButton = glyphButton("angle-down", HISTORY_COLOR, "Newer query (Ctrl+↓)", () => recallInEditor(false));
 
     const panel = Panel({ layoutManager: new BorderLayout() });
     panel.addComponent(new ToolBar({
-        components: [runButton, saveButton, clearButton, exportButton, Spacer.flex(), olderButton, newerButton],
+        components: [runButton, saveButton, clearButton, explainButton, analyzeButton, exportButton, Spacer.flex(), olderButton, newerButton],
     }), { placement: Placement.NORTH });
     panel.addComponent(body, { placement: Placement.CENTER });
 
@@ -251,8 +282,17 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
 
     // Monotonic guard: a slow run whose result arrives after a newer run started
     // is discarded so it can't clobber the newer one (mirrors showProperties's
-    // _propsSeq). The Run button is disabled for the in-flight run.
+    // _propsSeq). Run and Explain share the counter so a slow explain can't clobber
+    // a newer run (or vice versa), and all action buttons disable while one is
+    // in flight.
     let runSeq = 0;
+
+    /** Disable (or re-enable) the run/explain action buttons around an in-flight run. */
+    function setBusy(busy: boolean): void {
+        runButton.setEnabled(!busy);
+        explainButton.setEnabled(!busy);
+        analyzeButton.setEnabled(!busy);
+    }
 
     // The per-panel history-navigation cursor for Ctrl+↑/↓. Built lazily from a
     // fresh history snapshot when the user starts a browse, and reset to null on
@@ -273,7 +313,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
         // Running ends any in-progress Ctrl+↑/↓ browse; the next Ctrl+arrow rebuilds
         // the cursor from the now-updated history snapshot.
         historyCursor = null;
-        runButton.setEnabled(false);
+        setBusy(true);
         notify("Running…");
 
         try {
@@ -281,7 +321,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
 
             if (seq === runSeq) {
                 showResult(result);
-                onRun?.({ sql, timestamp: Date.now(), ok: true, rowCount: result.rowCount });
+                onRun?.({ sql, timestamp: Date.now(), ok: true, rowCount: resultRowCount(result) });
             }
         } catch (error) {
             if (seq === runSeq) {
@@ -290,7 +330,57 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
             }
         } finally {
             if (seq === runSeq) {
-                runButton.setEnabled(true);
+                setBusy(false);
+            }
+        }
+    }
+
+    /**
+     * Run EXPLAIN / EXPLAIN ANALYZE on the editor's statement and show its plan.
+     * Shares the runSeq guard and busy-button behaviour with {@link run}. Plain
+     * Explain never executes the statement; Explain Analyze does (rolled back on
+     * the backend), so it is blocked here when the statement is not plainly a read.
+     *
+     * @param analyze - True for EXPLAIN ANALYZE, false for plain EXPLAIN.
+     */
+    async function runExplainRun(analyze: boolean): Promise<void> {
+        const sql = editor.getValue().trim();
+
+        if (!sql) {
+            notify("Enter a SQL statement");
+
+            return;
+        }
+
+        if (analyze && !isReadOnlyStatement(sql)) {
+            // Frontend guard: don't round-trip an ANALYZE that would execute a
+            // write. The backend rolls it back regardless, but plain Explain is
+            // the safe path to a plan without running the statement at all.
+            notify("EXPLAIN ANALYZE will EXECUTE this statement (changes are rolled back). "
+                 + "It does not look read-only — use Explain to see the plan without running it.");
+
+            return;
+        }
+
+        const seq = ++runSeq;
+
+        historyCursor = null;
+        setBusy(true);
+        notify(analyze ? "Explaining (analyze)…" : "Explaining…");
+
+        try {
+            const result = await runExplain(sql, { analyze, format: "text" });
+
+            if (seq === runSeq) {
+                showResult(result);
+            }
+        } catch (error) {
+            if (seq === runSeq) {
+                onError(error);
+            }
+        } finally {
+            if (seq === runSeq) {
+                setBusy(false);
             }
         }
     }
@@ -317,12 +407,42 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
             notify(truncated
                 ? `showing first ${rows.length} of ${result.rows.length} — results truncated`
                 : `${result.rowCount} row(s)`);
-        } else {
-            // No result set (INSERT/UPDATE/DDL): drop the grid, editor fills again.
-            hideResultPane();
-            setCurrentResult(null);
-            notify(result.command || "OK");
+
+            return;
         }
+
+        if (result.kind === "explain") {
+            // A plan replaces any prior rows grid, so it is not exportable.
+            setCurrentResult(null);
+            showPlan(result);
+
+            return;
+        }
+
+        // No result set (INSERT/UPDATE/DDL): drop the grid, editor fills again.
+        hideResultPane();
+        setCurrentResult(null);
+        notify(result.command || "OK");
+    }
+
+    /**
+     * Row count to record in history for a run. A rows/status result carries one;
+     * an explain result (which never reaches here from {@link run}) has none, so 0.
+     */
+    function resultRowCount(result: QueryResult): number {
+        return result.kind === "explain" ? 0 : result.rowCount;
+    }
+
+    /** Render an EXPLAIN plan in the result pane as a read-only monospace block. */
+    function showPlan(result: QueryExplainResult): void {
+        // Reuse the same result pane/gutter as a rows Table — just different
+        // content: a read-only TextArea seeded with the joined plan text. Read-only
+        // (not disabled) keeps the plan selectable and copyable while blocking edits.
+        const view = new TextArea(result.plan, { styleRules: [{ suffix: "", styles: PLAN_STYLE }] });
+
+        view.setReadOnly(true);
+        showResultPane(view);
+        notify(result.analyze ? "EXPLAIN ANALYZE plan (side-effects rolled back)" : "EXPLAIN plan");
     }
 
     // Editor accelerators, all wired through the editor's own typed keydown
