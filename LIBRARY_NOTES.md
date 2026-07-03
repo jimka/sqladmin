@@ -8,6 +8,132 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🩹🔎 `autoScroll` Panel keeps its scrollbar gutter + scroll shadow after content shrinks
+
+A `Panel` with `autoScroll` reserves a scrollbar **gutter** (it shrinks its
+reported inner size by the bar width — `measureScrollbarGutter`) and paints a
+**scroll shadow** overlay while its content overflows. Growing the content past
+the viewport engages both correctly. But *shrinking* the content back within the
+viewport — by removing children — does **not** clear them: the reserved gutter
+space and the (e.g. bottom) shadow linger until some **later, unrelated** layout
+pass runs. Adding another child triggers such a pass, which is why the stale
+state appears to "fix itself" on the next add.
+
+**Root cause (likely):** `measureScrollbarGutter` runs in `Panel.doLayout`, but it
+only calls `scheduleLayout()` for a follow-up pass when the measured gutter
+*changes*. On a shrink the panel still measures as overflowing at that instant, so
+it detects no change, schedules no follow-up, and both the gutter and the shadow
+(`updateScrollShadows`, same pass) keep their overflow-state values. Nothing
+re-measures until an external layout pass happens to run.
+
+**Repro (sqladmin):** the filter dialog's condition rows live in an `autoScroll:
+"y"` viewport. Add enough rows to show the scrollbar, then remove rows back below
+the cap — the reserved gutter strip and the bottom scroll shadow stay until you
+add a row again.
+
+**Worked around (app):** after removing a row, force a follow-up layout pass once
+the removal has settled — `requestAnimationFrame(() => viewport.flushLayout())`
+(`dock/FilterDialog.ts`, `removeRow`). That second pass re-measures against the
+shrunk content and clears both the gutter and the shadow.
+
+**Possible library improvement:** have `measureScrollbarGutter` / the shadow update
+schedule a follow-up re-measure whenever a layout pass *could* have shrunk the
+content (e.g. always, on the pass after a child count / content-size decrease),
+not only when the gutter value it reads this pass differs — so the overflow→fit
+transition self-clears the same way the fit→overflow transition self-engages.
+
+**Status:** 🩹 worked around in the app; 🔎 fix belongs in the library.
+
+---
+
+## ✂️🩹🔎 `Button` can't tint the glyph independently of the text — no `glyphColor` option
+
+`Button`'s `foregroundColor` sets CSS `color` on the whole button, and both the
+title and the leading glyph inherit it (the glyph's SVG fills with
+`currentColor`). So there's no first-class way to render, say, a green glyph
+beside default-black text — a single button-level color paints both.
+
+**Repro (sqladmin):** the filter dialog's "Add condition" button wants a green
+`plus` glyph with a normal black label. Setting `foregroundColor: green` turned
+the *text* green too.
+
+**Worked around (app):** leave the button's `foregroundColor` unset (so the text
+keeps the inherited default) and tint only the glyph by reaching into its
+component — `addButton.getGlyph()?.setForegroundColor(green)` — which sets `color`
+on the glyph element alone, picked up by its `currentColor` fill
+(`dock/FilterDialog.ts`). Works, but relies on the `getGlyph()` escape hatch
+rather than a declared option, and there is no matching option for the
+description either.
+
+**Possible library improvement:** add a `glyphColor` (and `descriptionColor`)
+option / setter so each content part can be tinted independently of the button's
+`foregroundColor`, without reaching into `getGlyph()`.
+
+**Status:** 🩹 worked around in the app; 🔎 enhancement belongs in the library.
+
+---
+
+## 🐞🩹🔎 `ComboBox` with plain-string items makes `getValue()` return the row *index*, not the string
+
+`ComboBox({ items: ["id", "name", …] })` auto-keys each plain-string item by its
+array position — `setItems`/`AbstractCustomList` stores it as `{ key: String(i),
+label }`. `getValue()` returns the selected item's **key**, so it yields `"0"`,
+`"1"`, … — the positional index — **not** the visible string. The API reads as if
+`getValue()` returns the chosen string, so this is silent and easy to miss: the
+label shows correctly, only the *value* is wrong.
+
+**Repro (sqladmin):** the filter dialog built its column and operator combos from
+plain-string arrays and used `columnCombo.getValue()` as the filter field. Apply
+sent `field: "1"`; the backend `FilterCompiler` rejected it (`Unknown filter
+column '1'`) → HTTP **422 Unprocessable Entity**, so filtering never worked. The
+operator combo hit the same bug — `getValue()` returned `"0"`, so the label→key
+lookup always fell through to its `contains` default. Reopening the dialog then
+couldn't re-select the column, because the stored `"1"` matched no column name.
+
+**Worked around (app):** build both combos with **explicit-keyed** items —
+`{ key, label }` where `key` is the meaningful value (`c.name` / the operator
+key) — so `getValue()` round-trips the real value, and seed the selection with the
+`value:` option (`dock/FilterDialog.ts`, `buildConditionRow`). This is the
+documented escape hatch, but it is not the obvious default.
+
+**Possible library improvement:** default a plain-string item's key to the string
+itself (not its index), or at least document loudly that plain-string items are
+positional-keyed and `getValue()` returns the index — the current default is a
+footgun for the common "list of names" case.
+
+**Status:** 🩹 worked around in the app; 🔎 fix/doc belongs in the library.
+
+---
+
+## ✂️🩹🔎 `Dialog` can't grow to its content after `show()` — no resize-on-content-change
+
+A `Dialog`'s height is computed **once**, in the constructor, from the content
+component's preferred size (`TITLE_HEIGHT + contentHeight + BUTTON_HEIGHT`), and
+never revisited. Its content container is `Fit` + `overflow-y: auto` but the Fit
+layout is **not** marked overflowing, so content that grows *after* `show()` is
+stretched/compressed to the fixed area rather than scrolled — and there is no
+`setContentHeight` / auto-resize hook to grow the dialog to fit new content.
+
+**Repro (sqladmin):** the filter dialog lets the user add condition rows. Appending
+a row grows the form's preferred height, but the already-shown dialog stays its
+original size, so a naive form would clip the new rows.
+
+**Worked around (app):** host the rows in a fixed-height, `autoScroll: "y"` Panel
+(the documented `Panel.setAutoScroll` recipe — `overflow-y: auto` + the layout's
+overflowing flag) with its height pinned via `min = preferred = max`, so the
+dialog stays a constant size and extra rows scroll inside it (`dock/FilterDialog.ts`,
+`buildConditionForm`). This works but means the dialog can't simply grow with its
+content the way a resize-aware dialog would.
+
+**Possible library improvement:** add a `Dialog` option/method to resize to its
+content when the content's preferred size changes after `show()` (recompute
+height + re-center), for forms that add/remove rows. Until then, consumers must
+pin a scrolling viewport themselves.
+
+**Status:** 🩹 worked around in the app; 🔎 enhancement belongs in the library.
+
+---
+
 ## 🐞🩹🔎 `Event.addListener`'s capture dispatcher `stopPropagation`s events, swallowing document-level accelerators
 
 `Event.addListener` (`core/Event.ts`) does not attach a per-element listener — it

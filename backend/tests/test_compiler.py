@@ -99,6 +99,14 @@ def test_filter_like_special_chars_escaped() -> None:
     assert params == [r"%a\%b\_c%"]
 
 
+def test_filter_like_escapes_backslash() -> None:
+    # A literal backslash in the value must be doubled before the %/_ escaping, so
+    # the `ESCAPE '\'` clause treats it as data and not as an escape introducer.
+    _, params = FilterCompiler([{"type": "contains", "field": "name", "value": r"a\b"}], COLS).compile()
+
+    assert params == [r"%a\\b%"]
+
+
 def test_filter_in() -> None:
     where, params = FilterCompiler([{"type": "in", "field": "id", "values": [1, 2, 3]}], COLS).compile()
 

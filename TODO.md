@@ -11,8 +11,6 @@ Deferred features and known issues. Items with an implementation plan live in
 - **structure-detail** — indexes, constraints, foreign keys in the Structure
   panel, with foreign-key click-through.
 - **query-explain** — EXPLAIN / EXPLAIN ANALYZE run mode + plan view.
-- **grid-filter-sort** — column sort + WHERE builder (activates the store's
-  `remoteSort` / `remoteFilter` seams).
 
 ## Backlog (no plan yet)
 
