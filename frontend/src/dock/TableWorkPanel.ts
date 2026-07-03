@@ -17,17 +17,18 @@ import { Button }                      from "@jimka/typescript-ui/component/butt
 import { Table }                       from "@jimka/typescript-ui/component/table";
 import type { ColumnSpec }             from "@jimka/typescript-ui/component/table";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
-import { Dialog, DialogButtons }       from "@jimka/typescript-ui/overlay";
+import { Dialog, DialogButtons, Menu } from "@jimka/typescript-ui/overlay";
 import type { AjaxStore, ModelRecord } from "@jimka/typescript-ui/data";
 import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
 import { plus }                        from "@jimka/typescript-ui/glyphs/solid/plus";
 import { minus }                       from "@jimka/typescript-ui/glyphs/solid/minus";
 import { save }                        from "@jimka/typescript-ui/glyphs/solid/save";
 import { filter }                      from "@jimka/typescript-ui/glyphs/solid/filter";
+import { file_export }                 from "@jimka/typescript-ui/glyphs/solid/file_export";
 import type { ColumnMeta }             from "../contract";
 import { openFilterDialog }            from "./FilterDialog";
 
-Glyph.register(refresh, plus, minus, save, filter);
+Glyph.register(refresh, plus, minus, save, filter, file_export);
 
 /** Toolbar glyph colors: blue for neutral actions, green to add, red to delete. */
 const BLUE  = "rgb(30, 100, 200)";
@@ -40,12 +41,15 @@ const FILTER_ACTIVE = "rgb(230, 145, 30)";
 /** Surface a short status message (validation / save feedback) to the user. */
 export type Notify = (message: string) => void;
 
+/** Export the whole relation server-side (the streaming full-table export). */
+export type ExportTable = (format: "csv" | "json") => void;
+
 /** Build the work panel hosting a table's data grid. */
-export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[], notify: Notify): Panel {
+export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable): Panel {
     const dataGrid = Table(store, buildColumnSpec(columns));
 
     const panel = Panel({ layoutManager: new BorderLayout() });
-    panel.addComponent(buildToolBar(store, dataGrid, columns, notify), { placement: Placement.NORTH });
+    panel.addComponent(buildToolBar(store, dataGrid, columns, notify, onExport), { placement: Placement.NORTH });
     panel.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
 
     return panel;
@@ -61,20 +65,33 @@ function buildColumnSpec(columns: ColumnMeta[]): ColumnSpec {
 }
 
 /** Glyph-only toolbar wired to the store (CRUD) with validation + confirmation. */
-function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], notify: Notify): ToolBar {
+function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], notify: Notify, onExport: ExportTable): ToolBar {
     const deleteButton = glyphButton("minus", RED, "Delete row", () => void confirmDelete(store, dataGrid));
     const saveButton = glyphButton("save", BLUE, "Save", () => save_(store, columns, notify));
     const filterButton = glyphButton("filter", BLUE, "Filter rows", () => openFilterDialog(store, columns));
+
+    // The full-relation export runs server-side (it streams the whole table, not
+    // the grid's loaded page), so it stays correct regardless of paging, sort, or
+    // filter — the table analogue of the query-result Export button. The CSV/JSON
+    // chooser opens at the click point and is reused across clicks.
+    const exportMenu = Menu();
+    const exportButton = glyphButton("file-export", BLUE, "Export table (CSV / JSON)", event => {
+        exportMenu.show(event.clientX, event.clientY, [
+            { text: "Export CSV",  action: () => onExport("csv") },
+            { text: "Export JSON", action: () => onExport("json") },
+        ]);
+    });
 
     const bar = new ToolBar({
         components: [
             glyphButton("plus", GREEN, "Add row", () => store.add({})),
             deleteButton,
             saveButton,
-            // Flex spacer pushes the view actions (Filter, Refresh) to the far
-            // right, away from the edit actions.
+            // Flex spacer pushes the view actions (Filter, Export, Refresh) to the
+            // far right, away from the edit actions.
             Spacer.flex(),
             filterButton,
+            exportButton,
             // Refresh discards unsaved edits then reloads from the server. reject()
             // must precede load(): load() replaces the records but leaves pending
             // removals queued, so without it a deleted row would reappear yet stay
@@ -179,7 +196,7 @@ async function confirmDelete(store: AjaxStore, dataGrid: Table): Promise<void> {
 }
 
 /** A glyph-only toolbar button: colored icon, hover tooltip + accessible name, click handler. */
-function glyphButton(glyph: string, color: string, label: string, handler: () => void): Button {
+function glyphButton(glyph: string, color: string, label: string, handler: (event: MouseEvent) => void): Button {
     // showText:false keeps the face glyph-only while the label drives both the
     // hover tooltip and the aria-label (accessible name) — no manual setLabel.
     // showDescription:false keeps a description (e.g. the Filter button's

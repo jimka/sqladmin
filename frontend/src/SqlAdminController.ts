@@ -7,8 +7,9 @@ import type { DockPanelEvent }                                 from "@jimka/type
 import { StatusBar }                                           from "@jimka/typescript-ui/component/container";
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef, RolePrivilege, RoleSummary, TableStructure } from "./contract";
-import { getColumns, getRoleDetail, getRoles, getViewDefinition, getStructure, runQuery } from "./data/api";
+import type { ColumnMeta, DbObjectRef, QueryRowsResult, RolePrivilege, RoleSummary, TableStructure } from "./contract";
+import { getColumns, getRoleDetail, getRoles, getViewDefinition, getStructure, runQuery, tableExportUrl } from "./data/api";
+import { exportQueryResult }                                   from "./dock/exportQueryResult";
 import { buildModel }                                          from "./data/buildModel";
 import { buildSelectSql }                                      from "./data/sql";
 import { buildStore }                                          from "./data/stores";
@@ -18,6 +19,7 @@ import { StructurePanel }                                      from "./dock/Stru
 import { DefinitionPanel }                                     from "./dock/DefinitionPanel";
 import { QueryPanel }                                          from "./dock/QueryPanel";
 import { RoleGrantsPanel }                                     from "./dock/RoleGrantsPanel";
+import { exportRoleGrants }                                     from "./dock/exportRoleGrants";
 import { PropertiesPanel, relationTypeLabel }                  from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                from "./roles/RolesPropertiesPanel";
 import { QueryHistoryStore, SavedQueryStore }                  from "./data/queryStore";
@@ -93,6 +95,17 @@ export class SqlAdminController {
     // has since moved on is discarded instead of clobbering the current view.
     private _propsSeq: number = 0;
 
+    // The latest rows result each query panel displayed, keyed by panel id (set
+    // via the panel's injected onResult), plus the currently focused panel id.
+    // Together they let the Query-menu "Export results…" item act on the active
+    // panel without the controller holding a reference back to the panel object.
+    private readonly _activeQueryResult: Map<string, QueryRowsResult | null> = new Map();
+    // A grants tab's full grant set, keyed by panel id, so the active-tab export
+    // covers a focused role grants tab the same way _activeQueryResult covers a
+    // query panel. Grants tabs are not in _openPanels (no DbObjectRef).
+    private readonly _activeRoleGrants: Map<string, { role: string; privileges: RolePrivilege[] }> = new Map();
+    private _activePanelId: string | null = null;
+
     // The same monotonic guard for the Roles view's detail fetch.
     private _roleSeq: number = 0;
 
@@ -115,13 +128,20 @@ export class SqlAdminController {
         this._saved   = new SavedQueryStore(connectionId, window.localStorage);
 
         // Disposal is wired once: the dock fires "close" only on genuine
-        // destruction (a tear-off fires "detach" and the panel survives).
-        this.dock.on("close", (e: DockPanelEvent) => this.disposePanel(e.id));
+        // destruction (a tear-off fires "detach" and the panel survives). A
+        // closed query panel's held result is dropped so it can't be exported.
+        this.dock.on("close", (e: DockPanelEvent) => {
+            this.disposePanel(e.id);
+            this._activeQueryResult.delete(e.id);
+            this._activeRoleGrants.delete(e.id);
+        });
 
         // Switching tabs syncs the navigator selection and the status bar to the
-        // now-active panel. A null payload means no panel is focused.
+        // now-active panel, and records the active panel id so the Query-menu
+        // export targets it. A null payload means no panel is focused.
         this.dock.on("focus", (e: DockPanelEvent | null) => {
             if (e) {
+                this._activePanelId = e.id;
                 this.syncToPanel(e.id);
             }
         });
@@ -193,8 +213,8 @@ export class SqlAdminController {
             title  : ref.name ?? id,
             tooltip: this.panelTooltip(ref),
             content: isReadOnly
-                ? () => ViewWorkPanel(store, columns)
-                : () => TableWorkPanel(store, columns, notify)
+                ? () => ViewWorkPanel(store, columns, format => this.exportTable(ref, format))
+                : () => TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format))
         });
 
         try {
@@ -335,9 +355,111 @@ export class SqlAdminController {
                 getHistory: () => this._history.list().map(e => e.sql),
                 // The Save toolbar button hands back the trimmed SQL; the
                 // controller owns the naming modal and the saved-query store.
-                onSave    : (sql: string) => void this.promptAndSaveQuery(sql)
+                onSave    : (sql: string) => void this.promptAndSaveQuery(sql),
+                // Mirror this panel's latest result so the Query-menu export can
+                // reach it while it is the active panel.
+                onResult  : (result: QueryRowsResult | null) => this._activeQueryResult.set(id, result)
             })
         });
+    }
+
+    /**
+     * Export the active work tab's data as CSV or JSON — the menubar's "Export
+     * results…" convenience, routed to whichever tab is focused. A query panel
+     * exports its loaded result client-side; a table or view data tab streams the
+     * whole relation server-side; a role grants tab serializes its full grant set.
+     * Each matches that tab's own toolbar Export button. Notifies when the focused
+     * tab has nothing to export — a structure/definition tab, an empty query
+     * panel, or no open tab.
+     *
+     * @param format - The export format, "csv" or "json".
+     */
+    exportActive(format: "csv" | "json"): void {
+        const id = this._activePanelId;
+
+        if (id) {
+            const result = this._activeQueryResult.get(id);
+
+            if (result) {
+                exportQueryResult(result, format, message =>
+                    this.statusBar.setMessage(`${this._connectionId} · export: ${message}`));
+
+                return;
+            }
+
+            // A table/view data tab carries a store in _openPanels; its ref drives
+            // the server-side full-relation export (a structure/definition detail
+            // tab has no store, so it falls through to the notify below).
+            const panel = this._openPanels.get(id);
+
+            if (panel && panel.store) {
+                this.exportTable(panel.ref, format);
+
+                return;
+            }
+
+            // A role grants tab is tracked separately (it has no DbObjectRef); its
+            // full grant set serializes client-side, all pages included.
+            const grants = this._activeRoleGrants.get(id);
+
+            if (grants) {
+                exportRoleGrants(grants.role, grants.privileges, format);
+
+                return;
+            }
+        }
+
+        this.statusBar.setMessage("No data to export");
+    }
+
+    /**
+     * Fetch a role's detail and export its full grant set as CSV or JSON — the
+     * roles context-menu convenience, usable on a role whose tab is not open.
+     * Notifies when the role has no table grants.
+     *
+     * @param role - The role to export.
+     * @param format - The export format, "csv" or "json".
+     */
+    async exportRole(role: string, format: "csv" | "json"): Promise<void> {
+        let privileges: RolePrivilege[];
+
+        try {
+            privileges = (await getRoleDetail(this._connectionId, role)).privileges;
+        } catch (err) {
+            this.notifyError(err);
+
+            return;
+        }
+
+        if (privileges.length === 0) {
+            this.statusBar.setMessage(`${role} has no table grants to export`);
+
+            return;
+        }
+
+        exportRoleGrants(role, privileges, format);
+    }
+
+    /**
+     * Open the backend streaming export for a table/view: navigate a hidden
+     * anchor to the export URL so the `attachment` response downloads the full
+     * relation without buffering it in the browser (a big table exports without
+     * freezing the grid). Works identically for a table and a view.
+     *
+     * @param ref - The table/view to export.
+     * @param format - The export format, "csv" or "json".
+     */
+    exportTable(ref: DbObjectRef, format: "csv" | "json"): void {
+        const anchor = document.createElement("a");
+        anchor.href          = tableExportUrl(ref, format);
+        // The download attribute makes this a file save rather than a top-level
+        // navigation, and names the file `<schema>.<table>.<format>`.
+        anchor.download      = `${[ref.schema, ref.name].filter(Boolean).join(".") || "export"}.${format}`;
+        anchor.style.display = "none";
+
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
     }
 
     /**
@@ -613,8 +735,12 @@ export class SqlAdminController {
         this.dock.addPanel({
             id,
             title  : `Grants: ${role}`,
-            content: RoleGrantsPanel(privileges),
+            content: RoleGrantsPanel(role, privileges),
         });
+
+        // Track the grant set so the active-tab export (Tools menu) can reach it
+        // while this tab is focused, mirroring _activeQueryResult for query panels.
+        this._activeRoleGrants.set(id, { role, privileges });
     }
 
     /** Report a sync outcome: each failure as an error, or a success message. */

@@ -17,30 +17,34 @@ import { Button }                      from "@jimka/typescript-ui/component/butt
 import { Table }                       from "@jimka/typescript-ui/component/table";
 import type { ColumnSpec }             from "@jimka/typescript-ui/component/table";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
+import { Menu }                        from "@jimka/typescript-ui/overlay";
 import type { AjaxStore }              from "@jimka/typescript-ui/data";
 import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
+import { file_export }                 from "@jimka/typescript-ui/glyphs/solid/file_export";
 import type { ColumnMeta }             from "../contract";
+import type { ExportTable }            from "./TableWorkPanel";
 
-Glyph.register(refresh);
+Glyph.register(refresh, file_export);
 
 /** Neutral toolbar glyph color, matching TableWorkPanel's Refresh action. */
 const BLUE = "rgb(30, 100, 200)";
 
 /**
  * Build the read-only work panel for a view/materialized view: a paginated data
- * grid with a Refresh action, and nothing else on the toolbar.
+ * grid with Export and Refresh actions on the toolbar.
  *
  * @param store - The paginated AjaxStore over the view's rows (never written to).
  * @param columns - The view's introspected columns (drive the grid's columns).
+ * @param onExport - Streams the whole relation server-side in the chosen format.
  * @returns The assembled panel.
  */
-export function ViewWorkPanel(store: AjaxStore, columns: ColumnMeta[]): Panel {
+export function ViewWorkPanel(store: AjaxStore, columns: ColumnMeta[], onExport: ExportTable): Panel {
     // Read-only grid: every cell is locked (rowReadOnly), the same lock
     // StructurePanel/RoleGrantsPanel use.
     const dataGrid = Table(store, buildViewColumnSpec(columns));
 
     const panel = Panel({ layoutManager: new BorderLayout() });
-    panel.addComponent(buildToolBar(store), { placement: Placement.NORTH });
+    panel.addComponent(buildToolBar(store, onExport), { placement: Placement.NORTH });
     panel.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
 
     return panel;
@@ -55,14 +59,27 @@ function buildViewColumnSpec(columns: ColumnMeta[]): ColumnSpec {
 }
 
 /**
- * Build the toolbar: a flex spacer and a lone Refresh button, right-aligned to
- * match the Refresh position in TableWorkPanel's toolbar.
+ * Build the toolbar: a flex spacer then the Export and Refresh buttons, right-
+ * aligned to match TableWorkPanel's view-action group.
  */
-function buildToolBar(store: AjaxStore): ToolBar {
+function buildToolBar(store: AjaxStore, onExport: ExportTable): ToolBar {
+    // The full-relation export streams the whole view server-side (not the loaded
+    // page), matching TableWorkPanel's Export button. The CSV/JSON chooser opens
+    // at the click point and is reused across clicks.
+    const exportMenu = Menu();
+    const exportButton = glyphButton("file-export", BLUE, "Export view (CSV / JSON)", event => {
+        exportMenu.show(event.clientX, event.clientY, [
+            { text: "Export CSV",  action: () => onExport("csv") },
+            { text: "Export JSON", action: () => onExport("json") },
+        ]);
+    });
+
     return new ToolBar({
         components: [
-            // Flex spacer pushes Refresh to the far right, matching TableWorkPanel.
+            // Flex spacer pushes the view actions to the far right, matching
+            // TableWorkPanel.
             Spacer.flex(),
+            exportButton,
             // No reject() before load(): a read-only store has no pending edits.
             glyphButton("refresh", BLUE, "Refresh", () => void store.load()),
         ],
@@ -70,7 +87,7 @@ function buildToolBar(store: AjaxStore): ToolBar {
 }
 
 /** A glyph-only toolbar button: colored icon, hover tooltip + accessible name, click handler. */
-function glyphButton(glyph: string, color: string, label: string, handler: () => void): Button {
+function glyphButton(glyph: string, color: string, label: string, handler: (event: MouseEvent) => void): Button {
     // showText:false keeps the face glyph-only while the label drives both the
     // hover tooltip and the aria-label (accessible name) — no manual setLabel.
     const button = Button({ glyph, text: label, showText: false, foregroundColor: color, compact: true });

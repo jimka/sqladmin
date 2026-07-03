@@ -85,6 +85,14 @@ export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
             items.push({ text: "Open definition", action: () => void controller.openDefinition(ref, node) });
         }
 
+        // Export streams the full relation server-side (not the loaded page), so a
+        // large table/view exports without bulk-loading the grid.
+        items.push({ separator: true });
+        items.push({ text: "Export", submenu: { label: "Export", items: [
+            { text: "CSV",  action: () => controller.exportTable(ref, "csv") },
+            { text: "JSON", action: () => controller.exportTable(ref, "json") },
+        ] } });
+
         contextMenu.show(event.clientX, event.clientY, items);
     });
 

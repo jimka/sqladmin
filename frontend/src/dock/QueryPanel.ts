@@ -20,19 +20,22 @@ import { Button }                        from "@jimka/typescript-ui/component/bu
 import { Table }                         from "@jimka/typescript-ui/component/table";
 import { TextArea }                      from "@jimka/typescript-ui/component/input";
 import { MemoryStore }                   from "@jimka/typescript-ui/data";
+import { Menu }                          from "@jimka/typescript-ui/overlay";
 import { Glyph }                         from "@jimka/typescript-ui/component/display";
 import { play }                          from "@jimka/typescript-ui/glyphs/solid/play";
 import { eraser }                        from "@jimka/typescript-ui/glyphs/solid/eraser";
 import { floppy_disk }                   from "@jimka/typescript-ui/glyphs/solid/floppy_disk";
 import { angle_up }                      from "@jimka/typescript-ui/glyphs/solid/angle_up";
 import { angle_down }                    from "@jimka/typescript-ui/glyphs/solid/angle_down";
+import { file_export }                   from "@jimka/typescript-ui/glyphs/solid/file_export";
 import { buildQueryModel }               from "../data/buildModel";
 import { HistoryCursor }                 from "../data/historyCursor";
 import { capRows, MAX_RESULT_ROWS }      from "./capRows";
+import { exportQueryResult }             from "./exportQueryResult";
 import type { HistoryEntry }             from "../data/queryStore";
-import type { QueryResult }              from "../contract";
+import type { QueryResult, QueryRowsResult } from "../contract";
 
-Glyph.register(play, eraser, floppy_disk, angle_up, angle_down);
+Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export);
 
 // Green for the affirmative Run action, matching TableWorkPanel's add-action color.
 const RUN_COLOR = "rgb(46, 125, 50)";
@@ -48,6 +51,10 @@ const CLEAR_COLOR = "rgb(204, 102, 0)";
 // Neutral grey for the history-recall arrows — secondary navigation, kept
 // visually quieter than the colored Run/Save/Clear actions.
 const HISTORY_COLOR = "rgb(90, 90, 90)";
+
+// Blue for the Export action — a neutral "read out" action, distinct from the
+// green Run and amber Clear.
+const EXPORT_COLOR = "rgb(21, 101, 192)";
 
 // The editor's starting height once the result pane is shown below it; the Split
 // gutter lets the user resize from there.
@@ -81,11 +88,18 @@ export interface QueryPanelOptions {
      * view, handing over the trimmed SQL and leaving the naming/persist to it.
      */
     onSave?: (sql: string) => void;
+    /**
+     * Called whenever the displayed result changes: the rows result on a
+     * successful SELECT/RETURNING, or null on a clear or a status-only result.
+     * Lets the controller route the Query-menu "Export results…" item to this
+     * (the active) panel without holding a reference back to it.
+     */
+    onResult?: (result: QueryRowsResult | null) => void;
 }
 
 /** Build a query panel: a SQL editor over a (resizable) result grid. */
 export function QueryPanel(options: QueryPanelOptions): Panel {
-    const { runQuery, notify, onError, initialSql = "", autoRun = false, onRun, getHistory, onSave } = options;
+    const { runQuery, notify, onError, initialSql = "", autoRun = false, onRun, getHistory, onSave, onResult } = options;
 
     const editor = new TextArea(initialSql);
 
@@ -102,24 +116,59 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     // positive-weight sibling the split falls back to filling the container.)
     body.addComponent(editor, { weight: 0 });
 
-    const runButton   = glyphButton("play", RUN_COLOR, "Run (Ctrl+Enter)", () => void run());
-    const saveButton  = glyphButton("floppy-disk", SAVE_COLOR, "Save query (Ctrl+S)", () => save());
-    const clearButton = glyphButton("eraser", CLEAR_COLOR, "Clear (Alt+C)", () => clear());
+    const runButton    = glyphButton("play", RUN_COLOR, "Run (Ctrl+Enter)", () => void run());
+    const saveButton   = glyphButton("floppy-disk", SAVE_COLOR, "Save query (Ctrl+S)", () => save());
+    const clearButton  = glyphButton("eraser", CLEAR_COLOR, "Clear (Alt+C)", () => clear());
+    const exportButton = glyphButton("file-export", EXPORT_COLOR, "Export results (CSV / JSON)", (e: MouseEvent) => openExportMenu(e));
+
+    // The CSV/JSON chooser shown under the Export button; reused across clicks.
+    const exportMenu = Menu();
 
     // History recall as toolbar buttons, mirroring the editor's Ctrl+↑/↓: Older
     // walks back, Newer forward. Pushed to the far right by a flexible Spacer,
-    // set apart from the left-aligned Run/Save/Clear actions. Each recall
+    // set apart from the left-aligned Run/Save/Clear/Export actions. Each recall
     // refocuses the editor so keyboard recall / typing continues seamlessly.
     const olderButton = glyphButton("angle-up", HISTORY_COLOR, "Older query (Ctrl+↑)", () => recallInEditor(true));
     const newerButton = glyphButton("angle-down", HISTORY_COLOR, "Newer query (Ctrl+↓)", () => recallInEditor(false));
 
     const panel = Panel({ layoutManager: new BorderLayout() });
     panel.addComponent(new ToolBar({
-        components: [runButton, saveButton, clearButton, Spacer.flex(), olderButton, newerButton],
+        components: [runButton, saveButton, clearButton, exportButton, Spacer.flex(), olderButton, newerButton],
     }), { placement: Placement.NORTH });
     panel.addComponent(body, { placement: Placement.CENTER });
 
     let resultShown = false;
+
+    // The panel's latest rows result, exposed to the controller via onResult and
+    // serialized by the Export button. Null for an empty panel or a status-only
+    // result; the Export button is enabled iff this is non-null.
+    let currentResult: QueryRowsResult | null = null;
+
+    /** Record the displayed result, mirror it to the controller, and sync Export. */
+    function setCurrentResult(result: QueryRowsResult | null): void {
+        currentResult = result;
+        onResult?.(result);
+        exportButton.setEnabled(result !== null);
+    }
+
+    /**
+     * Open the CSV/JSON export chooser at the click point, exporting the panel's
+     * held result. A no-op when there is no rows result (the button is disabled
+     * then, so this is defensive).
+     *
+     * @param event - The Export button's click, for the menu's placement.
+     */
+    function openExportMenu(event: MouseEvent): void {
+        if (!currentResult) {
+            return;
+        }
+
+        const result = currentResult;
+        exportMenu.show(event.clientX, event.clientY, [
+            { text: "Export CSV",  action: () => exportQueryResult(result, "csv", notify) },
+            { text: "Export JSON", action: () => exportQueryResult(result, "json", notify) },
+        ]);
+    }
 
     /** Swap in the result grid, adding (and sizing) the result pane on first use. */
     function showResultPane(table: Component): void {
@@ -170,6 +219,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     function clear(): void {
         editor.setValue("");
         hideResultPane();
+        setCurrentResult(null);
     }
 
     /**
@@ -263,12 +313,14 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
             // Read-only: editing a query result is a Non-Goal (no PK, no write-back).
             // A fresh store + columns per run means columns never bleed across runs.
             showResultPane(Table(store, { columns: [], rowReadOnly: () => true }));
+            setCurrentResult(result);
             notify(truncated
                 ? `showing first ${rows.length} of ${result.rows.length} — results truncated`
                 : `${result.rowCount} row(s)`);
         } else {
             // No result set (INSERT/UPDATE/DDL): drop the grid, editor fills again.
             hideResultPane();
+            setCurrentResult(null);
             notify(result.command || "OK");
         }
     }
@@ -352,8 +404,10 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
         }
     }
 
-    // Initial state: disabled for an empty panel, enabled when seeded.
+    // Initial state: Run/Save/Clear disabled for an empty panel (enabled when
+    // seeded); Export disabled until a rows result is shown.
     syncToolbarButtons();
+    exportButton.setEnabled(false);
 
     // Focus the editor so the user can type on a fresh tab straight away. The
     // panel content is built before the Dock mounts it, so the element may not
@@ -368,8 +422,13 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     return panel;
 }
 
-/** A glyph-only toolbar button: colored icon, hover tooltip + accessible name, click handler. */
-function glyphButton(glyph: string, color: string, label: string, handler: () => void): Button {
+/**
+ * A glyph-only toolbar button: colored icon, hover tooltip + accessible name,
+ * click handler. The handler receives the click's `MouseEvent` so an action that
+ * opens a menu can position it at the click point (a `() => void` still binds,
+ * ignoring the argument).
+ */
+function glyphButton(glyph: string, color: string, label: string, handler: (event: MouseEvent) => void): Button {
     // showText:false keeps the face glyph-only while the label drives both the
     // hover tooltip and the aria-label (accessible name) — no manual setLabel.
     const button = Button({ glyph, text: label, showText: false, foregroundColor: color, compact: true });

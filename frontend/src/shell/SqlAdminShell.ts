@@ -73,6 +73,7 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
                 onNewQuery     : () => controller.openQuery(),
                 onOpenSaved    : () => controller.showQueriesView("saved"),
                 onQueryHistory : () => controller.showQueriesView("recent"),
+                onExportResults: format => controller.exportActive(format),
             }), constraints: { placement: Placement.NORTH } },
             { component: workArea,             constraints: { placement: Placement.CENTER } },
             { component: controller.statusBar, constraints: { placement: Placement.SOUTH } },
@@ -227,13 +228,16 @@ interface MenuBarActions {
     onOpenSaved: () => void;
     /** Selects the Queries view's Recent section (Query → Query History…). */
     onQueryHistory: () => void;
+    /** Exports the active work tab's data (Tools → Export results ▸ CSV/JSON). */
+    onExportResults: (format: "csv" | "json") => void;
 }
 
 /**
- * The Query and View menus. Query comes first: New Query (the Alt+N accelerator
- * is a real listener; the shortcut here is only a display hint), then the saved
- * and history entry points into the Queries view. View → Toggle Sidebar drives
- * the activity bar's collapse. The dead File and Tools menus are gone.
+ * The Query, Tools, and View menus. Query holds New Query (the Alt+N accelerator
+ * is a real listener; the shortcut here is only a display hint) and the saved and
+ * history entry points into the Queries view. Tools holds Export results, which
+ * acts on the active work tab's data. View → Toggle Sidebar drives the activity
+ * bar's collapse.
  *
  * @param actions - The menu action callbacks.
  *
@@ -247,7 +251,15 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
                 { separator: true },
                 { text: "Open Saved…",    shortcut: OPEN_SAVED_SHORTCUT,    action: actions.onOpenSaved },
                 { text: "Query History…", shortcut: QUERY_HISTORY_SHORTCUT, action: actions.onQueryHistory },
-                // Seam: "Export results…" is added here by the result-export plan.
+            ] },
+            { label: "Tools", items: [
+                // Exports the active work tab's data — a query result, a table/view's
+                // rows, or a role's grants. Each tab's own toolbar button is the
+                // primary surface; this acts on whichever tab is focused.
+                { text: "Export results…", submenu: { label: "Export results…", items: [
+                    { text: "CSV",  action: () => actions.onExportResults("csv") },
+                    { text: "JSON", action: () => actions.onExportResults("json") },
+                ] } },
             ] },
             { label: "View", items: [{ text: "Toggle Sidebar", action: actions.onToggleSidebar }] },
         ],

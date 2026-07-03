@@ -103,6 +103,24 @@ export function runQuery(connectionId: string, sql: string): Promise<QueryResult
     return postJson<QueryResult>(`/api/${connectionId}/query`, { sql });
 }
 
+/**
+ * Build the URL of the backend streaming full-table export for a table/view. No
+ * fetch happens here: the caller navigates the browser to this URL so the
+ * `Content-Disposition: attachment` response downloads the streamed body
+ * directly, without ever buffering the whole relation in memory.
+ *
+ * @param ref - The table/view to export (its connection/database/schema/name).
+ * @param format - The export format ("csv" or "json").
+ *
+ * @returns The `/…/export?format=…` URL to navigate to.
+ */
+export function tableExportUrl(ref: DbObjectRef, format: "csv" | "json"): string {
+    const seg = (s: string): string => encodeURIComponent(s);
+    const path = `${seg(ref.connectionId)}/${seg(ref.database ?? "")}/${seg(ref.schema ?? "")}/${seg(ref.name ?? "")}`;
+
+    return `/api/${path}/export?format=${format}`;
+}
+
 /** The Roles view's role list (introspection one-shot). */
 export function getRoles(connectionId: string): Promise<RoleSummary[]> {
     return getJson<RoleSummary[]>(`/api/${connectionId}/roles`);
