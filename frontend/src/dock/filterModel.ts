@@ -60,6 +60,69 @@ export function buildFilters(conditions: FilterCondition[], columns: ColumnMeta[
 }
 
 /**
+ * Reverse of {@link buildFilters} for the single-field descriptors this dialog
+ * emits: turn a store's active FilterDescriptors back into dialog rows so
+ * reopening the dialog shows the filter that is currently applied. Descriptor
+ * shapes the dialog never produces (`in` / `and` / `or` / `not`) are skipped.
+ *
+ * @param filters - the store's active filter descriptors.
+ * @returns one condition per single-field descriptor, in the filters' order.
+ */
+export function conditionsFromFilters(filters: FilterDescriptor[]): FilterCondition[] {
+    const conditions: FilterCondition[] = [];
+
+    for (const filter of filters) {
+        const condition = conditionFor(filter);
+
+        if (condition !== null) {
+            conditions.push(condition);
+        }
+    }
+
+    return conditions;
+}
+
+/**
+ * Map one FilterDescriptor back to a dialog condition, or null when it is a
+ * shape the dialog does not offer (`in` / `and` / `or` / `not`), so the caller
+ * drops it.
+ *
+ * @param filter - one active filter descriptor.
+ * @returns the equivalent condition, or null to skip it.
+ */
+function conditionFor(filter: FilterDescriptor): FilterCondition | null {
+    switch (filter.type) {
+        case "eq":
+        case "neq":
+        case "contains":
+        case "startsWith":
+        case "gt":
+        case "gte":
+        case "lt":
+        case "lte":
+            return { field: filter.field, operator: filter.type, value: stringifyValue(filter.value) };
+        default:
+            return null;
+    }
+}
+
+/**
+ * Render a descriptor's coerced value back to the text the value field shows,
+ * inverting the wire coercions {@link buildFilters} applies (number/boolean/
+ * string). Dates never occur here — the dialog only ever binds those three.
+ *
+ * @param value - the descriptor's value.
+ * @returns the string form for the dialog's value field.
+ */
+function stringifyValue(value: number | string | boolean | Date): string {
+    if (typeof value === "boolean") {
+        return value ? "true" : "false";
+    }
+
+    return String(value);
+}
+
+/**
  * Build one descriptor from a complete condition, coercing the value to the
  * column's wire type. Returns null when the value can't be coerced (a
  * non-numeric string on a numeric column) so the caller drops the row.

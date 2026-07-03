@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildFilters, type FilterCondition } from "./filterModel";
+import { buildFilters, conditionsFromFilters, type FilterCondition } from "./filterModel";
+import type { FilterDescriptor } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, WireType } from "../contract";
 
 /** Build a minimal ColumnMeta for a given name/wire type (other flags irrelevant here). */
@@ -116,6 +117,67 @@ describe("buildFilters", () => {
             { type: "contains", field: "name", value: "a" },
             { type: "gt", field: "id", value: 5 },
             { type: "eq", field: "active", value: true },
+        ]);
+    });
+});
+
+describe("conditionsFromFilters", () => {
+    it("returns no conditions for no filters", () => {
+        expect(conditionsFromFilters([])).toEqual([]);
+    });
+
+    it("maps each single-field descriptor back to a condition, preserving order", () => {
+        const filters: FilterDescriptor[] = [
+            { type: "contains", field: "name", value: "ada" },
+            { type: "gt", field: "id", value: 5 },
+            { type: "startsWith", field: "id", value: "12" },
+        ];
+
+        expect(conditionsFromFilters(filters)).toEqual([
+            cond("name", "contains", "ada"),
+            cond("id", "gt", "5"),
+            cond("id", "startsWith", "12"),
+        ]);
+    });
+
+    it("stringifies numeric and boolean values back to the value field's text", () => {
+        const filters: FilterDescriptor[] = [
+            { type: "eq", field: "id", value: 42 },
+            { type: "eq", field: "active", value: true },
+            { type: "neq", field: "active", value: false },
+        ];
+
+        expect(conditionsFromFilters(filters)).toEqual([
+            cond("id", "eq", "42"),
+            cond("active", "eq", "true"),
+            cond("active", "neq", "false"),
+        ]);
+    });
+
+    it("skips descriptor shapes the dialog does not offer (in / and / or / not)", () => {
+        const filters: FilterDescriptor[] = [
+            { type: "eq", field: "name", value: "keep" },
+            { type: "in", field: "id", values: [1, 2] },
+            { type: "and", filters: [{ type: "eq", field: "id", value: 1 }] },
+            { type: "not", filter: { type: "eq", field: "id", value: 1 } },
+        ];
+
+        expect(conditionsFromFilters(filters)).toEqual([
+            cond("name", "eq", "keep"),
+        ]);
+    });
+
+    it("round-trips the descriptors buildFilters produces back into equivalent conditions", () => {
+        const built = buildFilters([
+            cond("name", "contains", "a"),
+            cond("id", "gt", "5"),
+            cond("active", "eq", "true"),
+        ], COLUMNS);
+
+        expect(conditionsFromFilters(built)).toEqual([
+            cond("name", "contains", "a"),
+            cond("id", "gt", "5"),
+            cond("active", "eq", "true"),
         ]);
     });
 });

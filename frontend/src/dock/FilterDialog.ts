@@ -1,13 +1,19 @@
-// The modal filter dialog: a small AND-combined, per-column filter form for a
-// table's data grid. It is a thin shell around the pure `buildFilters`
-// translation (filterModel.ts) — it collects one FilterCondition per row from
-// its inputs, builds the descriptors, and applies them to the store.
+// The modal filter dialog: an AND-combined, per-column filter form for a
+// table's data grid. It is a thin shell around the pure translation in
+// filterModel.ts — it collects one FilterCondition per row from its inputs and
+// `buildFilters` them into descriptors to apply, and seeds its rows from the
+// store's active filter via `conditionsFromFilters` so reopening it shows the
+// filter that is currently applied.
 //
 // Chosen over an inline per-column filter row because the library's header /
 // column geometry is not an app seam (see plans/implemented/grid-filter-sort).
 //
+// The rows live in a fixed-height, vertically-scrolling viewport (so the dialog
+// stays a constant size); an "Add condition" button appends rows for more than
+// the initial few criteria, and each row's "−" button removes it (down to one).
+//
 // Behaviour (verified manually — the node-only harness can't drive the inputs,
-// focus, or the store's network reload):
+// focus, scrolling, or the store's network reload):
 //   - Apply: clear the store's filter, then apply one descriptor per complete
 //     row; an all-empty form therefore just clears the filter.
 //   - Clear: clear the store's filter regardless of the form.
@@ -17,14 +23,22 @@
 // filters across re-applies.
 
 import { Panel }                     from "@jimka/typescript-ui/core";
-import { HBox, VBox }                from "@jimka/typescript-ui/layout";
+import type { Component }            from "@jimka/typescript-ui/core";
+import { Grid, VBox }          from "@jimka/typescript-ui/layout";
 import { ComboBox, TextField }       from "@jimka/typescript-ui/component/input";
+import { Button }                    from "@jimka/typescript-ui/component/button";
+import { Glyph }                     from "@jimka/typescript-ui/component/display";
+import { plus }                      from "@jimka/typescript-ui/glyphs/solid/plus";
+import { minus }                     from "@jimka/typescript-ui/glyphs/solid/minus";
 import { Dialog }                    from "@jimka/typescript-ui/overlay";
 import type { DialogButtonConfig }   from "@jimka/typescript-ui/overlay";
 import type { AjaxStore }            from "@jimka/typescript-ui/data";
 import type { ColumnMeta }           from "../contract";
-import { buildFilters }              from "./filterModel";
+import { buildFilters, conditionsFromFilters } from "./filterModel";
 import type { FilterCondition, FilterOperator } from "./filterModel";
+import { Insets } from "@jimka/typescript-ui/primitive";
+
+Glyph.register(plus, minus);
 
 /** The operators offered by the dialog, paired with a human-readable label. */
 const OPERATORS: ReadonlyArray<{ label: string; op: FilterOperator }> = [
@@ -38,23 +52,57 @@ const OPERATORS: ReadonlyArray<{ label: string; op: FilterOperator }> = [
     { label: "starts with",  op: "startsWith" },
 ];
 
-// The dialog ships a fixed, small set of condition rows instead of an add-row
-// affordance: three is enough to AND a couple of conditions in the first cut,
-// and each row left unset (empty column) is dropped by buildFilters.
-const CONDITION_ROWS = 3;
+// The dialog opens with this many empty condition rows; the "Add condition"
+// button appends more and each row's "−" button removes it (down to one), and a
+// row left unset (empty column) is dropped by buildFilters. Reopening a filtered
+// store seeds one row per active condition, so the actual starting count is
+// max(CONDITION_ROWS, active conditions).
+const CONDITION_ROWS = 2;
 
-// Input geometry, in CSS px. Tuned so the three inputs sit comfortably on one
-// row inside the dialog; the dialog width is the sum plus inter-input spacing
-// and the dialog's own horizontal insets.
-const COLUMN_WIDTH   = 150;
-const OPERATOR_WIDTH = 130;
-const VALUE_WIDTH    = 170;
-const INPUT_HEIGHT   = 30;
-const ROW_SPACING    = 6;
-const DIALOG_WIDTH   = 500;
+// Row geometry. Each row tiles a Grid of three weight-tracked input columns plus
+// a fixed remove-button column. The inputs share the dialog's inner width in
+// these proportions (column : operator : value) rather than taking fixed widths,
+// so the fields grow with the dialog instead of sitting squished at a preferred
+// size. Rows are a fixed INPUT_HEIGHT tall; DIALOG_WIDTH sets the dialog's width.
+const COLUMN_WEIGHT   = 150;
+const OPERATOR_WEIGHT = 130;
+const VALUE_WEIGHT    = 170;
+const INPUT_HEIGHT    = 30;
+const ROW_SPACING     = 6;
+const DIALOG_WIDTH    = 500;
+
+// The condition rows live in a vertically-scrolling viewport that grows with the
+// rows up to this cap (six rows plus their inter-row gaps): below the cap the
+// viewport hugs its rows so the Add button sits directly beneath the last one;
+// at the cap it stops growing and further rows scroll into view.
+const VIEWPORT_HEIGHT = (6 * INPUT_HEIGHT) + (5 * ROW_SPACING);
+
+// The "Add condition" affordance sits in its own fixed-height row beneath the
+// viewport. The form is pinned to the full height (a capped viewport + this row)
+// so the dialog is a constant size — it can't grow after `show()` — while the
+// viewport inside flexes with the row count.
+const ADD_ROW_HEIGHT = INPUT_HEIGHT;
+const FORM_HEIGHT     = VIEWPORT_HEIGHT + ROW_SPACING + ADD_ROW_HEIGHT;
+
+// Row affordances match the toolbar palette: green to add, red to remove.
+const ADD_COLOR    = "rgb(46, 125, 50)";
+const REMOVE_COLOR = "rgb(198, 40, 40)";
 
 /** The empty column choice that marks a condition row as unset (dropped on Apply). */
 const NO_COLUMN = "";
+
+/** One condition row's live handles: its grid cells, a reader, and its remove button. */
+interface RowHandle {
+
+    /** The row's cells in column order: column combo, operator combo, value field, remove button. */
+    inputs: Component[];
+
+    /** Snapshots the row's current inputs into a FilterCondition. */
+    read: () => FilterCondition;
+
+    /** The row's remove button (disabled by syncGrid when it is the only row). */
+    removeButton: Button;
+}
 
 /**
  * Open the filter dialog for a store. On Apply, translate the form's rows into
@@ -65,7 +113,11 @@ const NO_COLUMN = "";
  * @param columns - the table's introspected columns, for the column list and coercion.
  */
 export function openFilterDialog(store: AjaxStore, columns: ColumnMeta[]): void {
-    const { form, readConditions } = buildConditionForm(columns);
+    // Seed the form with the store's active filter so reopening the dialog shows
+    // (and edits) the filter that is currently applied; an unfiltered store
+    // seeds nothing and the form opens with empty rows.
+    const initial = conditionsFromFilters(store.getActiveFilters());
+    const { form, readConditions } = buildConditionForm(columns, initial);
 
     void runFilterDialog(store, columns, form, readConditions);
 }
@@ -140,60 +192,193 @@ async function applyFilters(store: AjaxStore, columns: ColumnMeta[], conditions:
 }
 
 /**
- * Build the VBox form of condition rows and a reader that snapshots them.
+ * Build the form — a scrolling grid of condition rows plus an "Add condition"
+ * button — and a reader that snapshots the rows.
  *
  * @param columns - the table's columns; each row's column list is drawn from these.
+ * @param initial - conditions to seed the rows with (the store's active filter); the
+ *   form opens with one row per seed, padded to at least CONDITION_ROWS empty rows.
  * @returns the form panel and a function reading the current conditions in row order.
  */
-function buildConditionForm(columns: ColumnMeta[]): { form: Panel; readConditions: () => FilterCondition[] } {
-    const rows = Array.from({ length: CONDITION_ROWS }, () => buildConditionRow(columns));
+function buildConditionForm(columns: ColumnMeta[], initial: FilterCondition[]): { form: Panel; readConditions: () => FilterCondition[] } {
+    const rows: RowHandle[] = [];
 
-    const form = Panel({
-        layoutManager: new VBox({ spacing: ROW_SPACING }),
-        components:    rows.map(r => r.row),
+    // A single Grid tiles every row: three weighted input columns share the
+    // dialog width (so the inputs stretch to fill it instead of sitting at a
+    // fixed, squished width) plus a fixed remove-button column, and the grid's
+    // default fill (BOTH) makes each cell's child fill it. Auto-flow lays the
+    // flattened cells out left-to-right, top-to-bottom, one row per four; the row
+    // count and tracks are (re)synced by syncGrid as rows are added/removed.
+    const grid = new Grid({
+        columns:      4,
+        spacing:      ROW_SPACING,
+        columnTracks: [
+            { mode: "weight", value: COLUMN_WEIGHT },
+            { mode: "weight", value: OPERATOR_WEIGHT },
+            { mode: "weight", value: VALUE_WEIGHT },
+            { mode: "content" },
+        ],
     });
 
-    form.setPreferredSize(DIALOG_WIDTH, CONDITION_ROWS * INPUT_HEIGHT + (CONDITION_ROWS - 1) * ROW_SPACING);
+    // The scrolling viewport hosting the grid. It is NOT pinned: with no explicit
+    // preferred height it reports the grid's content height, so it hugs the rows
+    // and grows as they are added — keeping the Add button directly beneath the
+    // last row. `maxSize.height = VIEWPORT_HEIGHT` caps that growth, and
+    // `autoScroll: "y"` scrolls the overflow once the rows exceed the cap.
+    const viewport = Panel({
+        autoScroll:    "y",
+        layoutManager: grid,
+        insets:       new Insets(0, 0, 0, 0),
+        maxSize:       { width: Number.MAX_VALUE, height: VIEWPORT_HEIGHT },
+    });
+
+    // The Add button sits in its own fixed-height row beneath the viewport; the
+    // flex spacer keeps the glyph button compact rather than stretching it across.
+    const addButton = Button({
+        glyph:           "plus",
+        text:            "Add condition",
+        showText:        true,
+        showDescription: false,
+        compact:         true,
+    });
+    // Tint only the glyph green: its SVG fills with `currentColor`, so setting the
+    // glyph component's own color overrides the inherited default for the glyph
+    // alone. The button sets no `foregroundColor`, so the text stays default black.
+    addButton.getGlyph()?.setForegroundColor(ADD_COLOR);
+    addButton.on("action", () => appendRow());
+
+    // The form is pinned to the full height so the dialog is a constant size (it
+    // can't grow after `show()`); inside, the VBox packs the content-sized
+    // viewport and the Add row at the top (start-justify), so the Add button
+    // tracks the last row and any slack sits below it.
+    const form = Panel({
+        layoutManager: new VBox({ spacing: ROW_SPACING }),
+        components:    [addButton, viewport],
+        preferredSize: { width: DIALOG_WIDTH, height: FORM_HEIGHT },
+    });
+
+    // Resize the grid to the current row count (every row a fixed-height track),
+    // keep the sole remaining row's remove button disabled — the form always
+    // keeps at least one condition row — and re-lay out the form so its VBox
+    // re-measures the viewport at its new content height. The latter is required:
+    // `addComponent`/`removeComponent` only schedule the viewport's own layout,
+    // not a preferred-size change up to the form, so without this the viewport
+    // would keep its old height and the Add button would not track the last row.
+    const syncGrid = (): void => {
+        grid.setRows(rows.length);
+
+        const soleRow = rows.length === 1;
+
+        for (const row of rows) {
+            row.removeButton.setEnabled(!soleRow);
+        }
+
+        form.scheduleLayout();
+    };
+
+    const removeRow = (row: RowHandle): void => {
+        const index = rows.indexOf(row);
+
+        if (index < 0 || rows.length <= 1) {
+            return;
+        }
+
+        for (const input of row.inputs) {
+            viewport.removeComponent(input);
+        }
+
+        rows.splice(index, 1);
+        syncGrid();
+
+        // Work around a library bug (see LIBRARY_NOTES): an autoScroll panel does
+        // not re-clear its reserved scrollbar gutter and scroll shadow when its
+        // content shrinks back within the viewport — the stale gutter/shadow
+        // linger until an unrelated later layout pass re-measures (which is why
+        // adding another row "fixes" it). Force that follow-up pass here, once
+        // this removal's layout has settled, so they clear immediately instead.
+        requestAnimationFrame(() => viewport.flushLayout());
+    };
+
+    function appendRow(seed?: FilterCondition): void {
+        const row = buildConditionRow(columns, seed, () => removeRow(row));
+
+        rows.push(row);
+
+        for (const input of row.inputs) {
+            viewport.addComponent(input);
+        }
+
+        syncGrid();
+    }
+
+    // Open with one row per seeded condition, padded to at least CONDITION_ROWS
+    // so an unfiltered (or lightly filtered) store still shows a few empty rows.
+    const rowCount = Math.max(CONDITION_ROWS, initial.length);
+
+    for (let i = 0; i < rowCount; i += 1) {
+        appendRow(initial[i]);
+    }
 
     return { form, readConditions: () => rows.map(r => r.read()) };
 }
 
 /**
- * Build one condition row — a column ComboBox, an operator ComboBox, and a value
- * TextField — laid out horizontally, with a reader that snapshots its inputs.
+ * Build one condition row — a column ComboBox, an operator ComboBox, a value
+ * TextField, and a remove ("−") button — returned as the four cells (which the
+ * caller tiles into a Grid), with a reader that snapshots the inputs and a handle
+ * to the remove button. A `seed` pre-selects the inputs so a reopened dialog
+ * shows the active filter.
+ *
+ * Both combos carry explicit-keyed items ({@link CustomListItem}) so `getValue`
+ * round-trips the column name / operator key — a plain-string item is auto-keyed
+ * by its list *position*, so `getValue` would return "0"/"1"/… instead (which the
+ * backend rejects as an unknown column, and which never re-matches on reopen).
  *
  * @param columns - the table's columns; the column list is these plus an empty (unset) choice.
- * @returns the row panel and a function reading its current FilterCondition.
+ * @param seed - a condition to pre-fill the row with, or undefined for an empty row.
+ * @param onRemove - invoked when the row's remove button is pressed.
+ * @returns the row's cells (input columns then remove button), a reader, and the remove button.
  */
-function buildConditionRow(columns: ColumnMeta[]): { row: Panel; read: () => FilterCondition } {
-    const columnCombo = new ComboBox({ items: [NO_COLUMN, ...columns.map(c => c.name)], selectedIndex: 0 });
-    const operatorCombo = new ComboBox({ items: OPERATORS.map(o => o.label), selectedIndex: 0 });
-    const valueField = new TextField({ placeholder: "value" });
-
-    columnCombo.setPreferredSize(COLUMN_WIDTH, INPUT_HEIGHT);
-    operatorCombo.setPreferredSize(OPERATOR_WIDTH, INPUT_HEIGHT);
-    valueField.setPreferredSize(VALUE_WIDTH, INPUT_HEIGHT);
-
-    const row = Panel({
-        layoutManager: new HBox({ spacing: ROW_SPACING }),
-        components:    [columnCombo, operatorCombo, valueField],
+function buildConditionRow(columns: ColumnMeta[], seed: FilterCondition | undefined, onRemove: () => void): RowHandle {
+    const columnCombo = new ComboBox({
+        items: [{ key: NO_COLUMN, label: NO_COLUMN }, ...columns.map(c => ({ key: c.name, label: c.name }))],
+        value: seed?.field ?? NO_COLUMN,
     });
+    const operatorCombo = new ComboBox({
+        items: OPERATORS.map(o => ({ key: o.op, label: o.label })),
+        value: seed?.operator ?? OPERATORS[0].op,
+    });
+    const valueField = new TextField({ placeholder: "value", text: seed?.value ?? "" });
+
+    // Glyph-only "−" (label lives in the tooltip / aria-label, per the toolbar
+    // convention); syncGrid disables it on the last remaining row.
+    const removeButton = Button({
+        glyph:           "minus",
+        text:            "Remove condition",
+        showText:        false,
+        showDescription: false,
+        foregroundColor: REMOVE_COLOR,
+        compact:         true,
+    });
+    removeButton.on("action", onRemove);
 
     const read = (): FilterCondition => ({
         field:    columnCombo.getValue(),
-        operator: operatorForLabel(operatorCombo.getValue()),
+        operator: operatorFromKey(operatorCombo.getValue()),
         value:    valueField.getValue(),
     });
 
-    return { row, read };
+    return { inputs: [columnCombo, operatorCombo, valueField, removeButton], read, removeButton };
 }
 
 /**
- * Map an operator ComboBox label back to its FilterOperator key.
+ * Resolve an operator combo's selected key back to a FilterOperator. The keys are
+ * the operator keys themselves, so this is a validated cast defaulting to the
+ * first operator if the key is somehow unrecognised.
  *
- * @param label - the selected operator label.
- * @returns the matching operator key, defaulting to "contains" if unrecognised.
+ * @param key - the operator combo's selected key.
+ * @returns the matching FilterOperator, or the first operator as a fallback.
  */
-function operatorForLabel(label: string): FilterOperator {
-    return OPERATORS.find(o => o.label === label)?.op ?? "contains";
+function operatorFromKey(key: string): FilterOperator {
+    return OPERATORS.find(o => o.op === key)?.op ?? OPERATORS[0].op;
 }
