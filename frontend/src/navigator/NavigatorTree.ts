@@ -8,6 +8,7 @@
 import { Tree }                                 from "@jimka/typescript-ui/component/tree";
 import type { TreeNode }                        from "@jimka/typescript-ui/component/tree";
 import { Menu }                                 from "@jimka/typescript-ui/overlay";
+import type { MenuItemConfig }                  from "@jimka/typescript-ui/component/container";
 import type { DbObjectKind, DbObjectRef }       from "../contract";
 import { getDatabases, getObjects, getSchemas } from "../data/api";
 import type { SqlAdminController }              from "../SqlAdminController";
@@ -63,17 +64,28 @@ export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
         }
     });
 
-    // Right-clicking a table/view/matview offers its structure and an "open as
-    // query" (a generated SELECT in a query panel) in separate tabs.
+    // Right-clicking a table/view/matview offers, in a separate tab each: "open
+    // as query" (a generated SELECT in a query panel) first, then — below a
+    // separator — its structure and, for a (materialized) view, its SQL definition.
     tree.on("contextmenu", (node: TreeNode, event: MouseEvent) => {
         const ref = node.data as DbObjectRef | undefined;
 
-        if (ref && isRelation(ref.kind)) {
-            contextMenu.show(event.clientX, event.clientY, [
-                { text: "Open structure", action: () => void controller.openStructure(ref, node) },
-                { text: "Open as query", action: () => controller.openQueryFor(ref) },
-            ]);
+        if (!ref || !isRelation(ref.kind)) {
+            return;
         }
+
+        const items: MenuItemConfig[] = [
+            { text: "Open as query", action: () => controller.openQueryFor(ref) },
+            { separator: true },
+            { text: "Open structure", action: () => void controller.openStructure(ref, node) },
+        ];
+
+        // Only a (materialized) view has a definition; a table has none.
+        if (ref.kind === "view" || ref.kind === "materializedView") {
+            items.push({ text: "Open definition", action: () => void controller.openDefinition(ref, node) });
+        }
+
+        contextMenu.show(event.clientX, event.clientY, items);
     });
 
     tree.on("loaderror", (_node: TreeNode, error: unknown) => controller.notifyError(error));
