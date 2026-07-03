@@ -18,7 +18,7 @@ import { StructurePanel }                                      from "./dock/Stru
 import { DefinitionPanel }                                     from "./dock/DefinitionPanel";
 import { QueryPanel }                                          from "./dock/QueryPanel";
 import { RoleGrantsPanel }                                     from "./dock/RoleGrantsPanel";
-import { PropertiesPanel }                                     from "./properties/PropertiesPanel";
+import { PropertiesPanel, relationTypeLabel }                  from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                from "./roles/RolesPropertiesPanel";
 import { QueryHistoryStore, SavedQueryStore }                  from "./data/queryStore";
 import type { HistoryEntry, SavedQuery }                       from "./data/queryStore";
@@ -624,9 +624,12 @@ export class SqlAdminController {
         return `${this.panelId(ref)}::definition`;
     }
 
-    /** Hover tooltip for a tab: the table name, its database, and its schema. */
+    /**
+     * Hover tooltip for a tab: the object name, then Type/Schema/Database ordered
+     * most-specific to broadest.
+     */
     private panelTooltip(ref: DbObjectRef): string {
-        return `${ref.name}\n\nDatabase: ${ref.database}\nSchema: ${ref.schema}`;
+        return `${ref.name}\n\nType: ${relationTypeLabel(ref.kind)}\nSchema: ${ref.schema}\nDatabase: ${ref.database}`;
     }
 
     /** Drop a closed panel's store from the registry and update the start page. */

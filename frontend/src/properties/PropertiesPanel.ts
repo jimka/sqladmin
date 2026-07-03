@@ -76,7 +76,7 @@ function propertyRows(ref: DbObjectRef, columns?: ColumnMeta[]): { property: str
 }
 
 /** Human-readable Type label for a relation kind (table/view/materialized view). */
-function relationTypeLabel(kind: DbObjectRef["kind"]): string {
+export function relationTypeLabel(kind: DbObjectRef["kind"]): string {
     if (kind === "view") {
         return "View";
     }
