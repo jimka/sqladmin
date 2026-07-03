@@ -18,6 +18,12 @@ import { QueryPanel }                                          from "./dock/Quer
 import { RoleGrantsPanel }                                     from "./dock/RoleGrantsPanel";
 import { PropertiesPanel }                                     from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                from "./roles/RolesPropertiesPanel";
+import { QueryHistoryStore, SavedQueryStore }                  from "./data/queryStore";
+import type { HistoryEntry, SavedQuery }                       from "./data/queryStore";
+import { promptQueryName }                                     from "./promptQueryName";
+
+/** A focusable section of the Queries view — the Saved or the Recent list. */
+export type QueriesSection = "saved" | "recent";
 
 /** Registry entry for one open dock panel; `store` is absent for structure tabs. */
 interface OpenPanel {
@@ -26,6 +32,16 @@ interface OpenPanel {
     store?: AjaxStore;
     columns: ColumnMeta[];
 }
+
+/** A recently opened table, kept with its node so the start page can re-open it. */
+interface RecentTable {
+    ref: DbObjectRef;
+    node: TreeNode;
+}
+
+// How many recently opened tables the start page lists. Small enough to stay a
+// glanceable "jump back in" strip, not a full history.
+const MAX_RECENT_TABLES = 8;
 
 export class SqlAdminController {
     readonly dock           : Dock;
@@ -36,6 +52,30 @@ export class SqlAdminController {
     private readonly _connectionId: string;
     private readonly _openPanels  : Map<string, OpenPanel> = new Map();
     private _navigator            : Tree | null = null;
+
+    // The per-connection localStorage stores backing the Queries view, the start
+    // page, and the panel's Ctrl+↑/↓ recall.
+    private readonly _history: QueryHistoryStore;
+    private readonly _saved  : SavedQueryStore;
+
+    // Recently opened tables (newest-first), surfaced on the start page.
+    private readonly _recentTables: RecentTable[] = [];
+
+    // Count of open dock panels, driving the start page: it shows at 0 and hides
+    // once the first panel opens. Every addPanel-issuing method increments; the
+    // single "close" subscription decrements.
+    private _openPanelCount: number = 0;
+
+    // Shell-injected handles (mirroring how ActivityBar takes a SidebarSizer): one
+    // toggles the start-page deck, one selects the Queries activity-bar view, one
+    // focuses a section (Saved/Recent) of the Queries view.
+    private _startToggle        : ((visible: boolean) => void) | null = null;
+    private _showQueriesView    : (() => void) | null = null;
+    private _focusQueriesSection: ((section: QueriesSection) => void) | null = null;
+
+    // Listeners rebuilt when the workspace data changes (a run recorded, a query
+    // saved/removed, a table opened) — the Queries view and the start page.
+    private readonly _workspaceListeners: Array<() => void> = [];
 
     // Monotonic counter minting unique ids for scratch query panels, which are
     // never deduped (each "New Query" / "Open as query" opens a fresh panel).
@@ -60,6 +100,11 @@ export class SqlAdminController {
         this.statusBar       = new StatusBar();
         this.properties      = new PropertiesPanel();
         this.rolesProperties = new RolesPropertiesPanel();
+
+        // Production storage is the DOM localStorage (persisted per connection);
+        // the pure stores keep it injected so their logic tests run DOM-less.
+        this._history = new QueryHistoryStore(connectionId, window.localStorage);
+        this._saved   = new SavedQueryStore(connectionId, window.localStorage);
 
         // Disposal is wired once: the dock fires "close" only on genuine
         // destruction (a tear-off fires "detach" and the panel survives).
@@ -108,6 +153,8 @@ export class SqlAdminController {
         store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
         store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
         this._openPanels.set(id, { ref, node, store, columns });
+        this.rememberTable(ref, node);
+        this.panelOpened();
 
         // Open lazily: the tab appears at once, and the grid UI builds on first
         // activation behind a spinner, so a wide table never blocks the tab.
@@ -146,6 +193,7 @@ export class SqlAdminController {
         }
 
         this._openPanels.set(id, { ref, node, columns });
+        this.panelOpened();
         this.dock.addPanel({
             id,
             title  : `${ref.name ?? id} (structure)`,
@@ -167,24 +215,39 @@ export class SqlAdminController {
      * the subtree on close with no controller-side cleanup, and the table-panel
      * lifecycle (`OpenPanel`/`syncToPanel`/`disposePanel`) stays untouched.
      *
-     * @param seedSql - SQL to prefill the editor with and run on open.
+     * @param seedSql - SQL to prefill the editor with.
+     * @param run - Whether to execute the seeded SQL on open. Defaults to
+     *   `false` — opening seeds the editor only; a caller that wants the
+     *   phpMyAdmin "run immediately" behaviour (Open-as-query, "Execute") opts in.
+     * @param title - The tab title (and status-line label). Defaults to
+     *   `Query N`; a saved query passes its name so the tab reads as the query.
      */
-    openQuery(seedSql?: string): void {
-        const n  = ++this._queryCounter;
-        const id = `query-${n}`;
+    openQuery(seedSql?: string, run: boolean = false, title?: string): void {
+        const n     = ++this._queryCounter;
+        const id    = `query-${n}`;
+        const label = title ?? `Query ${n}`;
 
         const notify = (message: string): void =>
-            this.statusBar.setMessage(`${this._connectionId} · Query ${n}: ${message}`);
+            this.statusBar.setMessage(`${this._connectionId} · ${label}: ${message}`);
 
+        this.panelOpened();
         this.dock.addPanel({
             id,
-            title  : `Query ${n}`,
+            title  : label,
             content: QueryPanel({
                 runQuery  : sql => runQuery(this._connectionId, sql),
                 notify,
                 onError   : error => this.notifyError(error),
                 initialSql: seedSql,
-                autoRun   : seedSql !== undefined
+                autoRun   : run,
+                // Record every run in history and feed the panel's Ctrl+↑/↓ recall.
+                // The store dependency stays here — the panel is a pure view over
+                // these injected callbacks (matching notify/onError).
+                onRun     : (entry: HistoryEntry) => this.recordRun(entry),
+                getHistory: () => this._history.list().map(e => e.sql),
+                // The Save toolbar button hands back the trimmed SQL; the
+                // controller owns the naming modal and the saved-query store.
+                onSave    : (sql: string) => void this.promptAndSaveQuery(sql)
             })
         });
     }
@@ -197,7 +260,181 @@ export class SqlAdminController {
      * @param ref - The table/view to browse as a query.
      */
     openQueryFor(ref: DbObjectRef): void {
-        this.openQuery(buildSelectSql(ref));
+        this.openQuery(buildSelectSql(ref), true);
+    }
+
+    /**
+     * Open a saved query by name in a fresh query panel (a no-op for an unknown
+     * name). Like every scratch panel, it is never deduped.
+     *
+     * @param name - The saved query's name.
+     * @param run - Whether to execute it on open (the "Execute" gesture); the
+     *   default opens it in the editor without running.
+     */
+    openSavedQuery(name: string, run: boolean = false): void {
+        const saved = this._saved.get(name);
+
+        if (saved) {
+            this.openQuery(saved.sql, run, name);
+        }
+    }
+
+    /**
+     * Save (upsert) a named query and refresh the workspace surfaces.
+     *
+     * @param name - The name to store the query under (overwrites an existing one).
+     * @param sql - The SQL to save.
+     */
+    saveQuery(name: string, sql: string): void {
+        this._saved.save(name, sql);
+        this.notifyWorkspaceChanged();
+    }
+
+    /**
+     * Prompt (via the in-app modal) for a name and save the SQL under it,
+     * reporting the outcome on the status bar. A cancelled or blank name
+     * abandons the save. Bound to the query panel's Save toolbar button and the
+     * Queries view's "Save…" action.
+     *
+     * @param sql - The SQL to save.
+     */
+    async promptAndSaveQuery(sql: string): Promise<void> {
+        const name = await promptQueryName();
+
+        if (name === null) {
+            return;
+        }
+
+        this.saveQuery(name, sql);
+        this.statusBar.setMessage(`${this._connectionId} · Saved query as “${name}”`);
+    }
+
+    /**
+     * Remove a saved query and refresh the workspace surfaces.
+     *
+     * @param name - The saved query's name.
+     */
+    removeSavedQuery(name: string): void {
+        this._saved.remove(name);
+        this.notifyWorkspaceChanged();
+    }
+
+    /**
+     * @returns The run history, newest-first (for the Queries view's Recent section).
+     */
+    historyList(): HistoryEntry[] {
+        return this._history.list();
+    }
+
+    /**
+     * @returns The saved queries, sorted by name (for the Queries view + start page).
+     */
+    savedList(): SavedQuery[] {
+        return this._saved.list();
+    }
+
+    /**
+     * @returns The recently opened tables, newest-first (for the start page).
+     */
+    recentTables(): DbObjectRef[] {
+        return this._recentTables.map(t => t.ref);
+    }
+
+    /**
+     * Re-open a recently opened table from the start page, reusing the stored
+     * navigator node so the reopened panel still drives the tree selection.
+     *
+     * @param ref - The table ref (matched to a remembered entry by panel id).
+     */
+    reopenTable(ref: DbObjectRef): void {
+        const entry = this._recentTables.find(t => this.panelId(t.ref) === this.panelId(ref));
+
+        if (entry) {
+            void this.openTable(entry.ref, entry.node);
+        }
+    }
+
+    /**
+     * Select and expand the Queries activity-bar view (the menu's entry point),
+     * optionally focusing one of its sections so "Open Saved…" and "Query
+     * History…" land the keyboard on the Saved vs Recent list respectively.
+     *
+     * @param section - Which section's list to focus, if any.
+     */
+    showQueriesView(section?: QueriesSection): void {
+        this._showQueriesView?.();
+
+        if (section) {
+            this._focusQueriesSection?.(section);
+        }
+    }
+
+    /**
+     * Register the shell's start-page deck toggle. Invoked once the shell has
+     * built the CENTER Card; mirrors how the ActivityBar takes a SidebarSizer.
+     * The current emptiness is reflected immediately so the deck starts correct.
+     *
+     * @param toggle - Shows (true) or hides (false) the start page.
+     */
+    setStartToggle(toggle: (visible: boolean) => void): void {
+        this._startToggle = toggle;
+        toggle(this._openPanelCount === 0);
+    }
+
+    /**
+     * Register the shell's Queries-view selector (the ActivityBar can select a
+     * view by id, but only the shell holds the bar handle).
+     *
+     * @param select - Selects and expands the Queries activity-bar view.
+     */
+    setShowQueriesView(select: () => void): void {
+        this._showQueriesView = select;
+    }
+
+    /**
+     * Register the Queries view's section focuser (owned by the view, not the
+     * shell): focus and reveal the Saved or Recent list.
+     *
+     * @param focus - Focuses the named section's list.
+     */
+    setQueriesSectionFocus(focus: (section: QueriesSection) => void): void {
+        this._focusQueriesSection = focus;
+    }
+
+    /**
+     * Subscribe to workspace changes (a run recorded, a query saved/removed, a
+     * table opened) so a live surface can rebuild. Used by the Queries view and
+     * the start page.
+     *
+     * @param listener - Called after any workspace-data change.
+     */
+    onWorkspaceChanged(listener: () => void): void {
+        this._workspaceListeners.push(listener);
+    }
+
+    /** Remember a just-opened table (dedupe by panel id, move-to-front, capped). */
+    private rememberTable(ref: DbObjectRef, node: TreeNode): void {
+        const id       = this.panelId(ref);
+        const existing = this._recentTables.findIndex(t => this.panelId(t.ref) === id);
+
+        if (existing >= 0) {
+            this._recentTables.splice(existing, 1);
+        }
+
+        this._recentTables.unshift({ ref, node });
+        this._recentTables.length = Math.min(this._recentTables.length, MAX_RECENT_TABLES);
+        this.notifyWorkspaceChanged();
+    }
+
+    /** Record a completed run in history and refresh the workspace surfaces. */
+    private recordRun(entry: HistoryEntry): void {
+        this._history.record(entry);
+        this.notifyWorkspaceChanged();
+    }
+
+    /** Notify every workspace-change listener that the stored data changed. */
+    private notifyWorkspaceChanged(): void {
+        this._workspaceListeners.forEach(listener => listener());
     }
 
     /**
@@ -283,6 +520,7 @@ export class SqlAdminController {
             return;
         }
 
+        this.panelOpened();
         this.dock.addPanel({
             id,
             title  : `Grants: ${role}`,
@@ -326,9 +564,25 @@ export class SqlAdminController {
         return `${ref.name}\n\nDatabase: ${ref.database}\nSchema: ${ref.schema}`;
     }
 
-    /** Drop a closed panel's store from the registry. */
+    /** Drop a closed panel's store from the registry and update the start page. */
     private disposePanel(id: string): void {
         this._openPanels.delete(id);
+        this.panelClosed();
+    }
+
+    /** Record that a panel opened: bump the count and hide the start page. */
+    private panelOpened(): void {
+        this._openPanelCount++;
+        this._startToggle?.(false);
+    }
+
+    /** Record that a panel closed: drop the count and show the start page at 0. */
+    private panelClosed(): void {
+        this._openPanelCount = Math.max(0, this._openPanelCount - 1);
+
+        if (this._openPanelCount === 0) {
+            this._startToggle?.(true);
+        }
     }
 
     /** Select the panel's navigator node and refresh the status bar to match. */
