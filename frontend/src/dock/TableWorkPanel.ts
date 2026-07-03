@@ -77,8 +77,8 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
     const exportMenu = Menu();
     const exportButton = glyphButton("file-export", BLUE, "Export table (CSV / JSON)", event => {
         exportMenu.show(event.clientX, event.clientY, [
-            { text: "Export CSV",  action: () => onExport("csv") },
-            { text: "Export JSON", action: () => onExport("json") },
+            { text: "Export CSV (.csv)",   action: () => onExport("csv") },
+            { text: "Export JSON (.json)", action: () => onExport("json") },
         ]);
     });
 

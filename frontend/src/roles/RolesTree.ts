@@ -36,8 +36,8 @@ export function RolesTree(controller: SqlAdminController): ExplorerTree {
 
         contextMenu.show(event.clientX, event.clientY, [
             { text: "Export grants", submenu: { label: "Export grants", items: [
-                { text: "CSV",  action: () => void controller.exportRole(name, "csv") },
-                { text: "JSON", action: () => void controller.exportRole(name, "json") },
+                { text: "CSV (.csv)",   action: () => void controller.exportRole(name, "csv") },
+                { text: "JSON (.json)", action: () => void controller.exportRole(name, "json") },
             ] } },
         ]);
     });

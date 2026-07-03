@@ -89,8 +89,8 @@ export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
         // large table/view exports without bulk-loading the grid.
         items.push({ separator: true });
         items.push({ text: "Export", submenu: { label: "Export", items: [
-            { text: "CSV",  action: () => controller.exportTable(ref, "csv") },
-            { text: "JSON", action: () => controller.exportTable(ref, "json") },
+            { text: "CSV (.csv)",   action: () => controller.exportTable(ref, "csv") },
+            { text: "JSON (.json)", action: () => controller.exportTable(ref, "json") },
         ] } });
 
         contextMenu.show(event.clientX, event.clientY, items);
