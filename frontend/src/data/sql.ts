@@ -15,12 +15,16 @@ function quoteIdent(name: string): string {
 }
 
 /**
- * Build `SELECT * FROM "schema"."name" LIMIT n` for a table/view.
+ * Build `SELECT * FROM "schema"."name" [LIMIT n]` for a table/view.
  *
  * @param ref - The table/view to browse (its schema and name are quoted).
- * @param limit - Row cap; defaults to a small preview limit.
+ * @param limit - Row cap; defaults to a small preview limit. Pass `null` to omit
+ *     the LIMIT entirely — e.g. to EXPLAIN a relation's plan, where a LIMIT node
+ *     would mask the underlying query's real cost.
  * @returns The generated SQL string.
  */
-export function buildSelectSql(ref: DbObjectRef, limit: number = DEFAULT_LIMIT): string {
-    return `SELECT * FROM ${quoteIdent(ref.schema ?? "")}.${quoteIdent(ref.name ?? "")} LIMIT ${limit}`;
+export function buildSelectSql(ref: DbObjectRef, limit: number | null = DEFAULT_LIMIT): string {
+    const relation = `${quoteIdent(ref.schema ?? "")}.${quoteIdent(ref.name ?? "")}`;
+
+    return limit === null ? `SELECT * FROM ${relation}` : `SELECT * FROM ${relation} LIMIT ${limit}`;
 }

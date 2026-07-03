@@ -1,7 +1,12 @@
 // The dock work panel for one view or materialized view: a read-only, paginated
-// data grid with a single Refresh action. Unlike TableWorkPanel there are NO
-// write actions (Add/Delete/Save) — a view is read-only — so the store's
-// mutation methods are never invoked and the write toolbar is omitted entirely.
+// data grid with Explain, Export, and Refresh actions. Unlike TableWorkPanel
+// there are NO write actions (Add/Delete/Save) — a view is read-only — so the
+// store's mutation methods are never invoked and the write toolbar is omitted.
+//
+// Explain / Explain Analyze do NOT touch this grid: they open a Query tab seeded
+// with the view's backing `SELECT * FROM schema.view` and run EXPLAIN there (see
+// the controller's openQuery), so the plan and its export live on the query
+// surface that already handles them, and the data grid stays put.
 //
 // The view's SQL definition and its column structure each open in their own tab
 // from the navigator's right-click menu (see DefinitionPanel / StructurePanel and
@@ -21,30 +26,44 @@ import { Menu }                        from "@jimka/typescript-ui/overlay";
 import type { AjaxStore }              from "@jimka/typescript-ui/data";
 import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
 import { file_export }                 from "@jimka/typescript-ui/glyphs/solid/file_export";
+import { diagram_project }             from "@jimka/typescript-ui/glyphs/solid/diagram_project";
+import { flask }                       from "@jimka/typescript-ui/glyphs/solid/flask";
 import type { ColumnMeta }             from "../contract";
 import type { ExportTable }            from "./TableWorkPanel";
 
-Glyph.register(refresh, file_export);
+Glyph.register(refresh, file_export, diagram_project, flask);
 
 /** Neutral toolbar glyph color, matching TableWorkPanel's Refresh action. */
 const BLUE = "rgb(30, 100, 200)";
 
+// Neutral dark grey for the plain Explain action — it neither mutates input nor
+// executes the statement, so it carries no warning color (unlike Analyze).
+const NEUTRAL_COLOR = "rgb(66, 66, 66)";
+
+// Amber for Explain Analyze — it executes the view's query (the backend rolls it
+// back), so it warns like TableWorkPanel/QueryPanel's destructive actions.
+const ANALYZE_COLOR = "rgb(204, 102, 0)";
+
+/** Open a Query tab that EXPLAINs the view (true = EXPLAIN ANALYZE, false = plain). */
+export type ExplainView = (analyze: boolean) => void;
+
 /**
  * Build the read-only work panel for a view/materialized view: a paginated data
- * grid with Export and Refresh actions on the toolbar.
+ * grid with Explain, Export, and Refresh actions on the toolbar.
  *
  * @param store - The paginated AjaxStore over the view's rows (never written to).
  * @param columns - The view's introspected columns (drive the grid's columns).
  * @param onExport - Streams the whole relation server-side in the chosen format.
+ * @param onExplain - Opens a Query tab that EXPLAINs the view's backing SELECT.
  * @returns The assembled panel.
  */
-export function ViewWorkPanel(store: AjaxStore, columns: ColumnMeta[], onExport: ExportTable): Panel {
+export function ViewWorkPanel(store: AjaxStore, columns: ColumnMeta[], onExport: ExportTable, onExplain: ExplainView): Panel {
     // Read-only grid: every cell is locked (rowReadOnly), the same lock
     // StructurePanel/RoleGrantsPanel use.
     const dataGrid = Table(store, buildViewColumnSpec(columns));
 
     const panel = Panel({ layoutManager: new BorderLayout() });
-    panel.addComponent(buildToolBar(store, onExport), { placement: Placement.NORTH });
+    panel.addComponent(buildToolBar(store, onExport, onExplain), { placement: Placement.NORTH });
     panel.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
 
     return panel;
@@ -59,23 +78,33 @@ function buildViewColumnSpec(columns: ColumnMeta[]): ColumnSpec {
 }
 
 /**
- * Build the toolbar: a flex spacer then the Export and Refresh buttons, right-
- * aligned to match TableWorkPanel's view-action group.
+ * Build the toolbar: the Explain / Analyze plan actions on the left, then a flex
+ * spacer pushing Export and Refresh to the far right (matching TableWorkPanel's
+ * view-action group).
  */
-function buildToolBar(store: AjaxStore, onExport: ExportTable): ToolBar {
+function buildToolBar(store: AjaxStore, onExport: ExportTable, onExplain: ExplainView): ToolBar {
     // The full-relation export streams the whole view server-side (not the loaded
     // page), matching TableWorkPanel's Export button. The CSV/JSON chooser opens
     // at the click point and is reused across clicks.
     const exportMenu = Menu();
     const exportButton = glyphButton("file-export", BLUE, "Export view (CSV / JSON)", event => {
         exportMenu.show(event.clientX, event.clientY, [
-            { text: "Export CSV",  action: () => onExport("csv") },
-            { text: "Export JSON", action: () => onExport("json") },
+            { text: "Export CSV (.csv)",   action: () => onExport("csv") },
+            { text: "Export JSON (.json)", action: () => onExport("json") },
         ]);
     });
 
+    // Explain opens the plan on a Query tab (see openQuery); this panel's grid is
+    // never disturbed. Analyze executes the view query (rolled back server-side).
+    const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, "Explain (opens a query tab)",
+                                      () => onExplain(false));
+    const analyzeButton = glyphButton("flask", ANALYZE_COLOR, "Explain Analyze (opens a query tab; executes the view query)",
+                                      () => onExplain(true));
+
     return new ToolBar({
         components: [
+            explainButton,
+            analyzeButton,
             // Flex spacer pushes the view actions to the far right, matching
             // TableWorkPanel.
             Spacer.flex(),

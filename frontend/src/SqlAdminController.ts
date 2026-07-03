@@ -7,9 +7,11 @@ import type { DockPanelEvent }                                 from "@jimka/type
 import { StatusBar }                                           from "@jimka/typescript-ui/component/container";
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef, QueryRowsResult, RolePrivilege, RoleSummary, TableStructure } from "./contract";
+import type { ColumnMeta, DbObjectRef, RolePrivilege, RoleSummary, TableStructure } from "./contract";
 import { getColumns, getRoleDetail, getRoles, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";
 import { exportQueryResult }                                   from "./dock/exportQueryResult";
+import { exportExplainPlan }                                   from "./dock/exportExplainResult";
+import type { ActiveExport }                                   from "./data/explain";
 import { buildModel }                                          from "./data/buildModel";
 import { buildSelectSql }                                      from "./data/sql";
 import { buildStore }                                          from "./data/stores";
@@ -95,11 +97,12 @@ export class SqlAdminController {
     // has since moved on is discarded instead of clobbering the current view.
     private _propsSeq: number = 0;
 
-    // The latest rows result each query panel displayed, keyed by panel id (set
-    // via the panel's injected onResult), plus the currently focused panel id.
-    // Together they let the Query-menu "Export results…" item act on the active
-    // panel without the controller holding a reference back to the panel object.
-    private readonly _activeQueryResult: Map<string, QueryRowsResult | null> = new Map();
+    // The latest exportable result each query panel displayed — a rows grid or an
+    // EXPLAIN plan — keyed by panel id (set via the panel's injected onResult),
+    // plus the currently focused panel id. Together they let the menubar "Export
+    // results…" item act on the active panel without the controller holding a
+    // reference back to the panel object.
+    private readonly _activeQueryResult: Map<string, ActiveExport | null> = new Map();
     // A grants tab's full grant set, keyed by panel id, so the active-tab export
     // covers a focused role grants tab the same way _activeQueryResult covers a
     // query panel. Grants tabs are not in _openPanels (no DbObjectRef).
@@ -213,7 +216,11 @@ export class SqlAdminController {
             title  : ref.name ?? id,
             tooltip: this.panelTooltip(ref),
             content: isReadOnly
-                ? () => ViewWorkPanel(store, columns, format => this.exportTable(ref, format))
+                ? () => ViewWorkPanel(store, columns, format => this.exportTable(ref, format),
+                    // Explain opens a query tab seeded with the view's own query
+                    // (no LIMIT — a LIMIT node would mask the plan's real cost) and
+                    // auto-runs EXPLAIN / EXPLAIN ANALYZE there.
+                    analyze => this.openQuery(buildSelectSql(ref, null), false, ref.name, analyze ? "analyze" : "plain"))
                 : () => TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format))
         });
 
@@ -329,8 +336,10 @@ export class SqlAdminController {
      *   phpMyAdmin "run immediately" behaviour (Open-as-query, "Execute") opts in.
      * @param title - The tab title (and status-line label). Defaults to
      *   `Query N`; a saved query passes its name so the tab reads as the query.
+     * @param explain - Auto-EXPLAIN the seeded SQL on open instead of running it
+     *   (`"plain"` / `"analyze"`); used by the view panel's Explain actions.
      */
-    openQuery(seedSql?: string, run: boolean = false, title?: string): void {
+    openQuery(seedSql?: string, run: boolean = false, title?: string, explain?: "plain" | "analyze"): void {
         const n     = ++this._queryCounter;
         const id    = `query-${n}`;
         const label = title ?? `Query ${n}`;
@@ -347,8 +356,9 @@ export class SqlAdminController {
                 runExplain: (sql, opts) => runExplain(this._connectionId, sql, opts),
                 notify,
                 onError   : error => this.notifyError(error),
-                initialSql: seedSql,
-                autoRun   : run,
+                initialSql : seedSql,
+                autoRun    : run,
+                autoExplain: explain,
                 // Record every run in history and feed the panel's Ctrl+↑/↓ recall.
                 // The store dependency stays here — the panel is a pure view over
                 // these injected callbacks (matching notify/onError).
@@ -357,9 +367,9 @@ export class SqlAdminController {
                 // The Save toolbar button hands back the trimmed SQL; the
                 // controller owns the naming modal and the saved-query store.
                 onSave    : (sql: string) => void this.promptAndSaveQuery(sql),
-                // Mirror this panel's latest result so the Query-menu export can
-                // reach it while it is the active panel.
-                onResult  : (result: QueryRowsResult | null) => this._activeQueryResult.set(id, result)
+                // Mirror this panel's latest exportable result (rows or plan) so
+                // the menubar export can reach it while it is the active panel.
+                onResult  : (active: ActiveExport | null) => this._activeQueryResult.set(id, active)
             })
         });
     }
@@ -379,11 +389,20 @@ export class SqlAdminController {
         const id = this._activePanelId;
 
         if (id) {
-            const result = this._activeQueryResult.get(id);
+            const active = this._activeQueryResult.get(id);
+            const notify = (message: string): void =>
+                this.statusBar.setMessage(`${this._connectionId} · export: ${message}`);
 
-            if (result) {
-                exportQueryResult(result, format, message =>
-                    this.statusBar.setMessage(`${this._connectionId} · export: ${message}`));
+            if (active?.kind === "rows") {
+                exportQueryResult(active.result, format, notify);
+
+                return;
+            }
+
+            if (active?.kind === "plan") {
+                // A plan isn't tabular: map the menu's CSV/JSON to the plan's text
+                // and structured-JSON exports (CSV → plain-text plan).
+                void exportExplainPlan(active.plan, format === "csv" ? "txt" : "json", notify);
 
                 return;
             }
@@ -411,6 +430,42 @@ export class SqlAdminController {
         }
 
         this.statusBar.setMessage("No data to export");
+    }
+
+    /**
+     * The export-format family the focused tab offers, so the menubar's "Export
+     * results" submenu can label its two items correctly: an EXPLAIN plan exports
+     * as text / JSON (`"plan"`); everything else — query rows, a table/view
+     * stream, a role's grants, or nothing — exports as CSV / JSON (`"tabular"`).
+     * Read fresh each time that submenu opens.
+     *
+     * @returns `"plan"` when the focused tab shows an EXPLAIN plan, else `"tabular"`.
+     */
+    activeExportKind(): "plan" | "tabular" {
+        const id     = this._activePanelId;
+        const active = id ? this._activeQueryResult.get(id) : null;
+
+        return active?.kind === "plan" ? "plan" : "tabular";
+    }
+
+    /**
+     * Whether the focused tab has anything to export, so the menubar's "Export
+     * results" item can grey out when it does not. Mirrors {@link exportActive}'s
+     * sources: a query result/plan, a table/view data grid, or a role's grants —
+     * a structure/definition detail tab or no open tab has nothing.
+     *
+     * @returns True when the focused tab can export.
+     */
+    canExportActive(): boolean {
+        const id = this._activePanelId;
+
+        if (!id) {
+            return false;
+        }
+
+        return this._activeQueryResult.get(id) != null   // query rows or an EXPLAIN plan
+            || this._openPanels.get(id)?.store != null    // a table/view data grid
+            || this._activeRoleGrants.get(id) != null;    // a role grants tab
     }
 
     /**

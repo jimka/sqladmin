@@ -72,8 +72,8 @@ function buildToolBar(role: string, privileges: RolePrivilege[]): ToolBar {
     const exportMenu = Menu();
     const exportButton = glyphButton("file-export", BLUE, "Export grants (CSV / JSON)", event => {
         exportMenu.show(event.clientX, event.clientY, [
-            { text: "Export CSV",  action: () => exportRoleGrants(role, privileges, "csv") },
-            { text: "Export JSON", action: () => exportRoleGrants(role, privileges, "json") },
+            { text: "Export CSV (.csv)",   action: () => exportRoleGrants(role, privileges, "csv") },
+            { text: "Export JSON (.json)", action: () => exportRoleGrants(role, privileges, "json") },
         ]);
     });
 
