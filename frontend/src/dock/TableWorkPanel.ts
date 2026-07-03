@@ -182,7 +182,9 @@ async function confirmDelete(store: AjaxStore, dataGrid: Table): Promise<void> {
 function glyphButton(glyph: string, color: string, label: string, handler: () => void): Button {
     // showText:false keeps the face glyph-only while the label drives both the
     // hover tooltip and the aria-label (accessible name) — no manual setLabel.
-    const button = Button({ glyph, text: label, showText: false, foregroundColor: color, compact: true });
+    // showDescription:false keeps a description (e.g. the Filter button's
+    // "(active)" state) in the tooltip only, off the glyph-only face.
+    const button = Button({ glyph, text: label, showText: false, showDescription: false, foregroundColor: color, compact: true });
 
     button.on("action", handler);
 
