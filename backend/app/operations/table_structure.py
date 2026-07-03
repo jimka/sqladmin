@@ -105,7 +105,7 @@ class ListConstraintsQuery(Query):
     _SQL = """
         SELECT
             con.conname AS name,
-            con.contype AS contype,
+            con.contype::text AS contype,
             pg_get_constraintdef(con.oid) AS definition,
             ARRAY(
                 SELECT a.attname
@@ -169,8 +169,8 @@ class ListForeignKeysQuery(Query):
     _SQL = """
         SELECT
             con.conname AS name,
-            con.confupdtype AS on_update,
-            con.confdeltype AS on_delete,
+            con.confupdtype::text AS on_update,
+            con.confdeltype::text AS on_delete,
             nr.nspname AS ref_schema,
             cr.relname AS ref_table,
             ARRAY(
