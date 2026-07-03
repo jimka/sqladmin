@@ -1,7 +1,7 @@
 // The wire contract, mirrored on the TS side. Matches the backend's WireType
 // scalar set and introspection/list shapes (see backend/app/contract.py).
 
-export type DbObjectKind = "database" | "schema" | "table" | "view";
+export type DbObjectKind = "database" | "schema" | "table" | "view" | "materializedView";
 
 /** Identifies a database object the navigator can act on. */
 export interface DbObjectRef {
@@ -34,6 +34,11 @@ export interface ColumnMeta {
     isGenerated: boolean;
     hasDefault: boolean; // has a column default; not user-required on insert
     wireType: WireType;
+}
+
+/** A (materialized) view's reconstructed SELECT (pg_get_viewdef). */
+export interface ViewDefinition {
+    definition: string; // the pretty-printed pg_get_viewdef(oid, true) SQL
 }
 
 /** The list endpoint envelope the configured JsonReader parses. */

@@ -44,8 +44,9 @@ export class PropertiesPanel {
     }
 
     /**
-     * Replace the displayed metadata with that of `ref`. For a table or view,
-     * pass its `columns` so the column count and primary key are included.
+     * Replace the displayed metadata with that of `ref`. For a table, view, or
+     * materialized view, pass its `columns` so the column count and primary key
+     * are included.
      */
     show(ref: DbObjectRef, columns?: ColumnMeta[]): void {
         this._store.loadData(propertyRows(ref, columns));
@@ -69,17 +70,34 @@ function propertyRows(ref: DbObjectRef, columns?: ColumnMeta[]): { property: str
             ];
         case "table":
         case "view":
+        case "materializedView":
             return tableRows(ref, columns);
     }
 }
 
-/** Rows for a table or view: identity plus a column count and primary key. */
+/** Human-readable Type label for a relation kind (table/view/materialized view). */
+export function relationTypeLabel(kind: DbObjectRef["kind"]): string {
+    if (kind === "view") {
+        return "View";
+    }
+
+    if (kind === "materializedView") {
+        return "Materialized view";
+    }
+
+    return "Table";
+}
+
+/**
+ * Rows for a table, view, or materialized view: identity plus a column count
+ * and primary key.
+ */
 function tableRows(ref: DbObjectRef, columns?: ColumnMeta[]): { property: string; value: string }[] {
     const rows = [
         { property: "Name", value: ref.name ?? "—" },
         { property: "Schema", value: ref.schema ?? "—" },
         { property: "Database", value: ref.database ?? "—" },
-        { property: "Type", value: ref.kind === "view" ? "View" : "Table" },
+        { property: "Type", value: relationTypeLabel(ref.kind) },
     ];
 
     if (columns) {

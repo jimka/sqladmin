@@ -51,3 +51,53 @@ def test_get_result_contract_shape() -> None:
 def test_columns_before_apply_raises() -> None:
     with pytest.raises(RuntimeError):
         _query().get_columns_result()
+
+
+class _FakeConn:
+    """
+    Records each ``fetch`` query and returns pre-seeded rows in call order.
+    """
+
+    def __init__(self, responses: list) -> None:
+        self._responses: list = responses
+        self.queries: list[str] = []
+
+    async def fetch(self, sql: str, *args: object) -> list:
+        """
+        Return the next seeded response, recording the SQL that was run.
+        """
+        self.queries.append(sql)
+
+        return self._responses.pop(0)
+
+
+async def test_apply_falls_back_to_catalog_for_matview() -> None:
+    # information_schema.columns returns nothing for a materialized view, so a
+    # second pg_catalog query must supply its columns.
+    matview_row = {
+        "name": "total",
+        "data_type": "numeric",
+        "nullable": True,
+        "is_primary_key": False,
+        "is_generated": False,
+        "has_default": False,
+    }
+    conn = _FakeConn(responses=[[], [matview_row]])
+    op = ListColumnsQuery(conn, TABLE)  # type: ignore[arg-type]
+
+    await op.apply()
+
+    assert len(conn.queries) == 2
+    assert "pg_attribute" in conn.queries[1]
+    assert op.get_columns_result()[0].name == "total"
+
+
+async def test_apply_skips_fallback_when_information_schema_has_rows() -> None:
+    # A table/regular view is fully covered by information_schema, so the catalog
+    # fallback must not run (a single query only).
+    conn = _FakeConn(responses=[_RAW])
+    op = ListColumnsQuery(conn, TABLE)  # type: ignore[arg-type]
+
+    await op.apply()
+
+    assert len(conn.queries) == 1

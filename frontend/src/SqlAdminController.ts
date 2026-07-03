@@ -8,15 +8,17 @@ import { StatusBar }                                           from "@jimka/type
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef, RolePrivilege, RoleSummary } from "./contract";
-import { getColumns, getRoleDetail, getRoles, runQuery }       from "./data/api";
+import { getColumns, getRoleDetail, getRoles, getViewDefinition, runQuery } from "./data/api";
 import { buildModel }                                          from "./data/buildModel";
 import { buildSelectSql }                                      from "./data/sql";
 import { buildStore }                                          from "./data/stores";
 import { TableWorkPanel }                                      from "./dock/TableWorkPanel";
+import { ViewWorkPanel }                                       from "./dock/ViewWorkPanel";
 import { StructurePanel }                                      from "./dock/StructurePanel";
+import { DefinitionPanel }                                     from "./dock/DefinitionPanel";
 import { QueryPanel }                                          from "./dock/QueryPanel";
 import { RoleGrantsPanel }                                     from "./dock/RoleGrantsPanel";
-import { PropertiesPanel }                                     from "./properties/PropertiesPanel";
+import { PropertiesPanel, relationTypeLabel }                  from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                from "./roles/RolesPropertiesPanel";
 import { QueryHistoryStore, SavedQueryStore }                  from "./data/queryStore";
 import type { HistoryEntry, SavedQuery }                       from "./data/queryStore";
@@ -25,12 +27,18 @@ import { promptQueryName }                                     from "./promptQue
 /** A focusable section of the Queries view — the Saved or the Recent list. */
 export type QueriesSection = "saved" | "recent";
 
-/** Registry entry for one open dock panel; `store` is absent for structure tabs. */
+/**
+ * Registry entry for one open dock panel. `store` is absent for the storeless
+ * detail tabs (structure, definition); `columns` is present only when the tab
+ * was built from introspected columns (data, structure). `detail` labels a
+ * storeless tab in the status line ("structure" / "definition").
+ */
 interface OpenPanel {
     ref: DbObjectRef;
     node: TreeNode;
     store?: AjaxStore;
-    columns: ColumnMeta[];
+    columns?: ColumnMeta[];
+    detail?: string;
 }
 
 /** A recently opened table, kept with its node so the start page can re-open it. */
@@ -130,7 +138,13 @@ export class SqlAdminController {
         this._navigator = tree;
     }
 
-    /** Open a table in the Dock (deduping by panel id), wiring its store errors. */
+    /**
+     * Open a table, view, or materialized view in the Dock (deduping by panel
+     * id), wiring its store errors. A table opens the editable TableWorkPanel; a
+     * view or materialized view opens the read-only ViewWorkPanel (a plain data
+     * grid — its structure and definition open as separate tabs from the
+     * navigator's right-click menu).
+     */
     async openTable(ref: DbObjectRef, node: TreeNode): Promise<void> {
         const id = this.panelId(ref);
 
@@ -150,8 +164,16 @@ export class SqlAdminController {
             return;
         }
 
+        // A view/matview is read-only: it opens the ViewWorkPanel and never
+        // writes, so the 'sync' write-feedback listener is not attached.
+        const isReadOnly = ref.kind === "view" || ref.kind === "materializedView";
+
         store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
-        store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
+
+        if (!isReadOnly) {
+            store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
+        }
+
         this._openPanels.set(id, { ref, node, store, columns });
         this.rememberTable(ref, node);
         this.panelOpened();
@@ -163,7 +185,9 @@ export class SqlAdminController {
             id,
             title  : ref.name ?? id,
             tooltip: this.panelTooltip(ref),
-            content: () => TableWorkPanel(store, columns, notify)
+            content: isReadOnly
+                ? () => ViewWorkPanel(store, columns)
+                : () => TableWorkPanel(store, columns, notify)
         });
 
         try {
@@ -172,6 +196,41 @@ export class SqlAdminController {
         } catch {
             // load() rethrows, but the 'exception' listener already surfaced it.
         }
+    }
+
+    /**
+     * Open a read-only definition (pg_get_viewdef SQL) tab for a view/matview,
+     * deduping by definition-panel id. The SQL is fetched up front and passed to
+     * a plain DefinitionPanel; a failed fetch surfaces through notifyError and no
+     * tab opens. Tables have no definition, so the navigator only offers this for
+     * views (see NavigatorTree).
+     */
+    async openDefinition(ref: DbObjectRef, node: TreeNode): Promise<void> {
+        const id = this.definitionPanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        let definition: string;
+
+        try {
+            definition = (await getViewDefinition(ref)).definition;
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return;
+        }
+
+        this._openPanels.set(id, { ref, node, detail: "definition" });
+        this.panelOpened();
+        this.dock.addPanel({
+            id,
+            title  : `${ref.name ?? id} (definition)`,
+            tooltip: this.panelTooltip(ref),
+            content: DefinitionPanel(definition)
+        });
+        this.syncToPanel(id);
     }
 
     /** Open a read-only structure (column metadata) tab for a table/view. */
@@ -192,7 +251,7 @@ export class SqlAdminController {
             return;
         }
 
-        this._openPanels.set(id, { ref, node, columns });
+        this._openPanels.set(id, { ref, node, columns, detail: "structure" });
         this.panelOpened();
         this.dock.addPanel({
             id,
@@ -439,15 +498,16 @@ export class SqlAdminController {
 
     /**
      * Show the selected object's metadata in the Properties inspector. A database
-     * or schema renders immediately; a table/view needs its columns (for the
-     * count and primary key), reused from an open panel when possible and fetched
-     * otherwise. A monotonic guard discards a stale fetch whose selection has
-     * since changed, so rapid clicks never render the wrong object.
+     * or schema renders immediately; a table, view, or materialized view needs
+     * its columns (for the count and primary key), reused from an open panel when
+     * possible and fetched otherwise. A monotonic guard discards a stale fetch
+     * whose selection has since changed, so rapid clicks never render the wrong
+     * object.
      */
     async showProperties(ref: DbObjectRef): Promise<void> {
         const seq = ++this._propsSeq;
 
-        if (ref.kind !== "table" && ref.kind !== "view") {
+        if (ref.kind !== "table" && ref.kind !== "view" && ref.kind !== "materializedView") {
             this.properties.show(ref);
 
             return;
@@ -559,9 +619,17 @@ export class SqlAdminController {
         return `${this.panelId(ref)}::structure`;
     }
 
-    /** Hover tooltip for a tab: the table name, its database, and its schema. */
+    /** Stable id for a view's definition tab, distinct from its data/structure tabs. */
+    private definitionPanelId(ref: DbObjectRef): string {
+        return `${this.panelId(ref)}::definition`;
+    }
+
+    /**
+     * Hover tooltip for a tab: the object name, then Type/Schema/Database ordered
+     * most-specific to broadest.
+     */
     private panelTooltip(ref: DbObjectRef): string {
-        return `${ref.name}\n\nDatabase: ${ref.database}\nSchema: ${ref.schema}`;
+        return `${ref.name}\n\nType: ${relationTypeLabel(ref.kind)}\nSchema: ${ref.schema}\nDatabase: ${ref.database}`;
     }
 
     /** Drop a closed panel's store from the registry and update the start page. */
@@ -598,13 +666,13 @@ export class SqlAdminController {
         void this.showProperties(panel.ref);
     }
 
-    /** Status line for a panel: row count for a data tab, else a structure label. */
+    /** Status line for a panel: row count for a data tab, else the detail label. */
     private updateStatusFor(panel: OpenPanel): void {
         if (panel.store) {
             const count = panel.store.getTotalCount() ?? panel.store.getRecords().length;
             this.statusBar.setMessage(`${this._connectionId} · ${panel.ref.name}: ${count} rows`);
         } else {
-            this.statusBar.setMessage(`${this._connectionId} · ${panel.ref.name}: structure`);
+            this.statusBar.setMessage(`${this._connectionId} · ${panel.ref.name}: ${panel.detail ?? "structure"}`);
         }
     }
 
