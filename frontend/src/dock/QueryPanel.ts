@@ -15,6 +15,7 @@ import { Component, Panel }              from "@jimka/typescript-ui/core";
 import { Placement }                     from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Fit, Split } from "@jimka/typescript-ui/layout";
 import { ToolBar }                       from "@jimka/typescript-ui/component/menubar";
+import { Spacer }                        from "@jimka/typescript-ui/component/container";
 import { Button }                        from "@jimka/typescript-ui/component/button";
 import { Table }                         from "@jimka/typescript-ui/component/table";
 import { TextArea }                      from "@jimka/typescript-ui/component/input";
@@ -22,17 +23,31 @@ import { MemoryStore }                   from "@jimka/typescript-ui/data";
 import { Glyph }                         from "@jimka/typescript-ui/component/display";
 import { play }                          from "@jimka/typescript-ui/glyphs/solid/play";
 import { eraser }                        from "@jimka/typescript-ui/glyphs/solid/eraser";
+import { floppy_disk }                   from "@jimka/typescript-ui/glyphs/solid/floppy_disk";
+import { angle_up }                      from "@jimka/typescript-ui/glyphs/solid/angle_up";
+import { angle_down }                    from "@jimka/typescript-ui/glyphs/solid/angle_down";
 import { buildQueryModel }               from "../data/buildModel";
+import { HistoryCursor }                 from "../data/historyCursor";
+import { capRows, MAX_RESULT_ROWS }      from "./capRows";
+import type { HistoryEntry }             from "../data/queryStore";
 import type { QueryResult }              from "../contract";
 
-Glyph.register(play, eraser);
+Glyph.register(play, eraser, floppy_disk, angle_up, angle_down);
 
 // Green for the affirmative Run action, matching TableWorkPanel's add-action color.
 const RUN_COLOR = "rgb(46, 125, 50)";
 
+// Blue for the neutral Save action — distinct from the green Run and amber
+// Clear, reading as "persist this query" rather than "execute" or "discard".
+const SAVE_COLOR = "rgb(21, 101, 192)";
+
 // Amber for the Clear (reset) action — distinct from the green Run, signalling
 // "discards your input" without the finality of a delete-red.
 const CLEAR_COLOR = "rgb(204, 102, 0)";
+
+// Neutral grey for the history-recall arrows — secondary navigation, kept
+// visually quieter than the colored Run/Save/Clear actions.
+const HISTORY_COLOR = "rgb(90, 90, 90)";
 
 // The editor's starting height once the result pane is shown below it; the Split
 // gutter lets the user resize from there.
@@ -56,11 +71,21 @@ export interface QueryPanelOptions {
     initialSql?: string;
     /** Run the seeded SQL immediately on open (true for "Open as query"). */
     autoRun?: boolean;
+    /** Record a completed run in history (the controller binds this to the store). */
+    onRun?: (entry: HistoryEntry) => void;
+    /** Newest-first SQL snapshot for the Ctrl+↑/↓ history recall (from the store). */
+    getHistory?: () => string[];
+    /**
+     * Save the current editor SQL (the toolbar Save button). The controller
+     * binds this to the naming modal + saved-query store; the panel stays a pure
+     * view, handing over the trimmed SQL and leaving the naming/persist to it.
+     */
+    onSave?: (sql: string) => void;
 }
 
 /** Build a query panel: a SQL editor over a (resizable) result grid. */
 export function QueryPanel(options: QueryPanelOptions): Panel {
-    const { runQuery, notify, onError, initialSql = "", autoRun = false } = options;
+    const { runQuery, notify, onError, initialSql = "", autoRun = false, onRun, getHistory, onSave } = options;
 
     const editor = new TextArea(initialSql);
 
@@ -78,10 +103,20 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     body.addComponent(editor, { weight: 0 });
 
     const runButton   = glyphButton("play", RUN_COLOR, "Run (Ctrl+Enter)", () => void run());
-    const clearButton = glyphButton("eraser", CLEAR_COLOR, "Clear", () => clear());
+    const saveButton  = glyphButton("floppy-disk", SAVE_COLOR, "Save query (Ctrl+S)", () => save());
+    const clearButton = glyphButton("eraser", CLEAR_COLOR, "Clear (Alt+C)", () => clear());
+
+    // History recall as toolbar buttons, mirroring the editor's Ctrl+↑/↓: Older
+    // walks back, Newer forward. Pushed to the far right by a flexible Spacer,
+    // set apart from the left-aligned Run/Save/Clear actions. Each recall
+    // refocuses the editor so keyboard recall / typing continues seamlessly.
+    const olderButton = glyphButton("angle-up", HISTORY_COLOR, "Older query (Ctrl+↑)", () => recallInEditor(true));
+    const newerButton = glyphButton("angle-down", HISTORY_COLOR, "Newer query (Ctrl+↓)", () => recallInEditor(false));
 
     const panel = Panel({ layoutManager: new BorderLayout() });
-    panel.addComponent(new ToolBar({ components: [runButton, clearButton] }), { placement: Placement.NORTH });
+    panel.addComponent(new ToolBar({
+        components: [runButton, saveButton, clearButton, Spacer.flex(), olderButton, newerButton],
+    }), { placement: Placement.NORTH });
     panel.addComponent(body, { placement: Placement.CENTER });
 
     let resultShown = false;
@@ -98,7 +133,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
         }
 
         body.doLayout();
-        syncClearEnabled();
+        syncToolbarButtons();
     }
 
     // Split the body so the editor starts at EDITOR_HEIGHT and the grid gets the
@@ -128,7 +163,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
             body.doLayout();
         }
 
-        syncClearEnabled();
+        syncToolbarButtons();
     }
 
     /** Reset the panel to its initial state: empty editor, no result pane. */
@@ -137,17 +172,42 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
         hideResultPane();
     }
 
-    // Clear is meaningful only when there is something to reset: text in the
-    // editor or a result on screen. (setValue/setText don't fire "change", so
-    // clear() re-syncs via hideResultPane.)
-    function syncClearEnabled(): void {
-        clearButton.setEnabled(editor.getValue().trim() !== "" || resultShown);
+    /**
+     * Save the current query: hand the trimmed editor SQL to the injected saver
+     * (which prompts for a name and persists it). A no-op on an empty editor.
+     */
+    function save(): void {
+        const sql = editor.getValue().trim();
+
+        if (!sql) {
+            notify("Enter a SQL statement to save");
+
+            return;
+        }
+
+        onSave?.(sql);
+    }
+
+    // Keep the input-dependent toolbar buttons in step with the editor's state.
+    // Clear is meaningful when there is something to reset (text or a result on
+    // screen); Save is meaningful only with SQL to save. (setValue/setText don't
+    // fire "change", so mutators re-sync through here.)
+    function syncToolbarButtons(): void {
+        const hasSql = editor.getValue().trim() !== "";
+
+        clearButton.setEnabled(hasSql || resultShown);
+        saveButton.setEnabled(onSave !== undefined && hasSql);
     }
 
     // Monotonic guard: a slow run whose result arrives after a newer run started
     // is discarded so it can't clobber the newer one (mirrors showProperties's
     // _propsSeq). The Run button is disabled for the in-flight run.
     let runSeq = 0;
+
+    // The per-panel history-navigation cursor for Ctrl+↑/↓. Built lazily from a
+    // fresh history snapshot when the user starts a browse, and reset to null on
+    // a run (running ends the browse), so each browse recalls the latest history.
+    let historyCursor: HistoryCursor | null = null;
 
     async function run(): Promise<void> {
         const sql = editor.getValue().trim();
@@ -159,6 +219,10 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
         }
 
         const seq = ++runSeq;
+
+        // Running ends any in-progress Ctrl+↑/↓ browse; the next Ctrl+arrow rebuilds
+        // the cursor from the now-updated history snapshot.
+        historyCursor = null;
         runButton.setEnabled(false);
         notify("Running…");
 
@@ -167,10 +231,12 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
 
             if (seq === runSeq) {
                 showResult(result);
+                onRun?.({ sql, timestamp: Date.now(), ok: true, rowCount: result.rowCount });
             }
         } catch (error) {
             if (seq === runSeq) {
                 onError(error);
+                onRun?.({ sql, timestamp: Date.now(), ok: false, rowCount: 0 });
             }
         } finally {
             if (seq === runSeq) {
@@ -181,16 +247,25 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
 
     function showResult(result: QueryResult): void {
         if (result.kind === "rows") {
+            // Defensive render cap: a large MemoryStore renders zero rows in the
+            // library's Table (a known open bug — LIBRARY_NOTES.md), so a big query
+            // would show an empty grid. Cap below that threshold and tell the user
+            // the grid is partial (full pagination is a Non-Goal).
+            const rows      = capRows(result.rows, MAX_RESULT_ROWS);
+            const truncated = rows.length < result.rows.length;
+
             const store = new MemoryStore({
                 model   : buildQueryModel(result.columns),
-                data    : result.rows,
+                data    : rows,
                 autoLoad: true,
             });
 
             // Read-only: editing a query result is a Non-Goal (no PK, no write-back).
             // A fresh store + columns per run means columns never bleed across runs.
             showResultPane(Table(store, { columns: [], rowReadOnly: () => true }));
-            notify(`${result.rowCount} row(s)`);
+            notify(truncated
+                ? `showing first ${rows.length} of ${result.rows.length} — results truncated`
+                : `${result.rowCount} row(s)`);
         } else {
             // No result set (INSERT/UPDATE/DDL): drop the grid, editor fills again.
             hideResultPane();
@@ -198,22 +273,93 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
         }
     }
 
-    // Ctrl/Cmd+Enter runs, wired through the editor's own typed keydown surface.
+    // Editor accelerators, all wired through the editor's own typed keydown
+    // surface: Ctrl/Cmd+Enter runs, Ctrl/Cmd+S saves, Alt+C clears, Ctrl/Cmd+↑/↓
+    // recalls history (bash-style). Plain arrows (no modifier) are untouched, so
+    // normal caret movement still works — and Clear is Alt+C, not Ctrl+C, so the
+    // editor's Copy is left intact.
     editor.on("keydown", (e: KeyboardEvent) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        const chord = e.ctrlKey || e.metaKey;
+
+        if (chord && e.key === "Enter") {
             e.preventDefault();
             void run();
+
+            return;
+        }
+
+        if (chord && (e.key === "s" || e.key === "S")) {
+            e.preventDefault();
+            save();
+
+            return;
+        }
+
+        if (e.altKey && !chord && (e.key === "c" || e.key === "C")) {
+            e.preventDefault();
+            clear();
+
+            return;
+        }
+
+        if (chord && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+            e.preventDefault();
+            recallHistory(e.key === "ArrowUp");
         }
     });
 
-    // Keep Clear's enabled state in step with the editor's content as the user
+    /**
+     * Recall a history entry into the editor. On the first Ctrl+arrow of a browse
+     * the cursor is built from a fresh history snapshot and seeded with the live
+     * draft, so arrowing down past the newest entry restores the in-progress text.
+     *
+     * @param older - `true` for Ctrl+↑ (walk toward older), `false` for Ctrl+↓.
+     */
+    function recallHistory(older: boolean): void {
+        if (!historyCursor) {
+            historyCursor = new HistoryCursor(getHistory?.() ?? []);
+            historyCursor.begin(editor.getValue());
+        }
+
+        editor.setValue(older ? historyCursor.older() : historyCursor.newer());
+        syncToolbarButtons();
+    }
+
+    /**
+     * Recall from the toolbar arrows: same as {@link recallHistory}, then return
+     * focus to the editor (the click moved it to the button) so keyboard recall
+     * and typing continue seamlessly.
+     *
+     * @param older - `true` for the Older arrow, `false` for the Newer arrow.
+     */
+    function recallInEditor(older: boolean): void {
+        recallHistory(older);
+        editor.focus();
+    }
+
+    // Keep the toolbar buttons in step with the editor's content as the user
     // types. Use "action" (the input-event shorthand), registered after the
     // editor's own onInput, so getValue() already reflects the new text — the
     // "change" bridge fires before onInput and would read the stale value.
-    editor.on("action", () => syncClearEnabled());
+    editor.on("action", () => syncToolbarButtons());
+
+    /** Focus the editor once it has mounted, retrying across frames until then. */
+    function focusEditorWhenReady(attempt: number): void {
+        if (editor.getElement()) {
+            editor.focus();
+        } else if (attempt < 30) {
+            requestAnimationFrame(() => focusEditorWhenReady(attempt + 1));
+        }
+    }
 
     // Initial state: disabled for an empty panel, enabled when seeded.
-    syncClearEnabled();
+    syncToolbarButtons();
+
+    // Focus the editor so the user can type on a fresh tab straight away. The
+    // panel content is built before the Dock mounts it, so the element may not
+    // exist yet — retry on the next frame until it does (capped so a tab closed
+    // mid-wait can't loop forever).
+    focusEditorWhenReady(0);
 
     if (autoRun && initialSql.trim()) {
         void run();
