@@ -28,7 +28,10 @@ from .operations import (
     DeleteRowCommand,
     InsertRowCommand,
     ListColumnsQuery,
+    ListConstraintsQuery,
     ListDatabasesQuery,
+    ListForeignKeysQuery,
+    ListIndexesQuery,
     ListObjectsQuery,
     ListRolesQuery,
     ListRowsQuery,
@@ -223,6 +226,38 @@ async def view_definition(connection_id: str, database: str, schema: str, table:
         await op.apply()
 
         return op.get_result()
+
+
+@app.get("/api/{connection_id}/{database}/{schema}/{table}/structure")
+async def structure(connection_id: str, database: str, schema: str, table: str) -> dict:
+    """
+    Introspect a table's indexes, non-FK constraints, and foreign keys in one
+    round trip (mirroring the combined ``/roles/{role}`` detail endpoint).
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/{table}/structure``.
+
+    Returns:
+        ``{"indexes": [...], "constraints": [...], "foreignKeys": [...]}`` — a
+        table with none of a given facet returns an empty list for it, so the
+        read-only inspector renders every section regardless.
+    """
+    ref = TableRef(database, schema, table)
+
+    async with get_pool(connection_id).acquire() as c:
+        indexes = ListIndexesQuery(c, ref)
+        await indexes.apply()
+
+        constraints = ListConstraintsQuery(c, ref)
+        await constraints.apply()
+
+        foreign_keys = ListForeignKeysQuery(c, ref)
+        await foreign_keys.apply()
+
+        return {
+            "indexes": indexes.get_result(),
+            "constraints": constraints.get_result(),
+            "foreignKeys": foreign_keys.get_result(),
+        }
 
 
 # --- Role introspection ---------------------------------------------------
