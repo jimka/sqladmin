@@ -16,11 +16,13 @@ import { Store, Model }       from "@jimka/typescript-ui/data";
 import { PaginationBar, Glyph } from "@jimka/typescript-ui/component/display";
 import { Menu }               from "@jimka/typescript-ui/overlay";
 import { file_export }        from "@jimka/typescript-ui/glyphs/solid/file_export";
+import { file_csv }           from "@jimka/typescript-ui/glyphs/solid/file_csv";
+import { file_code }          from "@jimka/typescript-ui/glyphs/solid/file_code";
 import type { RolePrivilege } from "../contract";
 import { PagingMemoryProxy }  from "../data/PagingMemoryProxy";
 import { exportRoleGrants }   from "./exportRoleGrants";
 
-Glyph.register(file_export);
+Glyph.register(file_export, file_csv, file_code);
 
 // Rows per page — comfortably below the count at which the library Table render
 // limit bites (the row-CRUD path uses the same 100), and a sensible page for the
@@ -72,8 +74,8 @@ function buildToolBar(role: string, privileges: RolePrivilege[]): ToolBar {
     const exportMenu = Menu();
     const exportButton = glyphButton("file-export", BLUE, "Export grants (CSV / JSON)", event => {
         exportMenu.show(event.clientX, event.clientY, [
-            { text: "Export CSV (.csv)",   action: () => exportRoleGrants(role, privileges, "csv") },
-            { text: "Export JSON (.json)", action: () => exportRoleGrants(role, privileges, "json") },
+            { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => exportRoleGrants(role, privileges, "csv") },
+            { text: "Export JSON (.json)", glyph: "file-code", action: () => exportRoleGrants(role, privileges, "json") },
         ]);
     });
 

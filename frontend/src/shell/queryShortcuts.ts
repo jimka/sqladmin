@@ -6,12 +6,20 @@
 //
 // Alt+<letter> chords are used: free of the app's other accelerators (the
 // editor's Ctrl/Cmd+Enter and Ctrl/Cmd+↑/↓) and, unlike the browser-reserved
-// Ctrl/Cmd+N, reliably interceptable. N = new, S = saved, H = history.
+// Ctrl/Cmd+N, reliably interceptable. N = new, S = saved, H = history; the rail
+// switches are D = Databases, O = rOles (R is taken by Refresh), Q = Queries;
+// and R = Refresh the active view. (The Explain / Explain-Analyze chords —
+// Ctrl+E / Ctrl+Shift+E — are editor-scoped and live in QueryPanel, not here,
+// because the Explain engine is local to the active query panel.)
 
 /** Display labels shown on the menu items and the start-page hints. */
 export const NEW_QUERY_SHORTCUT     = "Alt+N";
 export const OPEN_SAVED_SHORTCUT    = "Alt+S";
 export const QUERY_HISTORY_SHORTCUT = "Alt+H";
+export const DATABASES_RAIL_SHORTCUT = "Alt+D";
+export const ROLES_RAIL_SHORTCUT     = "Alt+O";
+export const QUERIES_RAIL_SHORTCUT   = "Alt+Q";
+export const REFRESH_SHORTCUT        = "Alt+R";
 
 /**
  * Whether a keydown is an `Alt+<key>` chord with no other modifier, so plain
@@ -43,4 +51,45 @@ export function isOpenSavedChord(event: KeyboardEvent): boolean {
 /** Whether a keydown is the Query-History chord (Alt+H) — focuses the Recent list. */
 export function isQueryHistoryChord(event: KeyboardEvent): boolean {
     return isAltChord(event, "h");
+}
+
+/** Whether a keydown is the Databases-rail chord (Alt+D) — opens the Databases rail. */
+export function isDatabasesRailChord(event: KeyboardEvent): boolean {
+    return isAltChord(event, "d");
+}
+
+/** Whether a keydown is the Roles-rail chord (Alt+O) — opens the Roles rail. */
+export function isRolesRailChord(event: KeyboardEvent): boolean {
+    return isAltChord(event, "o");
+}
+
+/** Whether a keydown is the Queries-rail chord (Alt+Q) — opens the Queries rail. */
+export function isQueriesRailChord(event: KeyboardEvent): boolean {
+    return isAltChord(event, "q");
+}
+
+/** Whether a keydown is the Refresh chord (Alt+R) — refreshes the active view. */
+export function isRefreshChord(event: KeyboardEvent): boolean {
+    return isAltChord(event, "r");
+}
+
+/**
+ * Whether a keydown is the Explain chord (Ctrl/Cmd+E). Unlike the rail chords
+ * these ride Ctrl/Cmd (matching the editor's Run/Save family) and are bound
+ * scoped to the surface that explains — the query editor and the view panel —
+ * not at the document level.
+ */
+export function isExplainChord(event: KeyboardEvent): boolean {
+    return (event.ctrlKey || event.metaKey)
+        && !event.shiftKey
+        && !event.altKey
+        && (event.key === "e" || event.key === "E");
+}
+
+/** Whether a keydown is the Explain-Analyze chord (Ctrl/Cmd+Shift+E). */
+export function isExplainAnalyzeChord(event: KeyboardEvent): boolean {
+    return (event.ctrlKey || event.metaKey)
+        && event.shiftKey
+        && !event.altKey
+        && (event.key === "e" || event.key === "E");
 }

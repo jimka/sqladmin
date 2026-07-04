@@ -34,6 +34,9 @@ import { floppy_disk }                   from "@jimka/typescript-ui/glyphs/solid
 import { angle_up }                      from "@jimka/typescript-ui/glyphs/solid/angle_up";
 import { angle_down }                    from "@jimka/typescript-ui/glyphs/solid/angle_down";
 import { file_export }                   from "@jimka/typescript-ui/glyphs/solid/file_export";
+import { file_csv }                      from "@jimka/typescript-ui/glyphs/solid/file_csv";
+import { file_code }                     from "@jimka/typescript-ui/glyphs/solid/file_code";
+import { file_lines }                    from "@jimka/typescript-ui/glyphs/solid/file_lines";
 import { diagram_project }               from "@jimka/typescript-ui/glyphs/solid/diagram_project";
 import { flask }                         from "@jimka/typescript-ui/glyphs/solid/flask";
 import { buildQueryModel }               from "../data/buildModel";
@@ -44,9 +47,10 @@ import { exportQueryResult }             from "./exportQueryResult";
 import { exportExplainPlan }             from "./exportExplainResult";
 import type { ActiveExport, RunExplain } from "../data/explain";
 import type { HistoryEntry }             from "../data/queryStore";
+import { isExplainChord, isExplainAnalyzeChord } from "../shell/queryShortcuts";
 import type { QueryExplainResult, QueryResult } from "../contract";
 
-Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, diagram_project, flask);
+Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask);
 
 // Green for the affirmative Run action, matching TableWorkPanel's add-action color.
 const RUN_COLOR = "rgb(46, 125, 50)";
@@ -152,9 +156,9 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     const clearButton   = glyphButton("eraser", CLEAR_COLOR, "Clear (Alt+C)", () => clear());
     // The glyph registers under its hyphenated name ("diagram-project"), even
     // though the ESM export identifier uses an underscore.
-    const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, "Explain",
+    const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, "Explain (Ctrl+E)",
                                       () => void runExplainRun(false));
-    const analyzeButton = glyphButton("flask", CLEAR_COLOR, "Explain Analyze (executes the statement)",
+    const analyzeButton = glyphButton("flask", CLEAR_COLOR, "Explain Analyze (Ctrl+Shift+E)\n\nexecutes the statement",
                                       () => void runExplainRun(true));
     const exportButton  = glyphButton("file-export", EXPORT_COLOR, "Export results (CSV / JSON)", (e: MouseEvent) => openExportMenu(e));
 
@@ -205,12 +209,12 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
         const active = activeExport;
         const items = active.kind === "rows"
             ? [
-                { text: "Export CSV (.csv)",   action: () => exportQueryResult(active.result, "csv", notify) },
-                { text: "Export JSON (.json)", action: () => exportQueryResult(active.result, "json", notify) },
+                { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => exportQueryResult(active.result, "csv", notify) },
+                { text: "Export JSON (.json)", glyph: "file-code", action: () => exportQueryResult(active.result, "json", notify) },
             ]
             : [
-                { text: "Export text (.txt)",  action: () => void exportExplainPlan(active.plan, "txt", notify) },
-                { text: "Export JSON (.json)", action: () => void exportExplainPlan(active.plan, "json", notify) },
+                { text: "Export text (.txt)",  glyph: "file-lines", action: () => void exportExplainPlan(active.plan, "txt", notify) },
+                { text: "Export JSON (.json)", glyph: "file-code",  action: () => void exportExplainPlan(active.plan, "json", notify) },
             ];
 
         exportMenu.show(event.clientX, event.clientY, items);
@@ -463,10 +467,12 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     }
 
     // Editor accelerators, all wired through the editor's own typed keydown
-    // surface: Ctrl/Cmd+Enter runs, Ctrl/Cmd+S saves, Alt+C clears, Ctrl/Cmd+↑/↓
-    // recalls history (bash-style). Plain arrows (no modifier) are untouched, so
-    // normal caret movement still works — and Clear is Alt+C, not Ctrl+C, so the
-    // editor's Copy is left intact.
+    // surface: Ctrl/Cmd+Enter runs, Ctrl/Cmd+S saves, Ctrl/Cmd+E explains
+    // (Ctrl/Cmd+Shift+E explain-analyzes), Alt+C clears, Ctrl/Cmd+↑/↓ recalls
+    // history (bash-style). Editor-scoped so Explain acts on this query view and
+    // does not clash with the list/editor select-all elsewhere. Plain arrows (no
+    // modifier) are untouched, so normal caret movement still works — and Clear is
+    // Alt+C, not Ctrl+C, so the editor's Copy is left intact.
     editor.on("keydown", (e: KeyboardEvent) => {
         const chord = e.ctrlKey || e.metaKey;
 
@@ -480,6 +486,22 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
         if (chord && (e.key === "s" || e.key === "S")) {
             e.preventDefault();
             save();
+
+            return;
+        }
+
+        // Ctrl/Cmd+E explains; adding Shift explain-analyzes. Shared with the view
+        // panel's Explain chords (queryShortcuts) so the two surfaces stay in sync.
+        if (isExplainChord(e)) {
+            e.preventDefault();
+            void runExplainRun(false);
+
+            return;
+        }
+
+        if (isExplainAnalyzeChord(e)) {
+            e.preventDefault();
+            void runExplainRun(true);
 
             return;
         }

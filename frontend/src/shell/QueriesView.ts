@@ -29,7 +29,7 @@ import { folder_open }             from "@jimka/typescript-ui/glyphs/solid/folde
 import { trash }                   from "@jimka/typescript-ui/glyphs/solid/trash";
 import { floppy_disk }             from "@jimka/typescript-ui/glyphs/solid/floppy_disk";
 import { clock_rotate_left }       from "@jimka/typescript-ui/glyphs/solid/clock_rotate_left";
-import { refreshTool }             from "./refreshTool";
+import { refreshTool, bindRefreshShortcut } from "./refreshTool";
 import type { SqlAdminController } from "../SqlAdminController";
 
 Glyph.register(folder_open, trash, floppy_disk, clock_rotate_left);
@@ -161,6 +161,9 @@ export function QueriesView(controller: SqlAdminController, id: string): Compone
 
     controller.onWorkspaceChanged(rebuild);
     rebuild();
+
+    // Alt+R re-reads both sections' stores while this rail has focus (see refreshTool).
+    bindRefreshShortcut(view, rebuild);
 
     return view;
 }

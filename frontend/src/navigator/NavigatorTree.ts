@@ -1,9 +1,11 @@
 // The lazy object navigator: a Tree whose levels (databases -> schemas ->
 // Tables/Views/Materialized Views category groups -> object leaves) are fetched
 // on first expansion via the introspection api. Each object leaf carries its
-// DbObjectRef on node.data; selecting one opens it in the Dock through the
-// controller. Category nodes carry no data, so selecting them is a no-op. The
-// Tree caches loaded children, so a collapse/re-expand does not refetch.
+// DbObjectRef on node.data; selecting one shows its metadata in the Properties
+// inspector, and double-clicking a relation (or its "Show data" context item)
+// opens the object in the Dock through the controller. Category nodes carry no
+// data, so selecting them is a no-op. The Tree caches loaded children, so a
+// collapse/re-expand does not refetch.
 
 import { Tree }                                 from "@jimka/typescript-ui/component/tree";
 import type { TreeNode }                        from "@jimka/typescript-ui/component/tree";
@@ -47,6 +49,10 @@ export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
     const tree        = Tree();
     const contextMenu = Menu();
 
+    // A single click only selects: it shows the object's metadata in the
+    // Properties inspector without opening anything. Opening (and executing) a
+    // relation's data tab is reserved for a double-click and the "Show data"
+    // context item — see below.
     tree.on("selection", (nodes: TreeNode[]) => {
         const node = nodes[0];
         const ref  = node?.data as DbObjectRef | undefined;
@@ -55,12 +61,17 @@ export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
             return;
         }
 
-        // Every selection updates the Properties inspector; a table, view, or
-        // materialized view also opens (or focuses) its data tab in the Dock.
-        if (isRelation(ref.kind)) {
+        void controller.showProperties(ref);
+    });
+
+    // A double-click on a table, view, or materialized view opens (or focuses)
+    // its data tab in the Dock and loads it — the behaviour a single click used
+    // to have. Non-relation nodes (databases, schemas, categories) have no tab.
+    tree.on("dblclick", (node: TreeNode) => {
+        const ref = node.data as DbObjectRef | undefined;
+
+        if (ref && isRelation(ref.kind)) {
             void controller.openTable(ref, node);
-        } else {
-            void controller.showProperties(ref);
         }
     });
 
@@ -75,22 +86,25 @@ export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
         }
 
         const items: MenuItemConfig[] = [
-            { text: "Open as query", action: () => controller.openQueryFor(ref) },
+            // "Show data" mirrors the double-click: open (or focus) the relation's
+            // data tab and load it. The glyphs match the tabs each item opens.
+            { text: "Show data", glyph: "table", action: () => void controller.openTable(ref, node) },
+            { text: "Open as query", glyph: "terminal", action: () => controller.openQueryFor(ref) },
             { separator: true },
-            { text: "Open structure", action: () => void controller.openStructure(ref, node) },
+            { text: "Open structure", glyph: "table-columns", action: () => void controller.openStructure(ref, node) },
         ];
 
         // Only a (materialized) view has a definition; a table has none.
         if (ref.kind === "view" || ref.kind === "materializedView") {
-            items.push({ text: "Open definition", action: () => void controller.openDefinition(ref, node) });
+            items.push({ text: "Open definition", glyph: "file-code", action: () => void controller.openDefinition(ref, node) });
         }
 
         // Export streams the full relation server-side (not the loaded page), so a
         // large table/view exports without bulk-loading the grid.
         items.push({ separator: true });
-        items.push({ text: "Export", submenu: { label: "Export", items: [
-            { text: "CSV (.csv)",   action: () => controller.exportTable(ref, "csv") },
-            { text: "JSON (.json)", action: () => controller.exportTable(ref, "json") },
+        items.push({ text: "Export", glyph: "file-export", submenu: { label: "Export", items: [
+            { text: "CSV (.csv)",   glyph: "file-csv",  action: () => controller.exportTable(ref, "csv") },
+            { text: "JSON (.json)", glyph: "file-code", action: () => controller.exportTable(ref, "json") },
         ] } });
 
         contextMenu.show(event.clientX, event.clientY, items);

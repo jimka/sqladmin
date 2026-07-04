@@ -1,7 +1,8 @@
 // The roles picker: a flat Tree of leaf nodes, one per role, loaded eagerly (a
 // single small list — no hierarchy to defer). Each node carries the role name on
-// node.data; selecting a node loads that role's detail through the controller.
-// Mirrors NavigatorTree's selection→controller wiring, minus the lazy levels.
+// node.data; selecting a node shows that role's detail in the inspector, and
+// double-clicking (or its "Show data" context item) also opens the role's grants
+// tab through the controller. Mirrors NavigatorTree's click→controller wiring.
 
 import { Tree }                      from "@jimka/typescript-ui/component/tree";
 import type { TreeNode }             from "@jimka/typescript-ui/component/tree";
@@ -14,8 +15,21 @@ import type { ExplorerTree }         from "../navigator/NavigatorTree";
 export function RolesTree(controller: SqlAdminController): ExplorerTree {
     const tree = Tree();
 
+    // A single click only selects: show the role's base info in the inspector
+    // without opening a tab. Opening the grants tab is reserved for a double-click
+    // and the "Show data" context item.
     tree.on("selection", (nodes: TreeNode[]) => {
         const name = nodes[0]?.data as string | undefined;
+
+        if (name) {
+            void controller.showRoleProperties(name);
+        }
+    });
+
+    // A double-click shows the role's detail and opens (or focuses) its grants
+    // tab in the Dock — the behaviour a single click used to have.
+    tree.on("dblclick", (node: TreeNode) => {
+        const name = node.data as string | undefined;
 
         if (name) {
             void controller.showRole(name);
@@ -35,9 +49,13 @@ export function RolesTree(controller: SqlAdminController): ExplorerTree {
         }
 
         contextMenu.show(event.clientX, event.clientY, [
-            { text: "Export grants", submenu: { label: "Export grants", items: [
-                { text: "CSV (.csv)",   action: () => void controller.exportRole(name, "csv") },
-                { text: "JSON (.json)", action: () => void controller.exportRole(name, "json") },
+            // "Show data" mirrors the double-click: show the role and open its grants
+            // tab. Glyphs match the grants tab and the export formats.
+            { text: "Show data", glyph: "key", action: () => void controller.showRole(name) },
+            { separator: true },
+            { text: "Export grants", glyph: "file-export", submenu: { label: "Export grants", items: [
+                { text: "CSV (.csv)",   glyph: "file-csv",  action: () => void controller.exportRole(name, "csv") },
+                { text: "JSON (.json)", glyph: "file-code", action: () => void controller.exportRole(name, "json") },
             ] } },
         ]);
     });

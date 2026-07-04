@@ -9,7 +9,7 @@
 import { Component }               from "@jimka/typescript-ui/core";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
 import { NavigatorTree }           from "../navigator/NavigatorTree";
-import { refreshTool }             from "./refreshTool";
+import { refreshTool, bindRefreshShortcut } from "./refreshTool";
 import type { SqlAdminController } from "../SqlAdminController";
 
 // A preferred height large enough to always overflow the sidebar, so the
@@ -42,6 +42,9 @@ export function DatabaseExplorerView(controller: SqlAdminController, id: string)
 
     view.getAccordion().setCompact(true);
     view.getAccordion().setToolsVisibility("always");
+
+    // Alt+R refreshes the navigator while this rail has focus (see refreshTool).
+    bindRefreshShortcut(view, refresh);
 
     return view;
 }
