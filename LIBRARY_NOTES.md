@@ -196,26 +196,27 @@ dismissal helper and calls `menu.show()` directly again (`shell/QueriesView.ts`)
 
 ---
 
-## ✂️🩹🔎 No `Tree` expand-to-node / reveal-by-predicate seam
+## ✂️✅ No `Tree` expand-to-node / reveal-by-predicate seam
 
 The Structure view's foreign-key click-through opens the referenced table and
 then tries to reveal it in the navigator. But `Tree.selectNode` is a **no-op
 when the target is not in the currently-visible flattened set** (an ancestor is
-collapsed, or its lazy children have not loaded), and `Tree` exposes no public
+collapsed, or its lazy children have not loaded), and `Tree` exposed no public
 API to expand a path to a node or find a node by predicate — `getNodes()`
 returns only the roots and expansion is user-click-driven. So an FK whose target
-lives under an unexpanded schema cannot be revealed at all.
+lived under an unexpanded schema could not be revealed at all.
 
-**Worked around (app):** `SqlAdminController.findLoadedNode` walks only the
-**already-loaded** nodes from `tree.getNodes()` and matches on the node's
-`DbObjectRef`; if the target is loaded and visible, `selectNode` highlights it,
-otherwise the reveal silently no-ops and only the Dock tab opens (best-effort,
-never forcing a lazy load).
+**Fix (library):** added `Tree.revealByPredicate((data, node) => boolean)` — a
+depth-first search that awaits each lazy branch's `loadChildren` on the way
+down, and on the first match expands every ancestor on the path and scrolls the
+node into view, returning it (or `null`). Revealing does not select or emit
+`"selection"`; a rejected lazy load is skipped. Regression tests added.
 
-**Possible library improvement:** a `Tree.revealByPredicate((data) => boolean)`
-(or expand-path) seam that expands lazy branches as needed and scrolls the node
-into view, so a consumer can reveal an object the user has not manually expanded
-to.
+**App change:** `SqlAdminController.openReferencedTable` now reveals the target
+via `revealByPredicate` (matching the node's `DbObjectRef`), opens the tab with
+the revealed node, and selects it — so an FK target under an unexpanded schema
+is expanded-to and highlighted, not just opened as a tab. The loaded-only
+`findLoadedNode` walk was removed.
 
 ---
 
