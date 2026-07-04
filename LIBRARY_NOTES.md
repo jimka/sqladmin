@@ -126,7 +126,7 @@ a constant size.)
 
 ---
 
-## 🐞🩹🔎 `Event.addListener`'s capture dispatcher `stopPropagation`s events, swallowing document-level accelerators
+## 🐞✅ `Event.addListener`'s capture dispatcher `stopPropagation`s events, swallowing document-level accelerators
 
 `Event.addListener` (`core/Event.ts`) does not attach a per-element listener — it
 registers the component in a map and installs **one window capture-phase
@@ -146,17 +146,19 @@ keydown is focused — a `List`, the `TextArea` editor, a `Tree` — its keydown
 chord is swallowed, because the now-focused `List` is the keydown target and has its
 own keydown listeners.
 
-**Worked around (app):** register accelerators on **`window` in the capture phase**
-(`SqlAdminShell.installQueryAccelerators`). `baseListener` calls `stopPropagation()`,
-not `stopImmediatePropagation()`, so other listeners on the *same node and phase*
-(window capture) still run. The same trick fixes the context-menu dismissal below.
+**Fix (library):** `baseListener` no longer calls `stopPropagation()` on a
+component's behalf (`core/Event.ts`). It dispatches to the exact-target
+component's listeners and halts the event only when one of them *explicitly*
+calls `stopPropagation` — so an unconsumed event keeps propagating through the
+bubble phase to `document`-level listeners. The framework's own ancestor
+dispatch is the explicit subtree walk (not native bubble), so its semantics are
+unchanged. Tests pin that the native stop fires only on an explicit consume.
 
-**Possible library improvement:** don't `stopPropagation()` unless a component's
-handler actually consumes the event, or expose a first-class global-accelerator /
-keybinding API. Also affects the planned focus-history feature, which relies on a
-global keydown accelerator.
-
-**Status:** 🩹 worked around in the app; 🔎 fix belongs in the library.
+**App change:** `SqlAdminShell.installQueryAccelerators` dropped the
+window-capture trick and registers a plain `document` keydown accelerator
+(bubble phase) — the documented way — which now fires even while a `List` / the
+editor / a `Tree` is focused. This also unblocks the planned focus-history
+feature's global keydown accelerator.
 
 ---
 
