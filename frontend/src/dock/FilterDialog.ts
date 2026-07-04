@@ -234,17 +234,16 @@ function buildConditionForm(columns: ColumnMeta[], initial: FilterCondition[]): 
 
     // The Add button sits in its own fixed-height row beneath the viewport; the
     // flex spacer keeps the glyph button compact rather than stretching it across.
+    // glyphColor tints only the glyph green (its SVG fills with `currentColor`),
+    // leaving the button's own color unset so the label stays default black.
     const addButton = Button({
         glyph:           "plus",
         text:            "Add condition",
         showText:        true,
         showDescription: false,
         compact:         true,
+        glyphColor:      ADD_COLOR,
     });
-    // Tint only the glyph green: its SVG fills with `currentColor`, so setting the
-    // glyph component's own color overrides the inherited default for the glyph
-    // alone. The button sets no `foregroundColor`, so the text stays default black.
-    addButton.getGlyph()?.setForegroundColor(ADD_COLOR);
     addButton.on("action", () => appendRow());
 
     // The form is pinned to the full height so the dialog is a constant size (it
