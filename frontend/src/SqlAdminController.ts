@@ -305,17 +305,29 @@ export class SqlAdminController {
     }
 
     /**
-     * Open a foreign key's referenced table in the Dock, revealing it in the
-     * navigator when its node is already loaded. The reveal is best-effort: an
-     * FK target under a collapsed or not-yet-loaded branch has no loaded node
-     * and no library API forces the expand, so only the Dock tab opens.
+     * Open a foreign key's referenced table in the Dock and reveal it in the
+     * navigator. `Tree.revealByPredicate` expands the path to the node —
+     * loading lazy branches (unexpanded schemas) as needed — so the target is
+     * revealed even when the user never navigated to it, then the tab opens with
+     * that node (so the panel remembers it) and it is selected. Best-effort: if
+     * no node matches, the tab still opens.
      *
      * @param ref - The referenced table to open.
      */
     openReferencedTable(ref: DbObjectRef): void {
-        const node = this.findLoadedNode(ref);
+        void (async () => {
+            const node = (await this._navigator?.revealByPredicate((data: unknown) => {
+                const r = data as DbObjectRef | undefined;
 
-        void this.openTable(ref, node);
+                return !!r && r.database === ref.database && r.schema === ref.schema && r.name === ref.name;
+            })) ?? undefined;
+
+            await this.openTable(ref, node);
+
+            if (node) {
+                this._navigator?.selectNode(node);
+            }
+        })();
     }
 
     /**
@@ -878,36 +890,6 @@ export class SqlAdminController {
 
         this.updateStatusFor(panel);
         void this.showProperties(panel.ref);
-    }
-
-    /**
-     * Find an already-loaded navigator node for `ref`, matching on the node's
-     * `DbObjectRef` by database/schema/name. Walks only nodes whose children are
-     * loaded (never forcing a lazy load), so an FK target under an unexpanded
-     * branch yields undefined and the caller opens the tab without a reveal.
-     *
-     * @param ref - The object to locate.
-     *
-     * @returns The matching loaded node, or undefined when none is loaded.
-     */
-    private findLoadedNode(ref: DbObjectRef): TreeNode | undefined {
-        const roots = this._navigator?.getNodes() ?? [];
-        const stack = [...roots];
-
-        while (stack.length > 0) {
-            const node = stack.pop() as TreeNode;
-            const data = node.data as DbObjectRef | undefined;
-
-            if (data && data.database === ref.database && data.schema === ref.schema && data.name === ref.name) {
-                return node;
-            }
-
-            if (node.children) {
-                stack.push(...node.children);
-            }
-        }
-
-        return undefined;
     }
 
     /** Status line for a panel: row count for a data tab, else the detail label. */
