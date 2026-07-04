@@ -220,19 +220,26 @@ is expanded-to and highlighted, not just opened as a tab. The loaded-only
 
 ---
 
-## ✂️🩹 No `ColumnConfig` cell renderer for a link-styled cell
+## ✂️✅ No `ColumnConfig` cell renderer for a link-styled cell
 
 The Foreign Keys grid would ideally render its referenced table as a clickable
 link cell. `Table` now emits a `"cellclick"` event (record + column), but
-`ColumnConfig` still has no `renderer` hook, so a cell cannot be styled as a
-link or carry custom markup.
+`ColumnConfig` had no `renderer` hook, so a cell could not be styled as a link
+or carry custom markup.
 
-**Worked around (app):** the FK click-through rides the grid's
-`"selectionchange"` instead — selecting an FK row opens its referenced table,
-reading the referenced schema/table straight off the selected record's fields.
+**Fix (library):** added `ColumnConfig.renderer` — a `() => CellRenderer<any>`
+factory. `Row.createCellForField` honours it ahead of the `values` (combo)
+routing and the field-type switch, building a display-only `Cell` (no editor,
+so it never enters edit mode) around a fresh renderer from the factory. Also
+shipped `LinkCellRenderer` (link-coloured, underlined, pointer cursor) as the
+first concrete renderer, so the common clickable-link case needs no
+`CellRenderer` subclass (external subclassing is awkward because of the
+callable-export `.d.ts` papercut below). Regression tests added.
 
-**Possible library improvement:** a `ColumnConfig.renderer` returning a
-component or markup per cell, so consumers can render link/badge/action cells.
+**App change:** the Foreign Keys grid renders its `refTable` column with
+`renderer: () => new LinkCellRenderer()` and opens the referenced table from the
+grid's `"cellclick"` event (gated on `field === "refTable"`), replacing the
+`"selectionchange"` workaround (`dock/StructurePanel.ts`).
 
 ---
 
