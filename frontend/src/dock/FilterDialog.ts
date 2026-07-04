@@ -8,9 +8,11 @@
 // Chosen over an inline per-column filter row because the library's header /
 // column geometry is not an app seam (see plans/implemented/grid-filter-sort).
 //
-// The rows live in a fixed-height, vertically-scrolling viewport (so the dialog
-// stays a constant size); an "Add condition" button appends rows for more than
-// the initial few criteria, and each row's "−" button removes it (down to one).
+// The rows live in a vertically-scrolling viewport capped at VIEWPORT_HEIGHT;
+// the dialog re-fits to the form on each add/remove (Dialog.resizeToContent), so
+// it grows and shrinks with the rows up to that cap, then the viewport scrolls.
+// An "Add condition" button appends rows for more than the initial few criteria,
+// and each row's "−" button removes it (down to one).
 //
 // Behaviour (verified manually — the node-only harness can't drive the inputs,
 // focus, scrolling, or the store's network reload):
@@ -77,13 +79,6 @@ const DIALOG_WIDTH    = 500;
 // at the cap it stops growing and further rows scroll into view.
 const VIEWPORT_HEIGHT = (6 * INPUT_HEIGHT) + (5 * ROW_SPACING);
 
-// The "Add condition" affordance sits in its own fixed-height row beneath the
-// viewport. The form is pinned to the full height (a capped viewport + this row)
-// so the dialog is a constant size — it can't grow after `show()` — while the
-// viewport inside flexes with the row count.
-const ADD_ROW_HEIGHT = INPUT_HEIGHT;
-const FORM_HEIGHT     = VIEWPORT_HEIGHT + ROW_SPACING + ADD_ROW_HEIGHT;
-
 // Row affordances match the toolbar palette: green to add, red to remove.
 const ADD_COLOR    = "rgb(46, 125, 50)";
 const REMOVE_COLOR = "rgb(198, 40, 40)";
@@ -117,9 +112,13 @@ export function openFilterDialog(store: AjaxStore, columns: ColumnMeta[]): void 
     // (and edits) the filter that is currently applied; an unfiltered store
     // seeds nothing and the form opens with empty rows.
     const initial = conditionsFromFilters(store.getActiveFilters());
-    const { form, readConditions } = buildConditionForm(columns, initial);
+    // The resize hook is wired to the dialog once it exists (see runFilterDialog);
+    // until then it's a no-op, so the initial rows don't try to resize a dialog
+    // that hasn't been constructed yet.
+    const resizer = { fit: () => {} };
+    const { form, readConditions } = buildConditionForm(columns, initial, () => resizer.fit());
 
-    void runFilterDialog(store, columns, form, readConditions);
+    void runFilterDialog(store, columns, form, readConditions, resizer);
 }
 
 /**
@@ -136,13 +135,20 @@ async function runFilterDialog(
     columns: ColumnMeta[],
     form: Panel,
     readConditions: () => FilterCondition[],
+    resizer: { fit: () => void },
 ): Promise<void> {
-    const result = await Dialog.show({
+    const dialog = new Dialog({
         title:            "Filter rows",
         contentComponent: form,
         width:            DIALOG_WIDTH,
         buttons:          [CANCEL_BUTTON, CLEAR_BUTTON, APPLY_BUTTON],
     });
+
+    // Now that the dialog exists, adding/removing a row re-fits it to the form's
+    // new height (up to the viewport cap), so it grows and shrinks with the rows.
+    resizer.fit = () => dialog.resizeToContent();
+
+    const result = await dialog.show();
 
     // Apply commits the form; Clear (result "cancel") drops the filter; Cancel
     // (result "close") — and every dismiss gesture, which the library also
@@ -200,7 +206,11 @@ async function applyFilters(store: AjaxStore, columns: ColumnMeta[], conditions:
  *   form opens with one row per seed, padded to at least CONDITION_ROWS empty rows.
  * @returns the form panel and a function reading the current conditions in row order.
  */
-function buildConditionForm(columns: ColumnMeta[], initial: FilterCondition[]): { form: Panel; readConditions: () => FilterCondition[] } {
+function buildConditionForm(
+    columns: ColumnMeta[],
+    initial: FilterCondition[],
+    onContentChange: () => void,
+): { form: Panel; readConditions: () => FilterCondition[] } {
     const rows: RowHandle[] = [];
 
     // A single Grid tiles every row: three weighted input columns share the
@@ -246,14 +256,15 @@ function buildConditionForm(columns: ColumnMeta[], initial: FilterCondition[]): 
     });
     addButton.on("action", () => appendRow());
 
-    // The form is pinned to the full height so the dialog is a constant size (it
-    // can't grow after `show()`); inside, the VBox packs the content-sized
-    // viewport and the Add row at the top (start-justify), so the Add button
-    // tracks the last row and any slack sits below it.
+    // The form takes its natural (content-sized) height: the VBox packs the
+    // content-sized viewport and the Add row, so its preferred height is the Add
+    // button plus the viewport's rows (capped at VIEWPORT_HEIGHT). The host dialog
+    // re-fits to that height on each add/remove (see onContentChange), so the
+    // dialog grows and shrinks with the rows instead of staying a constant size.
+    // The dialog forces the content width, so the form needs no explicit width.
     const form = Panel({
         layoutManager: new VBox({ spacing: ROW_SPACING }),
         components:    [addButton, viewport],
-        preferredSize: { width: DIALOG_WIDTH, height: FORM_HEIGHT },
     });
 
     // Resize the grid to the current row count (every row a fixed-height track),
@@ -273,6 +284,10 @@ function buildConditionForm(columns: ColumnMeta[], initial: FilterCondition[]): 
         }
 
         form.scheduleLayout();
+        // Let the host dialog re-fit to the form's new preferred height (grow on
+        // add, shrink on remove) up to the viewport cap. A no-op until the dialog
+        // wires it after construction, so the initial rows added below don't fire.
+        onContentChange();
     };
 
     const removeRow = (row: RowHandle): void => {
