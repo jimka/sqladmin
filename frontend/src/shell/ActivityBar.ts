@@ -147,12 +147,8 @@ export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
     for (const view of views) {
         deck.addComponent(view.component);
 
-        const button = new ToggleButton("", { selected: view.id === activeId });
+        const button = new ToggleButton("", { selected: view.id === activeId, glyph: view.glyph });
 
-        // setGlyph (not the `glyph` option): a ToggleButton forwards only `text`
-        // to super, so the glyph passed in its options bag is recorded but never
-        // rendered — the constructor-time glyph build already ran. See LIBRARY_NOTES.md.
-        button.setGlyph(view.glyph);
         button.pinGlyphSize(GLYPH_SIZE);
         Tooltip.attach(button, view.label);
 

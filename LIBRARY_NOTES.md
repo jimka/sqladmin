@@ -400,7 +400,7 @@ spacing first).
 
 ---
 
-## 🐞🩹 `ToggleButton` ignores the `glyph` option (renders no icon)
+## 🐞✅ `ToggleButton` ignores the `glyph` option (renders no icon)
 
 **Symptom:** `new ToggleButton("", { glyph: "database" })` produced a button with
 no glyph — it collapsed to a 14×6 box with no `<svg>` — so the activity-bar rail
@@ -409,20 +409,22 @@ icons were invisible.
 **Root cause (library):** `ToggleButton`'s constructor calls `super(text)` with
 **no options** (it dispatches the bag through `applyOptions` at the tail, after
 `super()`), so `Button`'s constructor-time content build runs with `glyph`
-undefined and never creates the glyph. The tail `applyOptions` then records
-`_options.glyph` but does **not** call `setGlyph` — it assumes a *separate* late
-`setGlyph`/`setDescription` triggered the content-row rebuild (see the comment at
-`Button.applyOptions`). For a plain `Button` the constructor sees the option and
-renders; for `ToggleButton` (and any subclass that forwards only `text` to super)
-the glyph option is silently dropped.
+undefined and never creates the glyph. The tail `applyOptions` then recorded
+`_options.glyph` but did **not** call `setGlyph` — it assumed a *separate* late
+`setGlyph`/`setDescription` triggered the content-row rebuild. For a plain
+`Button` the constructor sees the option and renders; for `ToggleButton` (and any
+subclass that forwards only `text` to super) the glyph option was silently
+dropped.
 
-**Worked around (app):** construct without the option and call `button.setGlyph(name)`
-explicitly — that path triggers the content-row rebuild and the icon appears
-(`shell/ActivityBar.ts`).
+**Fix (library):** `Button.applyOptions` now dispatches `setText`/`setGlyph`/
+`setDescription` when the content row is already built — a post-construction call
+such as a subclass's tail `applyOptions` or a runtime re-apply — and pure-writes
+only during the super-time cascade (before the row exists, where the constructor
+still dispatches). A `ToggleButton` built with `{ glyph }` renders its icon.
+Regression test added.
 
-**Possible library fix:** have `Button.applyOptions` dispatch `setGlyph`/`setText`/
-`setDescription` when those options change post-construction (not just record
-them), or have `ToggleButton` forward the options bag to super.
+**App change:** the rail passes the glyph in the `ToggleButton` options bag again
+and dropped the explicit `setGlyph` call (`shell/ActivityBar.ts`).
 
 ---
 
