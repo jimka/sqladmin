@@ -100,32 +100,30 @@ differs from its operator key (`dock/FilterDialog.ts`, `buildConditionRow`).
 
 ---
 
-## ✂️🩹🔎 `Dialog` can't grow to its content after `show()` — no resize-on-content-change
+## ✂️✅ `Dialog` can't grow to its content after `show()` — no resize-on-content-change
 
-A `Dialog`'s height is computed **once**, in the constructor, from the content
+A `Dialog`'s height was computed **once**, in the constructor, from the content
 component's preferred size (`TITLE_HEIGHT + contentHeight + BUTTON_HEIGHT`), and
-never revisited. Its content container is `Fit` + `overflow-y: auto` but the Fit
-layout is **not** marked overflowing, so content that grows *after* `show()` is
-stretched/compressed to the fixed area rather than scrolled — and there is no
-`setContentHeight` / auto-resize hook to grow the dialog to fit new content.
+never revisited. Its content container is `Fit` + `overflow-y: auto`, so content
+that grew *after* `show()` was stretched/compressed to the fixed area rather than
+scrolled — and there was no hook to grow the dialog to fit new content.
 
 **Repro (sqladmin):** the filter dialog lets the user add condition rows. Appending
-a row grows the form's preferred height, but the already-shown dialog stays its
-original size, so a naive form would clip the new rows.
+a row grows the form's preferred height, but the already-shown dialog stayed its
+original size.
 
-**Worked around (app):** host the rows in a fixed-height, `autoScroll: "y"` Panel
-(the documented `Panel.setAutoScroll` recipe — `overflow-y: auto` + the layout's
-overflowing flag) with its height pinned via `min = preferred = max`, so the
-dialog stays a constant size and extra rows scroll inside it (`dock/FilterDialog.ts`,
-`buildConditionForm`). This works but means the dialog can't simply grow with its
-content the way a resize-aware dialog would.
+**Fix (library):** added `Dialog.resizeToContent()` — it re-fits the height to the
+content's current preferred size (`TITLE + content + BUTTON`), floored at the
+dialog minimum and capped so the panel keeps a margin from the viewport edges
+(past the cap the content area scrolls), then re-centres. No-op before `show()`
+and when the height is unchanged. Regression tests added.
 
-**Possible library improvement:** add a `Dialog` option/method to resize to its
-content when the content's preferred size changes after `show()` (recompute
-height + re-center), for forms that add/remove rows. Until then, consumers must
-pin a scrolling viewport themselves.
-
-**Status:** 🩹 worked around in the app; 🔎 enhancement belongs in the library.
+**App change:** `dock/FilterDialog.ts` no longer pins the form to a constant
+height. It takes a `Dialog` instance and calls `dialog.resizeToContent()` from
+the row add/remove path (`onContentChange`), so the dialog grows and shrinks with
+the condition rows up to the viewport cap, then the inner `autoScroll` viewport
+scrolls. (The prior workaround pinned the form to a fixed height so the dialog was
+a constant size.)
 
 ---
 
