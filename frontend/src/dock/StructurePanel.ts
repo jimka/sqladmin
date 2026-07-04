@@ -3,18 +3,19 @@
 // as a vertical stack of four labelled read-only grids — Columns, Indexes,
 // Constraints, and Foreign Keys — in one scrollable panel, so a reader can
 // cross-reference every facet at once (e.g. "is customer_id indexed, and what
-// does its FK reference?"). Selecting a row in the Foreign Keys grid opens the
-// referenced table via `onOpenReferenced`. Every grid is the existing read-only
-// Table over a MemoryStore; array fields are pre-joined to comma-separated
-// display strings because the library Table has no array cell renderer.
+// does its FK reference?"). Clicking the referenced-table link in the Foreign
+// Keys grid opens that table via `onOpenReferenced`. Every grid is the existing
+// read-only Table over a MemoryStore; array fields are pre-joined to
+// comma-separated display strings because the library Table has no array cell
+// renderer.
 
 import { Component, Panel }    from "@jimka/typescript-ui/core";
 import { Border, VBox }        from "@jimka/typescript-ui/layout";
 import { Placement }           from "@jimka/typescript-ui/primitive";
 import { Text }                from "@jimka/typescript-ui/component/input";
-import { Table }               from "@jimka/typescript-ui/component/table";
+import { Table, LinkCellRenderer } from "@jimka/typescript-ui/component/table";
+import type { CellClickEvent } from "@jimka/typescript-ui/component/table";
 import { MemoryStore, Model }  from "@jimka/typescript-ui/data";
-import type { ModelRecord }    from "@jimka/typescript-ui/data";
 import type {
     ColumnMeta,
     ConstraintMeta,
@@ -137,14 +138,14 @@ function buildConstraintsGrid(constraints: ConstraintMeta[]): Component {
 }
 
 /**
- * The read-only Foreign Keys grid, wired so selecting a row opens the FK's
- * referenced table. The referenced schema/table are kept as plain string fields
- * on each record (they double as display columns), so the selection handler
- * reads them straight off the selected record — no side map needed, and the
- * library needs no cell-click event or renderer.
+ * The read-only Foreign Keys grid, wired so clicking the referenced-table link
+ * opens that table. The referenced-table cell renders as a link via
+ * `ColumnConfig.renderer`; the grid's `"cellclick"` event carries the clicked
+ * field and record, so the handler acts only on the `refTable` column and reads
+ * the referenced schema/table straight off the clicked record.
  *
  * @param foreignKeys - The table's foreign keys.
- * @param onOpenReferenced - Invoked with the selected FK's referenced schema and
+ * @param onOpenReferenced - Invoked with the clicked FK's referenced schema and
  *   table.
  *
  * @returns The wired read-only grid.
@@ -176,19 +177,31 @@ function buildForeignKeysGrid(
     }));
 
     const store = new MemoryStore({ model, data: rows, autoLoad: true });
-    const grid  = readOnlyTable(store);
+    // Columns listed explicitly to keep display order while giving refTable a
+    // link renderer; the rest stay read-only text. rowReadOnly locks every cell
+    // (structure edits need DDL the backend does not have yet).
+    const grid  = Table(store, {
+        columns: [
+            { field: "name" },
+            { field: "columns" },
+            { field: "refSchema" },
+            { field: "refTable", renderer: () => new LinkCellRenderer() },
+            { field: "refColumns" },
+            { field: "onUpdate" },
+            { field: "onDelete" },
+        ],
+        appendUnlisted: false,
+        rowReadOnly:    () => true,
+    });
 
-    // Selecting an FK row opens its referenced table — the library Table has no
-    // row-activate/cell-click contract we rely on here, so the deliberate
-    // action rides the single-record selection landing on a row.
-    grid.on("selectionchange", (records: ModelRecord[]) => {
-        const selected = records[0];
-
-        if (!selected) {
+    // Clicking a referenced-table link opens that table. cellclick fires for any
+    // cell, so gate on the refTable column before acting.
+    grid.on("cellclick", (e: CellClickEvent) => {
+        if (e.field !== "refTable") {
             return;
         }
 
-        onOpenReferenced(String(selected.get("refSchema")), String(selected.get("refTable")));
+        onOpenReferenced(String(e.record.get("refSchema")), String(e.record.get("refTable")));
     });
 
     return grid;
