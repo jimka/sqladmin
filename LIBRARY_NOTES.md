@@ -161,7 +161,7 @@ global keydown accelerator.
 
 ---
 
-## 🐞🩹🔎 Context-menu (`Menu.show`) outside-click dismissal misses `pointerdown`-cancelling targets
+## 🐞✅ Context-menu (`Menu.show`) outside-click dismissal misses `pointerdown`-cancelling targets
 
 The rebuild-mode `Menu` (`overlay/Menu.ts`) — the right-click context menu, shown
 via `menu.show(x, y, configs)` — wires its own outside-click dismissal: a
@@ -183,17 +183,17 @@ probe: a real row click reports `pointerdown: 1, mousedown: 0` and the menu stay
 clicking a plain element (the SQL editor) reports `pointerdown: 1, mousedown: 1`
 and the menu closes.
 
-**Possible library improvement:** have the light-dismiss listen on **`pointerdown`**
-(in addition to, or instead of, `mousedown`) — pointer events fire regardless of the
-compat-event suppression. The same applies to any overlay using `mousedown`-based
-light dismiss; the window-`blur` fallback is unaffected.
+**Fix (library):** `Menu`'s outside-press light dismiss now listens on
+**`pointerdown`** instead of the compatibility `mousedown` (`overlay/Menu.ts`,
+`_onViewportPointerDown`). Pointer events fire regardless of the compat-event
+suppression, so a press on a `pointerdown`-cancelling target (another list row, a
+tree item, a tab) now closes the menu. It still reaches the window-capture
+viewport listener for targets that consume the event because `baseViewportListener`
+only `stopPropagation()`s (not `stopImmediatePropagation()`), so same-node
+same-phase listeners survive. Regression test added.
 
-**Worked around (app):** `QueriesView.showContextMenu` registers a window
-capture-phase `pointerdown` listener alongside `menu.show()` that hides the menu on
-an outside press, removed via `show`'s `onClose`. Capture phase is required for the
-reason in the accelerator note above.
-
-**Status:** 🩹 worked around in the app; 🔎 fix belongs in the library.
+**App change:** `QueriesView` dropped its window capture-phase `pointerdown`
+dismissal helper and calls `menu.show()` directly again (`shell/QueriesView.ts`).
 
 ---
 

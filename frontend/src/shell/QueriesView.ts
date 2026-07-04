@@ -22,7 +22,6 @@ import type { Handle }             from "@jimka/typescript-ui/core";
 import { Text }                    from "@jimka/typescript-ui/component/input";
 import { Button }                  from "@jimka/typescript-ui/component/button";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
-import type { MenuItemConfig }     from "@jimka/typescript-ui/component/container";
 import { List }                    from "@jimka/typescript-ui/component/list";
 import { Glyph }                   from "@jimka/typescript-ui/component/display";
 import { Menu, Tooltip }           from "@jimka/typescript-ui/overlay";
@@ -305,41 +304,14 @@ function wireRow(list: List, rows: QueryRow[], config: SectionConfig, menu: Menu
         e.preventDefault();
         // Highlight the right-clicked row (fires change → arms the tools).
         list.setSelectedIndex(index, true);
-        showContextMenu(menu, e.clientX, e.clientY, [
+        // The library Menu light-dismisses on an outside pointerdown, so pressing
+        // another list row (a preventDefaulted pointerdown that suppresses the
+        // compat mousedown) closes it — no app-side dismissal listener needed.
+        menu.show(e.clientX, e.clientY, [
             { text: "Execute", action: () => config.execute(rows[index]) },
             { text: "Open",    action: () => config.open(rows[index]) },
         ]);
     });
-}
-
-/**
- * Show a context menu with an outside-`pointerdown` dismissal — a stopgap for the
- * library Menu's mousedown-only light dismiss (see LIBRARY_NOTES.md): a
- * `preventDefault`ed `pointerdown` (every `List` row does this) suppresses the
- * compatibility `mousedown` the library dismisses on, so the menu would never
- * close. The listener is registered in the window CAPTURE phase because the
- * library's own capture dispatcher `stopPropagation`s `pointerdown` for any
- * target that has listeners — only a same-node capture listener survives that.
- *
- * @param menu - The reused context menu.
- * @param x - Viewport x for the menu.
- * @param y - Viewport y for the menu.
- * @param configs - The menu items.
- */
-function showContextMenu(menu: Menu, x: number, y: number, configs: MenuItemConfig[]): void {
-    const dismiss = (event: Event): void => {
-        const raw    = event.target;
-        const menuEl = menu.getElement();
-
-        if (raw && menuEl && DOM.source.contains(menuEl, DOM.source.intern(raw))) {
-            return; // press inside the menu — its own item action handles the close
-        }
-
-        menu.hide();
-    };
-
-    window.addEventListener("pointerdown", dismiss, true);
-    menu.show(x, y, configs, () => window.removeEventListener("pointerdown", dismiss, true));
 }
 
 /**
