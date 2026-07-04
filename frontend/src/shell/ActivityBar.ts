@@ -85,9 +85,9 @@ export interface ActivityBarHandle {
  */
 export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
     const card        = new Card();
-    const deck        = Container({ layoutManager: card, insets: new Insets(4, 0, 4, 0) });
+    const deck        = Container({ layoutManager: card, insets: new Insets(0, 0, 0, 0) });
     const rail        = new ToolBar({ orientation: "vertical" });
-    const activityBar = Container({ layoutManager: new BorderLayout() });
+    const activityBar = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
     const buttonById  = new Map<string, ToggleButton>();
 
     // The last-shown view (restored on expand), the current collapsed state, and
@@ -169,7 +169,6 @@ export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
     // to RAIL_WIDTH would squeeze the rail (the Border insets eat into the WEST
     // region), so the rail width — and thus the icon column — would change across
     // toggles. Flush insets keep the rail a constant width in both states.
-    activityBar.setInsets(new Insets(0, 0, 0, 0));
     activityBar.addComponent(rail, { placement: Placement.WEST });
     activityBar.addComponent(deck, { placement: Placement.CENTER });
     activityBar.setPreferredSize(RAIL_WIDTH + DECK_WIDTH, 0);

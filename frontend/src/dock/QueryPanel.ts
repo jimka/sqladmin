@@ -17,7 +17,7 @@
 // is self-contained: the controller holds no reference back to it, so closing
 // the dock tab disposes the subtree and the MemoryStore is collected.
 
-import { Component, Panel }              from "@jimka/typescript-ui/core";
+import { Component, Container, Panel }              from "@jimka/typescript-ui/core";
 import { Placement }                     from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Fit, Split } from "@jimka/typescript-ui/layout";
 import { ToolBar }                       from "@jimka/typescript-ui/component/menubar";
@@ -172,7 +172,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     const olderButton = glyphButton("angle-up", HISTORY_COLOR, "Older query (Ctrl+↑)", () => recallInEditor(true));
     const newerButton = glyphButton("angle-down", HISTORY_COLOR, "Newer query (Ctrl+↓)", () => recallInEditor(false));
 
-    const panel = Panel({ layoutManager: new BorderLayout() });
+    const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
     panel.addComponent(new ToolBar({
         components: [runButton, saveButton, clearButton, explainButton, analyzeButton, exportButton, Spacer.flex(), olderButton, newerButton],
     }), { placement: Placement.NORTH });

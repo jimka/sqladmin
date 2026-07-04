@@ -13,8 +13,8 @@
 // the controller's openDefinition / openStructure), keeping this panel a plain
 // data surface — the same shape a table's data tab has, minus the edit actions.
 
-import { Panel, Event }                from "@jimka/typescript-ui/core";
-import { Placement }                   from "@jimka/typescript-ui/primitive";
+import { Panel, Event, Container }                from "@jimka/typescript-ui/core";
+import { Insets, Placement }                   from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
 import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
 import { Spacer }                      from "@jimka/typescript-ui/component/container";
@@ -33,6 +33,7 @@ import { flask }                       from "@jimka/typescript-ui/glyphs/solid/f
 import type { ColumnMeta }             from "../contract";
 import type { ExportTable }            from "./TableWorkPanel";
 import { isExplainChord, isExplainAnalyzeChord } from "../shell/queryShortcuts";
+import { _0 } from "@jimka/typescript-ui/glyphs/solid";
 
 Glyph.register(refresh, file_export, file_csv, file_code, diagram_project, flask);
 
@@ -65,7 +66,7 @@ export function ViewWorkPanel(store: AjaxStore, columns: ColumnMeta[], onExport:
     // StructurePanel/RoleGrantsPanel use.
     const dataGrid = Table(store, buildViewColumnSpec(columns));
 
-    const panel = Panel({ layoutManager: new BorderLayout() });
+    const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
     panel.addComponent(buildToolBar(store, onExport, onExplain), { placement: Placement.NORTH });
     panel.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
 

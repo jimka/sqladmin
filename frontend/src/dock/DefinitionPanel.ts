@@ -4,7 +4,7 @@
 // fetched by the controller (openDefinition) and passed in already-resolved, so
 // this panel is a pure view with no data dependency of its own.
 
-import { Panel }    from "@jimka/typescript-ui/core";
+import { Container, Panel }    from "@jimka/typescript-ui/core";
 import { Fit }      from "@jimka/typescript-ui/layout";
 import { TextArea } from "@jimka/typescript-ui/component/input";
 
@@ -12,5 +12,5 @@ import { TextArea } from "@jimka/typescript-ui/component/input";
 export function DefinitionPanel(definition: string): Panel {
     const area = new TextArea(definition, { readOnly: true });
 
-    return Panel({ layoutManager: new Fit(), components: [area] });
+    return Container({ layoutManager: new Fit(), components: [area] });
 }

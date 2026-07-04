@@ -129,27 +129,22 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
 function installAccelerators(controller: SqlAdminController, sidebar: ActivityBarHandle): void {
     document.addEventListener("keydown", (event: KeyboardEvent) => {
         if (isNewQueryChord(event)) {
-            event.preventDefault();
             controller.openQuery();
         } else if (isOpenSavedChord(event)) {
-            event.preventDefault();
             controller.showQueriesView("saved");
         } else if (isQueryHistoryChord(event)) {
-            event.preventDefault();
             controller.showQueriesView("recent");
         } else if (isDatabasesRailChord(event)) {
-            event.preventDefault();
             sidebar.selectView(DATABASE_VIEW_ID);
         } else if (isRolesRailChord(event)) {
-            event.preventDefault();
             sidebar.selectView(ROLES_VIEW_ID);
         } else if (isQueriesRailChord(event)) {
-            event.preventDefault();
             sidebar.selectView(QUERIES_VIEW_ID);
         } else if (isRefreshChord(event)) {
-            event.preventDefault();
             controller.refreshActive();
         }
+
+        event.preventDefault();
     });
 }
 

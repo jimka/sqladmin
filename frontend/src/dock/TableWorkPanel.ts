@@ -8,7 +8,7 @@
 // table's structure opens in its own tab from the navigator's right-click menu
 // (see StructurePanel / SqlAdminController).
 
-import { Panel }                       from "@jimka/typescript-ui/core";
+import { Container, Panel }                       from "@jimka/typescript-ui/core";
 import { Placement }                   from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
 import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
@@ -50,7 +50,7 @@ export type ExportTable = (format: "csv" | "json") => void;
 export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable): Panel {
     const dataGrid = Table(store, buildColumnSpec(columns));
 
-    const panel = Panel({ layoutManager: new BorderLayout() });
+    const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
     panel.addComponent(buildToolBar(store, dataGrid, columns, notify, onExport), { placement: Placement.NORTH });
     panel.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
 

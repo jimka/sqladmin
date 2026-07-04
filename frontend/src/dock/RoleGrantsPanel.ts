@@ -5,7 +5,7 @@
 // rows in one load (see LIBRARY_NOTES.md), so the grants are paged — also a
 // phpMyAdmin-style work-area table.
 
-import { Panel }              from "@jimka/typescript-ui/core";
+import { Container, Panel }              from "@jimka/typescript-ui/core";
 import { Border }             from "@jimka/typescript-ui/layout";
 import { Placement }          from "@jimka/typescript-ui/primitive";
 import { ToolBar }            from "@jimka/typescript-ui/component/menubar";
@@ -51,8 +51,8 @@ export function RoleGrantsPanel(role: string, privileges: RolePrivilege[]): Pane
     const store = new Store({ model, proxy });
     store.setPageSize(PAGE_SIZE);
 
-    const panel = Panel({
-        layoutManager: new Border(),
+    const panel = Container({
+        layoutManager: new Border({ spacing: 0 }),
         components   : [
             { component: buildToolBar(role, privileges),                        constraints: { placement: Placement.NORTH } },
             { component: Table(store, { columns: [], rowReadOnly: () => true }), constraints: { placement: Placement.CENTER } },
