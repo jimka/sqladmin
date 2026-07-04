@@ -303,14 +303,6 @@ function buildConditionForm(
 
         rows.splice(index, 1);
         syncGrid();
-
-        // Work around a library bug (see LIBRARY_NOTES): an autoScroll panel does
-        // not re-clear its reserved scrollbar gutter and scroll shadow when its
-        // content shrinks back within the viewport — the stale gutter/shadow
-        // linger until an unrelated later layout pass re-measures (which is why
-        // adding another row "fixes" it). Force that follow-up pass here, once
-        // this removal's layout has settled, so they clear immediately instead.
-        requestAnimationFrame(() => viewport.flushLayout());
     };
 
     function appendRow(seed?: FilterCondition): void {
