@@ -25,10 +25,12 @@ import { minus }                       from "@jimka/typescript-ui/glyphs/solid/m
 import { save }                        from "@jimka/typescript-ui/glyphs/solid/save";
 import { filter }                      from "@jimka/typescript-ui/glyphs/solid/filter";
 import { file_export }                 from "@jimka/typescript-ui/glyphs/solid/file_export";
+import { file_csv }                    from "@jimka/typescript-ui/glyphs/solid/file_csv";
+import { file_code }                   from "@jimka/typescript-ui/glyphs/solid/file_code";
 import type { ColumnMeta }             from "../contract";
 import { openFilterDialog }            from "./FilterDialog";
 
-Glyph.register(refresh, plus, minus, save, filter, file_export);
+Glyph.register(refresh, plus, minus, save, filter, file_export, file_csv, file_code);
 
 /** Toolbar glyph colors: blue for neutral actions, green to add, red to delete. */
 const BLUE  = "rgb(30, 100, 200)";
@@ -77,8 +79,8 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
     const exportMenu = Menu();
     const exportButton = glyphButton("file-export", BLUE, "Export table (CSV / JSON)", event => {
         exportMenu.show(event.clientX, event.clientY, [
-            { text: "Export CSV (.csv)",   action: () => onExport("csv") },
-            { text: "Export JSON (.json)", action: () => onExport("json") },
+            { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => onExport("csv") },
+            { text: "Export JSON (.json)", glyph: "file-code", action: () => onExport("json") },
         ]);
     });
 
@@ -96,7 +98,7 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
             // must precede load(): load() replaces the records but leaves pending
             // removals queued, so without it a deleted row would reappear yet stay
             // marked for deletion on the next Save.
-            glyphButton("refresh", BLUE, "Refresh", () => { store.reject(); void store.load(); })
+            glyphButton("refresh", BLUE, "Refresh (Alt+R)", () => { store.reject(); void store.load(); })
         ]
     });
 

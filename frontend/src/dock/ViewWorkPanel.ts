@@ -13,7 +13,7 @@
 // the controller's openDefinition / openStructure), keeping this panel a plain
 // data surface — the same shape a table's data tab has, minus the edit actions.
 
-import { Panel }                       from "@jimka/typescript-ui/core";
+import { Panel, Event }                from "@jimka/typescript-ui/core";
 import { Placement }                   from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
 import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
@@ -26,12 +26,15 @@ import { Menu }                        from "@jimka/typescript-ui/overlay";
 import type { AjaxStore }              from "@jimka/typescript-ui/data";
 import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
 import { file_export }                 from "@jimka/typescript-ui/glyphs/solid/file_export";
+import { file_csv }                    from "@jimka/typescript-ui/glyphs/solid/file_csv";
+import { file_code }                   from "@jimka/typescript-ui/glyphs/solid/file_code";
 import { diagram_project }             from "@jimka/typescript-ui/glyphs/solid/diagram_project";
 import { flask }                       from "@jimka/typescript-ui/glyphs/solid/flask";
 import type { ColumnMeta }             from "../contract";
 import type { ExportTable }            from "./TableWorkPanel";
+import { isExplainChord, isExplainAnalyzeChord } from "../shell/queryShortcuts";
 
-Glyph.register(refresh, file_export, diagram_project, flask);
+Glyph.register(refresh, file_export, file_csv, file_code, diagram_project, flask);
 
 /** Neutral toolbar glyph color, matching TableWorkPanel's Refresh action. */
 const BLUE = "rgb(30, 100, 200)";
@@ -66,6 +69,20 @@ export function ViewWorkPanel(store: AjaxStore, columns: ColumnMeta[], onExport:
     panel.addComponent(buildToolBar(store, onExport, onExplain), { placement: Placement.NORTH });
     panel.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
 
+    // Ctrl+E / Ctrl+Shift+E explain the view while this panel has focus, mirroring
+    // the toolbar's Explain / Explain Analyze buttons (each opens a query tab).
+    Event.addSubtreeListener(panel, "keydown", (event: KeyboardEvent) => {
+        if (isExplainChord(event)) {
+            event.preventDefault();
+            event.stopPropagation();
+            onExplain(false);
+        } else if (isExplainAnalyzeChord(event)) {
+            event.preventDefault();
+            event.stopPropagation();
+            onExplain(true);
+        }
+    });
+
     return panel;
 }
 
@@ -89,16 +106,16 @@ function buildToolBar(store: AjaxStore, onExport: ExportTable, onExplain: Explai
     const exportMenu = Menu();
     const exportButton = glyphButton("file-export", BLUE, "Export view (CSV / JSON)", event => {
         exportMenu.show(event.clientX, event.clientY, [
-            { text: "Export CSV (.csv)",   action: () => onExport("csv") },
-            { text: "Export JSON (.json)", action: () => onExport("json") },
+            { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => onExport("csv") },
+            { text: "Export JSON (.json)", glyph: "file-code", action: () => onExport("json") },
         ]);
     });
 
     // Explain opens the plan on a Query tab (see openQuery); this panel's grid is
     // never disturbed. Analyze executes the view query (rolled back server-side).
-    const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, "Explain (opens a query tab)",
+    const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, "Explain (Ctrl+E)\n\nopens a query tab",
                                       () => onExplain(false));
-    const analyzeButton = glyphButton("flask", ANALYZE_COLOR, "Explain Analyze (opens a query tab; executes the view query)",
+    const analyzeButton = glyphButton("flask", ANALYZE_COLOR, "Explain Analyze (Ctrl+Shift+E)\n\nopens a query tab; executes the view query",
                                       () => onExplain(true));
 
     return new ToolBar({
@@ -110,7 +127,7 @@ function buildToolBar(store: AjaxStore, onExport: ExportTable, onExplain: Explai
             Spacer.flex(),
             exportButton,
             // No reject() before load(): a read-only store has no pending edits.
-            glyphButton("refresh", BLUE, "Refresh", () => void store.load()),
+            glyphButton("refresh", BLUE, "Refresh (Alt+R)", () => void store.load()),
         ],
     });
 }

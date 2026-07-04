@@ -8,7 +8,7 @@
 import { Component }               from "@jimka/typescript-ui/core";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
 import { RolesTree }               from "../roles/RolesTree";
-import { refreshTool }             from "./refreshTool";
+import { refreshTool, bindRefreshShortcut } from "./refreshTool";
 import type { SqlAdminController } from "../SqlAdminController";
 
 // A preferred height large enough to always overflow the sidebar, so the
@@ -40,6 +40,9 @@ export function RolesExplorerView(controller: SqlAdminController, id: string): C
 
     view.getAccordion().setCompact(true);
     view.getAccordion().setToolsVisibility("always");
+
+    // Alt+R refreshes the roles tree while this rail has focus (see refreshTool).
+    bindRefreshShortcut(view, refresh);
 
     return view;
 }

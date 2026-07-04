@@ -15,7 +15,7 @@
 // the icon again expands. The same collapse/expand is exposed as
 // `toggleCollapsed` for the menu's "Toggle Sidebar" command.
 
-import { Component, Panel }             from "@jimka/typescript-ui/core";
+import { Component, Container }             from "@jimka/typescript-ui/core";
 import { Placement, Insets }            from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Card } from "@jimka/typescript-ui/layout";
 import { ToolBar }                      from "@jimka/typescript-ui/component/menubar";
@@ -44,6 +44,8 @@ export interface ActivityView {
     id:        string;
     /** Hover-tooltip label for the icon-only rail button. */
     label:     string;
+    /** Optional accelerator (e.g. "Alt+D") appended to the hover tooltip. */
+    shortcut?: string;
     /** Registry glyph name shown on the rail button. */
     glyph:     string;
     /** The view rendered in the deck when this button is active. */
@@ -83,9 +85,9 @@ export interface ActivityBarHandle {
  */
 export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
     const card        = new Card();
-    const deck        = Panel({ layoutManager: card });
+    const deck        = Container({ layoutManager: card, insets: new Insets(4, 0, 4, 0) });
     const rail        = new ToolBar({ orientation: "vertical" });
-    const activityBar = Panel({ layoutManager: new BorderLayout() });
+    const activityBar = Container({ layoutManager: new BorderLayout() });
     const buttonById  = new Map<string, ToggleButton>();
 
     // The last-shown view (restored on expand), the current collapsed state, and
@@ -150,7 +152,7 @@ export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
         const button = new ToggleButton("", { selected: view.id === activeId, glyph: view.glyph });
 
         button.pinGlyphSize(GLYPH_SIZE);
-        Tooltip.attach(button, view.label);
+        Tooltip.attach(button, view.shortcut ? `${view.label} (${view.shortcut})` : view.label);
 
         // The click already flipped `selected`: now-selected means this view was
         // chosen (show it); now-deselected means the active view was clicked off.

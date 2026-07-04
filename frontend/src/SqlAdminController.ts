@@ -5,9 +5,17 @@
 import { Dock }                                                from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent }                                 from "@jimka/typescript-ui/overlay";
 import { StatusBar }                                           from "@jimka/typescript-ui/component/container";
+import { Glyph }                                               from "@jimka/typescript-ui/component/display";
+import { table }                                               from "@jimka/typescript-ui/glyphs/solid/table";
+import { eye }                                                 from "@jimka/typescript-ui/glyphs/solid/eye";
+import { layer_group }                                         from "@jimka/typescript-ui/glyphs/solid/layer_group";
+import { terminal }                                            from "@jimka/typescript-ui/glyphs/solid/terminal";
+import { table_columns }                                       from "@jimka/typescript-ui/glyphs/solid/table_columns";
+import { file_code }                                           from "@jimka/typescript-ui/glyphs/solid/file_code";
+import { key }                                                 from "@jimka/typescript-ui/glyphs/solid/key";
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef, RolePrivilege, RoleSummary, TableStructure } from "./contract";
+import type { ColumnMeta, DbObjectRef, RoleDetail, RolePrivilege, RoleSummary, TableStructure } from "./contract";
 import { getColumns, getRoleDetail, getRoles, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";
 import { exportQueryResult }                                   from "./dock/exportQueryResult";
 import { exportExplainPlan }                                   from "./dock/exportExplainResult";
@@ -27,6 +35,18 @@ import { RolesPropertiesPanel }                                from "./roles/Rol
 import { QueryHistoryStore, SavedQueryStore }                  from "./data/queryStore";
 import type { HistoryEntry, SavedQuery }                       from "./data/queryStore";
 import { promptQueryName }                                     from "./promptQueryName";
+
+// Dock-tab glyphs, one per tab type, so a glance at the tab bar tells the tab
+// apart: relations by kind (data grids), plus the query / structure / definition
+// / grants tabs. Registered once here since the controller is what opens tabs.
+Glyph.register(table, eye, layer_group, terminal, table_columns, file_code, key);
+
+/** The dock-tab glyph for a relation kind — a table, view, or materialized view. */
+const RELATION_TAB_GLYPH: Record<string, string> = {
+    table:            "table",
+    view:             "eye",
+    materializedView: "layer-group",
+};
 
 /** A focusable section of the Queries view — the Saved or the Recent list. */
 export type QueriesSection = "saved" | "recent";
@@ -214,6 +234,7 @@ export class SqlAdminController {
         this.dock.addLazyPanel({
             id,
             title  : ref.name ?? id,
+            glyph  : RELATION_TAB_GLYPH[ref.kind] ?? "table",
             tooltip: this.panelTooltip(ref),
             content: isReadOnly
                 ? () => ViewWorkPanel(store, columns, format => this.exportTable(ref, format),
@@ -261,6 +282,7 @@ export class SqlAdminController {
         this.dock.addPanel({
             id,
             title  : `${ref.name ?? id} (definition)`,
+            glyph  : "file-code",
             tooltip: this.panelTooltip(ref),
             content: DefinitionPanel(definition)
         });
@@ -291,6 +313,7 @@ export class SqlAdminController {
         this.dock.addPanel({
             id,
             title  : `${ref.name ?? id} (structure)`,
+            glyph  : "table-columns",
             tooltip: this.panelTooltip(ref),
             content: StructurePanel(columns, structure, (refSchema, refTable) =>
                 this.openReferencedTable({
@@ -363,6 +386,7 @@ export class SqlAdminController {
         this.dock.addPanel({
             id,
             title  : label,
+            glyph  : "terminal",
             content: QueryPanel({
                 runQuery  : sql => runQuery(this._connectionId, sql),
                 runExplain: (sql, opts) => runExplain(this._connectionId, sql, opts),
@@ -770,19 +794,46 @@ export class SqlAdminController {
      * so rapid role clicks never render the wrong role.
      */
     async showRole(name: string): Promise<void> {
+        const detail = await this.fetchRoleDetail(name);
+
+        if (detail) {
+            this.rolesProperties.show(detail);
+            this.openRoleGrants(name, detail.privileges);
+        }
+    }
+
+    /**
+     * Show the selected role's base info (attributes + memberships) in the roles
+     * inspector only, without opening its grants tab — the single-click preview.
+     * Opening the grants tab is {@link showRole} (double-click / "Show data").
+     */
+    async showRoleProperties(name: string): Promise<void> {
+        const detail = await this.fetchRoleDetail(name);
+
+        if (detail) {
+            this.rolesProperties.show(detail);
+        }
+    }
+
+    /**
+     * Fetch a role's detail under the monotonic role guard, returning it only
+     * while it is still the current selection (otherwise `null`); a failed fetch
+     * reports the error and returns `null`. Shared by {@link showRole} and
+     * {@link showRoleProperties} so rapid role clicks never render a stale role.
+     */
+    private async fetchRoleDetail(name: string): Promise<RoleDetail | null> {
         const seq = ++this._roleSeq;
 
         try {
             const detail = await getRoleDetail(this._connectionId, name);
 
-            if (seq === this._roleSeq) {
-                this.rolesProperties.show(detail);
-                this.openRoleGrants(name, detail.privileges);
-            }
+            return seq === this._roleSeq ? detail : null;
         } catch (err) {
             if (seq === this._roleSeq) {
                 this.notifyError(err);
             }
+
+            return null;
         }
     }
 
@@ -803,12 +854,39 @@ export class SqlAdminController {
         this.dock.addPanel({
             id,
             title  : `Grants: ${role}`,
+            glyph  : "key",
             content: RoleGrantsPanel(role, privileges),
         });
 
         // Track the grant set so the active-tab export (Tools menu) can reach it
         // while this tab is focused, mirroring _activeQueryResult for query panels.
         this._activeRoleGrants.set(id, { role, privileges });
+    }
+
+    /**
+     * Refresh the active work tab if it is a reloadable data grid: reload the
+     * table's or view's store from the server, discarding a table's unsaved edits
+     * first (mirroring the grid's own Refresh button — a read-only view has no
+     * edits to reject). A no-op when the focused tab has no store (a query, a
+     * role's grants, a structure/definition tab, or the empty start page), so
+     * "refresh the current view" simply does nothing when there is nothing to
+     * reload. Wired to the Alt+R accelerator.
+     */
+    refreshActive(): void {
+        const entry = this._activePanelId ? this._openPanels.get(this._activePanelId) : undefined;
+
+        if (!entry?.store) {
+            return;
+        }
+
+        const readOnly = entry.ref.kind === "view" || entry.ref.kind === "materializedView";
+
+        if (!readOnly) {
+            entry.store.reject();
+        }
+
+        void entry.store.load();
+        this.statusBar.setMessage(`${this._connectionId} · ${entry.ref.name ?? ""}: refreshed`);
     }
 
     /** Report a sync outcome: each failure as an error, or a success message. */

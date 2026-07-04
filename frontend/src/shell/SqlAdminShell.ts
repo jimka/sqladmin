@@ -14,16 +14,28 @@
 // .d.ts (the callable constructor type drops instance methods for external
 // consumers). See LIBRARY_NOTES.md.
 
-import { Panel, Component }        from "@jimka/typescript-ui/core";
-import { Placement, UNBOUNDED }    from "@jimka/typescript-ui/primitive";
+import { Panel, Component, Container }        from "@jimka/typescript-ui/core";
+import { Insets, Placement, UNBOUNDED }    from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Split, Card } from "@jimka/typescript-ui/layout";
 import { MenuBar }                 from "@jimka/typescript-ui/component/menubar";
+import { Button }                  from "@jimka/typescript-ui/component/button";
+import { Spacer }                  from "@jimka/typescript-ui/component/container";
 import { Glyph }                   from "@jimka/typescript-ui/component/display";
 import { database }                from "@jimka/typescript-ui/glyphs/solid/database";
 import { circle_info }             from "@jimka/typescript-ui/glyphs/solid/circle_info";
 import { users }                   from "@jimka/typescript-ui/glyphs/solid/users";
 import { terminal }                from "@jimka/typescript-ui/glyphs/solid/terminal";
 import { arrows_rotate }           from "@jimka/typescript-ui/glyphs/solid/arrows_rotate";
+import { plus }                    from "@jimka/typescript-ui/glyphs/solid/plus";
+import { floppy_disk }             from "@jimka/typescript-ui/glyphs/solid/floppy_disk";
+import { clock_rotate_left }       from "@jimka/typescript-ui/glyphs/solid/clock_rotate_left";
+import { wrench }                  from "@jimka/typescript-ui/glyphs/solid/wrench";
+import { eye }                     from "@jimka/typescript-ui/glyphs/solid/eye";
+import { file_export }             from "@jimka/typescript-ui/glyphs/solid/file_export";
+import { file_lines }              from "@jimka/typescript-ui/glyphs/solid/file_lines";
+import { file_csv }                from "@jimka/typescript-ui/glyphs/solid/file_csv";
+import { file_code }               from "@jimka/typescript-ui/glyphs/solid/file_code";
+import { bars }                    from "@jimka/typescript-ui/glyphs/solid/bars";
 import { ActivityBar, SIDEBAR_RAIL_WIDTH, SIDEBAR_DEFAULT_WIDTH } from "./ActivityBar";
 import type { ActivityBarHandle, SidebarSizer } from "./ActivityBar";
 import { DatabaseExplorerView }    from "./DatabaseExplorerView";
@@ -32,8 +44,12 @@ import { QueriesView }             from "./QueriesView";
 import { StartPage }               from "./StartPage";
 import {
     NEW_QUERY_SHORTCUT, OPEN_SAVED_SHORTCUT, QUERY_HISTORY_SHORTCUT,
+    DATABASES_RAIL_SHORTCUT, ROLES_RAIL_SHORTCUT, QUERIES_RAIL_SHORTCUT, REFRESH_SHORTCUT,
     isNewQueryChord, isOpenSavedChord, isQueryHistoryChord,
+    isDatabasesRailChord, isRolesRailChord, isQueriesRailChord, isRefreshChord,
 } from "./queryShortcuts";
+import { openAboutDialog }         from "./aboutDialog";
+import { openLocalStorageWindow }  from "./localStorageWindow";
 import type { SqlAdminController } from "../SqlAdminController";
 
 // Glyphs used across the sidebar subtree: a database for the Database view (rail
@@ -42,6 +58,8 @@ import type { SqlAdminController } from "../SqlAdminController";
 // rotate icon for the section refresh tools. Registered once here, the
 // composition root, and referenced by name downstream.
 Glyph.register(database, circle_info, users, terminal, arrows_rotate);
+// Glyphs decorating the menu bar's menus, items, and submenus.
+Glyph.register(plus, floppy_disk, clock_rotate_left, wrench, eye, file_export, file_lines, file_csv, file_code, bars);
 
 // The view-container ids; each view's rail button selects it by this id.
 const DATABASE_VIEW_ID = "database";
@@ -63,20 +81,29 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
     // New-Query menu shortcut is a display hint only (MenuItem.ts), so install
     // the real Alt+N accelerator as a document keydown listener.
     controller.setShowQueriesView(() => sidebar.selectView(QUERIES_VIEW_ID));
-    installQueryAccelerators(controller);
+    installAccelerators(controller, sidebar);
 
-    return Panel({
-        layoutManager: new BorderLayout(),
+    return Container({
+        layoutManager: new BorderLayout({ spacing: 0 }),
         components: [
-            { component: buildMenuBar({
-                onToggleSidebar: sidebar.toggleCollapsed,
-                onNewQuery     : () => controller.openQuery(),
-                onOpenSaved    : () => controller.showQueriesView("saved"),
-                onQueryHistory : () => controller.showQueriesView("recent"),
-                onExportResults: format => controller.exportActive(format),
-                activeExportKind: () => controller.activeExportKind(),
-                canExportActive: () => controller.canExportActive(),
-            }), constraints: { placement: Placement.NORTH } },
+            {
+                component: buildMenuBar({
+                    onToggleSidebar   : sidebar.toggleCollapsed,
+                    onNewQuery        : () => controller.openQuery(),
+                    onOpenSaved       : () => controller.showQueriesView("saved"),
+                    onQueryHistory    : () => controller.showQueriesView("recent"),
+                    onExportResults   : format => controller.exportActive(format),
+                    activeExportKind  : () => controller.activeExportKind(),
+                    canExportActive   : () => controller.canExportActive(),
+                    onShowLocalStorage: () => openLocalStorageWindow(),
+                    onAbout           : () => openAboutDialog(),
+                    onShowDatabases   : () => sidebar.selectView(DATABASE_VIEW_ID),
+                    onShowRoles       : () => sidebar.selectView(ROLES_VIEW_ID),
+                    onShowQueries     : () => sidebar.selectView(QUERIES_VIEW_ID),
+                    onRefresh         : () => controller.refreshActive(),
+                }), 
+                constraints      : { placement: Placement.NORTH }
+            },
             { component: workArea,             constraints: { placement: Placement.CENTER } },
             { component: controller.statusBar, constraints: { placement: Placement.SOUTH } },
         ],
@@ -84,19 +111,22 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
 }
 
 /**
- * Install the global query accelerators. The library renders a menu shortcut as
- * a label but does not bind it, so each chord is wired as a real keydown
- * accelerator: Alt+N opens a new query, Alt+S jumps to the Saved list, Alt+H
- * jumps to the history list.
+ * Install the global accelerators. The library renders a menu shortcut as a
+ * label but does not bind it, so each chord is wired as a real keydown
+ * accelerator: Alt+N opens a new query, Alt+S/Alt+H jump to the Saved / history
+ * lists; Alt+D/Alt+O/Alt+Q open the Databases / Roles / Queries rails; Alt+R
+ * refreshes the active view. (Explain / Explain-Analyze — Ctrl+E / Ctrl+Shift+E
+ * — are editor-scoped and bound inside QueryPanel, not here.)
  *
  * A plain `document` keydown accelerator (bubble phase): the library's Event
  * dispatcher no longer stops propagation unless a focused component actually
  * consumes the key, so an unhandled chord bubbles up to this listener even while
  * a List / the editor / a Tree is focused (LIBRARY_NOTES.md).
  *
- * @param controller - The mediator the chords drive.
+ * @param controller - The mediator the query/refresh chords drive.
+ * @param sidebar - The activity bar the rail chords switch views on.
  */
-function installQueryAccelerators(controller: SqlAdminController): void {
+function installAccelerators(controller: SqlAdminController, sidebar: ActivityBarHandle): void {
     document.addEventListener("keydown", (event: KeyboardEvent) => {
         if (isNewQueryChord(event)) {
             event.preventDefault();
@@ -107,6 +137,18 @@ function installQueryAccelerators(controller: SqlAdminController): void {
         } else if (isQueryHistoryChord(event)) {
             event.preventDefault();
             controller.showQueriesView("recent");
+        } else if (isDatabasesRailChord(event)) {
+            event.preventDefault();
+            sidebar.selectView(DATABASE_VIEW_ID);
+        } else if (isRolesRailChord(event)) {
+            event.preventDefault();
+            sidebar.selectView(ROLES_VIEW_ID);
+        } else if (isQueriesRailChord(event)) {
+            event.preventDefault();
+            sidebar.selectView(QUERIES_VIEW_ID);
+        } else if (isRefreshChord(event)) {
+            event.preventDefault();
+            controller.refreshActive();
         }
     });
 }
@@ -122,7 +164,7 @@ function installQueryAccelerators(controller: SqlAdminController): void {
  */
 function buildWorkArea(sidebar: ActivityBarHandle, controller: SqlAdminController): Component {
     const split  = new Split({ orientation: "horizontal" });
-    const body   = Panel({ layoutManager: split });
+    const body   = Container({ layoutManager: split });
     const pane   = sidebar.component;
     const center = buildCenterDeck(controller);
 
@@ -198,7 +240,7 @@ function buildWorkArea(sidebar: ActivityBarHandle, controller: SqlAdminControlle
  */
 function buildCenterDeck(controller: SqlAdminController): Component {
     const card = new Card();
-    const deck = Panel({ layoutManager: card });
+    const deck = Container({ layoutManager: card });
 
     // Each deck page needs an id the Card matches on.
     controller.dock.setId(CENTER_DOCK_ID);
@@ -235,6 +277,18 @@ interface MenuBarActions {
     activeExportKind: () => "plan" | "tabular";
     /** Whether the active tab has anything to export, to grey the item when not. */
     canExportActive: () => boolean;
+    /** Opens the localStorage inspector window (Tools → Show localStorage…). */
+    onShowLocalStorage: () => void;
+    /** Opens the About dialog (the far-right menu-bar button). */
+    onAbout: () => void;
+    /** Selects the Databases rail (View → Databases, and the Alt+D accelerator). */
+    onShowDatabases: () => void;
+    /** Selects the Roles rail (View → Roles, and the Alt+O accelerator). */
+    onShowRoles: () => void;
+    /** Selects the Queries rail (View → Queries, and the Alt+Q accelerator). */
+    onShowQueries: () => void;
+    /** Refreshes the active view (View → Refresh, and the Alt+R accelerator). */
+    onRefresh: () => void;
 }
 
 /**
@@ -249,15 +303,15 @@ interface MenuBarActions {
  * @returns The composed menu bar.
  */
 function buildMenuBar(actions: MenuBarActions): MenuBar {
-    return MenuBar({
+    const menuBar = MenuBar({
         menus: [
-            { label: "Query", items: [
-                { text: "New Query", shortcut: NEW_QUERY_SHORTCUT, action: actions.onNewQuery },
+            { label: "Query", glyph: "terminal", items: [
+                { text: "New Query", glyph: "plus", shortcut: NEW_QUERY_SHORTCUT, action: actions.onNewQuery },
                 { separator: true },
-                { text: "Open Saved…",    shortcut: OPEN_SAVED_SHORTCUT,    action: actions.onOpenSaved },
-                { text: "Query History…", shortcut: QUERY_HISTORY_SHORTCUT, action: actions.onQueryHistory },
+                { text: "Open Saved…",    glyph: "floppy-disk",       shortcut: OPEN_SAVED_SHORTCUT,    action: actions.onOpenSaved },
+                { text: "Query History…", glyph: "clock-rotate-left", shortcut: QUERY_HISTORY_SHORTCUT, action: actions.onQueryHistory },
             ] },
-            { label: "Tools", items: () => [
+            { label: "Tools", glyph: "wrench", items: () => [
                 // Exports the active work tab's data — a query result, a table/view's
                 // rows, a role's grants, or a shown EXPLAIN plan. Each tab's own
                 // toolbar button is the primary surface; this acts on whichever tab
@@ -265,20 +319,49 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
                 // each time their menu opens: the item greys out when the focused
                 // tab has nothing to export, and the submenu labels track its kind
                 // (a plan shows text / JSON, everything else CSV / JSON).
-                { text: "Export results…", enabled: actions.canExportActive(),
+                { text: "Export results…", glyph: "file-export", enabled: actions.canExportActive(),
                   submenu: { label: "Export results…", items: () => {
                     const plan = actions.activeExportKind() === "plan";
 
                     return [
-                        // First slot: plain-text plan vs. CSV; second is JSON either way.
-                        { text: plan ? "Text (.txt)" : "CSV (.csv)", action: () => actions.onExportResults("csv") },
-                        { text: "JSON (.json)",                      action: () => actions.onExportResults("json") },
+                        // First slot: plain-text plan (file-lines) vs. CSV (file-csv);
+                        // second is JSON (file-code) either way. Glyphs match every
+                        // other export menu across the app.
+                        { text: plan ? "Text (.txt)" : "CSV (.csv)", glyph: plan ? "file-lines" : "file-csv", action: () => actions.onExportResults("csv") },
+                        { text: "JSON (.json)",                      glyph: "file-code",                     action: () => actions.onExportResults("json") },
                     ];
                 } } },
+                { separator: true },
+                // Opens the localStorage inspector window (view + clear stored state).
+                { text: "Show localStorage…", glyph: "database", action: actions.onShowLocalStorage },
             ] },
-            { label: "View", items: [{ text: "Toggle Sidebar", action: actions.onToggleSidebar }] },
+            // The rail switches and Refresh mirror the Alt+D/O/Q and Alt+R
+            // accelerators; the shortcut labels are display hints (the real keys
+            // are the document-level accelerators — installAccelerators).
+            { label: "View", glyph: "eye", items: [
+                { text: "Databases", glyph: "database", shortcut: DATABASES_RAIL_SHORTCUT, action: actions.onShowDatabases },
+                { text: "Roles",     glyph: "users",    shortcut: ROLES_RAIL_SHORTCUT,     action: actions.onShowRoles },
+                { text: "Queries",   glyph: "terminal", shortcut: QUERIES_RAIL_SHORTCUT,   action: actions.onShowQueries },
+                { separator: true },
+                { text: "Refresh", glyph: "arrows-rotate", shortcut: REFRESH_SHORTCUT, action: actions.onRefresh },
+                { separator: true },
+                { text: "Toggle Sidebar", glyph: "bars", action: actions.onToggleSidebar },
+            ] },
         ],
     });
+
+    // Pin an About button to the far right of the menu bar: a flex spacer eats
+    // the gap between the left-aligned menus and the button, so it sits at the
+    // trailing edge. Appended after the factory (not via `menus`, which are
+    // dropdown openers) — safe because the app builds its menus once and never
+    // re-calls setMenus (which would wipe these appended children).
+    const about = Button({ glyph: "circle-info", text: "About", showText: true, showDescription: false, compact: true, flat: true });
+    about.on("action", actions.onAbout);
+
+    menuBar.addComponent(Spacer.flex());
+    menuBar.addComponent(about);
+
+    return menuBar;
 }
 
 /**
@@ -293,8 +376,8 @@ function buildSidebar(controller: SqlAdminController): ActivityBarHandle {
     const queries  = QueriesView(controller, QUERIES_VIEW_ID);
 
     return ActivityBar([
-        { id: DATABASE_VIEW_ID, label: "Database", glyph: "database", component: explorer },
-        { id: ROLES_VIEW_ID,    label: "Roles",    glyph: "users",    component: roles },
-        { id: QUERIES_VIEW_ID,  label: "Queries",  glyph: "terminal", component: queries },
+        { id: DATABASE_VIEW_ID, label: "Database", shortcut: DATABASES_RAIL_SHORTCUT, glyph: "database", component: explorer },
+        { id: ROLES_VIEW_ID,    label: "Roles",    shortcut: ROLES_RAIL_SHORTCUT,     glyph: "users",    component: roles },
+        { id: QUERIES_VIEW_ID,  label: "Queries",  shortcut: QUERIES_RAIL_SHORTCUT,   glyph: "terminal", component: queries },
     ]);
 }
