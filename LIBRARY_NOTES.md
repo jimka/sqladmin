@@ -73,14 +73,14 @@ option / setter so each content part can be tinted independently of the button's
 
 ---
 
-## 🐞🩹🔎 `ComboBox` with plain-string items makes `getValue()` return the row *index*, not the string
+## 🐞✅ `ComboBox` with plain-string items made `getValue()` return the row *index*, not the string
 
-`ComboBox({ items: ["id", "name", …] })` auto-keys each plain-string item by its
-array position — `setItems`/`AbstractCustomList` stores it as `{ key: String(i),
-label }`. `getValue()` returns the selected item's **key**, so it yields `"0"`,
+`ComboBox({ items: ["id", "name", …] })` auto-keyed each plain-string item by its
+array position — `setItems`/`AbstractCustomList` stored it as `{ key: String(i),
+label }`. `getValue()` returns the selected item's **key**, so it yielded `"0"`,
 `"1"`, … — the positional index — **not** the visible string. The API reads as if
-`getValue()` returns the chosen string, so this is silent and easy to miss: the
-label shows correctly, only the *value* is wrong.
+`getValue()` returns the chosen string, so this was silent and easy to miss: the
+label showed correctly, only the *value* was wrong.
 
 **Repro (sqladmin):** the filter dialog built its column and operator combos from
 plain-string arrays and used `columnCombo.getValue()` as the filter field. Apply
@@ -90,18 +90,17 @@ operator combo hit the same bug — `getValue()` returned `"0"`, so the label→
 lookup always fell through to its `contains` default. Reopening the dialog then
 couldn't re-select the column, because the stored `"1"` matched no column name.
 
-**Worked around (app):** build both combos with **explicit-keyed** items —
-`{ key, label }` where `key` is the meaningful value (`c.name` / the operator
-key) — so `getValue()` round-trips the real value, and seed the selection with the
-`value:` option (`dock/FilterDialog.ts`, `buildConditionRow`). This is the
-documented escape hatch, but it is not the obvious default.
+**Fix (library):** `AbstractCustomList.setItems` / `addItem` now key a plain-string
+item by its own value (`{ key: label }`) instead of its array index, so
+`getValue` / `setValue` round-trip the visible string for the common "list of
+names" case. A pre-formed `{ key, label }` item still keeps its explicit key. This
+is a behavioural change — callers that relied on index keys pass explicit
+`{ key, label }` items to restore them; the affected List/MultiSelectList tests
+were updated, and a round-trip regression test added.
 
-**Possible library improvement:** default a plain-string item's key to the string
-itself (not its index), or at least document loudly that plain-string items are
-positional-keyed and `getValue()` returns the index — the current default is a
-footgun for the common "list of names" case.
-
-**Status:** 🩹 worked around in the app; 🔎 fix/doc belongs in the library.
+**App change:** the column combo uses plain strings (`[NO_COLUMN, ...names]`);
+the operator combo keeps explicit `{ key, label }` items because its display label
+differs from its operator key (`dock/FilterDialog.ts`, `buildConditionRow`).
 
 ---
 

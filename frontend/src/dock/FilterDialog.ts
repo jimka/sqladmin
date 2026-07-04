@@ -329,10 +329,10 @@ function buildConditionForm(columns: ColumnMeta[], initial: FilterCondition[]): 
  * to the remove button. A `seed` pre-selects the inputs so a reopened dialog
  * shows the active filter.
  *
- * Both combos carry explicit-keyed items ({@link CustomListItem}) so `getValue`
- * round-trips the column name / operator key — a plain-string item is auto-keyed
- * by its list *position*, so `getValue` would return "0"/"1"/… instead (which the
- * backend rejects as an unknown column, and which never re-matches on reopen).
+ * The column combo uses plain-string items — a ComboBox keys a plain string by
+ * its own value, so `getValue` round-trips the column name. The operator combo
+ * carries explicit-keyed items ({@link CustomListItem}) because its display label
+ * differs from its operator key, so it can't ride the plain-string default.
  *
  * @param columns - the table's columns; the column list is these plus an empty (unset) choice.
  * @param seed - a condition to pre-fill the row with, or undefined for an empty row.
@@ -341,7 +341,7 @@ function buildConditionForm(columns: ColumnMeta[], initial: FilterCondition[]): 
  */
 function buildConditionRow(columns: ColumnMeta[], seed: FilterCondition | undefined, onRemove: () => void): RowHandle {
     const columnCombo = new ComboBox({
-        items: [{ key: NO_COLUMN, label: NO_COLUMN }, ...columns.map(c => ({ key: c.name, label: c.name }))],
+        items: [NO_COLUMN, ...columns.map(c => c.name)],
         value: seed?.field ?? NO_COLUMN,
     });
     const operatorCombo = new ComboBox({
