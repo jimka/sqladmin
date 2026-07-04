@@ -89,16 +89,15 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
  * accelerator: Alt+N opens a new query, Alt+S jumps to the Saved list, Alt+H
  * jumps to the history list.
  *
- * Registered on `window` in the CAPTURE phase: the library's Event dispatcher is
- * a window-capture handler that calls `stopPropagation()` for any focused target
- * that has its own listeners (a focused List, the editor, …), which would stop a
- * document bubble-phase accelerator from ever seeing the key. A same-node
- * capture listener fires regardless (LIBRARY_NOTES.md).
+ * A plain `document` keydown accelerator (bubble phase): the library's Event
+ * dispatcher no longer stops propagation unless a focused component actually
+ * consumes the key, so an unhandled chord bubbles up to this listener even while
+ * a List / the editor / a Tree is focused (LIBRARY_NOTES.md).
  *
  * @param controller - The mediator the chords drive.
  */
 function installQueryAccelerators(controller: SqlAdminController): void {
-    window.addEventListener("keydown", (event: KeyboardEvent) => {
+    document.addEventListener("keydown", (event: KeyboardEvent) => {
         if (isNewQueryChord(event)) {
             event.preventDefault();
             controller.openQuery();
@@ -109,7 +108,7 @@ function installQueryAccelerators(controller: SqlAdminController): void {
             event.preventDefault();
             controller.showQueriesView("recent");
         }
-    }, true);
+    });
 }
 
 /**
