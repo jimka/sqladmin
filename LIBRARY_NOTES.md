@@ -313,29 +313,35 @@ second consumer needs it.
 
 ---
 
-## 🐞🔎🩹 Large `MemoryStore.loadData` renders zero rows in a Table
+## 🐞✅ Large `MemoryStore.loadData` renders zero rows in a Table
 
 Selecting a PostgreSQL superuser in the Phase-2 roles browser (~1500 detail rows:
 9 attributes + ~1477 table grants) left the role-detail Table blank — `loadData`
-replaced the store records but the Table rendered zero/stale rows, with **no
-error**. Small roles (≤ ~12 rows) render fine; the failure scales with row count.
+replaced the store records but the Table rendered zero rows, with **no error**.
+Small roles (≤ ~12 rows) rendered fine; the failure scaled with row count.
 
-**Root cause (so far):** `AbstractStore.loadData` is synchronous and *does* update
-the records (`ingestRaw` → `applyView` → emit `'load'`), so the store is correct —
-the failure is downstream in the Table's load→render / `VirtualScroller` path for
-a large in-memory dataset. The Table is built inside an initially-hidden `Card`
-deck page (the activity-bar Roles view) and shown later; collapsing/re-expanding
-(forcing a fresh layout) does **not** recover it, so it is not purely a
-viewport-measure-on-show issue. Needs a dedicated debug pass on the
-Table/`VirtualScroller` large-`loadData` render in the library.
+**Root cause (library, confirmed in a browser):** at `_allRecords.length >=
+WORKER_THRESHOLD` (1000) `AbstractStore.applyView()` offloads the sort/filter to a
+Web Worker and populates the view (`_records`) only when that promise **resolves**
+— but `ingestRaw` discarded the promise and `loadData` / `load` emitted `'load'`
+**synchronously** right after, so `'load'` fired with `_records` still empty. The
+bound `Table` rendered zero rows and never recovered, because nothing re-emits
+when the worker lands (a later layout re-runs `renderWindow` but no store event
+re-triggers it). Below the threshold the view builds in-process, so small datasets
+worked — exactly the "scales with row count" symptom. (Diagnosed by reproducing in
+a live browser: a 1500-row store in a hidden→shown Card deck showed `poolLen 0 /
+contentHeight 0`, and the `'load'` event fired with `getRecords().length === 0`.)
 
-**App handling (🩹):** the role's grants render in a *paginated* Dock table
-(`Store` + an in-memory `PagingMemoryProxy` + `PaginationBar`, ≤ 100 rows/page,
-mirroring the MiscPanel paginated-table demo), so the Table never loads more than
-a page at once. (The sidebar Details panel shows only base info — attributes +
-memberships, always small — so it uses a plain `MemoryStore` and never hits the
-limit.) Paging is also better UX (phpMyAdmin-style), but it sidesteps rather than
-fixes the underlying library limit, which stays **open**.
+**Fix (library):** `ingestRaw` now returns the `applyView` promise; `loadData`
+emits `'load'` synchronously when the view built in-process and defers to the
+worker's resolution otherwise, and the async `load()` awaits the view before
+emitting. Regression test (stubbed worker) added. Verified in a browser: the
+1500-row table now renders.
+
+**App handling:** the role's grants stay in a *paginated* Dock table (`Store` +
+an in-memory `PagingMemoryProxy` + `PaginationBar`, ≤ 100 rows/page) — kept on
+purpose, since paging is the better UX (phpMyAdmin-style) for ~1500 grants, not
+because the library forces it. A plain large `MemoryStore` Table now works too.
 
 ---
 
