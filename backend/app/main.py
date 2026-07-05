@@ -449,9 +449,11 @@ async def run_query(connection_id: str, body: dict = Body(...)) -> dict:
             is rejected by the extended query protocol as a 400).
 
     Returns:
-        ``{"kind": "rows", "columns", "rows", "rowCount"}`` for a statement that
-        returned a result set, or ``{"kind": "status", "command", "rowCount"}``
-        for one that did not (INSERT/UPDATE/DDL).
+        ``{"kind": "rows", "columns", "rows", "rowCount", "truncated"}`` for a
+        statement that returned a result set (``truncated`` is ``True`` when the
+        result was capped at ``MAX_RESULT_ROWS``), or
+        ``{"kind": "status", "command", "rowCount"}`` for one that did not
+        (INSERT/UPDATE/DDL).
     """
     async with get_pool(connection_id).acquire() as c:
         op = RunQueryCommand(c, body.get("sql", ""))

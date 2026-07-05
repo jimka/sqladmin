@@ -54,6 +54,7 @@ def test_rows_result_maps_columns_and_scalars() -> None:
         ],
         "rows": [{"id": 1, "amount": "5.00"}],
         "rowCount": 1,
+        "truncated": False,
     }
 
 
@@ -69,6 +70,38 @@ def test_empty_rowset_with_description_is_rows_not_status() -> None:
     assert result["rows"] == []
     assert result["columns"] == [{"name": "id", "wireType": "number"}]
     assert result["rowCount"] == 0
+
+
+def test_result_capped_at_max_rows_sets_truncated() -> None:
+    # apply() fetches MAX_RESULT_ROWS + 1; that extra row marks the result
+    # truncated, and get_result keeps only the first MAX_RESULT_ROWS.
+    from app.operations.run_query import MAX_RESULT_ROWS
+
+    op = RunQueryCommand(NO_CONN, "select n from t")
+    op._attrs = [_attr("n", "int4")]
+    op._records = [(i,) for i in range(MAX_RESULT_ROWS + 1)]
+    op._status = f"SELECT {MAX_RESULT_ROWS + 1}"
+
+    result = op.get_result()
+
+    assert result["truncated"] is True
+    assert result["rowCount"] == MAX_RESULT_ROWS
+    assert len(result["rows"]) == MAX_RESULT_ROWS
+
+
+def test_result_at_cap_is_not_truncated() -> None:
+    # Exactly MAX_RESULT_ROWS fetched (apply's +1 found nothing more): not truncated.
+    from app.operations.run_query import MAX_RESULT_ROWS
+
+    op = RunQueryCommand(NO_CONN, "select n from t")
+    op._attrs = [_attr("n", "int4")]
+    op._records = [(i,) for i in range(MAX_RESULT_ROWS)]
+    op._status = f"SELECT {MAX_RESULT_ROWS}"
+
+    result = op.get_result()
+
+    assert result["truncated"] is False
+    assert result["rowCount"] == MAX_RESULT_ROWS
 
 
 def test_duplicate_and_unnamed_columns_keep_distinct_values() -> None:

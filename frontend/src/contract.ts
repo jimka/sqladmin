@@ -59,6 +59,8 @@ export interface QueryRowsResult {
     columns: QueryColumnMeta[];
     rows: Record<string, unknown>[];
     rowCount: number;
+    /** True when the result exceeded the backend cap and only `rows` (the first N) are returned. */
+    truncated: boolean;
 }
 
 /** A query that returned no result set (INSERT/UPDATE/DDL). */
