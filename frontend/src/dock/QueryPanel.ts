@@ -204,7 +204,7 @@ export function QueryPanel(options: QueryPanelOptions): Container {
         if (!resultShown) {
             body.addComponent(resultHost);
             resultShown = true;
-            seedEditorHeight(0);
+            seedEditorHeight();
         }
 
         body.doLayout();
@@ -216,17 +216,23 @@ export function QueryPanel(options: QueryPanelOptions): Container {
     // position — the pane is reused, only its table content swaps). setPaneSize
     // takes px, so we need the body's inner height. On the "Open as query"
     // auto-run that height isn't known yet (the panel runs before its first
-    // rAF-scheduled layout), so retry on the next frame until the body is laid
-    // out, capped so a panel closed mid-wait can't loop forever.
-    function seedEditorHeight(attempt: number): void {
-        const full = body.getInnerSize()?.height ?? 0;
+    // layout), so defer the seed to the body's first laid-out frame; when the
+    // body is already sized (the common case) it applies straight away.
+    function seedEditorHeight(): void {
+        const apply = (): void => {
+            const full = body.getInnerSize()?.height ?? 0;
 
-        if (full > EDITOR_HEIGHT) {
-            split.setPaneSize(editor, EDITOR_HEIGHT);
-            split.setPaneSize(resultHost, full - EDITOR_HEIGHT);
-            body.doLayout();
-        } else if (attempt < 30 && body.getElement()) {
-            requestAnimationFrame(() => seedEditorHeight(attempt + 1));
+            if (full > EDITOR_HEIGHT) {
+                split.setPaneSize(editor, EDITOR_HEIGHT);
+                split.setPaneSize(resultHost, full - EDITOR_HEIGHT);
+                body.doLayout();
+            }
+        };
+
+        if (body.getInnerSize()) {
+            apply();
+        } else {
+            body.onFirstLayout(apply);
         }
     }
 
@@ -527,15 +533,6 @@ export function QueryPanel(options: QueryPanelOptions): Container {
     // "change" bridge fires before onInput and would read the stale value.
     editor.on("action", () => syncToolbarButtons());
 
-    /** Focus the editor once it has mounted, retrying across frames until then. */
-    function focusEditorWhenReady(attempt: number): void {
-        if (editor.getElement()) {
-            editor.focus();
-        } else if (attempt < 30) {
-            requestAnimationFrame(() => focusEditorWhenReady(attempt + 1));
-        }
-    }
-
     // Initial state: Run/Save/Clear disabled for an empty panel (enabled when
     // seeded); Export disabled until a rows result is shown.
     syncToolbarButtons();
@@ -543,9 +540,10 @@ export function QueryPanel(options: QueryPanelOptions): Container {
 
     // Focus the editor so the user can type on a fresh tab straight away. The
     // panel content is built before the Dock mounts it, so the element may not
-    // exist yet — retry on the next frame until it does (capped so a tab closed
-    // mid-wait can't loop forever).
-    focusEditorWhenReady(0);
+    // exist yet — onFirstLayout runs once the editor has been mounted and laid
+    // out, when it can take focus (and never fires for a tab closed before it
+    // mounts).
+    editor.onFirstLayout(() => editor.focus());
 
     if (autoExplain && initialSql.trim()) {
         void runExplainRun(autoExplain === "analyze");
