@@ -4,9 +4,7 @@
 // hold ~1500 grants, and paging them phpMyAdmin-style is the better UX for a
 // work-area table than one long scroll.
 
-import { Container, Panel }              from "@jimka/typescript-ui/core";
-import { Border }             from "@jimka/typescript-ui/layout";
-import { Placement }          from "@jimka/typescript-ui/primitive";
+import type { Container }     from "@jimka/typescript-ui/core";
 import { ToolBar }            from "@jimka/typescript-ui/component/menubar";
 import { Spacer }             from "@jimka/typescript-ui/component/container";
 import { Table }              from "@jimka/typescript-ui/component/table";
@@ -14,6 +12,7 @@ import { Store, Model }       from "@jimka/typescript-ui/data";
 import { PaginationBar }      from "@jimka/typescript-ui/component/display";
 import type { RolePrivilege } from "../contract";
 import { PagingMemoryProxy }  from "../data/PagingMemoryProxy";
+import { workPanelShell }     from "./workPanelShell";
 import { exportRoleGrants }   from "./exportRoleGrants";
 import { buildExportButton }  from "./exportButton";
 
@@ -22,7 +21,7 @@ import { buildExportButton }  from "./exportButton";
 const PAGE_SIZE = 100;
 
 /** Build a Dock panel showing a role's table grants as a paginated read-only grid. */
-export function RoleGrantsPanel(role: string, privileges: RolePrivilege[]): Panel {
+export function RoleGrantsPanel(role: string, privileges: RolePrivilege[]): Container {
     const model = new Model({
         fields: [
             { name: "schema", type: "string", description: "Schema", order: 1 },
@@ -40,14 +39,11 @@ export function RoleGrantsPanel(role: string, privileges: RolePrivilege[]): Pane
     const store = new Store({ model, proxy });
     store.setPageSize(PAGE_SIZE);
 
-    const panel = Container({
-        layoutManager: new Border({ spacing: 0 }),
-        components   : [
-            { component: buildToolBar(role, privileges),                        constraints: { placement: Placement.NORTH } },
-            { component: Table(store, { columns: [], rowReadOnly: () => true }), constraints: { placement: Placement.CENTER } },
-            { component: new PaginationBar(store),                               constraints: { placement: Placement.SOUTH } },
-        ],
-    });
+    const panel = workPanelShell(
+        buildToolBar(role, privileges),
+        Table(store, { columns: [], rowReadOnly: () => true }),
+        new PaginationBar(store),
+    );
 
     void store.load();
 

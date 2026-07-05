@@ -8,9 +8,9 @@
 // table's structure opens in its own tab from the navigator's right-click menu
 // (see StructurePanel / SqlAdminController).
 
-import { Container, Panel }                       from "@jimka/typescript-ui/core";
-import { Placement }                   from "@jimka/typescript-ui/primitive";
-import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
+import { Panel }                       from "@jimka/typescript-ui/core";
+import type { Container }              from "@jimka/typescript-ui/core";
+import { Fit }                         from "@jimka/typescript-ui/layout";
 import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
 import { Spacer }                      from "@jimka/typescript-ui/component/container";
 import { glyphButton }                 from "./glyphButton";
@@ -27,6 +27,7 @@ import { filter }                      from "@jimka/typescript-ui/glyphs/solid/f
 import type { ColumnMeta }             from "../contract";
 import { openFilterDialog }            from "./FilterDialog";
 import { buildExportButton }           from "./exportButton";
+import { workPanelShell }              from "./workPanelShell";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR, FILTER_ACTIVE_COLOR } from "../theme";
 
 Glyph.register(refresh, plus, minus, save, filter);
@@ -38,14 +39,13 @@ export type Notify = (message: string) => void;
 export type ExportTable = (format: "csv" | "json") => void;
 
 /** Build the work panel hosting a table's data grid. */
-export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable): Panel {
+export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable): Container {
     const dataGrid = Table(store, buildColumnSpec(columns));
 
-    const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
-    panel.addComponent(buildToolBar(store, dataGrid, columns, notify, onExport), { placement: Placement.NORTH });
-    panel.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
-
-    return panel;
+    return workPanelShell(
+        buildToolBar(store, dataGrid, columns, notify, onExport),
+        Panel({ layoutManager: new Fit(), components: [dataGrid] }),
+    );
 }
 
 /**

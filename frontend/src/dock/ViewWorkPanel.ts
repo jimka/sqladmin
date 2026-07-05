@@ -13,9 +13,9 @@
 // the controller's openDefinition / openStructure), keeping this panel a plain
 // data surface — the same shape a table's data tab has, minus the edit actions.
 
-import { Panel, Event, Container }                from "@jimka/typescript-ui/core";
-import { Placement }                   from "@jimka/typescript-ui/primitive";
-import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
+import { Panel, Event }                from "@jimka/typescript-ui/core";
+import type { Container }              from "@jimka/typescript-ui/core";
+import { Fit }                         from "@jimka/typescript-ui/layout";
 import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
 import { Spacer }                      from "@jimka/typescript-ui/component/container";
 import { glyphButton }                 from "./glyphButton";
@@ -30,6 +30,7 @@ import type { ColumnMeta }             from "../contract";
 import type { ExportTable }            from "./TableWorkPanel";
 import { isExplainChord, isExplainAnalyzeChord } from "../shell/queryShortcuts";
 import { buildExportButton }           from "./exportButton";
+import { workPanelShell }              from "./workPanelShell";
 import { PRIMARY_COLOR, NEUTRAL_COLOR, CAUTION_COLOR } from "../theme";
 
 Glyph.register(refresh, diagram_project, flask);
@@ -47,14 +48,15 @@ export type ExplainView = (analyze: boolean) => void;
  * @param onExplain - Opens a Query tab that EXPLAINs the view's backing SELECT.
  * @returns The assembled panel.
  */
-export function ViewWorkPanel(store: AjaxStore, columns: ColumnMeta[], onExport: ExportTable, onExplain: ExplainView): Panel {
+export function ViewWorkPanel(store: AjaxStore, columns: ColumnMeta[], onExport: ExportTable, onExplain: ExplainView): Container {
     // Read-only grid: every cell is locked (rowReadOnly), the same lock
     // StructurePanel/RoleGrantsPanel use.
     const dataGrid = Table(store, buildViewColumnSpec(columns));
 
-    const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
-    panel.addComponent(buildToolBar(store, onExport, onExplain), { placement: Placement.NORTH });
-    panel.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
+    const panel = workPanelShell(
+        buildToolBar(store, onExport, onExplain),
+        Panel({ layoutManager: new Fit(), components: [dataGrid] }),
+    );
 
     // Ctrl+E / Ctrl+Shift+E explain the view while this panel has focus, mirroring
     // the toolbar's Explain / Explain Analyze buttons (each opens a query tab).
