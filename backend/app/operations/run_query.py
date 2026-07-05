@@ -23,6 +23,14 @@ from ..wire import pg_type_to_wire, rows_to_wire
 from .base import Command
 
 
+# The ad-hoc query result cap. A rows-returning statement is read through a
+# server-side cursor that fetches at most this many rows (plus one, to detect
+# truncation), so an unbounded SELECT (e.g. ``SELECT * FROM huge_table``) never
+# materializes fully server- or client-side — the ad-hoc query panel is not
+# paginated, so the bound belongs here. Mirrors the list-rows page-size ceiling.
+MAX_RESULT_ROWS = 1000
+
+
 def _query_columns(attrs: Sequence[Any]) -> list[dict]:
     """
     Turn asyncpg result attributes into ``{name, wireType}`` contract columns.
@@ -135,12 +143,24 @@ class RunQueryCommand(Command):
     async def apply(self) -> None:
         """
         Prepare and run the statement in a transaction, capturing the column
-        description, the rows, and the command status tag.
+        description, the (capped) rows, and the command status tag.
+
+        A rows-returning statement is read through a server-side cursor that
+        fetches at most ``MAX_RESULT_ROWS + 1`` rows: the cursor never
+        materializes a huge result set, and the extra row lets ``get_result``
+        report truncation without a second COUNT. A non-row statement
+        (INSERT/UPDATE/DDL) is executed for its status tag.
         """
         async with self._conn.transaction():
             stmt = await self._conn.prepare(self._sql)
             self._attrs = stmt.get_attributes()
-            self._records = await stmt.fetch()
+
+            if self._attrs:
+                cursor = await stmt.cursor()
+                self._records = await cursor.fetch(MAX_RESULT_ROWS + 1)
+            else:
+                await stmt.fetch()
+
             self._status = stmt.get_statusmsg()
 
     def get_result(self) -> dict:
@@ -152,8 +172,10 @@ class RunQueryCommand(Command):
             RuntimeError: if called before ``apply()``.
 
         Returns:
-            ``{"kind": "rows", "columns", "rows", "rowCount"}`` for a statement
-            that returned a result set (even an empty one), or
+            ``{"kind": "rows", "columns", "rows", "rowCount", "truncated"}`` for a
+            statement that returned a result set (even an empty one) — ``truncated``
+            is ``True`` when the result exceeded ``MAX_RESULT_ROWS`` and only the
+            first ``MAX_RESULT_ROWS`` rows are returned — or
             ``{"kind": "status", "command", "rowCount"}`` otherwise.
         """
         if self._attrs is None:
@@ -163,16 +185,28 @@ class RunQueryCommand(Command):
             columns = _query_columns(self._attrs)
             names   = [c["name"] for c in columns]
 
+            # apply() fetches one past the cap; a full extra row means the result
+            # was truncated. Keep only the capped rows for the wire.
+            fetched   = self._records or []
+            truncated = len(fetched) > MAX_RESULT_ROWS
+            kept      = fetched[:MAX_RESULT_ROWS]
+
             # Build each row positionally against the de-duplicated names. asyncpg
             # collapses duplicate/unnamed keys under dict(record) (last wins), which
             # would drop a value and leave a renamed column (e.g. column_2) matching
             # no key; indexing by position keeps every column's value.
             raw_rows = [
                 {names[i]: record[i] for i in range(len(names))}
-                for record in (self._records or [])
+                for record in kept
             ]
             rows = rows_to_wire(raw_rows, _as_colmeta(columns))
 
-            return {"kind": "rows", "columns": columns, "rows": rows, "rowCount": len(rows)}
+            return {
+                "kind": "rows",
+                "columns": columns,
+                "rows": rows,
+                "rowCount": len(rows),
+                "truncated": truncated,
+            }
 
         return {"kind": "status", "command": self._status or "", "rowCount": _affected(self._status)}

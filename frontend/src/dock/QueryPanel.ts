@@ -382,9 +382,10 @@ export function QueryPanel(options: QueryPanelOptions): Container {
 
     function showResult(result: QueryResult): void {
         if (result.kind === "rows") {
-            // The library's Table virtual-scrolls its rows, so the full result set
-            // renders regardless of size — no display cap. (The backend fetch is
-            // itself unbounded; a LIMIT belongs there, not here.)
+            // The library's Table virtual-scrolls its rows, so the whole result set
+            // renders regardless of size — no client display cap. The backend bounds
+            // the fetch (an unbounded SELECT never floods the client) and flags a
+            // truncated result, surfaced in the status message below.
             const store = new MemoryStore({
                 model   : buildQueryModel(result.columns),
                 data    : result.rows,
@@ -395,7 +396,9 @@ export function QueryPanel(options: QueryPanelOptions): Container {
             // A fresh store + columns per run means columns never bleed across runs.
             showResultPane(Table(store, { columns: [], rowReadOnly: () => true }));
             setActiveExport({ kind: "rows", result });
-            notify(`${result.rowCount} row(s)`);
+            notify(result.truncated
+                ? `showing first ${result.rowCount} rows — result truncated`
+                : `${result.rowCount} row(s)`);
 
             return;
         }
