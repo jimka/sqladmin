@@ -7,13 +7,34 @@
 // data, so selecting them is a no-op. The Tree caches loaded children, so a
 // collapse/re-expand does not refetch.
 
-import { Tree }                                 from "@jimka/typescript-ui/component/tree";
+import { Tree, IconLabelTreeNodeRenderer }      from "@jimka/typescript-ui/component/tree";
 import type { TreeNode }                        from "@jimka/typescript-ui/component/tree";
 import { Menu }                                 from "@jimka/typescript-ui/overlay";
 import type { MenuItemConfig }                  from "@jimka/typescript-ui/component/container";
+import { Glyph }                                from "@jimka/typescript-ui/component/display";
+import { database }                             from "@jimka/typescript-ui/glyphs/solid/database";
+import { folder }                               from "@jimka/typescript-ui/glyphs/solid/folder";
+import { table }                                from "@jimka/typescript-ui/glyphs/solid/table";
+import { eye }                                  from "@jimka/typescript-ui/glyphs/solid/eye";
+import { layer_group }                          from "@jimka/typescript-ui/glyphs/solid/layer_group";
 import type { DbObjectKind, DbObjectRef }       from "../contract";
 import { getDatabases, getObjects, getSchemas } from "../data/api";
 import type { SqlAdminController }              from "../SqlAdminController";
+
+// Row glyphs, one per node kind, so each row reads its type at a glance. Database
+// and schema are containers; the object leaves reuse the same glyphs their dock
+// tabs carry (table / view / materialized view). Registered here since this is
+// where the navigator tree is built.
+Glyph.register(database, folder, table, eye, layer_group);
+
+/** The row glyph for each object kind. */
+const KIND_GLYPH: Record<DbObjectKind, string> = {
+    database:         "database",
+    schema:           "folder",
+    table:            "table",
+    view:             "eye",
+    materializedView: "layer-group",
+};
 
 /** One object leaf as returned by the objects endpoint. */
 interface DbObject {
@@ -32,9 +53,27 @@ const OBJECT_CATEGORIES: { label: string; kind: DbObjectKind }[] = [
     { label: "Materialized Views", kind: "materializedView" },
 ];
 
+// Category group nodes carry no data (they are non-selectable parents); show the
+// glyph of the objects they group, keyed by their synthetic label.
+const CATEGORY_GLYPH = new Map(OBJECT_CATEGORIES.map(c => [c.label, KIND_GLYPH[c.kind]]));
+
 /** True for the object kinds that open in the Dock and offer a context menu. */
 function isRelation(kind: DbObjectKind | undefined): boolean {
     return kind === "table" || kind === "view" || kind === "materializedView";
+}
+
+/**
+ * Resolve a row's glyph: an object leaf / database / schema by its kind, a
+ * category group by its label. Falls back to a folder for anything unmapped.
+ */
+function nodeGlyph(node: TreeNode): string {
+    const ref = node.data as DbObjectRef | undefined;
+
+    if (ref) {
+        return KIND_GLYPH[ref.kind] ?? "folder";
+    }
+
+    return CATEGORY_GLYPH.get(node.label) ?? "folder";
 }
 
 /** A built explorer tree plus a refresh action that reloads its top level. */
@@ -48,6 +87,9 @@ export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
     const conn        = controller.connectionId;
     const tree        = Tree();
     const contextMenu = Menu();
+
+    // Render each row as a kind glyph beside its label.
+    tree.setRendererFactory(() => new IconLabelTreeNodeRenderer(nodeGlyph));
 
     // A single click only selects: it shows the object's metadata in the
     // Properties inspector without opening anything. Opening (and executing) a

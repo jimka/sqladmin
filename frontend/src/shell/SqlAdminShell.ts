@@ -15,7 +15,7 @@
 // consumers). See LIBRARY_NOTES.md.
 
 import { Panel, Component, Container }        from "@jimka/typescript-ui/core";
-import { Insets, Placement, UNBOUNDED }    from "@jimka/typescript-ui/primitive";
+import { Placement, UNBOUNDED }    from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Split, Card } from "@jimka/typescript-ui/layout";
 import { MenuBar }                 from "@jimka/typescript-ui/component/menubar";
 import { Button }                  from "@jimka/typescript-ui/component/button";

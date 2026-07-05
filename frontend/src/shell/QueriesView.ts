@@ -22,17 +22,19 @@ import type { Handle }             from "@jimka/typescript-ui/core";
 import { Text }                    from "@jimka/typescript-ui/component/input";
 import { Button }                  from "@jimka/typescript-ui/component/button";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
-import { List }                    from "@jimka/typescript-ui/component/list";
+import { List, GlyphListItemRenderer } from "@jimka/typescript-ui/component/list";
 import { Glyph }                   from "@jimka/typescript-ui/component/display";
 import { Menu, Tooltip }           from "@jimka/typescript-ui/overlay";
 import { folder_open }             from "@jimka/typescript-ui/glyphs/solid/folder_open";
 import { trash }                   from "@jimka/typescript-ui/glyphs/solid/trash";
 import { floppy_disk }             from "@jimka/typescript-ui/glyphs/solid/floppy_disk";
 import { clock_rotate_left }       from "@jimka/typescript-ui/glyphs/solid/clock_rotate_left";
+import { terminal }                from "@jimka/typescript-ui/glyphs/solid/terminal";
 import { refreshTool, bindRefreshShortcut } from "./refreshTool";
 import type { SqlAdminController } from "../SqlAdminController";
 
-Glyph.register(folder_open, trash, floppy_disk, clock_rotate_left);
+// terminal marks every list row as a query (matching the query dock tab).
+Glyph.register(folder_open, trash, floppy_disk, clock_rotate_left, terminal);
 
 // A one-line SQL preview length. Long enough to recognise a statement in the
 // narrow sidebar column, short enough not to wrap the row.
@@ -379,10 +381,15 @@ function selectedRow(list: List | null, rows: QueryRow[]): QueryRow | undefined 
  * @returns The List component.
  */
 function buildList(rows: QueryRow[]): List {
-    const list = new List({ preferredSize: { width: 0, height: LIST_FILL_HINT } });
+    const list = new List({
+        preferredSize:   { width: 0, height: LIST_FILL_HINT },
+        // Render each row as a query glyph beside its label.
+        rendererFactory: () => new GlyphListItemRenderer(),
+    });
     // setItems is the typed entry point for pre-formed {key, label} rows (the
-    // constructor's `items` option is typed for the plain-string form).
-    list.setItems(rows.map(row => ({ key: row.key, label: row.label })));
+    // constructor's `items` option is typed for the plain-string form). Every row
+    // is a query, so each carries the terminal glyph.
+    list.setItems(rows.map(row => ({ key: row.key, label: row.label, glyph: "terminal" })));
 
     return list;
 }

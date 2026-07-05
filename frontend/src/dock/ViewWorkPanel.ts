@@ -14,7 +14,7 @@
 // data surface — the same shape a table's data tab has, minus the edit actions.
 
 import { Panel, Event, Container }                from "@jimka/typescript-ui/core";
-import { Insets, Placement }                   from "@jimka/typescript-ui/primitive";
+import { Placement }                   from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
 import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
 import { Spacer }                      from "@jimka/typescript-ui/component/container";
