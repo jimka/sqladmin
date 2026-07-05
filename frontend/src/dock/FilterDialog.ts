@@ -264,13 +264,12 @@ function buildConditionForm(
         components:    [addButton, viewport],
     });
 
-    // Resize the grid to the current row count (every row a fixed-height track),
-    // keep the sole remaining row's remove button disabled — the form always
-    // keeps at least one condition row — and re-lay out the form so its VBox
-    // re-measures the viewport at its new content height. The latter is required:
-    // `addComponent`/`removeComponent` only schedule the viewport's own layout,
-    // not a preferred-size change up to the form, so without this the viewport
-    // would keep its old height and the Add button would not track the last row.
+    // Resize the grid to the current row count (every row a fixed-height track)
+    // and keep the sole remaining row's remove button disabled — the form always
+    // keeps at least one condition row. Adding/removing a row's cells on the
+    // viewport propagates a preferred-size change up to the form (and on to the
+    // dialog), so the form's VBox re-measures the viewport at its new content
+    // height and repositions the Add button without an explicit relayout here.
     const syncGrid = (): void => {
         grid.setRows(rows.length);
 
@@ -280,7 +279,6 @@ function buildConditionForm(
             row.removeButton.setEnabled(!soleRow);
         }
 
-        form.scheduleLayout();
         // Let the host dialog re-fit to the form's new preferred height (grow on
         // add, shrink on remove) up to the viewport cap. A no-op until the dialog
         // wires it after construction, so the initial rows added below don't fire.

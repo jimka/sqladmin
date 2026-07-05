@@ -13,9 +13,9 @@ import { Text }                  from "@jimka/typescript-ui/component/input";
 import { Insets }                from "@jimka/typescript-ui/primitive";
 import { MUTED_TEXT_COLOR }      from "../theme";
 
-// Wide enough that each line below fits without wrapping (the Dialog auto-sizes
-// its height from the content's single-line rows, so a wrapped line would be
-// clipped — see the deliberately short lines in openAboutDialog).
+// The dialog's fixed width. The Dialog sizes its height to the wrapped content
+// (it measures the content at this width), so the body copy can be natural
+// sentences that wrap rather than hand-broken single lines.
 const DIALOG_WIDTH = 460;
 
 // Vertical rhythm for the stacked lines and the content's padding inset.
@@ -50,13 +50,12 @@ export function openAboutDialog(): void {
         insets       : new Insets(CONTENT_PAD, CONTENT_PAD, CONTENT_PAD, CONTENT_PAD),
     });
 
-    // Kept to short, single-line rows: the Dialog derives its height from the
-    // content's preferred (single-line) height, so a line long enough to wrap
-    // would have its second line clipped.
+    // The Dialog sizes its height to the wrapped content, so the description is a
+    // single natural sentence that wraps to the dialog width rather than a set of
+    // hand-broken single lines.
     content.addComponent(line("SQL Admin", { weight: "600" }));
-    content.addComponent(line("A browser-based PostgreSQL administration & query tool."));
-    content.addComponent(line("Browse databases, schemas, tables and roles;"));
-    content.addComponent(line("run, explain and export SQL."));
+    content.addComponent(line("A browser-based PostgreSQL administration & query tool. "
+        + "Browse databases, schemas, tables and roles; run, explain and export SQL."));
     content.addComponent(line("Author: Jimmy Karlsson", { muted: true }));
     content.addComponent(line("Source: github.com/jimka/sqladmin", { muted: true }));
     content.addComponent(line("UI library: github.com/jimka/typescript-ui", { muted: true }));

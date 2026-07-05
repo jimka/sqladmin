@@ -1,9 +1,10 @@
 // Build an AjaxStore for one table's rows.
 //
 // Uses the SINGLE-BAG AjaxStore form so the store-level options (pageSize,
-// remoteSort, remoteFilter) actually apply. A page size MUST be set: the proxy
-// only parses the {rows, totalCount} envelope in paginated mode, so without it
-// the reader would expect a top-level array and fail.
+// remoteSort, remoteFilter) actually apply. `pageSize` is set because the grids
+// genuinely paginate; the reader's `mode: "envelope"` (below) makes it parse the
+// {rows, totalCount} envelope on its own terms, independent of pagination, so
+// the two concerns are no longer coupled.
 
 import { AjaxStore, JsonReader }        from "@jimka/typescript-ui/data";
 import type { Model }                   from "@jimka/typescript-ui/data";
@@ -21,7 +22,7 @@ export function buildStore(ref: DbObjectRef, model: Model, columns: ColumnMeta[]
         model,
         proxy: {
             url: `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/rows`,
-            reader: new JsonReader({ rootProperty: "rows", totalProperty: "totalCount" }),
+            reader: new JsonReader({ rootProperty: "rows", totalProperty: "totalCount", mode: "envelope" }),
             writer: new SqlAdminWriter(generated),
             // The backend exposes per-record write endpoints (POST /rows with a
             // single object, PUT/DELETE /rows/{id}), so opt out of batch writes.
