@@ -6,12 +6,8 @@
 import { Component }               from "@jimka/typescript-ui/core";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
 import { refreshTool, bindRefreshShortcut } from "./refreshTool";
+import { SIDEBAR_FILL_HINT }       from "./sidebarFillHint";
 import type { ExplorerTree }       from "../navigator/NavigatorTree";
-
-// A preferred height large enough to always overflow the sidebar, so the
-// accordion's shrink gives the tree section every pixel the fixed-height inspector
-// section leaves. (The accordion has no per-section fill weight; see LIBRARY_NOTES.md.)
-const TREE_FILL_HINT = 10000;
 
 /** One explorer view: a tree section over a read-only inspector section. */
 export interface TreeExplorerConfig {
@@ -41,7 +37,7 @@ export interface TreeExplorerConfig {
 export function buildTreeExplorerView(config: TreeExplorerConfig): Component {
     const { tree, refresh } = config.explorer;
 
-    tree.setPreferredSize(0, TREE_FILL_HINT);
+    tree.setPreferredSize(0, SIDEBAR_FILL_HINT);
 
     const view = new AccordionPanel({
         id: config.id,

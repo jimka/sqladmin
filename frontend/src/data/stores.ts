@@ -10,7 +10,8 @@ import type { Model }                   from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef } from "../contract";
 import { SqlAdminWriter }               from "./SqlAdminWriter";
 
-const PAGE_SIZE = 100;
+/** Rows per page for the paginated data grids (row-CRUD tables and role grants). */
+export const PAGE_SIZE = 100;
 
 /** Build the AjaxStore for a table: JsonReader envelope + SqlAdminWriter. */
 export function buildStore(ref: DbObjectRef, model: Model, columns: ColumnMeta[]): AjaxStore {

@@ -7,11 +7,8 @@
 import { toCSV, toJSON }      from "../data/serialize";
 import type { ExportColumn }  from "../data/serialize";
 import { download }           from "../data/download";
+import { CSV_MIME, JSON_MIME } from "../data/mime";
 import type { RolePrivilege } from "../contract";
-
-// The MIME types the two export formats download as.
-const CSV_MIME  = "text/csv";
-const JSON_MIME = "application/json";
 
 /**
  * Serialize a role's full grant set and download it as CSV or JSON. Exports every

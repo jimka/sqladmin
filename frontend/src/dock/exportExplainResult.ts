@@ -9,11 +9,8 @@
 // unit-tested in their own pure modules.
 
 import { download }          from "../data/download";
+import { TEXT_MIME, JSON_MIME } from "../data/mime";
 import type { PlanSource }    from "../data/explain";
-
-// The MIME types the two plan exports download as.
-const TEXT_MIME = "text/plain";
-const JSON_MIME = "application/json";
 
 // Pretty-print indent for the exported JSON plan tree (readable, not minified).
 const JSON_INDENT = 2;
