@@ -42,7 +42,6 @@ import { flask }                         from "@jimka/typescript-ui/glyphs/solid
 import { buildQueryModel }               from "../data/buildModel";
 import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
-import { capRows, MAX_RESULT_ROWS }      from "./capRows";
 import { exportQueryResult }             from "./exportQueryResult";
 import { exportExplainPlan }             from "./exportExplainResult";
 import type { ActiveExport, RunExplain } from "../data/explain";
@@ -406,16 +405,12 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
 
     function showResult(result: QueryResult): void {
         if (result.kind === "rows") {
-            // Defensive render cap: a large MemoryStore renders zero rows in the
-            // library's Table (a known open bug — LIBRARY_NOTES.md), so a big query
-            // would show an empty grid. Cap below that threshold and tell the user
-            // the grid is partial (full pagination is a Non-Goal).
-            const rows      = capRows(result.rows, MAX_RESULT_ROWS);
-            const truncated = rows.length < result.rows.length;
-
+            // The library's Table virtual-scrolls its rows, so the full result set
+            // renders regardless of size — no display cap. (The backend fetch is
+            // itself unbounded; a LIMIT belongs there, not here.)
             const store = new MemoryStore({
                 model   : buildQueryModel(result.columns),
-                data    : rows,
+                data    : result.rows,
                 autoLoad: true,
             });
 
@@ -423,9 +418,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
             // A fresh store + columns per run means columns never bleed across runs.
             showResultPane(Table(store, { columns: [], rowReadOnly: () => true }));
             setActiveExport({ kind: "rows", result });
-            notify(truncated
-                ? `showing first ${rows.length} of ${result.rows.length} — results truncated`
-                : `${result.rowCount} row(s)`);
+            notify(`${result.rowCount} row(s)`);
 
             return;
         }
