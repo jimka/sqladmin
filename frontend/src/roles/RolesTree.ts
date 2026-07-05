@@ -4,16 +4,24 @@
 // double-clicking (or its "Show data" context item) also opens the role's grants
 // tab through the controller. Mirrors NavigatorTree's click→controller wiring.
 
-import { Tree }                      from "@jimka/typescript-ui/component/tree";
+import { Tree, IconLabelTreeNodeRenderer } from "@jimka/typescript-ui/component/tree";
 import type { TreeNode }             from "@jimka/typescript-ui/component/tree";
 import { Menu }                      from "@jimka/typescript-ui/overlay";
+import { Glyph }                     from "@jimka/typescript-ui/component/display";
+import { user }                      from "@jimka/typescript-ui/glyphs/solid/user";
 import type { RoleSummary }          from "../contract";
 import type { SqlAdminController }   from "../SqlAdminController";
 import type { ExplorerTree }         from "../navigator/NavigatorTree";
 
+// Every row is a role; a single user glyph reads the list as "these are roles".
+Glyph.register(user);
+
 /** Build the roles Tree, wired to show a role's detail and report load errors. */
 export function RolesTree(controller: SqlAdminController): ExplorerTree {
     const tree = Tree();
+
+    // Render each role row as a user glyph beside its name.
+    tree.setRendererFactory(() => new IconLabelTreeNodeRenderer(() => "user"));
 
     // A single click only selects: show the role's base info in the inspector
     // without opening a tab. Opening the grants tab is reserved for a double-click
