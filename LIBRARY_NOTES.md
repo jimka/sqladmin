@@ -34,24 +34,28 @@ start page inside the dock's empty region.)
 
 ---
 
-## ✂️🔎 `ButtonGroup` forces one-always-selected — no collapsible/deselectable radio mode
+## ✂️✅ `ButtonGroup` forced one-always-selected — no collapsible/deselectable radio mode
 
 The activity-bar rail is a set of icon `ToggleButton`s where selecting one view
 deselects the others (radio), **but** clicking the already-active view deselects
-*all* of them to collapse the sidebar. The library's `ButtonGroup` provides the
-radio half, yet its `updateButtonStates` re-selects a button that was clicked off
-(`if (!initiator.isSelected()) initiator.setSelected(true)`) — it enforces
-"exactly one selected" — so it cannot express the click-active-to-collapse
-gesture.
+*all* of them to collapse the sidebar. `ButtonGroup` provided the radio half, yet
+its `updateButtonStates` re-selected a button that was clicked off
+(`if (!initiator.isSelected()) initiator.setSelected(true)`) — enforcing "exactly
+one selected" — so it could not express the click-active-to-collapse gesture.
 
-**Worked around (app):** the rail keeps its own two-line mutual-exclusion loop
-(`buttonById.forEach(b => b.setSelected(id === activeId))`) plus a collapse path,
-rather than adopting `ButtonGroup` (`shell/ActivityBar.ts`).
+**Fix (library):** added a `ButtonGroupOptions.allowDeselect` flag (+
+`setAllowDeselect`). When set, a click on the selected member leaves it deselected
+(the group holds nothing) and still fires `"selection"` with that member, so a
+listener reads `isSelected()` to tell select from deselect. Default `false` keeps
+the classic radio invariant. Regression tests added.
 
-**Possible library improvement:** a `ButtonGroup` option (e.g. `allowDeselect` /
-`toggle`) that lets a click on the selected member leave the group with nothing
-selected and emit that, so a collapsible rail can use it. Low value — the manual
-loop is small — so deferred until a second consumer wants it.
+**App:** `shell/ActivityBar.ts` keeps its own two-line mutual-exclusion loop
+(`buttonById.forEach(b => b.setSelected(id === activeId))`) — not because
+`ButtonGroup` can't now express the gesture, but because the rail drives selection
+through `showView`/`collapse` for **both** clicks and the programmatic `selectView`
+(menu) path, while `ButtonGroup` only reacts to clicks; routing half the selection
+through the group would split that logic. The library option exists for a consumer
+whose selection is purely click-driven.
 
 ---
 
