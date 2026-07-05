@@ -17,17 +17,19 @@ const WIRE_TO_FIELD: Record<WireType, FieldType> = {
     jsonArray: "auto",
 };
 
+/** The column shape both model builders read: a name and its wire type. */
+type WireColumn = { name: string; wireType: WireType };
+
+/** Map columns to ordered Model field specs (name, mapped type, table order). */
+function toFields(columns: WireColumn[]): { name: string; type: FieldType; order: number }[] {
+    return columns.map((c, i) => ({ name: c.name, type: WIRE_TO_FIELD[c.wireType], order: i }));
+}
+
 /** Map introspected columns to a Model (PK set, columns ordered). */
 export function buildModel(columns: ColumnMeta[]): Model {
-    const primaryKey = columns.find(c => c.isPrimaryKey)?.name;
-
     return new Model({
-        fields: columns.map((c, i) => ({
-            name : c.name,
-            type : WIRE_TO_FIELD[c.wireType],
-            order: i,
-        })),
-        primaryKey,
+        fields    : toFields(columns),
+        primaryKey: columns.find(c => c.isPrimaryKey)?.name,
     });
 }
 
@@ -36,11 +38,5 @@ export function buildModel(columns: ColumnMeta[]): Model {
  * with no primary key — a query result set has none and is never written back.
  */
 export function buildQueryModel(columns: QueryColumnMeta[]): Model {
-    return new Model({
-        fields: columns.map((c, i) => ({
-            name : c.name,
-            type : WIRE_TO_FIELD[c.wireType],
-            order: i,
-        })),
-    });
+    return new Model({ fields: toFields(columns) });
 }
