@@ -4,57 +4,27 @@
 // also passes its columns so the count and primary key can be shown; the detailed
 // per-column grid lives in StructurePanel, opened from the right-click menu.
 //
-// Backed by a single persistent MemoryStore: each selection replaces its rows via
-// loadData (synchronous, fires 'load'), so the Table re-renders in place without
-// rebuilding the component.
+// The panel/store scaffolding lives in the shared PropertyValuePanel base; this
+// class adds only the selection→rows mapping.
 
-import { Panel } from "@jimka/typescript-ui/core";
-import { Fit } from "@jimka/typescript-ui/layout";
-import { Table } from "@jimka/typescript-ui/component/table";
-import { MemoryStore, Model } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef } from "../contract";
-
-// Fixed height the inspector occupies at the bottom of the sidebar accordion;
-// the navigator above it takes the rest. Pinned as both preferred and minimum so
-// the accordion's shrink never steals from it — the navigator absorbs all the
-// flex instead. The Table scrolls internally if the property list ever exceeds it.
-const PANEL_HEIGHT = 220;
+import { PropertyValuePanel }           from "./PropertyValuePanel";
+import type { PropertyValueRow }        from "./PropertyValuePanel";
 
 /** The selected object's metadata, shown as a read-only Property/Value grid. */
-export class PropertiesPanel {
-    readonly component: Panel;
-
-    private readonly _store: MemoryStore;
-
-    constructor() {
-        const model = new Model({
-            fields: [
-                { name: "property", type: "string", description: "Property", order: 1 },
-                { name: "value", type: "string", description: "Value", order: 2 },
-            ],
-        });
-
-        this._store = new MemoryStore({ model, data: [], autoLoad: true });
-        this.component = Panel({
-            layoutManager: new Fit(),
-            preferredSize: { width: 0, height: PANEL_HEIGHT },
-            minSize      : { width: 0, height: PANEL_HEIGHT },
-            components   : [Table(this._store, { columns: [], rowReadOnly: () => true })],
-        });
-    }
-
+export class PropertiesPanel extends PropertyValuePanel {
     /**
      * Replace the displayed metadata with that of `ref`. For a table, view, or
      * materialized view, pass its `columns` so the column count and primary key
      * are included.
      */
     show(ref: DbObjectRef, columns?: ColumnMeta[]): void {
-        this._store.loadData(propertyRows(ref, columns));
+        this.setRows(propertyRows(ref, columns));
     }
 }
 
 /** Map a selected object to its Property/Value rows, keyed off the object kind. */
-function propertyRows(ref: DbObjectRef, columns?: ColumnMeta[]): { property: string; value: string }[] {
+function propertyRows(ref: DbObjectRef, columns?: ColumnMeta[]): PropertyValueRow[] {
     switch (ref.kind) {
         case "database":
             return [
@@ -92,7 +62,7 @@ export function relationTypeLabel(kind: DbObjectRef["kind"]): string {
  * Rows for a table, view, or materialized view: identity plus a column count
  * and primary key.
  */
-function tableRows(ref: DbObjectRef, columns?: ColumnMeta[]): { property: string; value: string }[] {
+function tableRows(ref: DbObjectRef, columns?: ColumnMeta[]): PropertyValueRow[] {
     const rows = [
         { property: "Name", value: ref.name ?? "—" },
         { property: "Schema", value: ref.schema ?? "—" },
