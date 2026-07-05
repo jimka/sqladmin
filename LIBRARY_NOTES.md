@@ -8,6 +8,45 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️🩹🔎 `Dock` has no "became empty" event / empty-content slot
+
+The shell shows an app-owned start page in the CENTER whenever no dock panels are
+open. But `Dock` exposes no `emptyContent` slot and no "became empty" / "became
+non-empty" event — it fires `"close"` per panel but nothing aggregate.
+
+**Worked around (app):** the controller tracks the open-panel count itself —
+incrementing on `openTable`/open and decrementing on the dock's `"close"` event —
+and toggles a `Card` deck (start page vs. Dock) on the count crossing 0
+(`shell/StartPage.ts`, `SqlAdminController`). Each open path must remember to keep
+the count in step.
+
+**Possible library improvement:** a Dock `"emptychange"` event (or an
+`emptyContent` component the Dock swaps in when it has no panels), so a consumer
+gets the empty-state toggle without shadow-counting panels.
+
+---
+
+## ✂️🔎 `ButtonGroup` forces one-always-selected — no collapsible/deselectable radio mode
+
+The activity-bar rail is a set of icon `ToggleButton`s where selecting one view
+deselects the others (radio), **but** clicking the already-active view deselects
+*all* of them to collapse the sidebar. The library's `ButtonGroup` provides the
+radio half, yet its `updateButtonStates` re-selects a button that was clicked off
+(`if (!initiator.isSelected()) initiator.setSelected(true)`) — it enforces
+"exactly one selected" — so it cannot express the click-active-to-collapse
+gesture.
+
+**Worked around (app):** the rail keeps its own two-line mutual-exclusion loop
+(`buttonById.forEach(b => b.setSelected(id === activeId))`) plus a collapse path,
+rather than adopting `ButtonGroup` (`shell/ActivityBar.ts`).
+
+**Possible library improvement:** a `ButtonGroup` option (e.g. `allowDeselect` /
+`toggle`) that lets a click on the selected member leave the group with nothing
+selected and emit that, so a collapsible rail can use it. Low value — the manual
+loop is small — so deferred until a second consumer wants it.
+
+---
+
 ## 🐞✅ `autoScroll` Panel keeps its scrollbar gutter + scroll shadow after content shrinks
 
 A `Panel` with `autoScroll` reserves a scrollbar **gutter** (it shrinks its
@@ -441,7 +480,7 @@ and dropped the explicit `setGlyph` call (`shell/ActivityBar.ts`).
 
 ---
 
-## ✂️🩹 Accordion `fillHeight` only fills the bottommost open section
+## ✂️🩹✅ Accordion `fillHeight` only fills the bottommost open section
 
 The sidebar wants the navigator (top section) to fill while the Properties
 inspector (bottom section) stays a fixed compact height. `Accordion.fillHeight`
@@ -450,15 +489,25 @@ per-section fill weight or "this section fills" flag — so with both sections o
 the bottom one always grows. Turning fill off instead leaves an empty gap when
 the content underflows.
 
-**Worked around (app):** disabled `fillHeight`, pinned the Properties section to a
-fixed height (`preferred === min`, so the shrink can't steal from it), and gave
-the navigator an outsized preferred height (`NAV_FILL_HINT`) so the accordion's
-proportional shrink hands it every remaining pixel. Works, but relies on a magic
-preferred height rather than declaring intent.
+**Worked around (app):** disabled `fillHeight`, gave the filling section an
+outsized preferred height (`SIDEBAR_FILL_HINT = 10000`) so the accordion's
+proportional shrink handed it every remaining pixel. Worked, but relied on a
+magic preferred height rather than declaring intent — and split the two Queries
+lists ~50/50 only by coincidence of equal preferreds.
 
-**Possible library improvement:** a per-section grow/fill weight (or a
-`setFillTarget(index)` override), so a non-bottom section can be the one that
-absorbs leftover height without the outsized-preferred trick.
+**Fix (library):** added a per-section `fillWeight` constraint (surfaced via
+`AccordionSectionConfig.fillWeight` / `addSection`). When the open sections
+underflow, the leftover height is split among the weighted sections in
+proportion — so a single weighted section (in any position, not just the
+bottommost) fills all the slack and equal weights share it. `computeFill` returns
+a per-section extra-height map; with no weights set it falls back to the
+bottommost-fills behaviour, so `setFillHeight` is unchanged. Regression tests
+added (non-bottommost fill; weighted split).
+
+**App change:** the tree-explorer's tree section and both Queries list sections
+declare `fillWeight: 1` (the tree and lists carry a `0` preferred so the sections
+underflow and actually fill); `sidebarFillHint.ts` and the `10000` constant are
+gone (`shell/treeExplorerView.ts`, `shell/QueriesView.ts`).
 
 ---
 
