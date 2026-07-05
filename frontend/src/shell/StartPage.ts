@@ -12,10 +12,14 @@ import { VBox }                     from "@jimka/typescript-ui/layout";
 import { Insets }                   from "@jimka/typescript-ui/primitive";
 import { Text }                     from "@jimka/typescript-ui/component/input";
 import { Button }                   from "@jimka/typescript-ui/component/button";
+import { Glyph }                    from "@jimka/typescript-ui/component/display";
+import { plus }                     from "@jimka/typescript-ui/glyphs/solid/plus";
 import { NEW_QUERY_SHORTCUT, OPEN_SAVED_SHORTCUT, QUERY_HISTORY_SHORTCUT } from "./queryShortcuts";
 import type { SavedQuery }          from "../data/queryStore";
 import type { SqlAdminController }  from "../SqlAdminController";
 import { MUTED_TEXT_COLOR }         from "../theme";
+
+Glyph.register(plus);
 
 // Padding around the welcome content, the vertical gap between stacked entries,
 // and the fixed height of each action button — comfortable click targets that
@@ -44,7 +48,7 @@ export function StartPage(controller: SqlAdminController): Component {
         page.removeAllComponents();
 
         page.addComponent(heading("SQL Admin", "600"));
-        page.addComponent(actionButton("＋  New Query", () => controller.openQuery()));
+        page.addComponent(actionButton("New Query", () => controller.openQuery(), "plus"));
 
         appendList(page, "Recent tables", controller.recentTables(),
             ref => actionButton(ref.name ?? "(table)", () => controller.reopenTable(ref)));
@@ -115,11 +119,12 @@ function mutedText(text: string): Component {
  *
  * @param text - The button label.
  * @param handler - The click action.
+ * @param glyph - Optional leading glyph (registered name).
  *
  * @returns The button component.
  */
-function actionButton(text: string, handler: () => void): Component {
-    const button = Button({ text, compact: true, preferredSize: { width: 0, height: BUTTON_HEIGHT } });
+function actionButton(text: string, handler: () => void, glyph?: string): Component {
+    const button = Button({ glyph, text, compact: true, preferredSize: { width: 0, height: BUTTON_HEIGHT } });
     button.on("action", handler);
 
     return button;
