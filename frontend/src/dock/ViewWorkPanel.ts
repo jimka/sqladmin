@@ -33,7 +33,6 @@ import { flask }                       from "@jimka/typescript-ui/glyphs/solid/f
 import type { ColumnMeta }             from "../contract";
 import type { ExportTable }            from "./TableWorkPanel";
 import { isExplainChord, isExplainAnalyzeChord } from "../shell/queryShortcuts";
-import { _0 } from "@jimka/typescript-ui/glyphs/solid";
 import { PRIMARY_COLOR, NEUTRAL_COLOR, CAUTION_COLOR } from "../theme";
 
 Glyph.register(refresh, file_export, file_csv, file_code, diagram_project, flask);
