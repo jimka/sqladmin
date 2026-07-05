@@ -1,55 +1,38 @@
-// An in-memory Proxy that honours page/pageSize, slicing a settable array per
-// page so the role-detail grants Table renders one page at a time — a
-// phpMyAdmin-style UX for a work-area grid.
+// An in-memory proxy that pages a settable array by page/pageSize, so the
+// role-detail grants Table renders one page at a time — a phpMyAdmin-style UX for
+// a work-area grid.
 //
-// Ideally this would `extend MemoryProxy` — which already stores the array and
-// provides setData/CRUD — and add only the page slice plus total-count report.
-// But an external consumer that subclasses a library class does NOT inherit the
-// base's concrete instance members through the built .d.ts: `class X extends
-// MemoryProxy` sees no `setData`, even though a direct `new MemoryProxy()` does
-// (the same external-subclassing papercut LIBRARY_NOTES records for
-// `Panel.addComponent`, here confirmed on a data class). So this extends the
-// abstract `Proxy` and stores the array itself; CRUD is unused (read-only).
+// It extends the library's MemoryProxy, which already stores the array and
+// provides setData plus CRUD. This subclass adds only what MemoryProxy lacks: a
+// page-slicing read (MemoryProxy.read ignores pagination and returns the whole
+// array) and a total-count report (Proxy.getLastTotalCount returns undefined),
+// which the PaginationBar needs to derive the page count. CRUD is inherited but
+// unused — the role browser is read-only.
 
-import { Proxy }            from "@jimka/typescript-ui/data";
-import type { ReadParams }  from "@jimka/typescript-ui/data";
-import type { ModelRecord } from "@jimka/typescript-ui/data";
+import { MemoryProxy }     from "@jimka/typescript-ui/data";
+import type { ReadParams } from "@jimka/typescript-ui/data";
 
-/** Pages over an in-memory array; CRUD is unused (the role browser is read-only). */
-export class PagingMemoryProxy extends Proxy {
-    private _data: any[] = [];
+/** Pages over MemoryProxy's in-memory array, reporting the full count for the bar. */
+export class PagingMemoryProxy extends MemoryProxy {
     private _lastTotal: number = 0;
 
-    /** Replace the full dataset paged over by subsequent reads. */
-    setData(data: any[]): void {
-        this._data = data;
-    }
-
     /** Return the requested page slice and record the full count for the bar. */
-    read(params?: ReadParams): Promise<any[]> {
+    async read(params?: ReadParams): Promise<any[]> {
+        // super.read() returns a copy of the whole array (MemoryProxy ignores
+        // pagination); slice out the requested page from it.
+        const all = await super.read();
+
+        this._lastTotal = all.length;
+
         const page     = params?.page ?? 1;
-        const pageSize = params?.pageSize ?? this._data.length;
+        const pageSize = params?.pageSize ?? all.length;
         const start    = (page - 1) * pageSize;
 
-        this._lastTotal = this._data.length;
-
-        return Promise.resolve(this._data.slice(start, start + pageSize));
+        return all.slice(start, start + pageSize);
     }
 
     /** The full dataset length, so the store can derive the page count. */
     getLastTotalCount(): number {
         return this._lastTotal;
-    }
-
-    create(_record: ModelRecord): Promise<Record<string, any>> {
-        return Promise.resolve({});
-    }
-
-    update(_record: ModelRecord): Promise<Record<string, any>> {
-        return Promise.resolve({});
-    }
-
-    destroy(_record: ModelRecord): Promise<void> {
-        return Promise.resolve();
     }
 }
