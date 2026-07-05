@@ -109,7 +109,7 @@ export interface QueryPanelOptions {
 }
 
 /** Build a query panel: a SQL editor over a (resizable) result grid. */
-export function QueryPanel(options: QueryPanelOptions): Panel {
+export function QueryPanel(options: QueryPanelOptions): Container {
     const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult } = options;
 
     const editor = new TextArea(initialSql);

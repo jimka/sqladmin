@@ -230,7 +230,7 @@ export class SqlAdminController {
 
         // Open lazily: the tab appears at once, and the grid UI builds on first
         // activation behind a spinner, so a wide table never blocks the tab.
-        const notify = (message: string): void => this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: ${message}`);
+        const notify = (message: string): void => { this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: ${message}`); };
         this.dock.addLazyPanel({
             id,
             title  : ref.name ?? id,
@@ -379,8 +379,9 @@ export class SqlAdminController {
         const id    = `query-${n}`;
         const label = title ?? `Query ${n}`;
 
-        const notify = (message: string): void =>
+        const notify = (message: string): void => {
             this.statusBar.setMessage(`${this._connectionId} · ${label}: ${message}`);
+        };
 
         this.panelOpened();
         this.dock.addPanel({
@@ -426,8 +427,9 @@ export class SqlAdminController {
 
         if (id) {
             const active = this._activeQueryResult.get(id);
-            const notify = (message: string): void =>
+            const notify = (message: string): void => {
                 this.statusBar.setMessage(`${this._connectionId} · export: ${message}`);
+            };
 
             if (active?.kind === "rows") {
                 exportQueryResult(active.result, format, notify);
