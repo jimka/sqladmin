@@ -38,21 +38,11 @@ export async function promptQueryName(defaultName: string = ""): Promise<string 
         closeOnBackdrop : true,
     });
 
-    // The library's Dialog binds Escape (dismiss) and Tab (focus trap) but not
-    // Enter; wire Enter in the field to confirm so the modal submits like a form.
-    input.on("keydown", (e: KeyboardEvent) => {
-        if (e.key === "Enter") {
-            e.preventDefault();
-            dialog.hide("confirm");
-        }
-    });
-
-    const shown = dialog.show();
-    // focusFirst() lands on the title-bar close button; pull focus to the field
-    // so the user can type the name immediately.
-    input.focus();
-
-    const result = await shown;
+    // Enter confirms (Dialog submits its primary button) and the name field —
+    // the first focusable in the content region — takes focus on open, both
+    // straight from the library, so the modal behaves like a form with no
+    // per-call wiring.
+    const result = await dialog.show();
 
     if (result !== "confirm") {
         return null;

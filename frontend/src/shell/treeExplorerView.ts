@@ -6,7 +6,6 @@
 import { Component }               from "@jimka/typescript-ui/core";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
 import { refreshTool, bindRefreshShortcut } from "./refreshTool";
-import { SIDEBAR_FILL_HINT }       from "./sidebarFillHint";
 import type { ExplorerTree }       from "../navigator/NavigatorTree";
 
 /** One explorer view: a tree section over a read-only inspector section. */
@@ -26,9 +25,9 @@ export interface TreeExplorerConfig {
 }
 
 /**
- * Build a sidebar explorer view. Both sections stay open; the tree carries an
- * outsized preferred height so the accordion's shrink hands it every pixel the
- * fixed-height inspector leaves — the tree fills, the inspector stays compact.
+ * Build a sidebar explorer view. Both sections stay open; the tree section takes
+ * a fill weight so the accordion grows it into every pixel the fixed-height
+ * inspector leaves — the tree fills, the inspector stays compact.
  *
  * @param config - The view's id, its tree + refresh, and the two sections' labels/glyphs.
  *
@@ -37,12 +36,15 @@ export interface TreeExplorerConfig {
 export function buildTreeExplorerView(config: TreeExplorerConfig): Component {
     const { tree, refresh } = config.explorer;
 
-    tree.setPreferredSize(0, SIDEBAR_FILL_HINT);
+    // The tree carries no intrinsic height — its section's fillWeight grows it
+    // into the leftover space, so a 0 preferred keeps the sections underflowing
+    // (the precondition for fill) regardless of the rail's height.
+    tree.setPreferredSize(0, 0);
 
     const view = new AccordionPanel({
         id: config.id,
         sections: [
-            { label: config.treeLabel, component: tree, initiallyOpen: true, glyph: config.treeGlyph, tools: [refreshTool(refresh)] },
+            { label: config.treeLabel, component: tree, initiallyOpen: true, glyph: config.treeGlyph, tools: [refreshTool(refresh)], fillWeight: 1 },
             { label: config.inspectorLabel, component: config.inspector, initiallyOpen: true, glyph: config.inspectorGlyph ?? "circle-info" },
         ],
     });
