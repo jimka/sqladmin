@@ -17,14 +17,13 @@
 
 import { Component, Panel }        from "@jimka/typescript-ui/core";
 import { Fit }                     from "@jimka/typescript-ui/layout";
-import { Event, DOM }              from "@jimka/typescript-ui/core";
-import type { Handle }             from "@jimka/typescript-ui/core";
+import { Event }                   from "@jimka/typescript-ui/core";
 import { Text }                    from "@jimka/typescript-ui/component/input";
 import { Button }                  from "@jimka/typescript-ui/component/button";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
 import { List, GlyphListItemRenderer } from "@jimka/typescript-ui/component/list";
 import { Glyph }                   from "@jimka/typescript-ui/component/display";
-import { Menu, Tooltip }           from "@jimka/typescript-ui/overlay";
+import { Menu }                    from "@jimka/typescript-ui/overlay";
 import { folder_open }             from "@jimka/typescript-ui/glyphs/solid/folder_open";
 import { trash }                   from "@jimka/typescript-ui/glyphs/solid/trash";
 import { floppy_disk }             from "@jimka/typescript-ui/glyphs/solid/floppy_disk";
@@ -41,10 +40,6 @@ Glyph.register(folder_open, trash, floppy_disk, clock_rotate_left, terminal);
 // A one-line SQL preview length. Long enough to recognise a statement in the
 // narrow sidebar column, short enough not to wrap the row.
 const SNIPPET_MAX = 60;
-
-// The CSS class the library gives every rendered list row — the delegation hook
-// for mapping a right-click back to its row index.
-const ROW_CLASS = "CustomListRow";
 
 /** A list row plus whatever a section's actions need to act on it. */
 interface QueryRow {
@@ -205,9 +200,6 @@ function buildSection(config: SectionConfig): Section {
 
         host.addComponent(list);
         host.doLayout();
-        // Tooltips need the rows in the DOM; attach on the next frame once the
-        // freshly added list has rendered its row pool.
-        attachTooltips(list, rows);
         syncTools();
     };
 
@@ -263,9 +255,7 @@ function buildSection(config: SectionConfig): Section {
  * @param menu - The reused context menu to show on right-click.
  */
 function wireRow(list: List, rows: QueryRow[], config: SectionConfig, menu: Menu): void {
-    Event.addSubtreeListener(list, "dblclick", () => {
-        const index = list.getSelectedIndex();
-
+    list.on("dblclick", (index: number) => {
         if (index >= 0) {
             config.execute(rows[index]);
         }
@@ -289,15 +279,9 @@ function wireRow(list: List, rows: QueryRow[], config: SectionConfig, menu: Menu
         (e.ctrlKey || e.metaKey ? config.execute : config.open)(rows[index]);
     });
 
-    Event.addSubtreeListener(list, "contextmenu", (e: MouseEvent) => {
-        const index = rowIndexFromEvent(e);
-
-        if (index < 0) {
-            return;
-        }
-
-        e.preventDefault();
-        // Highlight the right-clicked row (fires change → arms the tools).
+    list.on("contextmenu", (index: number, e: MouseEvent) => {
+        // Highlight the right-clicked row (fires change → arms the tools). The
+        // list has already suppressed the native menu and resolved the index.
         list.setSelectedIndex(index, true);
         // The library Menu light-dismisses on an outside pointerdown, so pressing
         // another list row (a preventDefaulted pointerdown that suppresses the
@@ -306,52 +290,6 @@ function wireRow(list: List, rows: QueryRow[], config: SectionConfig, menu: Menu
             { text: "Execute", action: () => config.execute(rows[index]) },
             { text: "Open",    action: () => config.open(rows[index]) },
         ]);
-    });
-}
-
-/**
- * Map a right-click event to its row index by walking up to the row element and
- * finding its position among the sibling rows.
- *
- * @param e - The contextmenu event.
- *
- * @returns The zero-based row index, or -1 when the click missed a row.
- */
-function rowIndexFromEvent(e: MouseEvent): number {
-    const target = e.target as HTMLElement | null;
-    const row    = target?.closest?.(`.${ROW_CLASS}`) as HTMLElement | null;
-    const parent = row?.parentElement;
-
-    if (!row || !parent) {
-        return -1;
-    }
-
-    const siblings = Array.from(parent.children).filter(child => child.classList.contains(ROW_CLASS));
-
-    return siblings.indexOf(row);
-}
-
-/**
- * Attach a full-SQL hover tooltip to each rendered row, on the next frame so the
- * list's row pool has rendered into the DOM.
- *
- * @param list - The list whose rows to annotate.
- * @param rows - The rows backing the list, in index order.
- */
-function attachTooltips(list: List, rows: QueryRow[]): void {
-    requestAnimationFrame(() => {
-        const el = list.getElement();
-
-        if (!el) {
-            return;
-        }
-
-        const rowEls: Handle[] = DOM.source.querySelectorAll(el, `.${ROW_CLASS}`);
-        rowEls.forEach((rowEl, index) => {
-            if (rows[index]) {
-                Tooltip.attachToElement(rowEl, rows[index].sql);
-            }
-        });
     });
 }
 
@@ -378,8 +316,9 @@ function buildList(rows: QueryRow[]): List {
     });
     // setItems is the typed entry point for pre-formed {key, label} rows (the
     // constructor's `items` option is typed for the plain-string form). Every row
-    // is a query, so each carries the terminal glyph.
-    list.setItems(rows.map(row => ({ key: row.key, label: row.label, glyph: "terminal" })));
+    // is a query, so each carries the terminal glyph; the full SQL rides along as
+    // the row's hover tooltip (rows are truncated).
+    list.setItems(rows.map(row => ({ key: row.key, label: row.label, glyph: "terminal", tooltip: row.sql })));
 
     return list;
 }
