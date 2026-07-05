@@ -241,9 +241,13 @@ function buildSection(config: SectionConfig): Section {
             target.setSelectedIndex(0, true);
         }
 
-        // Focus on the next frame: the menu that triggered this restores focus to
-        // its opener as it closes, which would otherwise steal a focus set now.
-        requestAnimationFrame(() => target.focus());
+        // Focus after the next layout flush, not now: this runs from
+        // controller.showQueriesView, which reveals the Queries view and opens its
+        // section — both via scheduleLayout — so on this tick the list is not yet
+        // in its final attached, laid-out state. afterNextLayout follows the
+        // batched layout pass deterministically, so focus lands on the settled
+        // list; a bare requestAnimationFrame only races that flush.
+        Component.afterNextLayout(() => target.focus());
     }
 
     return { host, tools, refresh, focusList };
