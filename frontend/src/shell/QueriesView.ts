@@ -30,7 +30,6 @@ import { floppy_disk }             from "@jimka/typescript-ui/glyphs/solid/flopp
 import { clock_rotate_left }       from "@jimka/typescript-ui/glyphs/solid/clock_rotate_left";
 import { terminal }                from "@jimka/typescript-ui/glyphs/solid/terminal";
 import { refreshTool, bindRefreshShortcut } from "./refreshTool";
-import { SIDEBAR_FILL_HINT }       from "./sidebarFillHint";
 import type { SqlAdminController } from "../SqlAdminController";
 import { PRIMARY_COLOR, DESTRUCTIVE_COLOR, MUTED_TEXT_COLOR } from "../theme";
 
@@ -118,8 +117,9 @@ export function QueriesView(controller: SqlAdminController, id: string): Compone
     const view = new AccordionPanel({
         id,
         sections: [
-            { label: "Saved",  component: saved.host,  initiallyOpen: true, glyph: "floppy-disk",       tools: saved.tools },
-            { label: "Recent", component: recent.host, initiallyOpen: true, glyph: "clock-rotate-left", tools: recent.tools },
+            // Equal fill weights split the leftover height between the two lists.
+            { label: "Saved",  component: saved.host,  initiallyOpen: true, glyph: "floppy-disk",       tools: saved.tools,  fillWeight: 1 },
+            { label: "Recent", component: recent.host, initiallyOpen: true, glyph: "clock-rotate-left", tools: recent.tools, fillWeight: 1 },
         ],
     });
 
@@ -301,8 +301,9 @@ function selectedRow(list: List | null, rows: QueryRow[]): QueryRow | undefined 
 }
 
 /**
- * Build a selectable List for the section's rows, sized with a fill hint so it
- * fills the accordion section and scrolls its own overflow.
+ * Build a selectable List for the section's rows. Carries no intrinsic height —
+ * the section's fillWeight grows it into the leftover space, and it scrolls its
+ * own overflow.
  *
  * @param rows - The section's rows.
  *
@@ -310,7 +311,7 @@ function selectedRow(list: List | null, rows: QueryRow[]): QueryRow | undefined 
  */
 function buildList(rows: QueryRow[]): List {
     const list = new List({
-        preferredSize:   { width: 0, height: SIDEBAR_FILL_HINT },
+        preferredSize:   { width: 0, height: 0 },
         // Render each row as a query glyph beside its label.
         rendererFactory: () => new GlyphListItemRenderer(),
     });
