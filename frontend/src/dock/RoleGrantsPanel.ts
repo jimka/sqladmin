@@ -1,9 +1,8 @@
 // A read-only, paginated grid of a role's table privileges (one row per grant),
 // shown in its own Dock work-area tab opened from the Roles view. Backed by a
 // Store over an in-memory paging proxy with a PaginationBar: a superuser can
-// hold ~1500 grants, and the library Table renders nothing when handed that many
-// rows in one load (see LIBRARY_NOTES.md), so the grants are paged — also a
-// phpMyAdmin-style work-area table.
+// hold ~1500 grants, and paging them phpMyAdmin-style is the better UX for a
+// work-area table than one long scroll.
 
 import { Container, Panel }              from "@jimka/typescript-ui/core";
 import { Border }             from "@jimka/typescript-ui/layout";
@@ -25,9 +24,8 @@ import { PRIMARY_COLOR }       from "../theme";
 
 Glyph.register(file_export, file_csv, file_code);
 
-// Rows per page — comfortably below the count at which the library Table render
-// limit bites (the row-CRUD path uses the same 100), and a sensible page for the
-// work area.
+// Rows per page — a sensible page for the work area, matching the row-CRUD
+// path's page size.
 const PAGE_SIZE = 100;
 
 /** Build a Dock panel showing a role's table grants as a paginated read-only grid. */
