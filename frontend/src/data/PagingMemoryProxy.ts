@@ -1,8 +1,15 @@
 // An in-memory Proxy that honours page/pageSize, slicing a settable array per
-// page (mirroring the library's MiscPanel paginated-table demo proxy). Used to
-// page the role-detail rows so the Table never renders more than one page at a
-// time — both a phpMyAdmin-style UX and a guard against the library's large
-// MemoryStore.loadData render limit (see LIBRARY_NOTES.md).
+// page so the role-detail grants Table renders one page at a time — a
+// phpMyAdmin-style UX for a work-area grid.
+//
+// Ideally this would `extend MemoryProxy` — which already stores the array and
+// provides setData/CRUD — and add only the page slice plus total-count report.
+// But an external consumer that subclasses a library class does NOT inherit the
+// base's concrete instance members through the built .d.ts: `class X extends
+// MemoryProxy` sees no `setData`, even though a direct `new MemoryProxy()` does
+// (the same external-subclassing papercut LIBRARY_NOTES records for
+// `Panel.addComponent`, here confirmed on a data class). So this extends the
+// abstract `Proxy` and stores the array itself; CRUD is unused (read-only).
 
 import { Proxy }            from "@jimka/typescript-ui/data";
 import type { ReadParams }  from "@jimka/typescript-ui/data";
