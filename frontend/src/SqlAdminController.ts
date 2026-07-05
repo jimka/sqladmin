@@ -84,11 +84,6 @@ export class SqlAdminController {
     // Recently opened tables (newest-first), surfaced on the start page.
     private readonly _recentTables: RecentTable[] = [];
 
-    // Count of open dock panels, driving the start page: it shows at 0 and hides
-    // once the first panel opens. Every addPanel-issuing method increments; the
-    // single "close" subscription decrements.
-    private _openPanelCount: number = 0;
-
     // Shell-injected handles (mirroring how ActivityBar takes a SidebarSizer): one
     // toggles the start-page deck, one selects the Queries activity-bar view, one
     // focuses a section (Saved/Recent) of the Queries view.
@@ -131,7 +126,10 @@ export class SqlAdminController {
      */
     constructor(connectionId: string = "default") {
         this._connectionId = connectionId;
-        this.dock            = Dock();
+        // The dock owns its own emptiness; drive the start-page deck straight off
+        // its "emptychange" aggregate (empty↔populated, once per transition)
+        // instead of shadow-counting opens and closes here.
+        this.dock            = Dock({ listeners: { emptychange: e => this._startToggle?.(e.empty) } });
         this.statusBar       = new StatusBar();
         this.properties      = new PropertiesPanel();
         this.rolesProperties = new RolesPropertiesPanel();
@@ -217,8 +215,6 @@ export class SqlAdminController {
             this.rememberTable(ref, node);
         }
 
-        this.panelOpened();
-
         // Open lazily: the tab appears at once, and the grid UI builds on first
         // activation behind a spinner, so a wide table never blocks the tab.
         const notify = (message: string): void => { this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: ${message}`); };
@@ -269,7 +265,6 @@ export class SqlAdminController {
         }
 
         this._openPanels.set(id, { ref, node, detail: "definition" });
-        this.panelOpened();
         this.dock.addPanel({
             id,
             title  : `${ref.name ?? id} (definition)`,
@@ -300,7 +295,6 @@ export class SqlAdminController {
         }
 
         this._openPanels.set(id, { ref, node, columns, detail: "structure" });
-        this.panelOpened();
         this.dock.addPanel({
             id,
             title  : `${ref.name ?? id} (structure)`,
@@ -374,7 +368,6 @@ export class SqlAdminController {
             this.statusBar.setMessage(`${this._connectionId} · ${label}: ${message}`);
         };
 
-        this.panelOpened();
         this.dock.addPanel({
             id,
             title  : label,
@@ -673,7 +666,7 @@ export class SqlAdminController {
      */
     setStartToggle(toggle: (visible: boolean) => void): void {
         this._startToggle = toggle;
-        toggle(this._openPanelCount === 0);
+        toggle(this.dock.isEmpty());
     }
 
     /**
@@ -843,7 +836,6 @@ export class SqlAdminController {
             return;
         }
 
-        this.panelOpened();
         this.dock.addPanel({
             id,
             title  : `Grants: ${role}`,
@@ -926,25 +918,9 @@ export class SqlAdminController {
         return `${ref.name}\n\nType: ${relationTypeLabel(ref.kind)}\nSchema: ${ref.schema}\nDatabase: ${ref.database}`;
     }
 
-    /** Drop a closed panel's store from the registry and update the start page. */
+    /** Drop a closed panel's store from the registry (the dock drives the start page). */
     private disposePanel(id: string): void {
         this._openPanels.delete(id);
-        this.panelClosed();
-    }
-
-    /** Record that a panel opened: bump the count and hide the start page. */
-    private panelOpened(): void {
-        this._openPanelCount++;
-        this._startToggle?.(false);
-    }
-
-    /** Record that a panel closed: drop the count and show the start page at 0. */
-    private panelClosed(): void {
-        this._openPanelCount = Math.max(0, this._openPanelCount - 1);
-
-        if (this._openPanelCount === 0) {
-            this._startToggle?.(true);
-        }
     }
 
     /** Select the panel's navigator node and refresh the status bar to match. */

@@ -1,10 +1,9 @@
 // The empty-workspace start page — an app-owned welcome surface shown in the
 // shell's CENTER (a Card deck alongside the Dock) whenever no dock panels are
-// open. The Dock exposes no emptyContent hook or "became empty" event
-// (LIBRARY_NOTES / the plan's Dock investigation), so the controller tracks an
-// open-panel count and toggles this deck; the page itself is a plain composed
-// Panel of quick actions, recent tables, saved queries, connection info, and
-// keyboard hints. It rebuilds on the controller's onWorkspaceChanged seam so the
+// open. The controller toggles this deck off the Dock's "emptychange" event, so
+// no panel bookkeeping lives here; the page itself is a plain composed Panel of
+// quick actions, recent tables, saved queries, connection info, and keyboard
+// hints. It rebuilds on the controller's onWorkspaceChanged seam so the
 // recent/saved lists stay current.
 
 import { Component, Panel }         from "@jimka/typescript-ui/core";
