@@ -8,37 +8,29 @@
 // table's structure opens in its own tab from the navigator's right-click menu
 // (see StructurePanel / SqlAdminController).
 
-import { Container, Panel }                       from "@jimka/typescript-ui/core";
-import { Placement }                   from "@jimka/typescript-ui/primitive";
-import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
+import { Panel }                       from "@jimka/typescript-ui/core";
+import type { Container }              from "@jimka/typescript-ui/core";
+import { Fit }                         from "@jimka/typescript-ui/layout";
 import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
 import { Spacer }                      from "@jimka/typescript-ui/component/container";
-import { Button }                      from "@jimka/typescript-ui/component/button";
+import { glyphButton }                 from "./glyphButton";
 import { Table }                       from "@jimka/typescript-ui/component/table";
 import type { ColumnSpec }             from "@jimka/typescript-ui/component/table";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
-import { Dialog, DialogButtons, Menu } from "@jimka/typescript-ui/overlay";
+import { Dialog, DialogButtons }       from "@jimka/typescript-ui/overlay";
 import type { AjaxStore, ModelRecord } from "@jimka/typescript-ui/data";
 import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
 import { plus }                        from "@jimka/typescript-ui/glyphs/solid/plus";
 import { minus }                       from "@jimka/typescript-ui/glyphs/solid/minus";
 import { save }                        from "@jimka/typescript-ui/glyphs/solid/save";
 import { filter }                      from "@jimka/typescript-ui/glyphs/solid/filter";
-import { file_export }                 from "@jimka/typescript-ui/glyphs/solid/file_export";
-import { file_csv }                    from "@jimka/typescript-ui/glyphs/solid/file_csv";
-import { file_code }                   from "@jimka/typescript-ui/glyphs/solid/file_code";
 import type { ColumnMeta }             from "../contract";
 import { openFilterDialog }            from "./FilterDialog";
+import { buildExportButton }           from "./exportButton";
+import { workPanelShell }              from "./workPanelShell";
+import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR, FILTER_ACTIVE_COLOR } from "../theme";
 
-Glyph.register(refresh, plus, minus, save, filter, file_export, file_csv, file_code);
-
-/** Toolbar glyph colors: blue for neutral actions, green to add, red to delete. */
-const BLUE  = "rgb(30, 100, 200)";
-const GREEN = "rgb(46, 125, 50)";
-const RED   = "rgb(198, 40, 40)";
-
-/** Amber tints the Filter button while a filter is active, signalling the grid is narrowed. */
-const FILTER_ACTIVE = "rgb(230, 145, 30)";
+Glyph.register(refresh, plus, minus, save, filter);
 
 /** Surface a short status message (validation / save feedback) to the user. */
 export type Notify = (message: string) => void;
@@ -47,14 +39,13 @@ export type Notify = (message: string) => void;
 export type ExportTable = (format: "csv" | "json") => void;
 
 /** Build the work panel hosting a table's data grid. */
-export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable): Panel {
+export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable): Container {
     const dataGrid = Table(store, buildColumnSpec(columns));
 
-    const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
-    panel.addComponent(buildToolBar(store, dataGrid, columns, notify, onExport), { placement: Placement.NORTH });
-    panel.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
-
-    return panel;
+    return workPanelShell(
+        buildToolBar(store, dataGrid, columns, notify, onExport),
+        Panel({ layoutManager: new Fit(), components: [dataGrid] }),
+    );
 }
 
 /**
@@ -68,25 +59,18 @@ function buildColumnSpec(columns: ColumnMeta[]): ColumnSpec {
 
 /** Glyph-only toolbar wired to the store (CRUD) with validation + confirmation. */
 function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], notify: Notify, onExport: ExportTable): ToolBar {
-    const deleteButton = glyphButton("minus", RED, "Delete row", () => void confirmDelete(store, dataGrid));
-    const saveButton = glyphButton("save", BLUE, "Save", () => save_(store, columns, notify));
-    const filterButton = glyphButton("filter", BLUE, "Filter rows", () => openFilterDialog(store, columns));
+    const deleteButton = glyphButton("minus", DESTRUCTIVE_COLOR, "Delete row", () => void confirmDelete(store, dataGrid));
+    const saveButton = glyphButton("save", PRIMARY_COLOR, "Save", () => save_(store, columns, notify));
+    const filterButton = glyphButton("filter", PRIMARY_COLOR, "Filter rows", () => openFilterDialog(store, columns));
 
     // The full-relation export runs server-side (it streams the whole table, not
     // the grid's loaded page), so it stays correct regardless of paging, sort, or
-    // filter — the table analogue of the query-result Export button. The CSV/JSON
-    // chooser opens at the click point and is reused across clicks.
-    const exportMenu = Menu();
-    const exportButton = glyphButton("file-export", BLUE, "Export table (CSV / JSON)", event => {
-        exportMenu.show(event.clientX, event.clientY, [
-            { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => onExport("csv") },
-            { text: "Export JSON (.json)", glyph: "file-code", action: () => onExport("json") },
-        ]);
-    });
+    // filter — the table analogue of the query-result Export button.
+    const exportButton = buildExportButton("Export table (CSV / JSON)", onExport);
 
     const bar = new ToolBar({
         components: [
-            glyphButton("plus", GREEN, "Add row", () => store.add({})),
+            glyphButton("plus", CONSTRUCTIVE_COLOR, "Add row", () => store.add({})),
             deleteButton,
             saveButton,
             // Flex spacer pushes the view actions (Filter, Export, Refresh) to the
@@ -98,7 +82,7 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
             // must precede load(): load() replaces the records but leaves pending
             // removals queued, so without it a deleted row would reappear yet stay
             // marked for deletion on the next Save.
-            glyphButton("refresh", BLUE, "Refresh (Alt+R)", () => { store.reject(); void store.load(); })
+            glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", () => { store.reject(); void store.load(); })
         ]
     });
 
@@ -108,7 +92,7 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
     const syncFilterActive = (): void => {
         const active = store.getActiveFilters().length > 0;
 
-        filterButton.setForegroundColor(active ? FILTER_ACTIVE : BLUE);
+        filterButton.setForegroundColor(active ? FILTER_ACTIVE_COLOR : PRIMARY_COLOR);
         filterButton.setDescription(active ? "Filter rows (active)" : "Filter rows");
     };
     syncFilterActive();
@@ -197,15 +181,3 @@ async function confirmDelete(store: AjaxStore, dataGrid: Table): Promise<void> {
     }
 }
 
-/** A glyph-only toolbar button: colored icon, hover tooltip + accessible name, click handler. */
-function glyphButton(glyph: string, color: string, label: string, handler: (event: MouseEvent) => void): Button {
-    // showText:false keeps the face glyph-only while the label drives both the
-    // hover tooltip and the aria-label (accessible name) — no manual setLabel.
-    // showDescription:false keeps a description (e.g. the Filter button's
-    // "(active)" state) in the tooltip only, off the glyph-only face.
-    const button = Button({ glyph, text: label, showText: false, showDescription: false, foregroundColor: color, compact: true });
-
-    button.on("action", handler);
-
-    return button;
-}

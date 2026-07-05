@@ -14,7 +14,7 @@
 // .d.ts (the callable constructor type drops instance methods for external
 // consumers). See LIBRARY_NOTES.md.
 
-import { Panel, Component, Container }        from "@jimka/typescript-ui/core";
+import { Component, Container }        from "@jimka/typescript-ui/core";
 import { Placement, UNBOUNDED }    from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Split, Card } from "@jimka/typescript-ui/layout";
 import { MenuBar }                 from "@jimka/typescript-ui/component/menubar";
@@ -71,8 +71,8 @@ const QUERIES_VIEW_ID  = "queries";
 const CENTER_DOCK_ID  = "work-dock";
 const CENTER_START_ID = "work-start";
 
-/** Build the shell Panel, hosting the controller's Dock and StatusBar. */
-export function SqlAdminShell(controller: SqlAdminController): Panel {
+/** Build the shell container, hosting the controller's Dock and StatusBar. */
+export function SqlAdminShell(controller: SqlAdminController): Container {
     const sidebar  = buildSidebar(controller);
     const workArea = buildWorkArea(sidebar, controller);
 
@@ -128,6 +128,8 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
  */
 function installAccelerators(controller: SqlAdminController, sidebar: ActivityBarHandle): void {
     document.addEventListener("keydown", (event: KeyboardEvent) => {
+        let matched = true;
+
         if (isNewQueryChord(event)) {
             controller.openQuery();
         } else if (isOpenSavedChord(event)) {
@@ -142,9 +144,16 @@ function installAccelerators(controller: SqlAdminController, sidebar: ActivityBa
             sidebar.selectView(QUERIES_VIEW_ID);
         } else if (isRefreshChord(event)) {
             controller.refreshActive();
+        } else {
+            matched = false;
         }
 
-        event.preventDefault();
+        // Only swallow the browser default for a chord we actually handled;
+        // otherwise every other key (Ctrl+F/Ctrl+P, Tab traversal, Space-scroll)
+        // reaching document would have its default suppressed.
+        if (matched) {
+            event.preventDefault();
+        }
     });
 }
 

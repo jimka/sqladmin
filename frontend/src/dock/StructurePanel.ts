@@ -9,7 +9,7 @@
 // comma-separated display strings because the library Table has no array cell
 // renderer.
 
-import { Component, Container, Panel }    from "@jimka/typescript-ui/core";
+import { Component, Panel }    from "@jimka/typescript-ui/core";
 import { Border, VBox }        from "@jimka/typescript-ui/layout";
 import { Placement }           from "@jimka/typescript-ui/primitive";
 import { Text }                from "@jimka/typescript-ui/component/input";
@@ -46,7 +46,7 @@ export function StructurePanel(
     structure: TableStructure,
     onOpenReferenced: (refSchema: string, refTable: string) => void,
 ): Panel {
-    return Container({
+    return Panel({
         layoutManager: new VBox({ stretching: true }),
         autoScroll   : "auto",
         components   : [

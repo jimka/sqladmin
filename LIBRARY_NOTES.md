@@ -708,23 +708,46 @@ selector from one — audit other `#${id}` / `'#' + id` sites for the same gap.
 
 ---
 
-## ✂️ Subclassing the callable component export drops instance methods (external `.d.ts`)
+## ✂️✅ External consumers couldn't subclass a library class (unresolved `~/` alias in the shipped `.d.ts`)
 
-`class SqlAdminShell extends Panel { ... this.addComponent(...) }` type-checks
-inside the library's own source (where `@jimka/typescript-ui/*` resolves to
-source) but **fails for an external consumer** resolving the built `.d.ts`:
-`tsc` reports *"Property 'addComponent' does not exist on type 'SqlAdminShell'"*.
-The public `Panel` is the `callable()`-wrapped export, whose value type is a
-call/construct signature that doesn't carry the class's instance members through
-`extends` in the emitted declarations.
+`class SqlAdminShell extends Panel { ... this.addComponent(...) }` type-checked
+inside the library's own source but **failed for an external consumer** resolving
+the built `.d.ts`: `tsc` reported *"Property 'addComponent' does not exist on type
+'SqlAdminShell'"*. The same wall blocked `class PagingMemoryProxy extends
+MemoryProxy` (*"Property 'setData' does not exist"*) — even though a **direct**
+`new MemoryProxy().setData([])` type-checked fine (confirmed with a two-line probe).
+So it was **not** the `callable()` wrapper, which was the original guess here: it
+hit *every* library class, plain data classes included.
 
-**App workaround:** build components with the callable factory form
-(`const shell = Panel({...}); shell.addComponent(...)`) instead of subclassing —
-which is the recommended construction idiom anyway (`shell/SqlAdminShell.ts`).
+**Root cause (found + fixed in the library).** The library source uses a `~/*`
+path alias (`~ -> src/typescript/lib`), and the declaration build emitted the
+`.d.ts` with those alias imports **verbatim** — `tsc` does not rewrite path aliases
+on emit, and no post-step did. A consumer has no `~` mapping, so e.g.
+`import { Proxy } from '~/data/proxy/Proxy.js'` inside `MemoryProxy.d.ts` resolved
+to `any` (silently, under the consumer's `skipLibCheck`). A base class that resolves
+to `any` makes a *further* subclass inherit none of the base's members — while a
+direct instance, whose own declared members don't depend on the broken base, is
+unaffected. Proven by adding a temporary `~` → `dist/lib/types` mapping in the app:
+subclassing then saw every inherited member.
 
-**Suggestion:** expose a subclassable class type for external consumers (there is
-a `_Panel` raw export, but it reads as private), or make the callable export type
-a proper subclassable constructor in the built `.d.ts`.
+**Library fix.** Run `tsc-alias` after the declaration emit (`build:lib`) to
+rewrite the `~/*` imports to relative paths, plus an `outDir` for tsc-alias to
+locate the `.d.ts` (emitDeclarationOnly emits no `.js`) — so the shipped types are
+self-contained. Verified: 0 `~/` imports remain in `dist/lib/types`, and an
+external consumer can now `extends Panel` / `extends MemoryProxy` and reach
+inherited members with no workaround.
+
+**Fallout (worth knowing).** Once real types flowed to the consumer they unmasked
+latent errors the `any` had hidden — 14 in sqladmin: 7 app-side (mostly `: Panel`
+annotations on functions returning a `Container`, and a `Container({ autoScroll })`
+that silently ignored the Panel-only option), and 7 library public-API type bugs
+(`Menu()`'s no-arg overload dropped by the callable's `ConstructorParameters`,
+`ComboBoxOptions.items` narrower than `setItems`, `Text`'s over-narrowing options
+generic) — all now fixed.
+
+**App change:** `SqlAdminShell` can subclass `Panel` again, and
+`data/PagingMemoryProxy.ts` now `extends MemoryProxy` (dropping its reimplemented
+array storage) instead of the abstract `Proxy`.
 
 ---
 

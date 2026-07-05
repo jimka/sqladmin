@@ -16,7 +16,7 @@
 // `toggleCollapsed` for the menu's "Toggle Sidebar" command.
 
 import { Component, Container }             from "@jimka/typescript-ui/core";
-import { Placement, Insets }            from "@jimka/typescript-ui/primitive";
+import { Placement }                    from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Card } from "@jimka/typescript-ui/layout";
 import { ToolBar }                      from "@jimka/typescript-ui/component/menubar";
 import { ToggleButton }                 from "@jimka/typescript-ui/component/button";
@@ -85,7 +85,7 @@ export interface ActivityBarHandle {
  */
 export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
     const card        = new Card();
-    const deck        = Container({ layoutManager: card, insets: new Insets(0, 0, 0, 0) });
+    const deck        = Container({ layoutManager: card });
     const rail        = new ToolBar({ orientation: "vertical" });
     const activityBar = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
     const buttonById  = new Map<string, ToggleButton>();
@@ -165,10 +165,10 @@ export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
     rail.setPreferredSize(RAIL_WIDTH, 0);
     card.setVisibleComponentId(activeId);
 
-    // Zero the bar's content insets: with the default inset, collapsing the bar
-    // to RAIL_WIDTH would squeeze the rail (the Border insets eat into the WEST
-    // region), so the rail width — and thus the icon column — would change across
-    // toggles. Flush insets keep the rail a constant width in both states.
+    // The bar is a Container (not a Panel) so it carries zero content insets: a
+    // Panel's default 4px inset would eat into the WEST region and squeeze the
+    // rail when the bar collapses to RAIL_WIDTH, changing the rail — and thus the
+    // icon column — width across toggles. Zero insets keep it constant.
     activityBar.addComponent(rail, { placement: Placement.WEST });
     activityBar.addComponent(deck, { placement: Placement.CENTER });
     activityBar.setPreferredSize(RAIL_WIDTH + DECK_WIDTH, 0);

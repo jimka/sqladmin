@@ -15,6 +15,7 @@ import { Button }                   from "@jimka/typescript-ui/component/button"
 import { NEW_QUERY_SHORTCUT, OPEN_SAVED_SHORTCUT, QUERY_HISTORY_SHORTCUT } from "./queryShortcuts";
 import type { SavedQuery }          from "../data/queryStore";
 import type { SqlAdminController }  from "../SqlAdminController";
+import { MUTED_TEXT_COLOR }         from "../theme";
 
 // Padding around the welcome content, the vertical gap between stacked entries,
 // and the fixed height of each action button — comfortable click targets that
@@ -23,10 +24,6 @@ import type { SqlAdminController }  from "../SqlAdminController";
 const PAGE_PADDING = 24;
 const ENTRY_SPACING = 6;
 const BUTTON_HEIGHT = 30;
-
-// Muted grey for headers, hints, and connection info, matching the app's
-// secondary-text treatment.
-const MUTED_COLOR = "rgb(140, 140, 140)";
 
 /**
  * Build the start page shown when the workspace has no open panels.
@@ -100,7 +97,7 @@ function appendList<T>(
 /** A section heading (bold, muted). */
 function heading(text: string, fontWeight: string): Component {
     const header = new Text(text, { fontWeight });
-    header.setForegroundColor(MUTED_COLOR);
+    header.setForegroundColor(MUTED_TEXT_COLOR);
 
     return header;
 }
@@ -108,7 +105,7 @@ function heading(text: string, fontWeight: string): Component {
 /** A muted informational line. */
 function mutedText(text: string): Component {
     const line = new Text(text);
-    line.setForegroundColor(MUTED_COLOR);
+    line.setForegroundColor(MUTED_TEXT_COLOR);
 
     return line;
 }

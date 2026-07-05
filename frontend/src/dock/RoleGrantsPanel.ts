@@ -1,39 +1,27 @@
 // A read-only, paginated grid of a role's table privileges (one row per grant),
 // shown in its own Dock work-area tab opened from the Roles view. Backed by a
 // Store over an in-memory paging proxy with a PaginationBar: a superuser can
-// hold ~1500 grants, and the library Table renders nothing when handed that many
-// rows in one load (see LIBRARY_NOTES.md), so the grants are paged — also a
-// phpMyAdmin-style work-area table.
+// hold ~1500 grants, and paging them phpMyAdmin-style is the better UX for a
+// work-area table than one long scroll.
 
-import { Container, Panel }              from "@jimka/typescript-ui/core";
-import { Border }             from "@jimka/typescript-ui/layout";
-import { Placement }          from "@jimka/typescript-ui/primitive";
+import type { Container }     from "@jimka/typescript-ui/core";
 import { ToolBar }            from "@jimka/typescript-ui/component/menubar";
 import { Spacer }             from "@jimka/typescript-ui/component/container";
-import { Button }             from "@jimka/typescript-ui/component/button";
 import { Table }              from "@jimka/typescript-ui/component/table";
 import { Store, Model }       from "@jimka/typescript-ui/data";
-import { PaginationBar, Glyph } from "@jimka/typescript-ui/component/display";
-import { Menu }               from "@jimka/typescript-ui/overlay";
-import { file_export }        from "@jimka/typescript-ui/glyphs/solid/file_export";
-import { file_csv }           from "@jimka/typescript-ui/glyphs/solid/file_csv";
-import { file_code }          from "@jimka/typescript-ui/glyphs/solid/file_code";
+import { PaginationBar }      from "@jimka/typescript-ui/component/display";
 import type { RolePrivilege } from "../contract";
 import { PagingMemoryProxy }  from "../data/PagingMemoryProxy";
+import { workPanelShell }     from "./workPanelShell";
 import { exportRoleGrants }   from "./exportRoleGrants";
+import { buildExportButton }  from "./exportButton";
 
-Glyph.register(file_export, file_csv, file_code);
-
-// Rows per page — comfortably below the count at which the library Table render
-// limit bites (the row-CRUD path uses the same 100), and a sensible page for the
-// work area.
+// Rows per page — a sensible page for the work area, matching the row-CRUD
+// path's page size.
 const PAGE_SIZE = 100;
 
-/** Neutral toolbar glyph color, matching the table/view work panels' Export button. */
-const BLUE = "rgb(30, 100, 200)";
-
 /** Build a Dock panel showing a role's table grants as a paginated read-only grid. */
-export function RoleGrantsPanel(role: string, privileges: RolePrivilege[]): Panel {
+export function RoleGrantsPanel(role: string, privileges: RolePrivilege[]): Container {
     const model = new Model({
         fields: [
             { name: "schema", type: "string", description: "Schema", order: 1 },
@@ -51,14 +39,11 @@ export function RoleGrantsPanel(role: string, privileges: RolePrivilege[]): Pane
     const store = new Store({ model, proxy });
     store.setPageSize(PAGE_SIZE);
 
-    const panel = Container({
-        layoutManager: new Border({ spacing: 0 }),
-        components   : [
-            { component: buildToolBar(role, privileges),                        constraints: { placement: Placement.NORTH } },
-            { component: Table(store, { columns: [], rowReadOnly: () => true }), constraints: { placement: Placement.CENTER } },
-            { component: new PaginationBar(store),                               constraints: { placement: Placement.SOUTH } },
-        ],
-    });
+    const panel = workPanelShell(
+        buildToolBar(role, privileges),
+        Table(store, { columns: [], rowReadOnly: () => true }),
+        new PaginationBar(store),
+    );
 
     void store.load();
 
@@ -71,24 +56,11 @@ export function RoleGrantsPanel(role: string, privileges: RolePrivilege[]): Pane
  * every page, since the grants are held in memory and paging is display-only.
  */
 function buildToolBar(role: string, privileges: RolePrivilege[]): ToolBar {
-    const exportMenu = Menu();
-    const exportButton = glyphButton("file-export", BLUE, "Export grants (CSV / JSON)", event => {
-        exportMenu.show(event.clientX, event.clientY, [
-            { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => exportRoleGrants(role, privileges, "csv") },
-            { text: "Export JSON (.json)", glyph: "file-code", action: () => exportRoleGrants(role, privileges, "json") },
-        ]);
-    });
+    const exportButton = buildExportButton(
+        "Export grants (CSV / JSON)",
+        format => exportRoleGrants(role, privileges, format),
+    );
 
     return new ToolBar({ components: [Spacer.flex(), exportButton] });
 }
 
-/** A glyph-only toolbar button: colored icon, hover tooltip + accessible name, click handler. */
-function glyphButton(glyph: string, color: string, label: string, handler: (event: MouseEvent) => void): Button {
-    // showText:false keeps the face glyph-only while the label drives both the
-    // hover tooltip and the aria-label (accessible name).
-    const button = Button({ glyph, text: label, showText: false, foregroundColor: color, compact: true });
-
-    button.on("action", handler);
-
-    return button;
-}

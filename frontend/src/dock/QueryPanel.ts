@@ -22,7 +22,7 @@ import { Placement }                     from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Fit, Split } from "@jimka/typescript-ui/layout";
 import { ToolBar }                       from "@jimka/typescript-ui/component/menubar";
 import { Spacer }                        from "@jimka/typescript-ui/component/container";
-import { Button }                        from "@jimka/typescript-ui/component/button";
+import { glyphButton }                   from "./glyphButton";
 import { Table }                         from "@jimka/typescript-ui/component/table";
 import { TextArea }                      from "@jimka/typescript-ui/component/input";
 import { MemoryStore }                   from "@jimka/typescript-ui/data";
@@ -42,39 +42,15 @@ import { flask }                         from "@jimka/typescript-ui/glyphs/solid
 import { buildQueryModel }               from "../data/buildModel";
 import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
-import { capRows, MAX_RESULT_ROWS }      from "./capRows";
 import { exportQueryResult }             from "./exportQueryResult";
 import { exportExplainPlan }             from "./exportExplainResult";
 import type { ActiveExport, RunExplain } from "../data/explain";
 import type { HistoryEntry }             from "../data/queryStore";
 import { isExplainChord, isExplainAnalyzeChord } from "../shell/queryShortcuts";
 import type { QueryExplainResult, QueryResult } from "../contract";
+import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, CAUTION_COLOR, HISTORY_COLOR, NEUTRAL_COLOR } from "../theme";
 
 Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask);
-
-// Green for the affirmative Run action, matching TableWorkPanel's add-action color.
-const RUN_COLOR = "rgb(46, 125, 50)";
-
-// Blue for the neutral Save action — distinct from the green Run and amber
-// Clear, reading as "persist this query" rather than "execute" or "discard".
-const SAVE_COLOR = "rgb(21, 101, 192)";
-
-// Amber for the Clear (reset) action — distinct from the green Run, signalling
-// "discards your input" without the finality of a delete-red. Reused for the
-// Explain Analyze action to warn that it executes the statement.
-const CLEAR_COLOR = "rgb(204, 102, 0)";
-
-// Neutral grey for the history-recall arrows — secondary navigation, kept
-// visually quieter than the colored Run/Save/Clear actions.
-const HISTORY_COLOR = "rgb(90, 90, 90)";
-
-// Blue for the Export action — a neutral "read out" action, distinct from the
-// green Run and amber Clear.
-const EXPORT_COLOR = "rgb(21, 101, 192)";
-
-// Neutral dark grey for the plain Explain action — it neither mutates input nor
-// executes the statement, so it carries no warning color (unlike Run/Analyze).
-const NEUTRAL_COLOR = "rgb(66, 66, 66)";
 
 // Inline style for the read-only plan view: a monospace face with preserved
 // whitespace so EXPLAIN's indented tree lines up and long lines scroll rather
@@ -133,7 +109,7 @@ export interface QueryPanelOptions {
 }
 
 /** Build a query panel: a SQL editor over a (resizable) result grid. */
-export function QueryPanel(options: QueryPanelOptions): Panel {
+export function QueryPanel(options: QueryPanelOptions): Container {
     const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult } = options;
 
     const editor = new TextArea(initialSql);
@@ -151,16 +127,16 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     // positive-weight sibling the split falls back to filling the container.)
     body.addComponent(editor, { weight: 0 });
 
-    const runButton     = glyphButton("play", RUN_COLOR, "Run (Ctrl+Enter)", () => void run());
-    const saveButton    = glyphButton("floppy-disk", SAVE_COLOR, "Save query (Ctrl+S)", () => save());
-    const clearButton   = glyphButton("eraser", CLEAR_COLOR, "Clear (Alt+C)", () => clear());
+    const runButton     = glyphButton("play", CONSTRUCTIVE_COLOR, "Run (Ctrl+Enter)", () => void run());
+    const saveButton    = glyphButton("floppy-disk", PRIMARY_COLOR, "Save query (Ctrl+S)", () => save());
+    const clearButton   = glyphButton("eraser", CAUTION_COLOR, "Clear (Alt+C)", () => clear());
     // The glyph registers under its hyphenated name ("diagram-project"), even
     // though the ESM export identifier uses an underscore.
     const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, "Explain (Ctrl+E)",
                                       () => void runExplainRun(false));
-    const analyzeButton = glyphButton("flask", CLEAR_COLOR, "Explain Analyze (Ctrl+Shift+E)\n\nexecutes the statement",
+    const analyzeButton = glyphButton("flask", CAUTION_COLOR, "Explain Analyze (Ctrl+Shift+E)\n\nexecutes the statement",
                                       () => void runExplainRun(true));
-    const exportButton  = glyphButton("file-export", EXPORT_COLOR, "Export results (CSV / JSON)", (e: MouseEvent) => openExportMenu(e));
+    const exportButton  = glyphButton("file-export", PRIMARY_COLOR, "Export results (CSV / JSON)", (e: MouseEvent) => openExportMenu(e));
 
     // The CSV/JSON chooser shown under the Export button; reused across clicks.
     const exportMenu = Menu();
@@ -406,16 +382,12 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
 
     function showResult(result: QueryResult): void {
         if (result.kind === "rows") {
-            // Defensive render cap: a large MemoryStore renders zero rows in the
-            // library's Table (a known open bug — LIBRARY_NOTES.md), so a big query
-            // would show an empty grid. Cap below that threshold and tell the user
-            // the grid is partial (full pagination is a Non-Goal).
-            const rows      = capRows(result.rows, MAX_RESULT_ROWS);
-            const truncated = rows.length < result.rows.length;
-
+            // The library's Table virtual-scrolls its rows, so the full result set
+            // renders regardless of size — no display cap. (The backend fetch is
+            // itself unbounded; a LIMIT belongs there, not here.)
             const store = new MemoryStore({
                 model   : buildQueryModel(result.columns),
-                data    : rows,
+                data    : result.rows,
                 autoLoad: true,
             });
 
@@ -423,9 +395,7 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
             // A fresh store + columns per run means columns never bleed across runs.
             showResultPane(Table(store, { columns: [], rowReadOnly: () => true }));
             setActiveExport({ kind: "rows", result });
-            notify(truncated
-                ? `showing first ${rows.length} of ${result.rows.length} — results truncated`
-                : `${result.rowCount} row(s)`);
+            notify(`${result.rowCount} row(s)`);
 
             return;
         }
@@ -583,18 +553,3 @@ export function QueryPanel(options: QueryPanelOptions): Panel {
     return panel;
 }
 
-/**
- * A glyph-only toolbar button: colored icon, hover tooltip + accessible name,
- * click handler. The handler receives the click's `MouseEvent` so an action that
- * opens a menu can position it at the click point (a `() => void` still binds,
- * ignoring the argument).
- */
-function glyphButton(glyph: string, color: string, label: string, handler: (event: MouseEvent) => void): Button {
-    // showText:false keeps the face glyph-only while the label drives both the
-    // hover tooltip and the aria-label (accessible name) — no manual setLabel.
-    const button = Button({ glyph, text: label, showText: false, foregroundColor: color, compact: true });
-
-    button.on("action", handler);
-
-    return button;
-}

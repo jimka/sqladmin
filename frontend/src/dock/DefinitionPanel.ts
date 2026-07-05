@@ -4,12 +4,12 @@
 // fetched by the controller (openDefinition) and passed in already-resolved, so
 // this panel is a pure view with no data dependency of its own.
 
-import { Container, Panel }    from "@jimka/typescript-ui/core";
+import { Container } from "@jimka/typescript-ui/core";
 import { Fit }      from "@jimka/typescript-ui/layout";
 import { TextArea } from "@jimka/typescript-ui/component/input";
 
 /** Build a panel showing a view's SQL definition as read-only, selectable text. */
-export function DefinitionPanel(definition: string): Panel {
+export function DefinitionPanel(definition: string): Container {
     const area = new TextArea(definition, { readOnly: true });
 
     return Container({ layoutManager: new Fit(), components: [area] });

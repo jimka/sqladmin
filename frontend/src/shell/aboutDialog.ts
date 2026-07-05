@@ -11,6 +11,7 @@ import type { Component }        from "@jimka/typescript-ui/core";
 import { VBox }                  from "@jimka/typescript-ui/layout";
 import { Text }                  from "@jimka/typescript-ui/component/input";
 import { Insets }                from "@jimka/typescript-ui/primitive";
+import { MUTED_TEXT_COLOR }      from "../theme";
 
 // Wide enough that each line below fits without wrapping (the Dialog auto-sizes
 // its height from the content's single-line rows, so a wrapped line would be
@@ -21,9 +22,6 @@ const DIALOG_WIDTH = 460;
 const LINE_SPACING = 8;
 const CONTENT_PAD  = 16;
 
-// Muted grey for secondary lines (author / links), matching the start page.
-const MUTED_COLOR = "rgb(120, 120, 120)";
-
 /** One line of about-text; `muted` greys secondary lines, `weight` bolds a heading. */
 function line(text: string, opts?: { muted?: boolean; weight?: string }): Component {
     // Wrap rather than ellipsis-truncate: Text defaults to a single clipped line,
@@ -33,7 +31,7 @@ function line(text: string, opts?: { muted?: boolean; weight?: string }): Compon
     el.setWordBreak("break-word");
 
     if (opts?.muted) {
-        el.setForegroundColor(MUTED_COLOR);
+        el.setForegroundColor(MUTED_TEXT_COLOR);
     }
 
     return el;
