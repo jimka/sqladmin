@@ -726,6 +726,20 @@ which is the recommended construction idiom anyway (`shell/SqlAdminShell.ts`).
 a `_Panel` raw export, but it reads as private), or make the callable export type
 a proper subclassable constructor in the built `.d.ts`.
 
+**Update — it is not just the callable exports.** Trying to slim
+`data/PagingMemoryProxy.ts` by having it `extend MemoryProxy` (a plain, *non*-
+callable data class) hit the same wall: `class PagingMemoryProxy extends
+MemoryProxy` reports *"Property 'setData' does not exist on type
+'PagingMemoryProxy'"*, even though a **direct** `new MemoryProxy().setData([])`
+type-checks fine (confirmed with a minimal two-line probe in the app). So the
+external `.d.ts` does not carry a base class's concrete instance members through
+`extends` **for any library class**, not only the `callable()`-wrapped ones — the
+runtime prototype chain is correct (the app's tests pass), only the emitted types
+drop the inherited members. Consequence: an external consumer cannot subclass and
+extend *any* library class; it must compose (hold an instance) or reimplement. The
+paging proxy therefore stays on the abstract `Proxy` (whose members it implements
+itself) rather than the natural `MemoryProxy` base (`data/PagingMemoryProxy.ts`).
+
 ---
 
 ## ✂️ Remote `AjaxStore` silently needs a page size to parse an envelope
