@@ -34,19 +34,9 @@ import type { ColumnMeta }             from "../contract";
 import type { ExportTable }            from "./TableWorkPanel";
 import { isExplainChord, isExplainAnalyzeChord } from "../shell/queryShortcuts";
 import { _0 } from "@jimka/typescript-ui/glyphs/solid";
+import { PRIMARY_COLOR, NEUTRAL_COLOR, CAUTION_COLOR } from "../theme";
 
 Glyph.register(refresh, file_export, file_csv, file_code, diagram_project, flask);
-
-/** Neutral toolbar glyph color, matching TableWorkPanel's Refresh action. */
-const BLUE = "rgb(30, 100, 200)";
-
-// Neutral dark grey for the plain Explain action — it neither mutates input nor
-// executes the statement, so it carries no warning color (unlike Analyze).
-const NEUTRAL_COLOR = "rgb(66, 66, 66)";
-
-// Amber for Explain Analyze — it executes the view's query (the backend rolls it
-// back), so it warns like TableWorkPanel/QueryPanel's destructive actions.
-const ANALYZE_COLOR = "rgb(204, 102, 0)";
 
 /** Open a Query tab that EXPLAINs the view (true = EXPLAIN ANALYZE, false = plain). */
 export type ExplainView = (analyze: boolean) => void;
@@ -105,7 +95,7 @@ function buildToolBar(store: AjaxStore, onExport: ExportTable, onExplain: Explai
     // page), matching TableWorkPanel's Export button. The CSV/JSON chooser opens
     // at the click point and is reused across clicks.
     const exportMenu = Menu();
-    const exportButton = glyphButton("file-export", BLUE, "Export view (CSV / JSON)", event => {
+    const exportButton = glyphButton("file-export", PRIMARY_COLOR, "Export view (CSV / JSON)", event => {
         exportMenu.show(event.clientX, event.clientY, [
             { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => onExport("csv") },
             { text: "Export JSON (.json)", glyph: "file-code", action: () => onExport("json") },
@@ -116,7 +106,7 @@ function buildToolBar(store: AjaxStore, onExport: ExportTable, onExplain: Explai
     // never disturbed. Analyze executes the view query (rolled back server-side).
     const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, "Explain (Ctrl+E)\n\nopens a query tab",
                                       () => onExplain(false));
-    const analyzeButton = glyphButton("flask", ANALYZE_COLOR, "Explain Analyze (Ctrl+Shift+E)\n\nopens a query tab; executes the view query",
+    const analyzeButton = glyphButton("flask", CAUTION_COLOR, "Explain Analyze (Ctrl+Shift+E)\n\nopens a query tab; executes the view query",
                                       () => onExplain(true));
 
     return new ToolBar({
@@ -128,7 +118,7 @@ function buildToolBar(store: AjaxStore, onExport: ExportTable, onExplain: Explai
             Spacer.flex(),
             exportButton,
             // No reject() before load(): a read-only store has no pending edits.
-            glyphButton("refresh", BLUE, "Refresh (Alt+R)", () => void store.load()),
+            glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", () => void store.load()),
         ],
     });
 }

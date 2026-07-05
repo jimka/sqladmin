@@ -39,6 +39,7 @@ import type { ColumnMeta }           from "../contract";
 import { buildFilters, conditionsFromFilters } from "./filterModel";
 import type { FilterCondition, FilterOperator } from "./filterModel";
 import { Insets } from "@jimka/typescript-ui/primitive";
+import { CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR } from "../theme";
 
 Glyph.register(plus, minus);
 
@@ -78,10 +79,6 @@ const DIALOG_WIDTH    = 500;
 // viewport hugs its rows so the Add button sits directly beneath the last one;
 // at the cap it stops growing and further rows scroll into view.
 const VIEWPORT_HEIGHT = (6 * INPUT_HEIGHT) + (5 * ROW_SPACING);
-
-// Row affordances match the toolbar palette: green to add, red to remove.
-const ADD_COLOR    = "rgb(46, 125, 50)";
-const REMOVE_COLOR = "rgb(198, 40, 40)";
 
 /** The empty column choice that marks a condition row as unset (dropped on Apply). */
 const NO_COLUMN = "";
@@ -252,7 +249,7 @@ function buildConditionForm(
         showText:        true,
         showDescription: false,
         compact:         true,
-        glyphColor:      ADD_COLOR,
+        glyphColor:      CONSTRUCTIVE_COLOR,
     });
     addButton.on("action", () => appendRow());
 
@@ -363,7 +360,7 @@ function buildConditionRow(columns: ColumnMeta[], seed: FilterCondition | undefi
         text:            "Remove condition",
         showText:        false,
         showDescription: false,
-        foregroundColor: REMOVE_COLOR,
+        foregroundColor: DESTRUCTIVE_COLOR,
         compact:         true,
     });
     removeButton.on("action", onRemove);

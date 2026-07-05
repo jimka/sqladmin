@@ -11,14 +11,11 @@ import { Button } from "@jimka/typescript-ui/component/button";
 import { Event }  from "@jimka/typescript-ui/core";
 import type { Component } from "@jimka/typescript-ui/core";
 import { isRefreshChord } from "./queryShortcuts";
-
-// The shared blue for every Refresh action across the app, matching the table
-// toolbar's Refresh (TableWorkPanel's BLUE) so all refresh tools read alike.
-const REFRESH_COLOR = "rgb(30, 100, 200)";
+import { PRIMARY_COLOR } from "../theme";
 
 /** Build a compact "Refresh" tool button that runs `onRefresh` when clicked. */
 export function refreshTool(onRefresh: () => void): Button {
-    const button = Button({ glyph: "arrows-rotate", text: "Refresh (Alt+R)", showText: false, foregroundColor: REFRESH_COLOR, compact: true });
+    const button = Button({ glyph: "arrows-rotate", text: "Refresh (Alt+R)", showText: false, foregroundColor: PRIMARY_COLOR, compact: true });
 
     button.on("action", onRefresh);
 

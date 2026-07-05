@@ -32,6 +32,7 @@ import { clock_rotate_left }       from "@jimka/typescript-ui/glyphs/solid/clock
 import { terminal }                from "@jimka/typescript-ui/glyphs/solid/terminal";
 import { refreshTool, bindRefreshShortcut } from "./refreshTool";
 import type { SqlAdminController } from "../SqlAdminController";
+import { PRIMARY_COLOR, DESTRUCTIVE_COLOR, MUTED_TEXT_COLOR } from "../theme";
 
 // terminal marks every list row as a query (matching the query dock tab).
 Glyph.register(folder_open, trash, floppy_disk, clock_rotate_left, terminal);
@@ -51,14 +52,6 @@ const ROW_CLASS = "CustomListRow";
 // NAV_FILL_HINT in DatabaseExplorerView — the accordion has no per-section fill
 // weight, so a fill hint is how a section claims space.
 const LIST_FILL_HINT = 10000;
-
-// Muted grey for empty-state hints, matching the sidebar's secondary-text.
-const MUTED_COLOR = "rgb(140, 140, 140)";
-
-// Colors for the header tools, echoing the query panel's toolbar: blue for the
-// neutral Open/Save, red for the destructive Remove.
-const OPEN_COLOR   = "rgb(21, 101, 192)";
-const REMOVE_COLOR = "rgb(183, 28, 28)";
 
 /** A list row plus whatever a section's actions need to act on it. */
 interface QueryRow {
@@ -119,7 +112,7 @@ export function QueriesView(controller: SqlAdminController, id: string): Compone
         rows     : () => controller.savedList().map(q => ({ key: q.name, label: q.name, sql: q.sql, name: q.name })),
         open     : row => controller.openSavedQuery(row.name!, false),
         execute  : row => controller.openSavedQuery(row.name!, true),
-        secondary: { glyph: "trash", color: REMOVE_COLOR, label: "Remove",
+        secondary: { glyph: "trash", color: DESTRUCTIVE_COLOR, label: "Remove",
                      run: row => controller.removeSavedQuery(row.name!) },
     });
 
@@ -130,7 +123,7 @@ export function QueriesView(controller: SqlAdminController, id: string): Compone
         rows     : () => controller.historyList().map((h, i) => ({ key: String(i), label: snippet(h.sql), sql: h.sql })),
         open     : row => controller.openQuery(row.sql, false),
         execute  : row => controller.openQuery(row.sql, true),
-        secondary: { glyph: "floppy-disk", color: OPEN_COLOR, label: "Save under a name",
+        secondary: { glyph: "floppy-disk", color: PRIMARY_COLOR, label: "Save under a name",
                      run: row => void controller.promptAndSaveQuery(row.sql) },
     });
 
@@ -227,7 +220,7 @@ function buildSection(config: SectionConfig): Section {
 
     // The armed tools (Open + the section's Remove/Save…) act on the selection,
     // so they stay disabled until a row is picked; Refresh is always available.
-    const openAction: RowAction = { glyph: "folder-open", color: OPEN_COLOR, label: "Open", run: config.open };
+    const openAction: RowAction = { glyph: "folder-open", color: PRIMARY_COLOR, label: "Open", run: config.open };
     const armed = [openAction, config.secondary].map(action => actionButton(action, () => selectedRow(list, rows)));
     const tools = [...armed, refreshTool(refresh)];
 
@@ -428,7 +421,7 @@ function actionButton(action: RowAction, selected: () => QueryRow | undefined): 
 /** A muted empty-state hint row. */
 function hintText(text: string): Component {
     const hint = new Text(text);
-    hint.setForegroundColor(MUTED_COLOR);
+    hint.setForegroundColor(MUTED_TEXT_COLOR);
 
     return hint;
 }

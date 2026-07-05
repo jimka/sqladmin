@@ -29,16 +29,9 @@ import { file_csv }                    from "@jimka/typescript-ui/glyphs/solid/f
 import { file_code }                   from "@jimka/typescript-ui/glyphs/solid/file_code";
 import type { ColumnMeta }             from "../contract";
 import { openFilterDialog }            from "./FilterDialog";
+import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR, FILTER_ACTIVE_COLOR } from "../theme";
 
 Glyph.register(refresh, plus, minus, save, filter, file_export, file_csv, file_code);
-
-/** Toolbar glyph colors: blue for neutral actions, green to add, red to delete. */
-const BLUE  = "rgb(30, 100, 200)";
-const GREEN = "rgb(46, 125, 50)";
-const RED   = "rgb(198, 40, 40)";
-
-/** Amber tints the Filter button while a filter is active, signalling the grid is narrowed. */
-const FILTER_ACTIVE = "rgb(230, 145, 30)";
 
 /** Surface a short status message (validation / save feedback) to the user. */
 export type Notify = (message: string) => void;
@@ -68,16 +61,16 @@ function buildColumnSpec(columns: ColumnMeta[]): ColumnSpec {
 
 /** Glyph-only toolbar wired to the store (CRUD) with validation + confirmation. */
 function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], notify: Notify, onExport: ExportTable): ToolBar {
-    const deleteButton = glyphButton("minus", RED, "Delete row", () => void confirmDelete(store, dataGrid));
-    const saveButton = glyphButton("save", BLUE, "Save", () => save_(store, columns, notify));
-    const filterButton = glyphButton("filter", BLUE, "Filter rows", () => openFilterDialog(store, columns));
+    const deleteButton = glyphButton("minus", DESTRUCTIVE_COLOR, "Delete row", () => void confirmDelete(store, dataGrid));
+    const saveButton = glyphButton("save", PRIMARY_COLOR, "Save", () => save_(store, columns, notify));
+    const filterButton = glyphButton("filter", PRIMARY_COLOR, "Filter rows", () => openFilterDialog(store, columns));
 
     // The full-relation export runs server-side (it streams the whole table, not
     // the grid's loaded page), so it stays correct regardless of paging, sort, or
     // filter — the table analogue of the query-result Export button. The CSV/JSON
     // chooser opens at the click point and is reused across clicks.
     const exportMenu = Menu();
-    const exportButton = glyphButton("file-export", BLUE, "Export table (CSV / JSON)", event => {
+    const exportButton = glyphButton("file-export", PRIMARY_COLOR, "Export table (CSV / JSON)", event => {
         exportMenu.show(event.clientX, event.clientY, [
             { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => onExport("csv") },
             { text: "Export JSON (.json)", glyph: "file-code", action: () => onExport("json") },
@@ -86,7 +79,7 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
 
     const bar = new ToolBar({
         components: [
-            glyphButton("plus", GREEN, "Add row", () => store.add({})),
+            glyphButton("plus", CONSTRUCTIVE_COLOR, "Add row", () => store.add({})),
             deleteButton,
             saveButton,
             // Flex spacer pushes the view actions (Filter, Export, Refresh) to the
@@ -98,7 +91,7 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
             // must precede load(): load() replaces the records but leaves pending
             // removals queued, so without it a deleted row would reappear yet stay
             // marked for deletion on the next Save.
-            glyphButton("refresh", BLUE, "Refresh (Alt+R)", () => { store.reject(); void store.load(); })
+            glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", () => { store.reject(); void store.load(); })
         ]
     });
 
@@ -108,7 +101,7 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
     const syncFilterActive = (): void => {
         const active = store.getActiveFilters().length > 0;
 
-        filterButton.setForegroundColor(active ? FILTER_ACTIVE : BLUE);
+        filterButton.setForegroundColor(active ? FILTER_ACTIVE_COLOR : PRIMARY_COLOR);
         filterButton.setDescription(active ? "Filter rows (active)" : "Filter rows");
     };
     syncFilterActive();

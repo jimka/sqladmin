@@ -21,6 +21,7 @@ import { file_code }          from "@jimka/typescript-ui/glyphs/solid/file_code"
 import type { RolePrivilege } from "../contract";
 import { PagingMemoryProxy }  from "../data/PagingMemoryProxy";
 import { exportRoleGrants }   from "./exportRoleGrants";
+import { PRIMARY_COLOR }       from "../theme";
 
 Glyph.register(file_export, file_csv, file_code);
 
@@ -28,9 +29,6 @@ Glyph.register(file_export, file_csv, file_code);
 // limit bites (the row-CRUD path uses the same 100), and a sensible page for the
 // work area.
 const PAGE_SIZE = 100;
-
-/** Neutral toolbar glyph color, matching the table/view work panels' Export button. */
-const BLUE = "rgb(30, 100, 200)";
 
 /** Build a Dock panel showing a role's table grants as a paginated read-only grid. */
 export function RoleGrantsPanel(role: string, privileges: RolePrivilege[]): Panel {
@@ -72,7 +70,7 @@ export function RoleGrantsPanel(role: string, privileges: RolePrivilege[]): Pane
  */
 function buildToolBar(role: string, privileges: RolePrivilege[]): ToolBar {
     const exportMenu = Menu();
-    const exportButton = glyphButton("file-export", BLUE, "Export grants (CSV / JSON)", event => {
+    const exportButton = glyphButton("file-export", PRIMARY_COLOR, "Export grants (CSV / JSON)", event => {
         exportMenu.show(event.clientX, event.clientY, [
             { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => exportRoleGrants(role, privileges, "csv") },
             { text: "Export JSON (.json)", glyph: "file-code", action: () => exportRoleGrants(role, privileges, "json") },
