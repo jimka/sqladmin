@@ -128,6 +128,8 @@ export function SqlAdminShell(controller: SqlAdminController): Panel {
  */
 function installAccelerators(controller: SqlAdminController, sidebar: ActivityBarHandle): void {
     document.addEventListener("keydown", (event: KeyboardEvent) => {
+        let matched = true;
+
         if (isNewQueryChord(event)) {
             controller.openQuery();
         } else if (isOpenSavedChord(event)) {
@@ -142,9 +144,16 @@ function installAccelerators(controller: SqlAdminController, sidebar: ActivityBa
             sidebar.selectView(QUERIES_VIEW_ID);
         } else if (isRefreshChord(event)) {
             controller.refreshActive();
+        } else {
+            matched = false;
         }
 
-        event.preventDefault();
+        // Only swallow the browser default for a chord we actually handled;
+        // otherwise every other key (Ctrl+F/Ctrl+P, Tab traversal, Space-scroll)
+        // reaching document would have its default suppressed.
+        if (matched) {
+            event.preventDefault();
+        }
     });
 }
 
