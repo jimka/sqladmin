@@ -9,7 +9,7 @@ import { Border }             from "@jimka/typescript-ui/layout";
 import { Placement }          from "@jimka/typescript-ui/primitive";
 import { ToolBar }            from "@jimka/typescript-ui/component/menubar";
 import { Spacer }             from "@jimka/typescript-ui/component/container";
-import { Button }             from "@jimka/typescript-ui/component/button";
+import { glyphButton }        from "./glyphButton";
 import { Table }              from "@jimka/typescript-ui/component/table";
 import { Store, Model }       from "@jimka/typescript-ui/data";
 import { PaginationBar, Glyph } from "@jimka/typescript-ui/component/display";
@@ -78,13 +78,3 @@ function buildToolBar(role: string, privileges: RolePrivilege[]): ToolBar {
     return new ToolBar({ components: [Spacer.flex(), exportButton] });
 }
 
-/** A glyph-only toolbar button: colored icon, hover tooltip + accessible name, click handler. */
-function glyphButton(glyph: string, color: string, label: string, handler: (event: MouseEvent) => void): Button {
-    // showText:false keeps the face glyph-only while the label drives both the
-    // hover tooltip and the aria-label (accessible name).
-    const button = Button({ glyph, text: label, showText: false, foregroundColor: color, compact: true });
-
-    button.on("action", handler);
-
-    return button;
-}
