@@ -17,21 +17,19 @@ import { glyphButton }                 from "./glyphButton";
 import { Table }                       from "@jimka/typescript-ui/component/table";
 import type { ColumnSpec }             from "@jimka/typescript-ui/component/table";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
-import { Dialog, DialogButtons, Menu } from "@jimka/typescript-ui/overlay";
+import { Dialog, DialogButtons }       from "@jimka/typescript-ui/overlay";
 import type { AjaxStore, ModelRecord } from "@jimka/typescript-ui/data";
 import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
 import { plus }                        from "@jimka/typescript-ui/glyphs/solid/plus";
 import { minus }                       from "@jimka/typescript-ui/glyphs/solid/minus";
 import { save }                        from "@jimka/typescript-ui/glyphs/solid/save";
 import { filter }                      from "@jimka/typescript-ui/glyphs/solid/filter";
-import { file_export }                 from "@jimka/typescript-ui/glyphs/solid/file_export";
-import { file_csv }                    from "@jimka/typescript-ui/glyphs/solid/file_csv";
-import { file_code }                   from "@jimka/typescript-ui/glyphs/solid/file_code";
 import type { ColumnMeta }             from "../contract";
 import { openFilterDialog }            from "./FilterDialog";
+import { buildExportButton }           from "./exportButton";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR, FILTER_ACTIVE_COLOR } from "../theme";
 
-Glyph.register(refresh, plus, minus, save, filter, file_export, file_csv, file_code);
+Glyph.register(refresh, plus, minus, save, filter);
 
 /** Surface a short status message (validation / save feedback) to the user. */
 export type Notify = (message: string) => void;
@@ -67,15 +65,8 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
 
     // The full-relation export runs server-side (it streams the whole table, not
     // the grid's loaded page), so it stays correct regardless of paging, sort, or
-    // filter — the table analogue of the query-result Export button. The CSV/JSON
-    // chooser opens at the click point and is reused across clicks.
-    const exportMenu = Menu();
-    const exportButton = glyphButton("file-export", PRIMARY_COLOR, "Export table (CSV / JSON)", event => {
-        exportMenu.show(event.clientX, event.clientY, [
-            { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => onExport("csv") },
-            { text: "Export JSON (.json)", glyph: "file-code", action: () => onExport("json") },
-        ]);
-    });
+    // filter — the table analogue of the query-result Export button.
+    const exportButton = buildExportButton("Export table (CSV / JSON)", onExport);
 
     const bar = new ToolBar({
         components: [

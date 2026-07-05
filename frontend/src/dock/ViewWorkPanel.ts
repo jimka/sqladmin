@@ -22,20 +22,17 @@ import { glyphButton }                 from "./glyphButton";
 import { Table }                       from "@jimka/typescript-ui/component/table";
 import type { ColumnSpec }             from "@jimka/typescript-ui/component/table";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
-import { Menu }                        from "@jimka/typescript-ui/overlay";
 import type { AjaxStore }              from "@jimka/typescript-ui/data";
 import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
-import { file_export }                 from "@jimka/typescript-ui/glyphs/solid/file_export";
-import { file_csv }                    from "@jimka/typescript-ui/glyphs/solid/file_csv";
-import { file_code }                   from "@jimka/typescript-ui/glyphs/solid/file_code";
 import { diagram_project }             from "@jimka/typescript-ui/glyphs/solid/diagram_project";
 import { flask }                       from "@jimka/typescript-ui/glyphs/solid/flask";
 import type { ColumnMeta }             from "../contract";
 import type { ExportTable }            from "./TableWorkPanel";
 import { isExplainChord, isExplainAnalyzeChord } from "../shell/queryShortcuts";
+import { buildExportButton }           from "./exportButton";
 import { PRIMARY_COLOR, NEUTRAL_COLOR, CAUTION_COLOR } from "../theme";
 
-Glyph.register(refresh, file_export, file_csv, file_code, diagram_project, flask);
+Glyph.register(refresh, diagram_project, flask);
 
 /** Open a Query tab that EXPLAINs the view (true = EXPLAIN ANALYZE, false = plain). */
 export type ExplainView = (analyze: boolean) => void;
@@ -91,15 +88,8 @@ function buildViewColumnSpec(columns: ColumnMeta[]): ColumnSpec {
  */
 function buildToolBar(store: AjaxStore, onExport: ExportTable, onExplain: ExplainView): ToolBar {
     // The full-relation export streams the whole view server-side (not the loaded
-    // page), matching TableWorkPanel's Export button. The CSV/JSON chooser opens
-    // at the click point and is reused across clicks.
-    const exportMenu = Menu();
-    const exportButton = glyphButton("file-export", PRIMARY_COLOR, "Export view (CSV / JSON)", event => {
-        exportMenu.show(event.clientX, event.clientY, [
-            { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => onExport("csv") },
-            { text: "Export JSON (.json)", glyph: "file-code", action: () => onExport("json") },
-        ]);
-    });
+    // page), matching TableWorkPanel's Export button.
+    const exportButton = buildExportButton("Export view (CSV / JSON)", onExport);
 
     // Explain opens the plan on a Query tab (see openQuery); this panel's grid is
     // never disturbed. Analyze executes the view query (rolled back server-side).

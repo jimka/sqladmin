@@ -9,20 +9,13 @@ import { Border }             from "@jimka/typescript-ui/layout";
 import { Placement }          from "@jimka/typescript-ui/primitive";
 import { ToolBar }            from "@jimka/typescript-ui/component/menubar";
 import { Spacer }             from "@jimka/typescript-ui/component/container";
-import { glyphButton }        from "./glyphButton";
 import { Table }              from "@jimka/typescript-ui/component/table";
 import { Store, Model }       from "@jimka/typescript-ui/data";
-import { PaginationBar, Glyph } from "@jimka/typescript-ui/component/display";
-import { Menu }               from "@jimka/typescript-ui/overlay";
-import { file_export }        from "@jimka/typescript-ui/glyphs/solid/file_export";
-import { file_csv }           from "@jimka/typescript-ui/glyphs/solid/file_csv";
-import { file_code }          from "@jimka/typescript-ui/glyphs/solid/file_code";
+import { PaginationBar }      from "@jimka/typescript-ui/component/display";
 import type { RolePrivilege } from "../contract";
 import { PagingMemoryProxy }  from "../data/PagingMemoryProxy";
 import { exportRoleGrants }   from "./exportRoleGrants";
-import { PRIMARY_COLOR }       from "../theme";
-
-Glyph.register(file_export, file_csv, file_code);
+import { buildExportButton }  from "./exportButton";
 
 // Rows per page — a sensible page for the work area, matching the row-CRUD
 // path's page size.
@@ -67,13 +60,10 @@ export function RoleGrantsPanel(role: string, privileges: RolePrivilege[]): Pane
  * every page, since the grants are held in memory and paging is display-only.
  */
 function buildToolBar(role: string, privileges: RolePrivilege[]): ToolBar {
-    const exportMenu = Menu();
-    const exportButton = glyphButton("file-export", PRIMARY_COLOR, "Export grants (CSV / JSON)", event => {
-        exportMenu.show(event.clientX, event.clientY, [
-            { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => exportRoleGrants(role, privileges, "csv") },
-            { text: "Export JSON (.json)", glyph: "file-code", action: () => exportRoleGrants(role, privileges, "json") },
-        ]);
-    });
+    const exportButton = buildExportButton(
+        "Export grants (CSV / JSON)",
+        format => exportRoleGrants(role, privileges, format),
+    );
 
     return new ToolBar({ components: [Spacer.flex(), exportButton] });
 }
