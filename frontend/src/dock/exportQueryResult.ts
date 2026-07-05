@@ -9,11 +9,8 @@
 import { toCSV, toJSON }           from "../data/serialize";
 import type { ExportColumn }       from "../data/serialize";
 import { download }                from "../data/download";
+import { CSV_MIME, JSON_MIME }     from "../data/mime";
 import type { QueryRowsResult }    from "../contract";
-
-// The MIME types the two export formats download as.
-const CSV_MIME  = "text/csv";
-const JSON_MIME = "application/json";
 
 /**
  * Export a query panel's full loaded rows as CSV or JSON, downloading the file

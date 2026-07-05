@@ -11,30 +11,10 @@ import { Tree, IconLabelTreeNodeRenderer }      from "@jimka/typescript-ui/compo
 import type { TreeNode }                        from "@jimka/typescript-ui/component/tree";
 import { Menu }                                 from "@jimka/typescript-ui/overlay";
 import type { MenuItemConfig }                  from "@jimka/typescript-ui/component/container";
-import { Glyph }                                from "@jimka/typescript-ui/component/display";
-import { database }                             from "@jimka/typescript-ui/glyphs/solid/database";
-import { folder }                               from "@jimka/typescript-ui/glyphs/solid/folder";
-import { table }                                from "@jimka/typescript-ui/glyphs/solid/table";
-import { eye }                                  from "@jimka/typescript-ui/glyphs/solid/eye";
-import { layer_group }                          from "@jimka/typescript-ui/glyphs/solid/layer_group";
 import type { DbObjectKind, DbObjectRef }       from "../contract";
 import { getDatabases, getObjects, getSchemas } from "../data/api";
+import { KIND_GLYPH }                           from "./objectGlyphs";
 import type { SqlAdminController }              from "../SqlAdminController";
-
-// Row glyphs, one per node kind, so each row reads its type at a glance. Database
-// and schema are containers; the object leaves reuse the same glyphs their dock
-// tabs carry (table / view / materialized view). Registered here since this is
-// where the navigator tree is built.
-Glyph.register(database, folder, table, eye, layer_group);
-
-/** The row glyph for each object kind. */
-const KIND_GLYPH: Record<DbObjectKind, string> = {
-    database:         "database",
-    schema:           "folder",
-    table:            "table",
-    view:             "eye",
-    materializedView: "layer-group",
-};
 
 /** One object leaf as returned by the objects endpoint. */
 interface DbObject {

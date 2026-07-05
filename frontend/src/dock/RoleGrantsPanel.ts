@@ -15,10 +15,7 @@ import { PagingMemoryProxy }  from "../data/PagingMemoryProxy";
 import { workPanelShell }     from "./workPanelShell";
 import { exportRoleGrants }   from "./exportRoleGrants";
 import { buildExportButton }  from "./exportButton";
-
-// Rows per page — a sensible page for the work area, matching the row-CRUD
-// path's page size.
-const PAGE_SIZE = 100;
+import { PAGE_SIZE }          from "../data/stores";
 
 /** Build a Dock panel showing a role's table grants as a paginated read-only grid. */
 export function RoleGrantsPanel(role: string, privileges: RolePrivilege[]): Container {

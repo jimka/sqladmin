@@ -6,9 +6,6 @@ import { Dock }                                                from "@jimka/type
 import type { DockPanelEvent }                                 from "@jimka/typescript-ui/overlay";
 import { StatusBar }                                           from "@jimka/typescript-ui/component/container";
 import { Glyph }                                               from "@jimka/typescript-ui/component/display";
-import { table }                                               from "@jimka/typescript-ui/glyphs/solid/table";
-import { eye }                                                 from "@jimka/typescript-ui/glyphs/solid/eye";
-import { layer_group }                                         from "@jimka/typescript-ui/glyphs/solid/layer_group";
 import { terminal }                                            from "@jimka/typescript-ui/glyphs/solid/terminal";
 import { table_columns }                                       from "@jimka/typescript-ui/glyphs/solid/table_columns";
 import { file_code }                                           from "@jimka/typescript-ui/glyphs/solid/file_code";
@@ -32,21 +29,15 @@ import { RoleGrantsPanel }                                     from "./dock/Role
 import { exportRoleGrants }                                     from "./dock/exportRoleGrants";
 import { PropertiesPanel, relationTypeLabel }                  from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                from "./roles/RolesPropertiesPanel";
+import { KIND_GLYPH }                                          from "./navigator/objectGlyphs";
 import { QueryHistoryStore, SavedQueryStore }                  from "./data/queryStore";
 import type { HistoryEntry, SavedQuery }                       from "./data/queryStore";
 import { promptQueryName }                                     from "./promptQueryName";
 
-// Dock-tab glyphs, one per tab type, so a glance at the tab bar tells the tab
-// apart: relations by kind (data grids), plus the query / structure / definition
-// / grants tabs. Registered once here since the controller is what opens tabs.
-Glyph.register(table, eye, layer_group, terminal, table_columns, file_code, key);
-
-/** The dock-tab glyph for a relation kind — a table, view, or materialized view. */
-const RELATION_TAB_GLYPH: Record<string, string> = {
-    table:            "table",
-    view:             "eye",
-    materializedView: "layer-group",
-};
+// The non-relation dock-tab glyphs (query / structure / definition / grants).
+// The relation-kind glyphs (table / view / materialized view) come from
+// objectGlyphs via KIND_GLYPH, which registers them.
+Glyph.register(terminal, table_columns, file_code, key);
 
 /** A focusable section of the Queries view — the Saved or the Recent list. */
 export type QueriesSection = "saved" | "recent";
@@ -234,7 +225,7 @@ export class SqlAdminController {
         this.dock.addLazyPanel({
             id,
             title  : ref.name ?? id,
-            glyph  : RELATION_TAB_GLYPH[ref.kind] ?? "table",
+            glyph  : KIND_GLYPH[ref.kind],
             tooltip: this.panelTooltip(ref),
             content: isReadOnly
                 ? () => ViewWorkPanel(store, columns, format => this.exportTable(ref, format),

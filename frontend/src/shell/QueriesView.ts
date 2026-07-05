@@ -31,6 +31,7 @@ import { floppy_disk }             from "@jimka/typescript-ui/glyphs/solid/flopp
 import { clock_rotate_left }       from "@jimka/typescript-ui/glyphs/solid/clock_rotate_left";
 import { terminal }                from "@jimka/typescript-ui/glyphs/solid/terminal";
 import { refreshTool, bindRefreshShortcut } from "./refreshTool";
+import { SIDEBAR_FILL_HINT }       from "./sidebarFillHint";
 import type { SqlAdminController } from "../SqlAdminController";
 import { PRIMARY_COLOR, DESTRUCTIVE_COLOR, MUTED_TEXT_COLOR } from "../theme";
 
@@ -44,14 +45,6 @@ const SNIPPET_MAX = 60;
 // The CSS class the library gives every rendered list row — the delegation hook
 // for mapping a right-click back to its row index.
 const ROW_CLASS = "CustomListRow";
-
-// A preferred height large enough to always overflow the sidebar, so each
-// populated section's list fills the accordion instead of leaving a bare gap
-// below it (the accordion shrinks the over-tall lists to share the available
-// height; an empty section keeps its compact hint). Mirrors the navigator's
-// NAV_FILL_HINT in DatabaseExplorerView — the accordion has no per-section fill
-// weight, so a fill hint is how a section claims space.
-const LIST_FILL_HINT = 10000;
 
 /** A list row plus whatever a section's actions need to act on it. */
 interface QueryRow {
@@ -375,7 +368,7 @@ function selectedRow(list: List | null, rows: QueryRow[]): QueryRow | undefined 
  */
 function buildList(rows: QueryRow[]): List {
     const list = new List({
-        preferredSize:   { width: 0, height: LIST_FILL_HINT },
+        preferredSize:   { width: 0, height: SIDEBAR_FILL_HINT },
         // Render each row as a query glyph beside its label.
         rendererFactory: () => new GlyphListItemRenderer(),
     });
