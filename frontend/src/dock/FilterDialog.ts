@@ -332,7 +332,7 @@ function buildConditionForm(
  *
  * The column combo uses plain-string items — a ComboBox keys a plain string by
  * its own value, so `getValue` round-trips the column name. The operator combo
- * carries explicit-keyed items ({@link CustomListItem}) because its display label
+ * carries explicit-keyed items ({@link SelectableListItem}) because its display label
  * differs from its operator key, so it can't ride the plain-string default.
  *
  * @param columns - the table's columns; the column list is these plus an empty (unset) choice.
