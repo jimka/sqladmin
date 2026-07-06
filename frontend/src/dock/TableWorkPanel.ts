@@ -98,14 +98,14 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
     syncFilterActive();
     store.on("filterchange", syncFilterActive);
 
-    // Save is only meaningful with unsaved edits/adds/removes; 'datachanged'
+    // Save is only meaningful with unsaved edits/adds/removes; 'datachange'
     // fires on each of those (and after a sync clears them).
     const syncSaveEnabled = (): void => void saveButton.setEnabled(store.hasPendingChanges());
     syncSaveEnabled();
-    store.on("datachanged", syncSaveEnabled);
+    store.on("datachange", syncSaveEnabled);
 
     // Delete needs at least one selected row that still exists. Re-check on
-    // selection changes and on 'datachanged' (a removal drops rows from the
+    // selection changes and on 'datachange' (a removal drops rows from the
     // store, so a now-deleted selection no longer counts).
     const syncDeleteEnabled = (): void => {
         const live             = new Set(store.getAll());
@@ -114,8 +114,8 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
         deleteButton.setEnabled(hasLiveSelection);
     };
     syncDeleteEnabled();
-    dataGrid.on("selectionchange", syncDeleteEnabled);
-    store.on("datachanged", syncDeleteEnabled);
+    dataGrid.on("selection", syncDeleteEnabled);
+    store.on("datachange", syncDeleteEnabled);
 
     return bar;
 }
