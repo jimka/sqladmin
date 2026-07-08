@@ -8,23 +8,27 @@
 // result pane (editor back to full height). Errors funnel to onError.
 //
 // Two more toolbar buttons run EXPLAIN and EXPLAIN ANALYZE on the editor's
-// statement: the plan comes back through the same result pane as a read-only
-// monospace text block. Explain Analyze executes the statement (the backend
-// rolls it back), so the frontend blocks it for a statement that does not look
-// read-only — plain Explain is always safe.
+// statement: the plan comes back through the same result pane as a read-only,
+// SQL-highlighted CodeEditor. Explain Analyze executes the statement (the
+// backend rolls it back), so the frontend blocks it for a statement that does
+// not look read-only — plain Explain is always safe.
 //
-// Built as a callable factory mirroring TableWorkPanel/StructurePanel. The panel
-// is self-contained: the controller holds no reference back to it, so closing
-// the dock tab disposes the subtree and the MemoryStore is collected.
+// Built as a callable factory mirroring TableWorkPanel/StructurePanel. The
+// panel's Component subtree (and its MemoryStore) is dropped when the dock
+// tab closes, but neither CodeEditor here (the main editor and, transiently,
+// the plan view) is torn down by that alone — the framework has no cascading
+// dispose. The factory returns a `dispose` alongside its content precisely so
+// the controller can release both editors' CodeMirror views and ThemeManager
+// subscriptions explicitly; see SqlAdminController's `_panelDisposers`.
 
-import { Component, Container, Panel }              from "@jimka/typescript-ui/core";
+import { Component, Container, Panel, Event }        from "@jimka/typescript-ui/core";
 import { Placement }                     from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Fit, Split } from "@jimka/typescript-ui/layout";
 import { ToolBar }                       from "@jimka/typescript-ui/component/menubar";
 import { Spacer }                        from "@jimka/typescript-ui/component/container";
 import { glyphButton }                   from "./glyphButton";
 import { Table }                         from "@jimka/typescript-ui/component/table";
-import { TextArea }                      from "@jimka/typescript-ui/component/input";
+import { CodeEditor }                    from "@jimka/typescript-ui/component/editor";
 import { MemoryStore }                   from "@jimka/typescript-ui/data";
 import { Menu }                          from "@jimka/typescript-ui/overlay";
 import { Glyph }                         from "@jimka/typescript-ui/component/display";
@@ -39,6 +43,7 @@ import { file_code }                     from "@jimka/typescript-ui/glyphs/solid
 import { file_lines }                    from "@jimka/typescript-ui/glyphs/solid/file_lines";
 import { diagram_project }               from "@jimka/typescript-ui/glyphs/solid/diagram_project";
 import { flask }                         from "@jimka/typescript-ui/glyphs/solid/flask";
+import { wand_magic_sparkles }           from "@jimka/typescript-ui/glyphs/solid/wand_magic_sparkles";
 import { buildQueryModel }               from "../data/buildModel";
 import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
@@ -50,12 +55,7 @@ import { isExplainChord, isExplainAnalyzeChord } from "../shell/queryShortcuts";
 import type { QueryExplainResult, QueryResult } from "../contract";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, CAUTION_COLOR, HISTORY_COLOR, NEUTRAL_COLOR } from "../theme";
 
-Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask);
-
-// Inline style for the read-only plan view: a monospace face with preserved
-// whitespace so EXPLAIN's indented tree lines up and long lines scroll rather
-// than wrap. Applied via the suffix-"" style rule (targets the element itself).
-const PLAN_STYLE: Record<string, string> = { "font-family": "monospace", "white-space": "pre" };
+Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask, wand_magic_sparkles);
 
 // The editor's starting height once the result pane is shown below it; the Split
 // gutter lets the user resize from there.
@@ -108,11 +108,29 @@ export interface QueryPanelOptions {
     onResult?: (active: ActiveExport | null) => void;
 }
 
-/** Build a query panel: a SQL editor over a (resizable) result grid. */
-export function QueryPanel(options: QueryPanelOptions): Container {
+/**
+ * Build a query panel: a SQL editor over a (resizable) result grid.
+ *
+ * @returns The panel content plus a disposer that must be called on teardown
+ *     to release the main editor's (and, if shown, the plan editor's) view
+ *     and theme subscription.
+ */
+export function QueryPanel(options: QueryPanelOptions): { content: Container; dispose: () => void } {
     const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult } = options;
 
-    const editor = new TextArea(initialSql);
+    const editor = new CodeEditor(initialSql, { language: "sql" });
+
+    // The read-only plan editor shown in the result pane after an EXPLAIN run.
+    // Each run replaces it with a fresh CodeEditor (its own view + theme
+    // subscription), so the previous one must be disposed before it is dropped —
+    // see disposePlanView.
+    let planView: CodeEditor | null = null;
+
+    /** Dispose the current read-only plan editor (if any) before it is replaced or torn down. */
+    function disposePlanView(): void {
+        planView?.dispose();
+        planView = null;
+    }
 
     const resultHost = Panel({ layoutManager: new Fit() });
 
@@ -130,6 +148,7 @@ export function QueryPanel(options: QueryPanelOptions): Container {
     const runButton     = glyphButton("play", CONSTRUCTIVE_COLOR, "Run (Ctrl+Enter)", () => void run());
     const saveButton    = glyphButton("floppy-disk", PRIMARY_COLOR, "Save query (Ctrl+S)", () => save());
     const clearButton   = glyphButton("eraser", CAUTION_COLOR, "Clear (Alt+C)", () => clear());
+    const formatButton  = glyphButton("wand-magic-sparkles", NEUTRAL_COLOR, "Format SQL", () => void formatSql());
     // The glyph registers under its hyphenated name ("diagram-project"), even
     // though the ESM export identifier uses an underscore.
     const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, "Explain (Ctrl+E)",
@@ -150,7 +169,7 @@ export function QueryPanel(options: QueryPanelOptions): Container {
 
     const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
     panel.addComponent(new ToolBar({
-        components: [runButton, saveButton, clearButton, explainButton, analyzeButton, exportButton, Spacer.flex(), olderButton, newerButton],
+        components: [runButton, saveButton, clearButton, formatButton, explainButton, analyzeButton, exportButton, Spacer.flex(), olderButton, newerButton],
     }), { placement: Placement.NORTH });
     panel.addComponent(body, { placement: Placement.CENTER });
 
@@ -198,6 +217,7 @@ export function QueryPanel(options: QueryPanelOptions): Container {
 
     /** Swap in the result grid, adding (and sizing) the result pane on first use. */
     function showResultPane(table: Component): void {
+        disposePlanView();
         resultHost.removeAllComponents();
         resultHost.addComponent(table);
 
@@ -238,6 +258,8 @@ export function QueryPanel(options: QueryPanelOptions): Container {
 
     /** Drop the result pane so the editor fills the panel again. */
     function hideResultPane(): void {
+        disposePlanView();
+
         if (resultShown) {
             body.removeComponent(resultHost);
             resultShown = false;
@@ -268,6 +290,15 @@ export function QueryPanel(options: QueryPanelOptions): Container {
         }
 
         onSave?.(sql);
+    }
+
+    /** Format the editor SQL; on invalid SQL format() rejects and leaves text untouched. */
+    async function formatSql(): Promise<void> {
+        try {
+            await editor.format();
+        } catch {
+            notify("Cannot format — the statement is not valid SQL");
+        }
     }
 
     // Keep the input-dependent toolbar buttons in step with the editor's state.
@@ -435,24 +466,29 @@ export function QueryPanel(options: QueryPanelOptions): Container {
      */
     function showPlan(result: QueryExplainResult, sql: string): void {
         // Reuse the same result pane/gutter as a rows Table — just different
-        // content: a read-only TextArea seeded with the joined plan text. Read-only
-        // (not disabled) keeps the plan selectable and copyable while blocking edits.
-        const view = new TextArea(result.plan, { styleRules: [{ suffix: "", styles: PLAN_STYLE }] });
+        // content: a read-only, SQL-highlighted CodeEditor seeded with the joined
+        // plan text. Read-only (not disabled) keeps the plan selectable and
+        // copyable while blocking edits (CodeEditor flashes its own overlay).
+        const view = new CodeEditor(result.plan, { language: "sql", readOnly: true });
 
-        view.setReadOnly(true);
         showResultPane(view);
+        // Set after showResultPane, which disposes the prior planView first.
+        planView = view;
         setActiveExport({ kind: "plan", plan: { result, sql, runExplain } });
         notify(result.analyze ? "EXPLAIN ANALYZE plan (side-effects rolled back)" : "EXPLAIN plan");
     }
 
-    // Editor accelerators, all wired through the editor's own typed keydown
-    // surface: Ctrl/Cmd+Enter runs, Ctrl/Cmd+S saves, Ctrl/Cmd+E explains
-    // (Ctrl/Cmd+Shift+E explain-analyzes), Alt+C clears, Ctrl/Cmd+↑/↓ recalls
-    // history (bash-style). Editor-scoped so Explain acts on this query view and
-    // does not clash with the list/editor select-all elsewhere. Plain arrows (no
-    // modifier) are untouched, so normal caret movement still works — and Clear is
-    // Alt+C, not Ctrl+C, so the editor's Copy is left intact.
-    editor.on("keydown", (e: KeyboardEvent) => {
+    // Editor accelerators: Ctrl/Cmd+Enter runs, Ctrl/Cmd+S saves, Ctrl/Cmd+E
+    // explains (Ctrl/Cmd+Shift+E explain-analyzes), Alt+C clears, Ctrl/Cmd+↑/↓
+    // recalls history (bash-style). CodeEditor has no "keydown" event, so this
+    // is wired through Event.addListener — a window capture-phase dispatcher
+    // that resolves a keydown up to its owning component, firing before
+    // CodeMirror's own key handling, so preventDefault() here still suppresses
+    // any CodeMirror default. Editor-scoped so Explain acts on this query view
+    // and does not clash with the list/editor select-all elsewhere. Plain arrows
+    // (no modifier) are untouched, so normal caret movement still works — and
+    // Clear is Alt+C, not Ctrl+C, so the editor's Copy is left intact.
+    Event.addListener(editor, "keydown", (e: KeyboardEvent) => {
         const chord = e.ctrlKey || e.metaKey;
 
         if (chord && e.key === "Enter") {
@@ -528,10 +564,10 @@ export function QueryPanel(options: QueryPanelOptions): Container {
     }
 
     // Keep the toolbar buttons in step with the editor's content as the user
-    // types. Use "action" (the input-event shorthand), registered after the
-    // editor's own onInput, so getValue() already reflects the new text — the
-    // "change" bridge fires before onInput and would read the stale value.
-    editor.on("action", () => syncToolbarButtons());
+    // types. CodeEditor's "change" fires from CodeMirror's updateListener after
+    // the document transaction commits, so getValue() already reflects the new
+    // text by the time this runs.
+    editor.on("change", () => syncToolbarButtons());
 
     // Initial state: Run/Save/Clear disabled for an empty panel (enabled when
     // seeded); Export disabled until a rows result is shown.
@@ -551,6 +587,12 @@ export function QueryPanel(options: QueryPanelOptions): Container {
         void run();
     }
 
-    return panel;
+    return {
+        content: panel,
+        dispose: () => {
+            disposePlanView();
+            editor.dispose();
+        },
+    };
 }
 
