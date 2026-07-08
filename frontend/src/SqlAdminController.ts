@@ -74,6 +74,10 @@ export class SqlAdminController {
 
     private readonly _connectionId: string;
     private readonly _openPanels  : Map<string, OpenPanel> = new Map();
+    // Live-only panels (QueryPanel, DefinitionPanel) return a teardown closure
+    // that must run on tab close — the framework has no cascading dispose, so
+    // the controller owns invoking it (see the "close" handler below).
+    private readonly _panelDisposers: Map<string, () => void> = new Map();
     private _navigator            : Tree | null = null;
 
     // The per-connection localStorage stores backing the Queries view, the start
@@ -146,6 +150,8 @@ export class SqlAdminController {
             this.disposePanel(e.id);
             this._activeQueryResult.delete(e.id);
             this._activeRoleGrants.delete(e.id);
+            this._panelDisposers.get(e.id)?.();
+            this._panelDisposers.delete(e.id);
         });
 
         // Switching tabs syncs the navigator selection and the status bar to the
@@ -264,13 +270,16 @@ export class SqlAdminController {
             return;
         }
 
+        const { content, dispose } = DefinitionPanel(definition);
+
         this._openPanels.set(id, { ref, node, detail: "definition" });
+        this._panelDisposers.set(id, dispose);
         this.dock.addPanel({
             id,
             title  : `${ref.name ?? id} (definition)`,
             glyph  : "file-code",
             tooltip: this.panelTooltip(ref),
-            content: DefinitionPanel(definition)
+            content
         });
         this.syncToPanel(id);
     }
@@ -344,11 +353,13 @@ export class SqlAdminController {
      * (no dedup — the natural behaviour for a scratch buffer).
      *
      * Query panels are deliberately NOT registered in `_openPanels`: they carry
-     * no `ref`/`node`/`columns`, need no dedup or focus-sync, and the controller
-     * holds no reference back to them (the injected `notify`/`runQuery`/`onError`
-     * closures point panel -> controller, not the reverse). So the Dock disposes
-     * the subtree on close with no controller-side cleanup, and the table-panel
-     * lifecycle (`OpenPanel`/`syncToPanel`/`disposePanel`) stays untouched.
+     * no `ref`/`node`/`columns` and need no dedup or focus-sync, so the
+     * table-panel lifecycle (`OpenPanel`/`syncToPanel`/`disposePanel`) stays
+     * untouched. The controller does hold one reference back to each panel: its
+     * `dispose` closure, kept in `_panelDisposers` and invoked from the Dock's
+     * "close" handler — the framework has no cascading dispose, and the panel's
+     * live CodeEditor(s) would otherwise leak their CodeMirror view and
+     * ThemeManager subscription.
      *
      * @param seedSql - SQL to prefill the editor with.
      * @param run - Whether to execute the seeded SQL on open. Defaults to
@@ -368,31 +379,29 @@ export class SqlAdminController {
             this.statusBar.setMessage(`${this._connectionId} · ${label}: ${message}`);
         };
 
-        this.dock.addPanel({
-            id,
-            title  : label,
-            glyph  : "terminal",
-            content: QueryPanel({
-                runQuery  : sql => runQuery(this._connectionId, sql),
-                runExplain: (sql, opts) => runExplain(this._connectionId, sql, opts),
-                notify,
-                onError   : error => this.notifyError(error),
-                initialSql : seedSql,
-                autoRun    : run,
-                autoExplain: explain,
-                // Record every run in history and feed the panel's Ctrl+↑/↓ recall.
-                // The store dependency stays here — the panel is a pure view over
-                // these injected callbacks (matching notify/onError).
-                onRun     : (entry: HistoryEntry) => this.recordRun(entry),
-                getHistory: () => this._history.list().map(e => e.sql),
-                // The Save toolbar button hands back the trimmed SQL; the
-                // controller owns the naming modal and the saved-query store.
-                onSave    : (sql: string) => void this.promptAndSaveQuery(sql),
-                // Mirror this panel's latest exportable result (rows or plan) so
-                // the menubar export can reach it while it is the active panel.
-                onResult  : (active: ActiveExport | null) => this._activeQueryResult.set(id, active)
-            })
+        const { content, dispose } = QueryPanel({
+            runQuery  : sql => runQuery(this._connectionId, sql),
+            runExplain: (sql, opts) => runExplain(this._connectionId, sql, opts),
+            notify,
+            onError   : error => this.notifyError(error),
+            initialSql : seedSql,
+            autoRun    : run,
+            autoExplain: explain,
+            // Record every run in history and feed the panel's Ctrl+↑/↓ recall.
+            // The store dependency stays here — the panel is a pure view over
+            // these injected callbacks (matching notify/onError).
+            onRun     : (entry: HistoryEntry) => this.recordRun(entry),
+            getHistory: () => this._history.list().map(e => e.sql),
+            // The Save toolbar button hands back the trimmed SQL; the
+            // controller owns the naming modal and the saved-query store.
+            onSave    : (sql: string) => void this.promptAndSaveQuery(sql),
+            // Mirror this panel's latest exportable result (rows or plan) so
+            // the menubar export can reach it while it is the active panel.
+            onResult  : (active: ActiveExport | null) => this._activeQueryResult.set(id, active)
         });
+
+        this._panelDisposers.set(id, dispose);
+        this.dock.addPanel({ id, title: label, glyph: "terminal", content });
     }
 
     /**
