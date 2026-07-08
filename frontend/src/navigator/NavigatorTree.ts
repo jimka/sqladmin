@@ -103,6 +103,16 @@ export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
     tree.on("contextmenu", (node: TreeNode, event: MouseEvent) => {
         const ref = node.data as DbObjectRef | undefined;
 
+        // A schema node offers a single item: open its whole-schema ER diagram.
+        // Checked before the relation guard below (a schema is not a relation).
+        if (ref && ref.kind === "schema") {
+            contextMenu.show(event.clientX, event.clientY, [
+                { text: "Open schema diagram", glyph: "diagram-project", action: () => void controller.openSchemaDiagram(ref, node) },
+            ]);
+
+            return;
+        }
+
         if (!ref || !isRelation(ref.kind)) {
             return;
         }
