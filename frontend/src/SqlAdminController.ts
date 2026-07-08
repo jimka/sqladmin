@@ -10,14 +10,16 @@ import { terminal }                                            from "@jimka/type
 import { table_columns }                                       from "@jimka/typescript-ui/glyphs/solid/table_columns";
 import { file_code }                                           from "@jimka/typescript-ui/glyphs/solid/file_code";
 import { key }                                                 from "@jimka/typescript-ui/glyphs/solid/key";
+import { diagram_project }                                     from "@jimka/typescript-ui/glyphs/solid/diagram_project";
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef, RoleDetail, RolePrivilege, RoleSummary, TableStructure } from "./contract";
-import { getColumns, getRoleDetail, getRoles, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";
+import { getColumns, getObjects, getRoleDetail, getRoles, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";
 import { exportQueryResult }                                   from "./dock/exportQueryResult";
 import { exportExplainPlan }                                   from "./dock/exportExplainResult";
 import type { ActiveExport }                                   from "./data/explain";
 import { buildModel }                                          from "./data/buildModel";
+import { buildSchemaDiagram }                                  from "./data/buildSchemaDiagram";
 import { buildSelectSql }                                      from "./data/sql";
 import { buildStore }                                          from "./data/stores";
 import { TableWorkPanel }                                      from "./dock/TableWorkPanel";
@@ -27,6 +29,7 @@ import { DefinitionPanel }                                     from "./dock/Defi
 import { QueryPanel }                                          from "./dock/QueryPanel";
 import { RoleGrantsPanel }                                     from "./dock/RoleGrantsPanel";
 import { exportRoleGrants }                                     from "./dock/exportRoleGrants";
+import { SchemaDiagramPanel }                                  from "./dock/SchemaDiagramPanel";
 import { PropertiesPanel, relationTypeLabel }                  from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                from "./roles/RolesPropertiesPanel";
 import { KIND_GLYPH }                                          from "./navigator/objectGlyphs";
@@ -34,10 +37,10 @@ import { QueryHistoryStore, SavedQueryStore }                  from "./data/quer
 import type { HistoryEntry, SavedQuery }                       from "./data/queryStore";
 import { promptQueryName }                                     from "./promptQueryName";
 
-// The non-relation dock-tab glyphs (query / structure / definition / grants).
-// The relation-kind glyphs (table / view / materialized view) come from
-// objectGlyphs via KIND_GLYPH, which registers them.
-Glyph.register(terminal, table_columns, file_code, key);
+// The non-relation dock-tab glyphs (query / structure / definition / grants /
+// schema diagram). The relation-kind glyphs (table / view / materialized view)
+// come from objectGlyphs via KIND_GLYPH, which registers them.
+Glyph.register(terminal, table_columns, file_code, key, diagram_project);
 
 /** A focusable section of the Queries view — the Saved or the Recent list. */
 export type QueriesSection = "saved" | "recent";
@@ -319,6 +322,55 @@ export class SqlAdminController {
                 })),
         });
         this.syncToPanel(id);
+    }
+
+    /**
+     * Open a read-only entity-relationship diagram for a whole schema in the Dock
+     * (deduped by panel id): tables as nodes, foreign keys as edges, auto-laid-out
+     * by ELK. Selecting a node opens that table's data tab via openReferencedTable.
+     *
+     * @param ref - The schema to diagram (kind "schema"; database + schema set).
+     * @param _node - The schema's navigator node; accepted for call-site parity
+     *   with openStructure/openTable but unused — the diagram tab is not
+     *   registered in _openPanels, so there is no node to remember.
+     */
+    async openSchemaDiagram(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
+        const id = this.diagramPanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        let tables: string[];
+        let structures: TableStructure[];
+
+        try {
+            const objects = await getObjects(ref.connectionId, ref.database!, ref.schema!);
+
+            tables     = objects.filter(o => o.kind === "table").map(o => o.name);
+            structures = await Promise.all(tables.map(name =>
+                getStructure({ connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name, kind: "table" })));
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return;
+        }
+
+        const data = buildSchemaDiagram(tables, structures);
+
+        this.dock.addPanel({
+            id,
+            title  : `${ref.schema} (diagram)`,
+            glyph  : "diagram-project",
+            content: SchemaDiagramPanel(data, table => this.openReferencedTable({
+                connectionId: ref.connectionId,
+                database    : ref.database,
+                schema      : ref.schema,
+                name        : table,
+                kind        : "table",
+            })),
+        });
+        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}: diagram (${tables.length} tables)`);
     }
 
     /**
@@ -917,6 +969,11 @@ export class SqlAdminController {
     /** Stable id for a view's definition tab, distinct from its data/structure tabs. */
     private definitionPanelId(ref: DbObjectRef): string {
         return `${this.panelId(ref)}::definition`;
+    }
+
+    /** Stable id for a schema's diagram tab, distinct from any relation tab. */
+    private diagramPanelId(ref: DbObjectRef): string {
+        return `${ref.connectionId}/${ref.database}/${ref.schema}::diagram`;
     }
 
     /**
