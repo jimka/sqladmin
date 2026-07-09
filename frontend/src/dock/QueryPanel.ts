@@ -3,9 +3,11 @@
 // executed, the editor fills the panel and no result grid is shown. A rows
 // result adds a resizable result pane below the editor (a draggable Split
 // gutter), seeded so the editor starts ~150px tall; the result is read-only (a
-// query result has no PK and is never written back). A non-row statement
-// (INSERT/UPDATE/DDL) reports its command tag on the status line and removes the
-// result pane (editor back to full height). Errors funnel to onError.
+// query result has no PK and is never written back) and, for a chartable
+// result (>=1 row, >=1 numeric column), toggles to a bar/line chart of the
+// same rows — see QueryResultView. A non-row statement (INSERT/UPDATE/DDL)
+// reports its command tag on the status line and removes the result pane
+// (editor back to full height). Errors funnel to onError.
 //
 // Two more toolbar buttons run EXPLAIN and EXPLAIN ANALYZE on the editor's
 // statement: the plan comes back through the same result pane as a read-only,
@@ -14,12 +16,15 @@
 // not look read-only — plain Explain is always safe.
 //
 // Built as a callable factory mirroring TableWorkPanel/StructurePanel. The
-// panel's Component subtree (and its MemoryStore) is dropped when the dock
-// tab closes, but neither CodeEditor here (the main editor and, transiently,
-// the plan view) is torn down by that alone — the framework has no cascading
-// dispose. The factory returns a `dispose` alongside its content precisely so
-// the controller can release both editors' CodeMirror views and ThemeManager
-// subscriptions explicitly; see SqlAdminController's `_panelDisposers`.
+// panel's Component subtree (and any rows result's backing store, held inside
+// QueryResultView) is dropped when the dock tab closes, but neither CodeEditor
+// here (the main editor) nor the result pane's live component (the plan
+// CodeEditor, transiently, or a chartable rows result's chart) is torn down by
+// that alone — the framework has no cascading dispose. The factory returns a
+// `dispose` alongside its content precisely so the controller can release the
+// main editor's and the result pane's live component's CodeMirror views /
+// chart / ThemeManager subscriptions explicitly; see SqlAdminController's
+// `_panelDisposers`.
 
 import { Component, Container, Panel, Event }        from "@jimka/typescript-ui/core";
 import { Placement }                     from "@jimka/typescript-ui/primitive";
@@ -27,9 +32,7 @@ import { Border as BorderLayout, Fit, Split } from "@jimka/typescript-ui/layout"
 import { ToolBar }                       from "@jimka/typescript-ui/component/menubar";
 import { Spacer }                        from "@jimka/typescript-ui/component/container";
 import { glyphButton }                   from "./glyphButton";
-import { Table }                         from "@jimka/typescript-ui/component/table";
 import { CodeEditor }                    from "@jimka/typescript-ui/component/editor";
-import { MemoryStore }                   from "@jimka/typescript-ui/data";
 import { Menu }                          from "@jimka/typescript-ui/overlay";
 import { Glyph }                         from "@jimka/typescript-ui/component/display";
 import { play }                          from "@jimka/typescript-ui/glyphs/solid/play";
@@ -44,7 +47,7 @@ import { file_lines }                    from "@jimka/typescript-ui/glyphs/solid
 import { diagram_project }               from "@jimka/typescript-ui/glyphs/solid/diagram_project";
 import { flask }                         from "@jimka/typescript-ui/glyphs/solid/flask";
 import { wand_magic_sparkles }           from "@jimka/typescript-ui/glyphs/solid/wand_magic_sparkles";
-import { buildQueryModel }               from "../data/buildModel";
+import { QueryResultView }               from "./QueryResultView";
 import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
 import { exportQueryResult }             from "./exportQueryResult";
@@ -124,16 +127,18 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
 
     const editor = new CodeEditor(initialSql, { language: "sql" });
 
-    // The read-only plan editor shown in the result pane after an EXPLAIN run.
-    // Each run replaces it with a fresh CodeEditor (its own view + theme
+    // The result pane's current live component needing explicit teardown: the
+    // read-only plan editor shown after an EXPLAIN run, or a chartable rows
+    // result's QueryResultView (which owns a lazily-built chart). Each run
+    // replaces it with a fresh instance (its own view/chart + theme
     // subscription), so the previous one must be disposed before it is dropped —
-    // see disposePlanView.
-    let planView: CodeEditor | null = null;
+    // see disposeLiveResult.
+    let liveResult: { dispose(): void } | null = null;
 
-    /** Dispose the current read-only plan editor (if any) before it is replaced or torn down. */
-    function disposePlanView(): void {
-        planView?.dispose();
-        planView = null;
+    /** Dispose the result pane's current live component (if any) before it is replaced or torn down. */
+    function disposeLiveResult(): void {
+        liveResult?.dispose();
+        liveResult = null;
     }
 
     const resultHost = Panel({ layoutManager: new Fit() });
@@ -221,7 +226,7 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
 
     /** Swap in the result grid, adding (and sizing) the result pane on first use. */
     function showResultPane(table: Component): void {
-        disposePlanView();
+        disposeLiveResult();
         resultHost.removeAllComponents();
         resultHost.addComponent(table);
 
@@ -262,7 +267,7 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
 
     /** Drop the result pane so the editor fills the panel again. */
     function hideResultPane(): void {
-        disposePlanView();
+        disposeLiveResult();
 
         if (resultShown) {
             body.removeComponent(resultHost);
@@ -426,16 +431,13 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
             // The library's Table virtual-scrolls its rows, so the whole result set
             // renders regardless of size — no client display cap. The backend bounds
             // the fetch (an unbounded SELECT never floods the client) and flags a
-            // truncated result, surfaced in the status message below.
-            const store = new MemoryStore({
-                model   : buildQueryModel(result.columns),
-                data    : result.rows,
-                autoLoad: true,
-            });
+            // truncated result, surfaced in the status message below. A chartable
+            // result (>=1 row, >=1 numeric column) also gets a grid/chart toggle —
+            // see QueryResultView.
+            const view = QueryResultView(result);
 
-            // Read-only: editing a query result is a Non-Goal (no PK, no write-back).
-            // A fresh store + columns per run means columns never bleed across runs.
-            showResultPane(Table(store, { columns: [], rowReadOnly: () => true }));
+            showResultPane(view.content);
+            liveResult = view; // set AFTER showResultPane (which disposeLiveResult()s the prior)
             setActiveExport({ kind: "rows", result });
             notify(result.truncated
                 ? `showing first ${result.rowCount} rows — result truncated`
@@ -476,8 +478,8 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
         const view = new CodeEditor(result.plan, { language: "sql", readOnly: true });
 
         showResultPane(view);
-        // Set after showResultPane, which disposes the prior planView first.
-        planView = view;
+        // Set after showResultPane, which disposes the prior liveResult first.
+        liveResult = view;
         setActiveExport({ kind: "plan", plan: { result, sql, runExplain } });
         notify(result.analyze ? "EXPLAIN ANALYZE plan (side-effects rolled back)" : "EXPLAIN plan");
     }
@@ -599,7 +601,7 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     return {
         content: panel,
         dispose: () => {
-            disposePlanView();
+            disposeLiveResult();
             editor.dispose();
         },
     };
