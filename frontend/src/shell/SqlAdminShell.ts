@@ -36,6 +36,7 @@ import { file_lines }              from "@jimka/typescript-ui/glyphs/solid/file_
 import { file_csv }                from "@jimka/typescript-ui/glyphs/solid/file_csv";
 import { file_code }               from "@jimka/typescript-ui/glyphs/solid/file_code";
 import { bars }                    from "@jimka/typescript-ui/glyphs/solid/bars";
+import { keyboard }                from "@jimka/typescript-ui/glyphs/solid/keyboard";
 import { ActivityBar, SIDEBAR_RAIL_WIDTH, SIDEBAR_DEFAULT_WIDTH } from "./ActivityBar";
 import type { ActivityBarHandle, SidebarSizer } from "./ActivityBar";
 import { DatabaseExplorerView }    from "./DatabaseExplorerView";
@@ -47,8 +48,10 @@ import {
     DATABASES_RAIL_SHORTCUT, ROLES_RAIL_SHORTCUT, QUERIES_RAIL_SHORTCUT, REFRESH_SHORTCUT,
     isNewQueryChord, isOpenSavedChord, isQueryHistoryChord,
     isDatabasesRailChord, isRolesRailChord, isQueriesRailChord, isRefreshChord,
+    isHelpChord,
 } from "./queryShortcuts";
 import { openAboutDialog }         from "./aboutDialog";
+import { openShortcutsDialog }     from "./shortcutsDialog";
 import { openLocalStorageWindow }  from "./localStorageWindow";
 import type { SqlAdminController } from "../SqlAdminController";
 
@@ -59,7 +62,7 @@ import type { SqlAdminController } from "../SqlAdminController";
 // composition root, and referenced by name downstream.
 Glyph.register(database, circle_info, users, terminal, arrows_rotate);
 // Glyphs decorating the menu bar's menus, items, and submenus.
-Glyph.register(plus, floppy_disk, clock_rotate_left, wrench, eye, file_export, file_lines, file_csv, file_code, bars);
+Glyph.register(plus, floppy_disk, clock_rotate_left, wrench, eye, file_export, file_lines, file_csv, file_code, bars, keyboard);
 
 // The view-container ids; each view's rail button selects it by this id.
 const DATABASE_VIEW_ID = "database";
@@ -96,6 +99,7 @@ export function SqlAdminShell(controller: SqlAdminController): Container {
                     activeExportKind  : () => controller.activeExportKind(),
                     canExportActive   : () => controller.canExportActive(),
                     onShowLocalStorage: () => openLocalStorageWindow(),
+                    onShowShortcuts   : () => openShortcutsDialog(),
                     onAbout           : () => openAboutDialog(),
                     onShowDatabases   : () => sidebar.selectView(DATABASE_VIEW_ID),
                     onShowRoles       : () => sidebar.selectView(ROLES_VIEW_ID),
@@ -144,6 +148,8 @@ function installAccelerators(controller: SqlAdminController, sidebar: ActivityBa
             sidebar.selectView(QUERIES_VIEW_ID);
         } else if (isRefreshChord(event)) {
             controller.refreshActive();
+        } else if (isHelpChord(event)) {
+            openShortcutsDialog();
         } else {
             matched = false;
         }
@@ -283,6 +289,8 @@ interface MenuBarActions {
     canExportActive: () => boolean;
     /** Opens the localStorage inspector window (Tools → Show localStorage…). */
     onShowLocalStorage: () => void;
+    /** Opens the Keyboard Shortcuts dialog (the menu-bar button beside About, and the ? accelerator). */
+    onShowShortcuts: () => void;
     /** Opens the About dialog (the far-right menu-bar button). */
     onAbout: () => void;
     /** Selects the Databases rail (View → Databases, and the Alt+D accelerator). */
@@ -359,10 +367,14 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
     // trailing edge. Appended after the factory (not via `menus`, which are
     // dropdown openers) — safe because the app builds its menus once and never
     // re-calls setMenus (which would wipe these appended children).
+    const shortcuts = Button({ glyph: "keyboard", text: "Shortcuts", showText: true, showDescription: false, compact: true, flat: true });
+    shortcuts.on("action", actions.onShowShortcuts);
+
     const about = Button({ glyph: "circle-info", text: "About", showText: true, showDescription: false, compact: true, flat: true });
     about.on("action", actions.onAbout);
 
     menuBar.addComponent(Spacer.flex());
+    menuBar.addComponent(shortcuts);
     menuBar.addComponent(about);
 
     return menuBar;
