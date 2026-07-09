@@ -485,14 +485,19 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     // Editor accelerators: Ctrl/Cmd+Enter runs, Ctrl/Cmd+S saves, Ctrl/Cmd+E
     // explains (Ctrl/Cmd+Shift+E explain-analyzes), Alt+C clears, Ctrl/Cmd+↑/↓
     // recalls history (bash-style). CodeEditor has no "keydown" event, so this
-    // is wired through Event.addListener — a window capture-phase dispatcher
-    // that resolves a keydown up to its owning component, firing before
-    // CodeMirror's own key handling, so preventDefault() here still suppresses
-    // any CodeMirror default. Editor-scoped so Explain acts on this query view
-    // and does not clash with the list/editor select-all elsewhere. Plain arrows
-    // (no modifier) are untouched, so normal caret movement still works — and
-    // Clear is Alt+C, not Ctrl+C, so the editor's Copy is left intact.
-    Event.addListener(editor, "keydown", (e: KeyboardEvent) => {
+    // is wired through Event.addSubtreeListener — a window capture-phase
+    // dispatcher firing before CodeMirror's own key handling, so preventDefault()
+    // here still suppresses any CodeMirror default. It MUST be addSubtreeListener,
+    // not addListener: a keydown inside the editor originates at CodeMirror's
+    // inner contentDOM (a descendant of the CodeEditor element), and addListener
+    // only matches when the event's exact target IS the component element — so it
+    // never fires for CodeMirror keystrokes (the old TextArea was itself the
+    // target, which is why addListener worked before the swap). Editor-scoped so
+    // Explain acts on this query view and does not clash with the list/editor
+    // select-all elsewhere. Plain arrows (no modifier) are untouched, so normal
+    // caret movement still works — and Clear is Alt+C, not Ctrl+C, so the
+    // editor's Copy is left intact.
+    Event.addSubtreeListener(editor, "keydown", (e: KeyboardEvent) => {
         const chord = e.ctrlKey || e.metaKey;
 
         if (chord && e.key === "Enter") {
