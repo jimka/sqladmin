@@ -12,11 +12,12 @@ import { Component, Panel }         from "@jimka/typescript-ui/core";
 import { Border, HBox, VBox }       from "@jimka/typescript-ui/layout";
 import { Placement }                from "@jimka/typescript-ui/primitive";
 import { Checkbox, ComboBox, Text } from "@jimka/typescript-ui/component/input";
-import { DiagramNode, DiagramView } from "@jimka/typescript-ui/component/diagram";
+import { DiagramView }              from "@jimka/typescript-ui/component/diagram";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import { rootedDiagram, applyHide } from "../data/relationDiagram";
 import type { TraversalDirection }  from "../data/relationDiagram";
 import { applyCoverageStyle }       from "../data/fkCardinality";
+import { TableCardNode }            from "./TableCardNode";
 
 // One hop keeps the first cut readable — the root plus its direct FK neighbours,
 // not the whole transitive closure. The user widens it via the Depth control.
@@ -29,10 +30,6 @@ const DEPTH_CHOICES = ["1", "2", "3"];
 // Fixed width of the WEST side panel: enough for a checkbox plus a typical table
 // name without stealing canvas width from the diagram.
 const LEGEND_WIDTH = 220;
-
-// The root node's emphasis: a 2px accent border over the DiagramNode default of
-// a 1px border, so the root reads as the anchor of the view.
-const ROOT_BORDER = "2px solid var(--ts-ui-accent-color, rgb(30, 100, 200))";
 
 /**
  * Build the relation-rooted diagram panel: a Border layout with a WEST
@@ -62,15 +59,9 @@ export function RelationDiagramPanel(
 
     // Emphasis lives in the renderer (not applied imperatively after setData), so
     // it survives every filter recompute — setData rebuilds nodes through it.
-    const nodeRenderer = (n: DiagramNodeData): Component => {
-        const node = DiagramNode({ label: n.label, glyph: n.glyph });
-
-        if (n.id === root.id) {
-            node.setBorder(ROOT_BORDER);
-        }
-
-        return node;
-    };
+    // `full` already carries card `data`/`ports` from the controller (card mode),
+    // so this single renderer covers every node without a mode flag.
+    const nodeRenderer = (n: DiagramNodeData): Component => TableCardNode(n, n.id === root.id);
 
     const view = DiagramView({ data: base, nodeRenderer });
 
