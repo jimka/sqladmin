@@ -14,7 +14,7 @@ import { diagram_project }                                     from "@jimka/type
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef, RoleDetail, RolePrivilege, RoleSummary, TableStructure } from "./contract";
-import { getColumns, getObjects, getRoleDetail, getRoles, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";
+import { getColumns, getObjects, getRoleDetail, getRoles, getSchemas, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";
 import { exportQueryResult }                                   from "./dock/exportQueryResult";
 import { exportExplainPlan }                                   from "./dock/exportExplainResult";
 import type { ActiveExport }                                   from "./data/explain";
@@ -32,6 +32,8 @@ import { RoleGrantsPanel }                                     from "./dock/Role
 import { exportRoleGrants }                                     from "./dock/exportRoleGrants";
 import { SchemaDiagramPanel }                                  from "./dock/SchemaDiagramPanel";
 import { RelationDiagramPanel }                                from "./dock/RelationDiagramPanel";
+import { DatabaseDiagramPanel }                                from "./dock/DatabaseDiagramPanel";
+import type { SchemaTables }                                   from "./data/buildDatabaseDiagram";
 import type { DiagramData, DiagramNodeData }                   from "@jimka/typescript-ui/component/diagram";
 import { PropertiesPanel, relationTypeLabel }                  from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                from "./roles/RolesPropertiesPanel";
@@ -398,6 +400,80 @@ export class SqlAdminController {
                 opts?.withColumns ? new Map(tables.map((name, i) => [name, columns[i]])) : undefined;
 
             return annotateFkCardinality(buildSchemaDiagram(tables, structures, columnsByTable), tables, structures, columns);
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return null;
+        }
+    }
+
+    /**
+     * Open a read-only entity-relationship diagram spanning every schema in a
+     * database in the Dock (deduped by panel id). The panel defaults to a
+     * legible schema-overview graph and offers a rooted/filtered Tables mode;
+     * selecting a table opens its data tab via openReferencedTable, reading
+     * *that leaf's own* schema off its node data (unlike the single-schema
+     * diagram, which hardcodes `schema: ref.schema` — see openSchemaDiagram —
+     * a database diagram spans many schemas, so the schema varies per node).
+     *
+     * @param ref - The database to diagram (kind "database"; database set).
+     * @param _node - The database's navigator node; accepted for call-site
+     *   parity with the other open methods but unused — the diagram tab is not
+     *   registered in _openPanels, so there is no node to remember.
+     */
+    async openDatabaseDiagram(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
+        const id = this.databaseDiagramPanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const schemas = await this.buildDatabaseGraphData(ref);
+
+        if (!schemas) {
+            return;
+        }
+
+        this.dock.addPanel({
+            id,
+            title  : `${ref.database} (diagram)`,
+            glyph  : "diagram-project",
+            content: DatabaseDiagramPanel(schemas, (schema, table) => this.openReferencedTable({
+                connectionId: ref.connectionId,
+                database    : ref.database,
+                schema,
+                name        : table,
+                kind        : "table",
+            })),
+        });
+
+        const tableCount = schemas.reduce((total, s) => total + s.tables.length, 0);
+        this.statusBar.setMessage(`${this._connectionId} · ${ref.database}: diagram (${tableCount} tables)`);
+    }
+
+    /**
+     * Fetch every schema's tables + structures for the database diagram: list
+     * the database's schemas, then per schema list its tables and load each
+     * table's structure. The fetch is `O(schemas × tables)` round trips — a
+     * one-shot cost behind the tab open; the on-screen graph size is bounded by
+     * DatabaseDiagramPanel's rooted+prune+per-schema-hide filter layer, not by
+     * this fetch. Returns null on failure, having already reported the error.
+     *
+     * @param ref - The database to fetch (database set).
+     * @returns Every schema's tables + structures, or null if the fetch failed.
+     */
+    private async buildDatabaseGraphData(ref: DbObjectRef): Promise<SchemaTables[] | null> {
+        try {
+            const schemaList = await getSchemas(ref.connectionId, ref.database!);
+
+            return await Promise.all(schemaList.map(async ({ name: schema }) => {
+                const objects    = await getObjects(ref.connectionId, ref.database!, schema);
+                const tables     = objects.filter(o => o.kind === "table").map(o => o.name);
+                const structures = await Promise.all(tables.map(name =>
+                    getStructure({ connectionId: ref.connectionId, database: ref.database, schema, name, kind: "table" })));
+
+                return { schema, tables, structures } satisfies SchemaTables;
+            }));
         } catch (err) {
             this.notifyError(err, ref);
 
@@ -1060,6 +1136,14 @@ export class SqlAdminController {
      */
     private relationDiagramPanelId(ref: DbObjectRef): string {
         return `${this.panelId(ref)}::diagram`;
+    }
+
+    /**
+     * Stable id for a database's diagram tab, distinct from a schema's diagram
+     * id (no `/schema` segment) and from any relation tab.
+     */
+    private databaseDiagramPanelId(ref: DbObjectRef): string {
+        return `${ref.connectionId}/${ref.database}::db-diagram`;
     }
 
     /**
