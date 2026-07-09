@@ -9,7 +9,19 @@ import { CARD_WIDTH, cardHeight, columnPortY, deriveColumnRows, portId } from ".
 // Left-to-right layered layout: a schema's FK graph reads naturally as a
 // dependency flow (referencing table -> referenced table), matching the
 // left-to-right reading order most ER diagrams use.
-const LAYOUT_OPTIONS: Record<string, string> = { "elk.algorithm": "layered", "elk.direction": "RIGHT" };
+//
+// The two spacings are widened well past ELK's ~20px defaults: the card nodes
+// are large and each FK edge carries crow's-foot cardinality markers at both
+// ends plus an optional referential-action label, all of which crowd together
+// on a short edge. `nodeNodeBetweenLayers` lengthens the horizontal edges the
+// markers sit on (the "squished" axis); `spacing.nodeNode` keeps stacked cards
+// in a layer from touching.
+const LAYOUT_OPTIONS: Record<string, string> = {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "120",
+    "elk.spacing.nodeNode": "40",
+};
 
 // The registered glyph name for a table node. Deliberately NOT imported from
 // `../navigator/objectGlyphs` (its KIND_GLYPH.table has this same value):

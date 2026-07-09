@@ -95,7 +95,12 @@ describe("buildSchemaDiagram", () => {
 
         expect(data.nodes).toEqual([]);
         expect(data.edges).toEqual([]);
-        expect(data.layoutOptions).toEqual({ "elk.algorithm": "layered", "elk.direction": "RIGHT" });
+        expect(data.layoutOptions).toEqual({
+            "elk.algorithm": "layered",
+            "elk.direction": "RIGHT",
+            "elk.layered.spacing.nodeNodeBetweenLayers": "120",
+            "elk.spacing.nodeNode": "40",
+        });
     });
 
     it("keeps edge ids unique across tables sharing an FK constraint name", () => {
@@ -110,7 +115,12 @@ describe("buildSchemaDiagram", () => {
     it("always sets the layered/RIGHT layout options", () => {
         const data = buildSchemaDiagram(["a"], [structure()]);
 
-        expect(data.layoutOptions).toEqual({ "elk.algorithm": "layered", "elk.direction": "RIGHT" });
+        expect(data.layoutOptions).toEqual({
+            "elk.algorithm": "layered",
+            "elk.direction": "RIGHT",
+            "elk.layered.spacing.nodeNodeBetweenLayers": "120",
+            "elk.spacing.nodeNode": "40",
+        });
     });
 
     describe("card mode (columnsByTable present)", () => {
@@ -125,8 +135,8 @@ describe("buildSchemaDiagram", () => {
             const b = data.nodes.find(n => n.id === "b")!;
 
             expect(a.data).toEqual({ columns: [
-                { name: "id", type: "text", pk: true, fk: false },
-                { name: "x_id", type: "text", pk: false, fk: false },
+                { name: "id", type: "text", pk: true, fk: false, nullable: false, generated: false, hasDefault: false },
+                { name: "x_id", type: "text", pk: false, fk: false, nullable: false, generated: false, hasDefault: false },
             ] });
             expect(a.width).toBe(CARD_WIDTH);
             expect(a.height).toBe(cardHeight(2));

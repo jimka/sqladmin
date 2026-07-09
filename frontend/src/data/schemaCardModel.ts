@@ -23,6 +23,12 @@ export interface ColumnRowData {
     type: string;
     pk: boolean;
     fk: boolean;
+    /** Whether the column accepts NULL (drives the "NOT NULL" tooltip attribute). */
+    nullable: boolean;
+    /** Whether the column is generated (a `GENERATED` tooltip attribute). */
+    generated: boolean;
+    /** Whether the column has a default (a `DEFAULT` tooltip attribute). */
+    hasDefault: boolean;
 }
 
 /** The shape of {@link DiagramNodeData.data} in card mode: the card's column rows. */
@@ -69,11 +75,56 @@ export function deriveColumnRows(columns: ColumnMeta[], foreignKeys: ForeignKeyM
     const fkColumns = new Set(foreignKeys.flatMap(fk => fk.columns));
 
     return columns.map(c => ({
-        name: c.name,
-        type: c.dataType,
-        pk  : c.isPrimaryKey,
-        fk  : fkColumns.has(c.name),
+        name      : c.name,
+        type      : c.dataType,
+        pk        : c.isPrimaryKey,
+        fk        : fkColumns.has(c.name),
+        nullable  : c.nullable,
+        generated : c.isGenerated,
+        hasDefault: c.hasDefault,
     }));
+}
+
+/**
+ * A multi-line hover-tooltip description of a column row: a `Name:`/`Type:`
+ * labelled name and full type, then a labelled `Attributes:` line of the ones
+ * worth calling out (key role, NOT NULL, DEFAULT, GENERATED). The name and type
+ * repeat what the card shows so the tooltip still reveals them in full when the
+ * row ellipsised them; the attributes line is omitted when there are none.
+ *
+ * @param column - The row to describe.
+ * @returns The tooltip text; `\n`-separated, which the Tooltip renders as line breaks.
+ */
+export function columnTooltip(column: ColumnRowData): string {
+    const attributes: string[] = [];
+
+    if (column.pk) {
+        attributes.push("PRIMARY KEY");
+    }
+
+    if (column.fk) {
+        attributes.push("FOREIGN KEY");
+    }
+
+    if (!column.nullable) {
+        attributes.push("NOT NULL");
+    }
+
+    if (column.hasDefault) {
+        attributes.push("DEFAULT");
+    }
+
+    if (column.generated) {
+        attributes.push("GENERATED");
+    }
+
+    const lines = [`Name: ${column.name}`, `Type: ${column.type}`];
+
+    if (attributes.length > 0) {
+        lines.push(`Attributes: ${attributes.join(" · ")}`);
+    }
+
+    return lines.join("\n");
 }
 
 /**
