@@ -91,20 +91,21 @@ export function SqlAdminShell(controller: SqlAdminController): Container {
         components: [
             {
                 component: buildMenuBar({
-                    onToggleSidebar   : sidebar.toggleCollapsed,
-                    onNewQuery        : () => controller.openQuery(),
-                    onOpenSaved       : () => controller.showQueriesView("saved"),
-                    onQueryHistory    : () => controller.showQueriesView("recent"),
-                    onExportResults   : format => controller.exportActive(format),
-                    activeExportKind  : () => controller.activeExportKind(),
-                    canExportActive   : () => controller.canExportActive(),
-                    onShowLocalStorage: () => openLocalStorageWindow(),
-                    onShowShortcuts   : () => openShortcutsDialog(),
-                    onAbout           : () => openAboutDialog(),
-                    onShowDatabases   : () => sidebar.selectView(DATABASE_VIEW_ID),
-                    onShowRoles       : () => sidebar.selectView(ROLES_VIEW_ID),
-                    onShowQueries     : () => sidebar.selectView(QUERIES_VIEW_ID),
-                    onRefresh         : () => controller.refreshActive(),
+                    onToggleSidebar    : sidebar.toggleCollapsed,
+                    onNewQuery         : () => controller.openQuery(),
+                    onOpenSaved        : () => controller.showQueriesView("saved"),
+                    onQueryHistory     : () => controller.showQueriesView("recent"),
+                    onExportResults    : format => controller.exportActive(format),
+                    activeExportKind   : () => controller.activeExportKind(),
+                    canExportActive    : () => controller.canExportActive(),
+                    onOpenDocumentation: () => controller.openDocumentation(),
+                    onShowLocalStorage : () => openLocalStorageWindow(),
+                    onShowShortcuts    : () => openShortcutsDialog(),
+                    onAbout            : () => openAboutDialog(),
+                    onShowDatabases    : () => sidebar.selectView(DATABASE_VIEW_ID),
+                    onShowRoles        : () => sidebar.selectView(ROLES_VIEW_ID),
+                    onShowQueries      : () => sidebar.selectView(QUERIES_VIEW_ID),
+                    onRefresh          : () => controller.refreshActive(),
                 }), 
                 constraints      : { placement: Placement.NORTH }
             },
@@ -290,6 +291,8 @@ interface MenuBarActions {
     activeExportKind: () => "plan" | "tabular";
     /** Whether the active tab has anything to export, to grey the item when not. */
     canExportActive: () => boolean;
+    /** Opens (or focuses) the documentation/notes tab (Tools → Notes…). */
+    onOpenDocumentation: () => void;
     /** Opens the localStorage inspector window (Tools → Show localStorage…). */
     onShowLocalStorage: () => void;
     /** Opens the Keyboard Shortcuts dialog (the menu-bar button beside About, and the ? accelerator). */
@@ -347,6 +350,7 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
                     ];
                 } } },
                 { separator: true },
+                { text: "Notes…", glyph: "file-lines", action: actions.onOpenDocumentation },
                 // Opens the localStorage inspector window (view + clear stored state).
                 { text: "Show localStorage…", glyph: "database", action: actions.onShowLocalStorage },
             ] },
