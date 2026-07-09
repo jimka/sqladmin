@@ -325,6 +325,24 @@ component behaviour to live verification, so no app-level DOM test is added.
   re-open, close/reopen, reload-and-restore, and that the key shows and clears in
   the localStorage inspector.
 
+**Live verification performed** (`npm run dev` on the app's own dev server,
+against the batch's shared backend/Postgres container): Tools → "Notes…" opened
+a "Notes" Dock tab hosting a WYSIWYG `MarkdownEditor` sized to the full tab
+(confirmed via the mounted `[data-lexical-editor]` element's bounding box, not
+just visually). Typing `# My Notes`, `**bold**`, and `- item one` live-formatted
+as an H1 heading, bold text, and a bulleted list respectively. Re-invoking
+"Notes…" while the tab was open focused the existing tab — no duplicate.
+Closing the tab produced no console errors (checked via the DevTools console)
+and returned the Dock to its empty start-page state; re-opening built a fresh
+editor seeded from the persisted content. A full page reload (after the dev
+server itself was restarted, so the check is against `localStorage`, not
+in-memory state) preserved `sqladmin.notes.default`, and re-opening "Notes…"
+restored the authored Markdown exactly. Tools → "Show localStorage…" listed
+`sqladmin.notes.default` with the raw Markdown (not JSON-wrapped), and "Clear
+SQL Admin data" removed it — confirmed by re-reading
+`localStorage.getItem("sqladmin.notes.default")`, which returned `null`
+afterward.
+
 ---
 
 ## Potential Challenges
