@@ -15,17 +15,18 @@ import { file_lines }                                          from "@jimka/type
 import { user }                                                from "@jimka/typescript-ui/glyphs/solid/user";
 import type { MarkdownEditor }                                 from "@jimka/typescript-ui/component/editor";import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef, RoleDetail, RolePrivilege, RoleSummary, TableStructure } from "./contract";
-import { getColumns, getObjects, getRoleDetail, getRoles, getSchemas, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";
-import { exportQueryResult }                                   from "./dock/exportQueryResult";
+import type { ColumnMeta, DbObjectRef, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TableStructure } from "./contract";
+import { getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";import { exportQueryResult }                                   from "./dock/exportQueryResult";
 import { exportExplainPlan }                                   from "./dock/exportExplainResult";
 import type { ActiveExport }                                   from "./data/explain";
 import { buildModel }                                          from "./data/buildModel";
 import { buildSchemaDiagram }                                  from "./data/buildSchemaDiagram";
 import { annotateFkCardinality }                                from "./data/fkCardinality";
 import { buildRoleMembershipDiagram }                          from "./data/buildRoleMembershipDiagram";
-import { buildRoleGrantsDiagram }                              from "./data/buildRoleGrantsDiagram";import { buildSelectSql }                                      from "./data/sql";
-import { buildStore }                                          from "./data/stores";
+import { buildRoleGrantsDiagram }                              from "./data/buildRoleGrantsDiagram";
+import { buildRelationGraph, relationNodeId }                  from "./data/buildRelationGraph";
+import { rootedDiagram }                                       from "./data/relationDiagram";
+import { buildSelectSql }                                      from "./data/sql";import { buildStore }                                          from "./data/stores";
 import { TableWorkPanel }                                      from "./dock/TableWorkPanel";
 import { ViewWorkPanel }                                       from "./dock/ViewWorkPanel";
 import { StructurePanel }                                      from "./dock/StructurePanel";
@@ -38,8 +39,9 @@ import { SchemaDiagramPanel }                                  from "./dock/Sche
 import { RelationDiagramPanel }                                from "./dock/RelationDiagramPanel";
 import { DatabaseDiagramPanel }                                from "./dock/DatabaseDiagramPanel";
 import type { SchemaTables }                                   from "./data/buildDatabaseDiagram";
-import { RoleGrantsDiagramPanel }                              from "./dock/RoleGrantsDiagramPanel";import type { DiagramData, DiagramNodeData }                   from "@jimka/typescript-ui/component/diagram";
-import { PropertiesPanel, relationTypeLabel }                  from "./properties/PropertiesPanel";
+import { RoleGrantsDiagramPanel }                              from "./dock/RoleGrantsDiagramPanel";
+import { RelationGraphPanel }                                  from "./dock/RelationGraphPanel";
+import type { DiagramData, DiagramNodeData }                   from "@jimka/typescript-ui/component/diagram";import { PropertiesPanel, relationTypeLabel }                  from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                from "./roles/RolesPropertiesPanel";
 import { KIND_GLYPH }                                          from "./navigator/objectGlyphs";
 import { QueryHistoryStore, SavedQueryStore }                  from "./data/queryStore";
@@ -85,6 +87,13 @@ interface RecentTable {
 // How many recently opened tables the start page lists. Small enough to stay a
 // glanceable "jump back in" strip, not a full history.
 const MAX_RECENT_TABLES = 8;
+
+// Dependency graph reads left-to-right as a dependency flow (view -> underlying),
+// matching the FK schema diagram's RIGHT layered layout.
+const DEPENDENCY_LAYOUT = { "elk.algorithm": "layered", "elk.direction": "RIGHT" };
+
+// Inheritance reads top-to-bottom as a containment tree (parent above children).
+const INHERITANCE_LAYOUT = { "elk.algorithm": "layered", "elk.direction": "DOWN" };
 
 export class SqlAdminController {
     readonly dock           : Dock;
@@ -569,6 +578,220 @@ export class SqlAdminController {
             })),
         });
         this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}.${ref.name}: relations`);
+    }
+
+    /**
+     * Fetch a schema's view/matview dependency graph: the view -> underlying
+     * relation edges from the dependencies endpoint, assembled via
+     * buildRelationGraph with dashed edges (distinguishing dependency edges
+     * from a plain FK diagram's). Returns null on failure, having already
+     * reported the error.
+     *
+     * @param ref - The schema to fetch (database + schema set).
+     * @returns The full dependency graph, or null if the fetch failed.
+     */
+    private async fetchDependencyGraph(ref: DbObjectRef): Promise<DiagramData | null> {
+        try {
+            const edges = await getDependencies(ref.connectionId, ref.database!, ref.schema!);
+
+            return buildRelationGraph(edges, ref.schema!, DEPENDENCY_LAYOUT, true);
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return null;
+        }
+    }
+
+    /**
+     * Fetch a schema's inheritance/partitioning graph: the parent -> child
+     * edges from the inheritance endpoint, assembled via buildRelationGraph
+     * with plain edges. Returns null on failure, having already reported the
+     * error.
+     *
+     * @param ref - The schema to fetch (database + schema set).
+     * @returns The full inheritance graph, or null if the fetch failed.
+     */
+    private async fetchInheritanceGraph(ref: DbObjectRef): Promise<DiagramData | null> {
+        try {
+            const edges = await getInheritance(ref.connectionId, ref.database!, ref.schema!);
+
+            return buildRelationGraph(edges, ref.schema!, INHERITANCE_LAYOUT);
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return null;
+        }
+    }
+
+    /**
+     * Open a read-only view/matview dependency graph for a whole schema in the
+     * Dock (deduped by panel id): views/matviews as nodes, edges to the
+     * relations they read, laid out left-to-right by ELK. Node activation is
+     * kind-aware: a view opens read-only, a table opens for data.
+     *
+     * @param ref - The schema to diagram (kind "schema"; database + schema set).
+     * @param _node - The schema's navigator node; accepted for call-site parity
+     *   with the other open methods but unused — the tab is not registered in
+     *   _openPanels, so there is no node to remember.
+     */
+    async openSchemaDependencyGraph(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
+        const id = this.dependencyPanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const data = await this.fetchDependencyGraph(ref);
+
+        if (!data) {
+            return;
+        }
+
+        this.dock.addPanel({
+            id,
+            title  : `${ref.schema} (dependencies)`,
+            glyph  : "diagram-project",
+            content: RelationGraphPanel(data, nd => this.openReferencedTable({
+                connectionId: ref.connectionId,
+                database    : ref.database,
+                schema      : nd.schema,
+                name        : nd.name,
+                kind        : nd.kind,
+            })),
+        });
+        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}: dependencies (${data.nodes.length} relations)`);
+    }
+
+    /**
+     * Open a relation-rooted dependency graph in the Dock (deduped by panel
+     * id): the relation as the emphasized root plus its connected dependency
+     * component (both directions, unbounded depth) from the whole schema's
+     * dependency graph. Node activation is kind-aware via openReferencedTable.
+     *
+     * @param ref - The relation to root at (kind table/view/matview; name set).
+     * @param _node - The relation's navigator node; accepted for call-site
+     *   parity with the other open methods but unused.
+     */
+    async openRelationDependencyGraph(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
+        const id = this.relationDependencyPanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const full = await this.fetchDependencyGraph(ref);
+
+        if (!full) {
+            return;
+        }
+
+        const root: DiagramNodeData = {
+            id   : relationNodeId(ref as RelationNodeRef),
+            label: ref.name!,
+            glyph: KIND_GLYPH[ref.kind],
+            data : { schema: ref.schema!, name: ref.name!, kind: ref.kind },
+        };
+        const data = rootedDiagram(full, root, "both", Number.POSITIVE_INFINITY);
+
+        this.dock.addPanel({
+            id,
+            title  : `${ref.name} (dependencies)`,
+            glyph  : "diagram-project",
+            tooltip: this.panelTooltip(ref),
+            content: RelationGraphPanel(data, nd => this.openReferencedTable({
+                connectionId: ref.connectionId,
+                database    : ref.database,
+                schema      : nd.schema,
+                name        : nd.name,
+                kind        : nd.kind,
+            }), root.id),
+        });
+        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}.${ref.name}: dependencies`);
+    }
+
+    /**
+     * Open a read-only table inheritance/partitioning graph for a whole schema
+     * in the Dock (deduped by panel id): a top-to-bottom tree, parent -> child.
+     * Node activation is kind-aware via openReferencedTable.
+     *
+     * @param ref - The schema to diagram (kind "schema"; database + schema set).
+     * @param _node - The schema's navigator node; accepted for call-site parity
+     *   with the other open methods but unused.
+     */
+    async openSchemaInheritanceGraph(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
+        const id = this.inheritancePanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const data = await this.fetchInheritanceGraph(ref);
+
+        if (!data) {
+            return;
+        }
+
+        this.dock.addPanel({
+            id,
+            title  : `${ref.schema} (inheritance)`,
+            glyph  : "diagram-project",
+            content: RelationGraphPanel(data, nd => this.openReferencedTable({
+                connectionId: ref.connectionId,
+                database    : ref.database,
+                schema      : nd.schema,
+                name        : nd.name,
+                kind        : nd.kind,
+            })),
+        });
+        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}: inheritance (${data.nodes.length} relations)`);
+    }
+
+    /**
+     * Open a relation-rooted inheritance/partitioning graph in the Dock
+     * (deduped by panel id): the relation as the emphasized root plus its
+     * connected inheritance component (both directions, unbounded depth) from
+     * the whole schema's inheritance graph. Node activation is kind-aware via
+     * openReferencedTable.
+     *
+     * @param ref - The relation to root at (kind table; name set).
+     * @param _node - The relation's navigator node; accepted for call-site
+     *   parity with the other open methods but unused.
+     */
+    async openRelationInheritanceGraph(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
+        const id = this.relationInheritancePanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const full = await this.fetchInheritanceGraph(ref);
+
+        if (!full) {
+            return;
+        }
+
+        const root: DiagramNodeData = {
+            id   : relationNodeId(ref as RelationNodeRef),
+            label: ref.name!,
+            glyph: KIND_GLYPH[ref.kind],
+            data : { schema: ref.schema!, name: ref.name!, kind: ref.kind },
+        };
+        const data = rootedDiagram(full, root, "both", Number.POSITIVE_INFINITY);
+
+        this.dock.addPanel({
+            id,
+            title  : `${ref.name} (inheritance)`,
+            glyph  : "diagram-project",
+            tooltip: this.panelTooltip(ref),
+            content: RelationGraphPanel(data, nd => this.openReferencedTable({
+                connectionId: ref.connectionId,
+                database    : ref.database,
+                schema      : nd.schema,
+                name        : nd.name,
+                kind        : nd.kind,
+            }), root.id),
+        });
+        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}.${ref.name}: inheritance`);
     }
 
     /**
@@ -1310,8 +1533,28 @@ export class SqlAdminController {
      * `grants/${conn}/${role}` grid tab id.
      */
     private roleGrantsDiagramPanelId(role: string): string {
-        return `roles/${this._connectionId}/${role}::grants-diagram`;    }
+        return `roles/${this._connectionId}/${role}::grants-diagram`;
+    }
 
+    /** Stable id for a schema's dependency-graph tab, distinct from any relation tab. */
+    private dependencyPanelId(ref: DbObjectRef): string {
+        return `${ref.connectionId}/${ref.database}/${ref.schema}::dependencies`;
+    }
+
+    /** Stable id for a relation's rooted dependency-graph tab. */
+    private relationDependencyPanelId(ref: DbObjectRef): string {
+        return `${this.panelId(ref)}::dependencies`;
+    }
+
+    /** Stable id for a schema's inheritance-graph tab, distinct from any relation tab. */
+    private inheritancePanelId(ref: DbObjectRef): string {
+        return `${ref.connectionId}/${ref.database}/${ref.schema}::inheritance`;
+    }
+
+    /** Stable id for a relation's rooted inheritance-graph tab. */
+    private relationInheritancePanelId(ref: DbObjectRef): string {
+        return `${this.panelId(ref)}::inheritance`;
+    }
     /**
      * Hover tooltip for a tab: the object name, then Type/Schema/Database ordered
      * most-specific to broadest.

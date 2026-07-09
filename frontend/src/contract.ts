@@ -154,3 +154,18 @@ export interface TableStructure {
     constraints: ConstraintMeta[];
     foreignKeys: ForeignKeyMeta[];
 }
+
+/** One relation in a dependency / inheritance graph, schema-qualified. `kind`
+ *  is the collapsed contract kind (partitioned/foreign tables arrive as "table"). */
+export interface RelationNodeRef {
+    schema: string;
+    name: string;
+    kind: DbObjectKind;
+}
+
+/** One directed relation edge: dependency (view -> underlying) or inheritance
+ *  (parent -> child). Orientation is fixed by the endpoint. */
+export interface RelationEdge {
+    source: RelationNodeRef;
+    target: RelationNodeRef;
+}

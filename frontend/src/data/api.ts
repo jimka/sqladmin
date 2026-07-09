@@ -8,6 +8,7 @@ import type {
     DbObjectRef,
     QueryExplainResult,
     QueryResult,
+    RelationEdge,
     RoleDetail,
     RoleSummary,
     ViewDefinition,
@@ -73,6 +74,24 @@ export function getObjects(
     schema      : string,
 ): Promise<{ name: string; kind: DbObjectKind }[]> {
     return getJson(`/api/${connectionId}/${database}/${schema}/objects`);
+}
+
+/** View/matview dependency edges for a schema (view -> underlying relation). */
+export function getDependencies(
+    connectionId: string,
+    database    : string,
+    schema      : string,
+): Promise<RelationEdge[]> {
+    return getJson(`/api/${connectionId}/${database}/${schema}/dependencies`);
+}
+
+/** Inheritance/partition edges for a schema (parent -> child). */
+export function getInheritance(
+    connectionId: string,
+    database    : string,
+    schema      : string,
+): Promise<RelationEdge[]> {
+    return getJson(`/api/${connectionId}/${database}/${schema}/inheritance`);
 }
 
 /** Introspect a table's columns (drives the Model + data grid). */
