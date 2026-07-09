@@ -24,14 +24,22 @@ const CONTENT_PAD = 16;
  * holds no subscriptions.
  */
 export function openShortcutsDialog(): void {
+    // Cap the legend viewport to the window so the dialog never grows past the
+    // screen. The Dialog sizes its height to the content's preferred height;
+    // maxSize caps that preferred height, so a legend taller than the window
+    // scrolls inside a viewport-fitting dialog rather than overflowing it — and
+    // because the content then fits the dialog's own region exactly, this panel
+    // (with its eased autoScroll) is the sole scroller, matching the smooth wheel
+    // scroll everywhere else (the same autoScroll + maxSize idiom as FilterDialog).
+    // CHROME leaves room for the title bar, button row, and top/bottom margins.
+    const CHROME = 160;
+    const maxContentHeight = Math.max(200, window.innerHeight - CHROME);
+
     const content = Panel({
         layoutManager: new VBox({ stretching: true }),
         insets       : new Insets(CONTENT_PAD, CONTENT_PAD, CONTENT_PAD, CONTENT_PAD),
-        // The Dialog caps its own height to the viewport (resizeToContent), but
-        // the full legend is taller than a short viewport — scroll it internally
-        // so the capped dialog never clips the bottom rows. autoScroll (not
-        // overflow, which only clips) is what mounts a scrollbar.
         autoScroll   : "y",
+        maxSize      : { width: Number.MAX_VALUE, height: maxContentHeight },
     });
     content.addComponent(buildShortcutLegend());
 
