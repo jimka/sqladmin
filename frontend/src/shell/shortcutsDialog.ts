@@ -27,6 +27,11 @@ export function openShortcutsDialog(): void {
     const content = Panel({
         layoutManager: new VBox({ stretching: true }),
         insets       : new Insets(CONTENT_PAD, CONTENT_PAD, CONTENT_PAD, CONTENT_PAD),
+        // The Dialog caps its own height to the viewport (resizeToContent), but
+        // the full legend is taller than a short viewport — scroll it internally
+        // so the capped dialog never clips the bottom rows. autoScroll (not
+        // overflow, which only clips) is what mounts a scrollbar.
+        autoScroll   : "y",
     });
     content.addComponent(buildShortcutLegend());
 

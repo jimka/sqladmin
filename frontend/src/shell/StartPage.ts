@@ -58,7 +58,11 @@ work.
 export function StartPage(controller: SqlAdminController): Component {
     const page = Panel({
         layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
-        overflow     : "auto",
+        // The page is the bounded scroll host (the CENTER card sizes it to the
+        // viewport): autoScroll — not `overflow`, which only clips — mounts a
+        // scrollbar so a short viewport scrolls the whole home rather than
+        // clipping the shortcut legend below the fold.
+        autoScroll   : "y",
     });
     page.setInsets(new Insets(PAGE_PADDING, PAGE_PADDING, PAGE_PADDING, PAGE_PADDING));
 
