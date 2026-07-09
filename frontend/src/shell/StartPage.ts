@@ -11,9 +11,10 @@ import { VBox }                     from "@jimka/typescript-ui/layout";
 import { Insets }                   from "@jimka/typescript-ui/primitive";
 import { Text }                     from "@jimka/typescript-ui/component/input";
 import { Button }                   from "@jimka/typescript-ui/component/button";
-import { Glyph }                    from "@jimka/typescript-ui/component/display";
+import { Glyph, Markdown }          from "@jimka/typescript-ui/component/display";
 import { plus }                     from "@jimka/typescript-ui/glyphs/solid/plus";
 import { NEW_QUERY_SHORTCUT, OPEN_SAVED_SHORTCUT, QUERY_HISTORY_SHORTCUT } from "./queryShortcuts";
+import { shouldShowWelcome }        from "./startPageWelcome";
 import type { SavedQuery }          from "../data/queryStore";
 import type { SqlAdminController }  from "../SqlAdminController";
 import { MUTED_TEXT_COLOR }         from "../theme";
@@ -27,6 +28,20 @@ Glyph.register(plus);
 const PAGE_PADDING = 24;
 const ENTRY_SPACING = 6;
 const BUTTON_HEIGHT = 30;
+
+// The empty-workspace welcome blurb, shown above the quick actions only when
+// there are no recent tables and no saved queries (see shouldShowWelcome). It
+// opens with a `##`-level heading, not another `#` app title, so it doesn't
+// stutter against the "SQL Admin" heading already on the page.
+const GETTING_STARTED_MARKDOWN = `## Getting started
+
+Your workspace is empty. Open a new query or pick a table from the sidebar
+to begin — your **recent tables** and **saved queries** collect here as you
+work.
+
+- **New Query** — open a blank SQL editor
+- Click a table in the sidebar to inspect its structure and data
+- Save a query to pin it to this page`;
 
 /**
  * Build the start page shown when the workspace has no open panels.
@@ -42,11 +57,28 @@ export function StartPage(controller: SqlAdminController): Component {
     });
     page.setInsets(new Insets(PAGE_PADDING, PAGE_PADDING, PAGE_PADDING, PAGE_PADDING));
 
+    // The welcome blurb is transient: rebuilt (and disposed) each time the
+    // workspace toggles between empty and non-empty. removeAllComponents()
+    // below detaches it from the DOM but does not call dispose(), so its theme
+    // listener must be released explicitly before each rebuild.
+    let welcome: Markdown | null = null;
+
     /** Repopulate the page from the current stores. */
     function rebuild(): void {
+        if (welcome) {
+            welcome.dispose();
+            welcome = null;
+        }
+
         page.removeAllComponents();
 
         page.addComponent(heading("SQL Admin", "600"));
+
+        if (shouldShowWelcome(controller)) {
+            welcome = Markdown(GETTING_STARTED_MARKDOWN);
+            page.addComponent(welcome);
+        }
+
         page.addComponent(actionButton("New Query", () => controller.openQuery(), "plus"));
 
         appendList(page, "Recent tables", controller.recentTables(),

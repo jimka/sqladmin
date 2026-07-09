@@ -2,63 +2,54 @@
 // the menu bar. It presents a one-line description of what SQL Admin is, who
 // wrote it, and where the app and its UI library live on GitHub. Built on the
 // library's Dialog (an in-app, styled overlay) so it matches the rest of the
-// app's modals; the content is a VBox of Text lines rather than a plain
-// `message` so the heading can stand out from the body.
+// app's modals; the body is a single authored Markdown string rendered by the
+// library's read-only Markdown viewer.
 
 import { Dialog, DialogButtons } from "@jimka/typescript-ui/overlay";
 import { Panel }                 from "@jimka/typescript-ui/core";
-import type { Component }        from "@jimka/typescript-ui/core";
 import { VBox }                  from "@jimka/typescript-ui/layout";
-import { Text }                  from "@jimka/typescript-ui/component/input";
+import { Markdown }              from "@jimka/typescript-ui/component/display";
 import { Insets }                from "@jimka/typescript-ui/primitive";
-import { MUTED_TEXT_COLOR }      from "../theme";
 
 // The dialog's fixed width. The Dialog sizes its height to the wrapped content
 // (it measures the content at this width), so the body copy can be natural
 // sentences that wrap rather than hand-broken single lines.
 const DIALOG_WIDTH = 460;
 
-// Vertical rhythm for the stacked lines and the content's padding inset.
-const LINE_SPACING = 8;
-const CONTENT_PAD  = 16;
+// The content's padding inset.
+const CONTENT_PAD = 16;
 
-/** One line of about-text; `muted` greys secondary lines, `weight` bolds a heading. */
-function line(text: string, opts?: { muted?: boolean; weight?: string }): Component {
-    // Wrap rather than ellipsis-truncate: Text defaults to a single clipped line,
-    // but the description and link lines are longer than the dialog is wide.
-    const el = new Text(text, opts?.weight ? { fontWeight: opts.weight } : undefined);
-    el.setWhiteSpace("normal");
-    el.setWordBreak("break-word");
+// The dialog body, authored as Markdown. Reproduces exactly the five facts the
+// old hand-built line stack showed: app name, description, author, source URL,
+// UI-library URL — no version or license line exists to reproduce. Blank lines
+// between blocks are required so `marked` lexes separate paragraphs/headings.
+const ABOUT_MARKDOWN = `# SQL Admin
 
-    if (opts?.muted) {
-        el.setForegroundColor(MUTED_TEXT_COLOR);
-    }
+A browser-based PostgreSQL administration & query tool. Browse databases,
+schemas, tables and roles; run, explain and export SQL.
 
-    return el;
-}
+**Author:** Jimmy Karlsson
+
+**Source:** [github.com/jimka/sqladmin](https://github.com/jimka/sqladmin)
+
+**UI library:** [github.com/jimka/typescript-ui](https://github.com/jimka/typescript-ui)`;
 
 /**
  * Open the modal About dialog. Fire-and-forget: the only outcome is dismissal
  * (the single Close button, Escape, backdrop, or the title-bar close), so the
- * resolved result is intentionally ignored.
+ * resolved result is intentionally ignored — but the Markdown body's theme
+ * listener is disposed once dismissal resolves.
  */
 export function openAboutDialog(): void {
     const content = Panel({
-        // Stretch the lines to the content width so the wrapping Text has a width
-        // to wrap within (a content-sized Text would stay one long clipped line).
-        layoutManager: new VBox({ spacing: LINE_SPACING, stretching: true }),
+        // Stretch the content to the dialog's content width so the Markdown has
+        // a concrete width to wrap and self-measure within.
+        layoutManager: new VBox({ stretching: true }),
         insets       : new Insets(CONTENT_PAD, CONTENT_PAD, CONTENT_PAD, CONTENT_PAD),
     });
 
-    // The Dialog sizes its height to the wrapped content, so the description is a
-    // single natural sentence that wraps to the dialog width rather than a set of
-    // hand-broken single lines.
-    content.addComponent(line("SQL Admin", { weight: "600" }));
-    content.addComponent(line("A browser-based PostgreSQL administration & query tool. "
-        + "Browse databases, schemas, tables and roles; run, explain and export SQL."));
-    content.addComponent(line("Author: Jimmy Karlsson", { muted: true }));
-    content.addComponent(line("Source: github.com/jimka/sqladmin", { muted: true }));
-    content.addComponent(line("UI library: github.com/jimka/typescript-ui", { muted: true }));
+    const md = Markdown(ABOUT_MARKDOWN);
+    content.addComponent(md);
 
     const dialog = Dialog({
         title           : "About SQL Admin",
@@ -68,5 +59,5 @@ export function openAboutDialog(): void {
         closeOnBackdrop : true,
     });
 
-    void dialog.show();
+    void dialog.show().then(() => md.dispose());
 }
