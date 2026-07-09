@@ -10,6 +10,8 @@ from .export_rows import ExportRowsQuery
 from .insert_row import InsertRowCommand
 from .list_columns import ListColumnsQuery
 from .list_databases import ListDatabasesQuery
+from .list_dependencies import ListDependenciesQuery
+from .list_inheritance import ListInheritanceQuery
 from .list_objects import ListObjectsQuery
 from .list_rows import ListRowsQuery
 from .list_schemas import ListSchemasQuery
@@ -33,6 +35,8 @@ __all__ = [
     "ListObjectsQuery",
     "ListColumnsQuery",
     "ListRowsQuery",
+    "ListDependenciesQuery",
+    "ListInheritanceQuery",
     "ListRolesQuery",
     "RoleAttributesQuery",
     "RoleMembershipsQuery",

@@ -32,8 +32,10 @@ from .operations import (
     ListColumnsQuery,
     ListConstraintsQuery,
     ListDatabasesQuery,
+    ListDependenciesQuery,
     ListForeignKeysQuery,
     ListIndexesQuery,
+    ListInheritanceQuery,
     ListObjectsQuery,
     ListRolesQuery,
     ListRowsQuery,
@@ -187,6 +189,42 @@ async def objects(connection_id: str, database: str, schema: str) -> list[dict]:
     """
     async with get_pool(connection_id).acquire() as c:
         op = ListObjectsQuery(c, schema)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.get("/api/{connection_id}/{database}/{schema}/dependencies")
+async def dependencies(connection_id: str, database: str, schema: str) -> list[dict]:
+    """
+    List the view/matview dependency edges in a schema (what each view reads).
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/dependencies``.
+
+    Returns:
+        ``[{"source": RelationNodeRef, "target": RelationNodeRef}]`` — source is
+        the dependent view/matview, target is the underlying relation it reads.
+    """
+    async with get_pool(connection_id).acquire() as c:
+        op = ListDependenciesQuery(c, schema)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.get("/api/{connection_id}/{database}/{schema}/inheritance")
+async def inheritance(connection_id: str, database: str, schema: str) -> list[dict]:
+    """
+    List the table inheritance/partitioning edges in a schema.
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/inheritance``.
+
+    Returns:
+        ``[{"source": RelationNodeRef, "target": RelationNodeRef}]`` — source is
+        the parent relation, target is the child (partition or inheriting table).
+    """
+    async with get_pool(connection_id).acquire() as c:
+        op = ListInheritanceQuery(c, schema)
         await op.apply()
 
         return op.get_result()
