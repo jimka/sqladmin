@@ -255,8 +255,11 @@ function buildCenterDeck(controller: SqlAdminController): Component {
     // Each deck page needs an id the Card matches on.
     controller.dock.setId(CENTER_DOCK_ID);
 
-    const start = StartPage(controller);
-    start.setId(CENTER_START_ID);
+    // Pass the deck id into the constructor rather than a later setId: the start
+    // page's autoScroll registers its eased wheel-scroll listener under the id at
+    // construction, and setId does not re-register it (see StartPage), so a late
+    // setId would leave the page scrolling natively instead of smoothly.
+    const start = StartPage(controller, CENTER_START_ID);
 
     deck.addComponent(controller.dock);
     deck.addComponent(start);

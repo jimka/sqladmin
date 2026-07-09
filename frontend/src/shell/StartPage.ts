@@ -52,11 +52,20 @@ work.
  * Build the start page shown when the workspace has no open panels.
  *
  * @param controller - The mediator supplying the quick actions and stored lists.
+ * @param id - The CENTER Card-deck page id. It MUST be set here, in the Panel
+ *   constructor, rather than via a later `setId`: `autoScroll` registers the
+ *   eased wheel-scroll listener under the component's id at construction, and
+ *   `setId` re-points the DOM id without re-registering that listener — so a
+ *   post-construction `setId` would leave the page scrolling natively (not
+ *   smoothly) because the wheel listener no longer matches the element's id.
  *
  * @returns The start-page component.
  */
-export function StartPage(controller: SqlAdminController): Component {
+export function StartPage(controller: SqlAdminController, id: string): Component {
     const page = Panel({
+        // Set before autoScroll (applyOptions dispatches id first) so the eased
+        // wheel-scroll listener registers under this id — see the `id` param doc.
+        id,
         layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
         // The page is the bounded scroll host (the CENTER card sizes it to the
         // viewport): autoScroll — not `overflow`, which only clips — mounts a
