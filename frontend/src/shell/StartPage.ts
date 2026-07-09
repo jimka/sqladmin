@@ -1,20 +1,22 @@
 // The empty-workspace start page — an app-owned welcome surface shown in the
 // shell's CENTER (a Card deck alongside the Dock) whenever no dock panels are
 // open. The controller toggles this deck off the Dock's "emptychange" event, so
-// no panel bookkeeping lives here; the page itself is a plain composed Panel of
-// quick actions, recent tables, saved queries, connection info, and keyboard
-// hints. It rebuilds on the controller's onWorkspaceChanged seam so the
-// recent/saved lists stay current.
+// no panel bookkeeping lives here; the page itself is a plain composed Panel laid
+// out as a two-column "home": a full-width header (the app heading and, on an
+// empty workspace, the welcome blurb) over a left column of quick actions /
+// recent tables / saved queries and a right column of the keyboard-shortcut
+// legend and connection info. It rebuilds on the controller's onWorkspaceChanged
+// seam so the recent/saved lists stay current.
 
 import { Component, Panel }         from "@jimka/typescript-ui/core";
-import { VBox }                     from "@jimka/typescript-ui/layout";
+import { VBox, HBox }               from "@jimka/typescript-ui/layout";
 import { Insets }                   from "@jimka/typescript-ui/primitive";
 import { Text }                     from "@jimka/typescript-ui/component/input";
 import { Button }                   from "@jimka/typescript-ui/component/button";
 import { Glyph, Markdown }          from "@jimka/typescript-ui/component/display";
 import { plus }                     from "@jimka/typescript-ui/glyphs/solid/plus";
-import { NEW_QUERY_SHORTCUT, OPEN_SAVED_SHORTCUT, QUERY_HISTORY_SHORTCUT } from "./queryShortcuts";
 import { shouldShowWelcome }        from "./startPageWelcome";
+import { buildShortcutLegend }      from "./shortcutLegend";
 import type { SavedQuery }          from "../data/queryStore";
 import type { SqlAdminController }  from "../SqlAdminController";
 import { MUTED_TEXT_COLOR }         from "../theme";
@@ -22,11 +24,14 @@ import { MUTED_TEXT_COLOR }         from "../theme";
 Glyph.register(plus);
 
 // Padding around the welcome content, the vertical gap between stacked entries,
-// and the fixed height of each action button — comfortable click targets that
-// read as a "jump back in" list with a little more breathing room than the
-// denser Queries-view lists.
+// the horizontal gap between the two columns, and the fixed height of each action
+// button — comfortable click targets that read as a "jump back in" list with a
+// little more breathing room than the denser Queries-view lists. COLUMN_SPACING
+// is wider than the vertical ENTRY_SPACING so the two columns read as distinct
+// panes rather than one run-together block.
 const PAGE_PADDING = 24;
 const ENTRY_SPACING = 6;
+const COLUMN_SPACING = 32;
 const BUTTON_HEIGHT = 30;
 
 // The empty-workspace welcome blurb, shown above the quick actions only when
@@ -47,13 +52,26 @@ work.
  * Build the start page shown when the workspace has no open panels.
  *
  * @param controller - The mediator supplying the quick actions and stored lists.
+ * @param id - The CENTER Card-deck page id. It MUST be set here, in the Panel
+ *   constructor, rather than via a later `setId`: `autoScroll` registers the
+ *   eased wheel-scroll listener under the component's id at construction, and
+ *   `setId` re-points the DOM id without re-registering that listener — so a
+ *   post-construction `setId` would leave the page scrolling natively (not
+ *   smoothly) because the wheel listener no longer matches the element's id.
  *
  * @returns The start-page component.
  */
-export function StartPage(controller: SqlAdminController): Component {
+export function StartPage(controller: SqlAdminController, id: string): Component {
     const page = Panel({
+        // Set before autoScroll (applyOptions dispatches id first) so the eased
+        // wheel-scroll listener registers under this id — see the `id` param doc.
+        id,
         layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
-        overflow     : "auto",
+        // The page is the bounded scroll host (the CENTER card sizes it to the
+        // viewport): autoScroll — not `overflow`, which only clips — mounts a
+        // scrollbar so a short viewport scrolls the whole home rather than
+        // clipping the shortcut legend below the fold.
+        autoScroll   : "y",
     });
     page.setInsets(new Insets(PAGE_PADDING, PAGE_PADDING, PAGE_PADDING, PAGE_PADDING));
 
@@ -72,6 +90,8 @@ export function StartPage(controller: SqlAdminController): Component {
 
         page.removeAllComponents();
 
+        // Full-width header above the columns: the app heading, and — only on an
+        // empty workspace — the transient welcome blurb.
         page.addComponent(heading("SQL Admin", "600"));
 
         if (shouldShowWelcome(controller)) {
@@ -79,20 +99,7 @@ export function StartPage(controller: SqlAdminController): Component {
             page.addComponent(welcome);
         }
 
-        page.addComponent(actionButton("New Query", () => controller.openQuery(), "plus"));
-
-        appendList(page, "Recent tables", controller.recentTables(),
-            ref => actionButton(ref.name ?? "(table)", () => controller.reopenTable(ref)));
-        appendList(page, "Saved queries", controller.savedList(),
-            (q: SavedQuery) => actionButton(q.name, () => controller.openSavedQuery(q.name)));
-
-        page.addComponent(heading("Connection", "600"));
-        page.addComponent(mutedText(controller.connectionId));
-
-        page.addComponent(heading("Keyboard", "600"));
-        for (const hint of keyboardHints()) {
-            page.addComponent(mutedText(hint));
-        }
+        page.addComponent(buildColumns(controller));
 
         page.doLayout();
     }
@@ -101,6 +108,64 @@ export function StartPage(controller: SqlAdminController): Component {
     rebuild();
 
     return page;
+}
+
+/**
+ * Build the two-column body: quick actions and stored lists on the left, the
+ * shortcut legend and connection info on the right. Both columns take equal
+ * weight and top-anchor their content so the page reads as a home rather than a
+ * stretched split.
+ *
+ * @param controller - Supplies the quick actions, stored lists, and connection.
+ *
+ * @returns The columns container.
+ */
+function buildColumns(controller: SqlAdminController): Component {
+    const columns = Panel({ layoutManager: new HBox({ spacing: COLUMN_SPACING }) });
+
+    columns.addComponent(buildLeftColumn(controller), { weight: 1 });
+    columns.addComponent(buildRightColumn(controller), { weight: 1 });
+
+    return columns;
+}
+
+/**
+ * Build the left column: the New Query action over the Recent tables and Saved
+ * queries lists (each hidden while empty).
+ *
+ * @param controller - Supplies the quick actions and stored lists.
+ *
+ * @returns The left column panel.
+ */
+function buildLeftColumn(controller: SqlAdminController): Panel {
+    const column = Panel({ layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }) });
+
+    column.addComponent(actionButton("New Query", () => controller.openQuery(), "plus"));
+
+    appendList(column, "Recent tables", controller.recentTables(),
+        ref => actionButton(ref.name ?? "(table)", () => controller.reopenTable(ref)));
+    appendList(column, "Saved queries", controller.savedList(),
+        (q: SavedQuery) => actionButton(q.name, () => controller.openSavedQuery(q.name)));
+
+    return column;
+}
+
+/**
+ * Build the right column: the keyboard-shortcut legend over the connection info.
+ *
+ * @param controller - Supplies the connection id.
+ *
+ * @returns The right column panel.
+ */
+function buildRightColumn(controller: SqlAdminController): Panel {
+    const column = Panel({ layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }) });
+
+    column.addComponent(buildShortcutLegend());
+
+    column.addComponent(heading("Connection", "600"));
+    column.addComponent(mutedText(controller.connectionId));
+
+    return column;
 }
 
 /**
@@ -159,15 +224,4 @@ function actionButton(text: string, handler: () => void, glyph?: string): Compon
     button.on("action", handler);
 
     return button;
-}
-
-/** The keyboard hints shown at the bottom of the start page. */
-function keyboardHints(): string[] {
-    return [
-        "Ctrl/Cmd+Enter — run the query",
-        "Ctrl/Cmd+↑ / ↓ — browse query history",
-        `${NEW_QUERY_SHORTCUT} — new query`,
-        `${OPEN_SAVED_SHORTCUT} — saved queries`,
-        `${QUERY_HISTORY_SHORTCUT} — query history`,
-    ];
 }

@@ -51,7 +51,11 @@ import { exportQueryResult }             from "./exportQueryResult";
 import { exportExplainPlan }             from "./exportExplainResult";
 import type { ActiveExport, RunExplain } from "../data/explain";
 import type { HistoryEntry }             from "../data/queryStore";
-import { isExplainChord, isExplainAnalyzeChord } from "../shell/queryShortcuts";
+import {
+    isExplainChord, isExplainAnalyzeChord,
+    RUN_SHORTCUT, SAVE_SHORTCUT, CLEAR_SHORTCUT, EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT,
+    OLDER_QUERY_SHORTCUT, NEWER_QUERY_SHORTCUT,
+} from "../shell/queryShortcuts";
 import type { QueryExplainResult, QueryResult } from "../contract";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, CAUTION_COLOR, HISTORY_COLOR, NEUTRAL_COLOR } from "../theme";
 
@@ -145,15 +149,15 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     // positive-weight sibling the split falls back to filling the container.)
     body.addComponent(editor, { weight: 0 });
 
-    const runButton     = glyphButton("play", CONSTRUCTIVE_COLOR, "Run (Ctrl+Enter)", () => void run());
-    const saveButton    = glyphButton("floppy-disk", PRIMARY_COLOR, "Save query (Ctrl+S)", () => save());
-    const clearButton   = glyphButton("eraser", CAUTION_COLOR, "Clear (Alt+C)", () => clear());
+    const runButton     = glyphButton("play", CONSTRUCTIVE_COLOR, `Run (${RUN_SHORTCUT})`, () => void run());
+    const saveButton    = glyphButton("floppy-disk", PRIMARY_COLOR, `Save query (${SAVE_SHORTCUT})`, () => save());
+    const clearButton   = glyphButton("eraser", CAUTION_COLOR, `Clear (${CLEAR_SHORTCUT})`, () => clear());
     const formatButton  = glyphButton("wand-magic-sparkles", NEUTRAL_COLOR, "Format SQL", () => void formatSql());
     // The glyph registers under its hyphenated name ("diagram-project"), even
     // though the ESM export identifier uses an underscore.
-    const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, "Explain (Ctrl+E)",
+    const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, `Explain (${EXPLAIN_SHORTCUT})`,
                                       () => void runExplainRun(false));
-    const analyzeButton = glyphButton("flask", CAUTION_COLOR, "Explain Analyze (Ctrl+Shift+E)\n\nexecutes the statement",
+    const analyzeButton = glyphButton("flask", CAUTION_COLOR, `Explain Analyze (${EXPLAIN_ANALYZE_SHORTCUT})\n\nexecutes the statement`,
                                       () => void runExplainRun(true));
     const exportButton  = glyphButton("file-export", PRIMARY_COLOR, "Export results (CSV / JSON)", (e: MouseEvent) => openExportMenu(e));
 
@@ -164,8 +168,8 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     // walks back, Newer forward. Pushed to the far right by a flexible Spacer,
     // set apart from the left-aligned Run/Save/Clear/Explain/Export actions. Each
     // recall refocuses the editor so keyboard recall / typing continues seamlessly.
-    const olderButton = glyphButton("angle-up", HISTORY_COLOR, "Older query (Ctrl+↑)", () => recallInEditor(true));
-    const newerButton = glyphButton("angle-down", HISTORY_COLOR, "Newer query (Ctrl+↓)", () => recallInEditor(false));
+    const olderButton = glyphButton("angle-up", HISTORY_COLOR, `Older query (${OLDER_QUERY_SHORTCUT})`, () => recallInEditor(true));
+    const newerButton = glyphButton("angle-down", HISTORY_COLOR, `Newer query (${NEWER_QUERY_SHORTCUT})`, () => recallInEditor(false));
 
     const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
     panel.addComponent(new ToolBar({
@@ -481,14 +485,19 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     // Editor accelerators: Ctrl/Cmd+Enter runs, Ctrl/Cmd+S saves, Ctrl/Cmd+E
     // explains (Ctrl/Cmd+Shift+E explain-analyzes), Alt+C clears, Ctrl/Cmd+↑/↓
     // recalls history (bash-style). CodeEditor has no "keydown" event, so this
-    // is wired through Event.addListener — a window capture-phase dispatcher
-    // that resolves a keydown up to its owning component, firing before
-    // CodeMirror's own key handling, so preventDefault() here still suppresses
-    // any CodeMirror default. Editor-scoped so Explain acts on this query view
-    // and does not clash with the list/editor select-all elsewhere. Plain arrows
-    // (no modifier) are untouched, so normal caret movement still works — and
-    // Clear is Alt+C, not Ctrl+C, so the editor's Copy is left intact.
-    Event.addListener(editor, "keydown", (e: KeyboardEvent) => {
+    // is wired through Event.addSubtreeListener — a window capture-phase
+    // dispatcher firing before CodeMirror's own key handling, so preventDefault()
+    // here still suppresses any CodeMirror default. It MUST be addSubtreeListener,
+    // not addListener: a keydown inside the editor originates at CodeMirror's
+    // inner contentDOM (a descendant of the CodeEditor element), and addListener
+    // only matches when the event's exact target IS the component element — so it
+    // never fires for CodeMirror keystrokes (the old TextArea was itself the
+    // target, which is why addListener worked before the swap). Editor-scoped so
+    // Explain acts on this query view and does not clash with the list/editor
+    // select-all elsewhere. Plain arrows (no modifier) are untouched, so normal
+    // caret movement still works — and Clear is Alt+C, not Ctrl+C, so the
+    // editor's Copy is left intact.
+    Event.addSubtreeListener(editor, "keydown", (e: KeyboardEvent) => {
         const chord = e.ctrlKey || e.metaKey;
 
         if (chord && e.key === "Enter") {
