@@ -21,6 +21,20 @@ const LAYOUT_OPTIONS: Record<string, string> = { "elk.algorithm": "layered", "el
 const TABLE_GLYPH = "table";
 
 /**
+ * The foreign-key metadata carried on each edge's `data`. Inert for the current
+ * table-to-table rendering, it feeds later cardinality work and column-to-column
+ * (port) anchoring: `columns` / `refColumns` name the local and referenced
+ * columns, positionally paired.
+ */
+export interface FkEdgeData {
+    columns: string[]; // local FK columns, in key order
+    refColumns: string[]; // referenced columns, positionally paired with `columns`
+    refSchema: string;
+    onUpdate: string;
+    onDelete: string;
+}
+
+/**
  * Build the DiagramView graph for a schema from its tables and their structures.
  * Nodes are the tables; edges are each table's foreign keys whose referenced
  * table is also in the set (dangling / cross-schema FKs are dropped).
@@ -55,6 +69,15 @@ export function buildSchemaDiagram(
                 id    : `${sourceTable}.${fk.name}`,
                 source: sourceTable,
                 target: fk.refTable,
+                // Carried for later cardinality / column-to-column work; ignored
+                // by the current table-to-table rendering.
+                data  : {
+                    columns   : fk.columns,
+                    refColumns: fk.refColumns,
+                    refSchema : fk.refSchema,
+                    onUpdate  : fk.onUpdate,
+                    onDelete  : fk.onDelete,
+                } satisfies FkEdgeData,
             });
         }
     });

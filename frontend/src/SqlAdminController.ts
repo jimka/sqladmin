@@ -30,6 +30,8 @@ import { QueryPanel }                                          from "./dock/Quer
 import { RoleGrantsPanel }                                     from "./dock/RoleGrantsPanel";
 import { exportRoleGrants }                                     from "./dock/exportRoleGrants";
 import { SchemaDiagramPanel }                                  from "./dock/SchemaDiagramPanel";
+import { RelationDiagramPanel }                                from "./dock/RelationDiagramPanel";
+import type { DiagramData, DiagramNodeData }                   from "@jimka/typescript-ui/component/diagram";
 import { PropertiesPanel, relationTypeLabel }                  from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                from "./roles/RolesPropertiesPanel";
 import { KIND_GLYPH }                                          from "./navigator/objectGlyphs";
@@ -341,22 +343,11 @@ export class SqlAdminController {
             return;
         }
 
-        let tables: string[];
-        let structures: TableStructure[];
+        const data = await this.buildSchemaGraphData(ref);
 
-        try {
-            const objects = await getObjects(ref.connectionId, ref.database!, ref.schema!);
-
-            tables     = objects.filter(o => o.kind === "table").map(o => o.name);
-            structures = await Promise.all(tables.map(name =>
-                getStructure({ connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name, kind: "table" })));
-        } catch (err) {
-            this.notifyError(err, ref);
-
+        if (!data) {
             return;
         }
-
-        const data = buildSchemaDiagram(tables, structures);
 
         this.dock.addPanel({
             id,
@@ -370,7 +361,76 @@ export class SqlAdminController {
                 kind        : "table",
             })),
         });
-        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}: diagram (${tables.length} tables)`);
+        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}: diagram (${data.nodes.length} tables)`);
+    }
+
+    /**
+     * Fetch a whole schema's ER graph: list its tables, load each table's
+     * structure, and assemble the nodes+edges via buildSchemaDiagram. Shared by
+     * the schema diagram and the relation-rooted diagram (which walks this full
+     * graph from a chosen root). Returns null on failure, having already
+     * reported the error.
+     *
+     * @param ref - The schema to fetch (database + schema set).
+     * @returns The full schema graph, or null if the fetch failed.
+     */
+    private async buildSchemaGraphData(ref: DbObjectRef): Promise<DiagramData | null> {
+        try {
+            const objects    = await getObjects(ref.connectionId, ref.database!, ref.schema!);
+            const tables     = objects.filter(o => o.kind === "table").map(o => o.name);
+            const structures = await Promise.all(tables.map(name =>
+                getStructure({ connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name, kind: "table" })));
+
+            return buildSchemaDiagram(tables, structures);
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return null;
+        }
+    }
+
+    /**
+     * Open a relation-rooted foreign-key diagram in the Dock (deduped by panel
+     * id): the relation as the emphasized root, its FK neighbours out to a
+     * user-chosen direction and depth, with a legend that hides nodes. Reuses the
+     * schema-wide structure fetch and walks it from the root. A view /
+     * materialized-view root shows alone — PostgreSQL foreign keys are
+     * table-only. Node activation reuses openReferencedTable.
+     *
+     * @param ref - The relation to root at (kind table/view/matview; name set).
+     * @param _node - The relation's navigator node; accepted for call-site parity
+     *   with the other open methods but unused (the diagram tab is not tracked in
+     *   _openPanels).
+     */
+    async openRelationDiagram(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
+        const id = this.relationDiagramPanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const full = await this.buildSchemaGraphData(ref);
+
+        if (!full) {
+            return;
+        }
+
+        const root: DiagramNodeData = { id: ref.name!, label: ref.name!, glyph: KIND_GLYPH[ref.kind] };
+
+        this.dock.addPanel({
+            id,
+            title  : `${ref.name} (relations)`,
+            glyph  : "diagram-project",
+            tooltip: this.panelTooltip(ref),
+            content: RelationDiagramPanel(full, root, table => this.openReferencedTable({
+                connectionId: ref.connectionId,
+                database    : ref.database,
+                schema      : ref.schema,
+                name        : table,
+                kind        : "table",
+            })),
+        });
+        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}.${ref.name}: relations`);
     }
 
     /**
@@ -974,6 +1034,16 @@ export class SqlAdminController {
     /** Stable id for a schema's diagram tab, distinct from any relation tab. */
     private diagramPanelId(ref: DbObjectRef): string {
         return `${ref.connectionId}/${ref.database}/${ref.schema}::diagram`;
+    }
+
+    /**
+     * Stable id for a relation's rooted-diagram tab. `panelId` already includes
+     * the relation name, so this never collides with the schema diagram id
+     * (`.../schema::diagram`) nor with the relation's data/structure/definition
+     * tabs.
+     */
+    private relationDiagramPanelId(ref: DbObjectRef): string {
+        return `${this.panelId(ref)}::diagram`;
     }
 
     /**

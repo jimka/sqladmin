@@ -124,6 +124,9 @@ export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
             { text: "Open as query", glyph: "terminal", action: () => controller.openQueryFor(ref) },
             { separator: true },
             { text: "Open structure", glyph: "table-columns", action: () => void controller.openStructure(ref, node) },
+            // The relation-rooted ER diagram: this relation as the root, its FK
+            // neighbours around it (direction/depth controls in the panel).
+            { text: "Show relations", glyph: "diagram-project", action: () => void controller.openRelationDiagram(ref, node) },
         ];
 
         // Only a (materialized) view has a definition; a table has none.

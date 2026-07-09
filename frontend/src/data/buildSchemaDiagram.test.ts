@@ -30,13 +30,45 @@ describe("buildSchemaDiagram", () => {
         ]);
     });
 
-    it("keeps an intra-schema edge", () => {
+    it("keeps an intra-schema edge carrying the FK metadata", () => {
         const data = buildSchemaDiagram(
             ["a", "b"],
             [structure([fk("fk_ab", "b")]), structure()],
         );
 
-        expect(data.edges).toEqual([{ id: "a.fk_ab", source: "a", target: "b" }]);
+        expect(data.edges).toEqual([{
+            id    : "a.fk_ab",
+            source: "a",
+            target: "b",
+            data  : {
+                columns   : ["x_id"],
+                refColumns: ["id"],
+                refSchema : "public",
+                onUpdate  : "NO ACTION",
+                onDelete  : "NO ACTION",
+            },
+        }]);
+    });
+
+    it("carries the FK's local and referenced columns on the edge data", () => {
+        const data = buildSchemaDiagram(
+            ["a", "b"],
+            [
+                structure([{
+                    name: "fk_multi", columns: ["p", "q"], refSchema: "public",
+                    refTable: "b", refColumns: ["r", "s"], onUpdate: "CASCADE", onDelete: "SET NULL",
+                }]),
+                structure(),
+            ],
+        );
+
+        expect(data.edges[0].data).toEqual({
+            columns   : ["p", "q"],
+            refColumns: ["r", "s"],
+            refSchema : "public",
+            onUpdate  : "CASCADE",
+            onDelete  : "SET NULL",
+        });
     });
 
     it("drops a dangling / cross-schema edge", () => {
@@ -48,7 +80,8 @@ describe("buildSchemaDiagram", () => {
     it("keeps a self-referential foreign key", () => {
         const data = buildSchemaDiagram(["a"], [structure([fk("fk_aa", "a")])]);
 
-        expect(data.edges).toEqual([{ id: "a.fk_aa", source: "a", target: "a" }]);
+        expect(data.edges.map(e => ({ id: e.id, source: e.source, target: e.target })))
+            .toEqual([{ id: "a.fk_aa", source: "a", target: "a" }]);
     });
 
     it("returns an empty graph for an empty schema", () => {
