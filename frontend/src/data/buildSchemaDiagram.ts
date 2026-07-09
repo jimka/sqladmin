@@ -32,6 +32,8 @@ export interface FkEdgeData {
     refSchema: string;
     onUpdate: string;
     onDelete: string;
+    /** Set by annotateFkCardinality: FK local columns lack a covering index. */
+    uncovered?: boolean;
 }
 
 /**
