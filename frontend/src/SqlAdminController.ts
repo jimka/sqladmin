@@ -11,6 +11,8 @@ import { table_columns }                                       from "@jimka/type
 import { file_code }                                           from "@jimka/typescript-ui/glyphs/solid/file_code";
 import { key }                                                 from "@jimka/typescript-ui/glyphs/solid/key";
 import { diagram_project }                                     from "@jimka/typescript-ui/glyphs/solid/diagram_project";
+import { file_lines }                                          from "@jimka/typescript-ui/glyphs/solid/file_lines";
+import type { MarkdownEditor }                                 from "@jimka/typescript-ui/component/editor";
 import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef, RoleDetail, RolePrivilege, RoleSummary, TableStructure } from "./contract";
@@ -27,6 +29,7 @@ import { TableWorkPanel }                                      from "./dock/Tabl
 import { ViewWorkPanel }                                       from "./dock/ViewWorkPanel";
 import { StructurePanel }                                      from "./dock/StructurePanel";
 import { DefinitionPanel }                                     from "./dock/DefinitionPanel";
+import { DocumentationPanel }                                  from "./dock/DocumentationPanel";
 import { QueryPanel }                                          from "./dock/QueryPanel";
 import { RoleGrantsPanel }                                     from "./dock/RoleGrantsPanel";
 import { exportRoleGrants }                                     from "./dock/exportRoleGrants";
@@ -40,12 +43,13 @@ import { RolesPropertiesPanel }                                from "./roles/Rol
 import { KIND_GLYPH }                                          from "./navigator/objectGlyphs";
 import { QueryHistoryStore, SavedQueryStore }                  from "./data/queryStore";
 import type { HistoryEntry, SavedQuery }                       from "./data/queryStore";
+import { NotesStore }                                          from "./data/notesStore";
 import { promptQueryName }                                     from "./promptQueryName";
 
 // The non-relation dock-tab glyphs (query / structure / definition / grants /
-// schema diagram). The relation-kind glyphs (table / view / materialized view)
-// come from objectGlyphs via KIND_GLYPH, which registers them.
-Glyph.register(terminal, table_columns, file_code, key, diagram_project);
+// schema diagram / notes). The relation-kind glyphs (table / view / materialized
+// view) come from objectGlyphs via KIND_GLYPH, which registers them.
+Glyph.register(terminal, table_columns, file_code, key, diagram_project, file_lines);
 
 /** A focusable section of the Queries view — the Saved or the Recent list. */
 export type QueriesSection = "saved" | "recent";
@@ -92,6 +96,12 @@ export class SqlAdminController {
     // page, and the panel's Ctrl+↑/↓ recall.
     private readonly _history: QueryHistoryStore;
     private readonly _saved  : SavedQueryStore;
+    private readonly _notes  : NotesStore;
+
+    // The live MarkdownEditor backing the notes tab, held so it can be disposed
+    // by hand on tab close (MarkdownEditor.dispose() is not framework-driven —
+    // see the "close" handler below).
+    private _notesEditor: MarkdownEditor | null = null;
 
     // Recently opened tables (newest-first), surfaced on the start page.
     private readonly _recentTables: RecentTable[] = [];
@@ -150,6 +160,7 @@ export class SqlAdminController {
         // the pure stores keep it injected so their logic tests run DOM-less.
         this._history = new QueryHistoryStore(connectionId, window.localStorage);
         this._saved   = new SavedQueryStore(connectionId, window.localStorage);
+        this._notes   = new NotesStore(connectionId, window.localStorage);
 
         // Disposal is wired once: the dock fires "close" only on genuine
         // destruction (a tear-off fires "detach" and the panel survives). A
@@ -160,6 +171,11 @@ export class SqlAdminController {
             this._activeRoleGrants.delete(e.id);
             this._panelDisposers.get(e.id)?.();
             this._panelDisposers.delete(e.id);
+
+            if (e.id === this.notesPanelId()) {
+                this._notesEditor?.dispose();
+                this._notesEditor = null;
+            }
         });
 
         // Switching tabs syncs the navigator selection and the status bar to the
@@ -327,6 +343,28 @@ export class SqlAdminController {
                 })),
         });
         this.syncToPanel(id);
+    }
+
+    /**
+     * Open (or focus) the singleton documentation/notes tab for this connection:
+     * a WYSIWYG MarkdownEditor seeded from and persisting to the per-connection
+     * notes store. Not registered in `_openPanels` (it carries no `DbObjectRef`),
+     * matching how scratch query panels are handled.
+     */
+    openDocumentation(): void {
+        const id = this.notesPanelId();
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const { component, editor } = DocumentationPanel(
+            this._notes.load(),
+            markdown => this._notes.save(markdown),
+        );
+        this._notesEditor = editor;
+
+        this.dock.addPanel({ id, title: "Notes", glyph: "file-lines", content: component });
     }
 
     /**
@@ -1136,6 +1174,11 @@ export class SqlAdminController {
      */
     private relationDiagramPanelId(ref: DbObjectRef): string {
         return `${this.panelId(ref)}::diagram`;
+    }
+
+    /** Stable id for the singleton per-connection notes/documentation tab. */
+    private notesPanelId(): string {
+        return `notes/${this._connectionId}`;
     }
 
     /**
