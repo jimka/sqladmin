@@ -373,18 +373,31 @@ export class SqlAdminController {
      * reported the error.
      *
      * @param ref - The schema to fetch (database + schema set).
+     * @param opts - `withColumns` also fetches every table's columns and builds
+     *   card-mode nodes (table cards + column-to-column FK ports) — used by the
+     *   relation-rooted diagram; omitted (or false) keeps the flat table-to-table
+     *   graph the schema-wide diagram shows.
      * @returns The full schema graph, or null if the fetch failed.
      */
-    private async buildSchemaGraphData(ref: DbObjectRef): Promise<DiagramData | null> {
+    private async buildSchemaGraphData(ref: DbObjectRef, opts?: { withColumns?: boolean }): Promise<DiagramData | null> {
         try {
             const objects    = await getObjects(ref.connectionId, ref.database!, ref.schema!);
             const tables     = objects.filter(o => o.kind === "table").map(o => o.name);
-            const structures = await Promise.all(tables.map(name =>
-                getStructure({ connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name, kind: "table" })));
-            const columns    = await Promise.all(tables.map(name =>
-                getColumns({ connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name, kind: "table" })));
+            const refFor     = (name: string): DbObjectRef =>
+                ({ connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name, kind: "table" });
 
-            return annotateFkCardinality(buildSchemaDiagram(tables, structures), tables, structures, columns);
+            // Structures and columns fetch concurrently in one Promise.all round.
+            // Columns are always needed for FK cardinality annotation; card mode
+            // additionally reuses the same fetched columns (no second round-trip).
+            const [structures, columns] = await Promise.all([
+                Promise.all(tables.map(name => getStructure(refFor(name)))),
+                Promise.all(tables.map(name => getColumns(refFor(name)))),
+            ]);
+
+            const columnsByTable: Map<string, ColumnMeta[]> | undefined =
+                opts?.withColumns ? new Map(tables.map((name, i) => [name, columns[i]])) : undefined;
+
+            return annotateFkCardinality(buildSchemaDiagram(tables, structures, columnsByTable), tables, structures, columns);
         } catch (err) {
             this.notifyError(err, ref);
 
@@ -412,7 +425,7 @@ export class SqlAdminController {
             return;
         }
 
-        const full = await this.buildSchemaGraphData(ref);
+        const full = await this.buildSchemaGraphData(ref, { withColumns: true });
 
         if (!full) {
             return;
