@@ -3,7 +3,7 @@ import { groupBySchema } from "./groupBySchema";
 import type { DiagramData } from "@jimka/typescript-ui/component/diagram";
 
 describe("groupBySchema", () => {
-    it("wraps a schema's leaves into one container, id schema:<schema>, label = schema", () => {
+    it("wraps a schema's leaves into one container, id schema:<schema>, label = schema, folder glyph", () => {
         const flat: DiagramData = {
             nodes: [
                 { id: "a.users", label: "users", data: { schema: "a", table: "users" } },
@@ -18,6 +18,7 @@ describe("groupBySchema", () => {
             {
                 id: "schema:a",
                 label: "a",
+                glyph: "folder",
                 children: [
                     { id: "a.users", label: "users", data: { schema: "a", table: "users" } },
                     { id: "a.orders", label: "orders", data: { schema: "a", table: "orders" } },

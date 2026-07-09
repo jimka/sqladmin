@@ -7,6 +7,12 @@
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import type { TableNodeData } from "./buildDatabaseDiagram";
 
+// The registered glyph shown before a schema container's name, matching the
+// navigator's KIND_GLYPH.schema. Kept as a literal (not imported from
+// ../navigator/objectGlyphs) for the same DOM-less-vitest purity reason
+// buildDatabaseDiagram's TABLE_GLYPH is; keep in sync with KIND_GLYPH.schema.
+const SCHEMA_GLYPH = "folder";
+
 /**
  * Wrap a flat table graph's leaves into one compound container node per
  * schema, read from each leaf's `node.data.schema`. Edges and `layoutOptions`
@@ -42,6 +48,7 @@ export function groupBySchema(flat: DiagramData): DiagramData {
     const nodes: DiagramNodeData[] = order.map(schema => ({
         id      : `schema:${schema}`,
         label   : schema,
+        glyph   : SCHEMA_GLYPH,
         children: bySchema.get(schema)!,
     }));
 
