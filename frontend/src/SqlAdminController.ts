@@ -20,6 +20,7 @@ import { exportExplainPlan }                                   from "./dock/expo
 import type { ActiveExport }                                   from "./data/explain";
 import { buildModel }                                          from "./data/buildModel";
 import { buildSchemaDiagram }                                  from "./data/buildSchemaDiagram";
+import { annotateFkCardinality }                                from "./data/fkCardinality";
 import { buildSelectSql }                                      from "./data/sql";
 import { buildStore }                                          from "./data/stores";
 import { TableWorkPanel }                                      from "./dock/TableWorkPanel";
@@ -380,8 +381,10 @@ export class SqlAdminController {
             const tables     = objects.filter(o => o.kind === "table").map(o => o.name);
             const structures = await Promise.all(tables.map(name =>
                 getStructure({ connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name, kind: "table" })));
+            const columns    = await Promise.all(tables.map(name =>
+                getColumns({ connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name, kind: "table" })));
 
-            return buildSchemaDiagram(tables, structures);
+            return annotateFkCardinality(buildSchemaDiagram(tables, structures), tables, structures, columns);
         } catch (err) {
             this.notifyError(err, ref);
 

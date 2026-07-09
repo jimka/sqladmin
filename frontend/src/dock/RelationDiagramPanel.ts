@@ -16,6 +16,7 @@ import { DiagramNode, DiagramView } from "@jimka/typescript-ui/component/diagram
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import { rootedDiagram, applyHide } from "../data/relationDiagram";
 import type { TraversalDirection }  from "../data/relationDiagram";
+import { applyCoverageStyle }       from "../data/fkCardinality";
 
 // One hop keeps the first cut readable — the root plus its direct FK neighbours,
 // not the whole transitive closure. The user widens it via the Depth control.
@@ -55,6 +56,7 @@ export function RelationDiagramPanel(
     let direction: TraversalDirection = "both";
     let depth = DEFAULT_DEPTH;
     let prune = false;
+    let showCoverage = false;
     const hidden = new Set<string>();
     let base: DiagramData = rootedDiagram(full, root, direction, depth);
 
@@ -78,9 +80,9 @@ export function RelationDiagramPanel(
     // rebuild them wholesale (the node set changes).
     const legend = Panel({ layoutManager: new VBox({ spacing: 2 }), autoScroll: "auto" });
 
-    /** Push the current base + hide/prune state into the view. */
+    /** Push the current base + hide/prune + coverage-overlay state into the view. */
     const applyFilter = (): void => {
-        view.setData(applyHide(base, root.id, hidden, prune, direction));
+        view.setData(applyCoverageStyle(applyHide(base, root.id, hidden, prune, direction), showCoverage));
     };
 
     /** Rebuild the legend rows from the current base's nodes. */
@@ -121,12 +123,18 @@ export function RelationDiagramPanel(
         listeners: { change: (v: boolean) => { prune = v; applyFilter(); } },
     });
 
+    const coverageControl = Checkbox({
+        value: false,
+        listeners: { change: (v: boolean) => { showCoverage = v; applyFilter(); } },
+    });
+
     const controls = Panel({
         layoutManager: new VBox({ spacing: 4 }),
         components: [
             labelledRow("Direction", directionControl),
             labelledRow("Depth", depthControl),
             new Component({ layoutManager: new HBox({ spacing: 4 }), components: [pruneControl, new Text("Hide with prune")] }),
+            new Component({ layoutManager: new HBox({ spacing: 4 }), components: [coverageControl, new Text("Highlight FKs without a covering index")] }),
         ],
     });
 
