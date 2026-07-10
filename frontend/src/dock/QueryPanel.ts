@@ -575,6 +575,7 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
         // source SQL this path lacks.)
         removeDataTab();
         syncExportToActiveTab();
+        syncChartButton(); // no Data result to chart now (also re-synced by setBusy)
         notify(result.kind === "status" ? result.command || "OK" : "OK");
     }
 
