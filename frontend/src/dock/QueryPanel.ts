@@ -380,7 +380,11 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     // Last tab gone (by user close or programmatic removal): drop the pane —
     // unless a refresh is mid-flight, where the emptied strip is transient (a
     // replacement tab is already queued for the next layout).
-    tab.on("empty", () => { if (!refreshingTabs) hideResultPane(); });
+    tab.on("empty", () => {
+        if (!refreshingTabs) {
+            hideResultPane();
+        }
+    });
 
     /** Reset the panel to its initial state: empty editor, no tabs, no result pane. */
     function clear(): void {
