@@ -102,13 +102,21 @@ child, and emits `"empty"` when drained). Because `closeTab` also emits
 disposes the removed component's live view itself. This keeps disposal
 single-owner and prevents double-dispose.
 
-### Refresh adds the replacement tab(s) before removing the old ones
+### A refresh guards the transient "empty" instead of relying on add order
 
-When a query re-run refreshes Data/Chart, the new tabs are added **before** the old
-ones are closed, so the strip's content count never hits zero mid-refresh, the
-`"empty"` event never fires, the `TabPanel` stays in the Split, and the gutter
-position is preserved. (A status result, which adds nothing, does let the strip
-empty when no Explain tab survives — correctly hiding the pane.)
+When a query re-run refreshes Data/Chart, the new tabs are added before the old
+ones are closed — but `addTab` only lands the new tab in the `Tab` manager's
+content list on the *next scheduled layout* (`Tab.doLayout` reconciles the
+container's children into `_contents`), not synchronously. So the interim removal
+can momentarily drain `_contents` to zero and fire `"empty"` even though a
+replacement is already queued. A `refreshingTabs` flag is raised around the
+add+remove in `showRowsResult`/`showPlan`; while it is up the `"empty"` handler
+skips `hideResultPane`, so a same-panel refresh with no surviving sibling tab
+(re-running a rows query with no Explain tab, or Explain→Explain Analyze with no
+Data/Chart) keeps the pane and its gutter position. A refresh always adds at least
+one tab, so the pane legitimately stays shown. Genuine empties — a status result
+with no Explain survivor, or `clear()` — run with the flag down and correctly hide
+the pane.
 
 ---
 
@@ -580,9 +588,12 @@ by `chartConfig.test.ts`; no new unit tests are added.
 - **`onTabClose` timing.** `getActiveContent()` is stale inside `"tabclose"`
   (emitted before `selectNextContent`). Mitigation: the handler computes export
   from the panel's own slots, never from `getActiveContent()`.
-- **Refresh emptying the strip.** Removing Data/Chart before adding replacements
-  would fire `"empty"`, hide the pane, and lose the gutter. Mitigation: strict
-  add-before-remove ordering in `showRowsResult` / `showPlan`.
+- **Refresh emptying the strip.** A refresh removes the old tabs, but `addTab`
+  only lands the replacement in the `Tab` manager's content list on the next
+  scheduled layout — so the interim removal can transiently drain the strip, fire
+  `"empty"`, hide the pane, and lose the gutter. Mitigation: a `refreshingTabs`
+  flag around the add+remove in `showRowsResult` / `showPlan` makes the `"empty"`
+  handler skip `hideResultPane` during a refresh (which always re-adds a tab).
 - **Double-dispose.** `closeTab` emits `"tabclose"`, which could re-dispose a view
   the caller already disposed. Mitigation: `suppressCloseHandler` around every
   programmatic `closeTab`; `onTabClose` returns early while it is raised.
