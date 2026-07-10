@@ -797,10 +797,23 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     // mounts).
     editor.onFirstLayout(() => editor.focus());
 
-    if (autoExplain && initialSql.trim()) {
-        void runExplainRun(autoExplain === "analyze");
-    } else if (autoRun && initialSql.trim()) {
-        void run();
+    // Defer an auto-run/-explain (Open-as-query "Execute", the view panel's
+    // Explain) to the editor's first layout. The FIRST query tab is created while
+    // the work-dock deck page is still hidden (the start page is showing); firing
+    // the run synchronously here would populate the result pane against an
+    // unmounted, unsized panel and race the deck switch — intermittently leaving
+    // the southern region unseeded (blank) until a Clear + re-run. Waiting for
+    // first layout guarantees a mounted, laid-out panel, matching a second tab
+    // opened into the already-visible dock. onFirstLayout fires once, so this
+    // runs exactly once.
+    if ((autoExplain || autoRun) && initialSql.trim()) {
+        editor.onFirstLayout(() => {
+            if (autoExplain) {
+                void runExplainRun(autoExplain === "analyze");
+            } else {
+                void run();
+            }
+        });
     }
 
     return {
