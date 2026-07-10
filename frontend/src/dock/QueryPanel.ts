@@ -6,19 +6,22 @@
 // three independently-refreshed tabs:
 //
 //   * Data    — the read-only results grid (a query result has no PK and is
-//               never written back). Present for every rows result.
-//   * Chart   — a bar/line chart of the same rows over a config strip; present
-//               only for a chartable result (>=1 row, >=1 numeric column). See
-//               QueryResultGrid / QueryResultChart in QueryResultView.
+//               never written back). Driven by Run; present for every rows result.
+//   * Chart   — a bar/line chart of the current Data rows over a config strip;
+//               opened/refreshed on demand by the Chart toolbar button (enabled
+//               only for a chartable result — >=1 row, >=1 numeric column) and
+//               closeable. See QueryResultGrid / QueryResultChart in
+//               QueryResultView.
 //   * Explain — a read-only, SQL-highlighted CodeEditor holding an EXPLAIN or
 //               EXPLAIN ANALYZE plan; closeable.
 //
-// The tab families persist independently: running a query refreshes Data/Chart
-// and leaves Explain; running explain refreshes/adds Explain and leaves
-// Data/Chart — EXPLAIN no longer destroys the data/chart view. The pane appears
-// with the first tab and vanishes with the last (the Tab "empty" event). A
-// non-row statement (INSERT/UPDATE/DDL) reports its command tag and drops
-// Data/Chart, leaving any Explain tab. Errors funnel to onError.
+// Each tab is owned by its own toolbar action and they persist independently:
+// Run refreshes only Data, the Chart button only Chart, Explain only Explain —
+// EXPLAIN no longer destroys the data view, and a re-run does not disturb an open
+// Chart/Explain tab. The pane appears with the first tab and vanishes with the
+// last (the Tab "empty" event). A non-row statement (INSERT/UPDATE/DDL) reports
+// its command tag and drops only the Data tab, leaving any Chart/Explain tab.
+// Errors funnel to onError.
 //
 // Two toolbar buttons run EXPLAIN and EXPLAIN ANALYZE on the editor's statement.
 // One Explain tab serves both — analyze only adds real timings — and its content
@@ -139,22 +142,19 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
 
     const editor = new CodeEditor(initialSql, { language: "sql" });
 
-    // The result pane is a TabPanel with up to three independently-refreshed
-    // tabs: Data (the grid), Chart (a chartable result's chart), and Explain (a
-    // read-only plan editor). Each slot holds its currently-mounted tab's content
-    // plus the disposer that releases that content's CodeMirror view / chart —
-    // the framework has no cascading dispose. A slot is null when its tab is
-    // absent. Running a query refreshes Data/Chart; running explain refreshes
-    // Explain; neither disturbs the other's tab.
-    let dataSlot:    { content: Component; dispose(): void } | null = null;
-    let chartSlot:   { content: Component; dispose(): void } | null = null;
-    let explainSlot: { editor: CodeEditor } | null = null;
-
-    // The last results stashed so the "activate" handler can rebuild the
-    // ActiveExport for whichever tab the user switches to, without re-running.
-    let lastRowsResult:    QueryRowsResult | null = null;
-    let lastExplainResult: QueryExplainResult | null = null;
-    let lastExplainSql:    string | null = null;
+    // The result pane is a TabPanel with up to three independently-driven tabs,
+    // each owned by its own toolbar action: Data (the grid, from Run), Chart (a
+    // chartable result's chart, from the Chart button), and Explain (a read-only
+    // plan editor, from Explain / Explain Analyze). Each slot holds its
+    // currently-mounted tab's content, the disposer that releases that content's
+    // CodeMirror view / chart (the framework has no cascading dispose), and the
+    // result the tab exports — so switching tabs re-derives the export from the
+    // active slot without a shared stash. A slot is null when its tab is absent.
+    // Run refreshes only Data, the Chart button only Chart, Explain only Explain;
+    // none disturbs another's tab.
+    let dataSlot:    { content: Component; dispose(): void; result: QueryRowsResult } | null = null;
+    let chartSlot:   { content: Component; dispose(): void; result: QueryRowsResult } | null = null;
+    let explainSlot: { editor: CodeEditor; result: QueryExplainResult; sql: string } | null = null;
 
     // Raised around a programmatic closeTab so its "tabclose" emit is ignored by
     // the onTabClose handler (the caller disposes the removed view itself),
@@ -187,6 +187,9 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     const saveButton    = glyphButton("floppy-disk", PRIMARY_COLOR, `Save query (${SAVE_SHORTCUT})`, () => save());
     const clearButton   = glyphButton("eraser", CAUTION_COLOR, `Clear (${CLEAR_SHORTCUT})`, () => clear());
     const formatButton  = glyphButton("wand-magic-sparkles", NEUTRAL_COLOR, "Format SQL", () => void formatSql());
+    // Chart the current Data result on demand (opens/refreshes the closeable
+    // Chart tab). Enabled only while the Data tab holds a chartable result.
+    const chartButton   = glyphButton("chart-simple", PRIMARY_COLOR, "Chart the results", () => showChart());
     // The glyph registers under its hyphenated name ("diagram-project"), even
     // though the ESM export identifier uses an underscore.
     const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, `Explain (${EXPLAIN_SHORTCUT})`,
@@ -207,7 +210,7 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
 
     const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
     panel.addComponent(new ToolBar({
-        components: [runButton, saveButton, clearButton, formatButton, explainButton, analyzeButton, exportButton, Spacer.flex(), olderButton, newerButton],
+        components: [runButton, saveButton, clearButton, formatButton, chartButton, explainButton, analyzeButton, exportButton, Spacer.flex(), olderButton, newerButton],
     }), { placement: Placement.NORTH });
     panel.addComponent(body, { placement: Placement.CENTER });
 
@@ -268,18 +271,25 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     /** Remove a tab programmatically (no onTabClose side-effects); the caller disposes the removed view. */
     function removeTabSilently(content: Component): void {
         suppressCloseHandler = true;
-        tab.closeTab(content);
-        suppressCloseHandler = false;
+
+        try {
+            tab.closeTab(content);
+        } finally {
+            suppressCloseHandler = false;
+        }
     }
 
-    /** Remove and dispose the Data and Chart tabs (if present). */
-    function removeDataChartTabs(): void {
+    /** Remove and dispose the Data tab (if present). */
+    function removeDataTab(): void {
         if (dataSlot) {
             removeTabSilently(dataSlot.content);
             dataSlot.dispose();
             dataSlot = null;
         }
+    }
 
+    /** Remove and dispose the Chart tab (if present). */
+    function removeChartTab(): void {
         if (chartSlot) {
             removeTabSilently(chartSlot.content);
             chartSlot.dispose();
@@ -332,49 +342,46 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
         syncToolbarButtons();
     }
 
-    /** Recompute the exportable result from whichever tab is active now. */
+    /** Recompute the exportable result from whichever tab is active now (from its own slot). */
     function syncExportToActiveTab(): void {
         const active = tab.getActiveContent();
 
         if (explainSlot && active === explainSlot.editor) {
-            setActiveExport({ kind: "plan", plan: { result: lastExplainResult!, sql: lastExplainSql!, runExplain } });
-        } else if ((dataSlot && active === dataSlot.content) || (chartSlot && active === chartSlot.content)) {
-            setActiveExport({ kind: "rows", result: lastRowsResult! });
+            setActiveExport({ kind: "plan", plan: { result: explainSlot.result, sql: explainSlot.sql, runExplain } });
+        } else if (dataSlot && active === dataSlot.content) {
+            setActiveExport({ kind: "rows", result: dataSlot.result });
+        } else if (chartSlot && active === chartSlot.content) {
+            setActiveExport({ kind: "rows", result: chartSlot.result });
         } else {
             setActiveExport(null);
         }
     }
 
-    // Export follows the active tab on user switches and programmatic selection.
-    // (A fresh tab add auto-selects visually without emitting "activate"; the
-    // explicit setActiveContent after each refresh is what drives this.)
-    tab.on("activate", (content: Component) => {
-        if (explainSlot && content === explainSlot.editor) {
-            setActiveExport({ kind: "plan", plan: { result: lastExplainResult!, sql: lastExplainSql!, runExplain } });
-        } else {
-            setActiveExport({ kind: "rows", result: lastRowsResult! });
-        }
-    });
+    // Export follows the active tab on user switches and on the programmatic
+    // setActiveContent each refresh performs. (A fresh tab add auto-selects
+    // visually without emitting "activate", so the explicit setActiveContent
+    // drives this.)
+    tab.on("activate", () => syncExportToActiveTab());
 
-    // The user closed the (only closeable) Explain tab: dispose its editor and
-    // recompute export from the surviving slots. "activate" does NOT fire on the
-    // silent post-close reselection, and getActiveContent() is momentarily stale
-    // inside "tabclose" (emitted before the reselection), so read from the slots.
+    // The user closed a closeable tab (Chart or Explain — Data is not closeable):
+    // dispose its view. "activate" does NOT fire on the silent post-close
+    // reselection, and getActiveContent() is momentarily stale inside "tabclose"
+    // (emitted before the reselection), so defer the export recompute to a
+    // microtask, by when the surviving tab is selected.
     tab.on("tabclose", (content: Component) => {
         if (suppressCloseHandler) {
             return;
         }
 
-        if (explainSlot && content === explainSlot.editor) {
+        if (chartSlot && content === chartSlot.content) {
+            chartSlot.dispose();
+            chartSlot = null;
+        } else if (explainSlot && content === explainSlot.editor) {
             explainSlot.editor.dispose();
             explainSlot = null;
         }
 
-        if (dataSlot || chartSlot) {
-            setActiveExport({ kind: "rows", result: lastRowsResult! });
-        } else {
-            setActiveExport(null);
-        }
+        queueMicrotask(syncExportToActiveTab);
     });
 
     // Last tab gone (by user close or programmatic removal): drop the pane —
@@ -389,9 +396,11 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     /** Reset the panel to its initial state: empty editor, no tabs, no result pane. */
     function clear(): void {
         editor.setValue("");
-        removeDataChartTabs();
+        removeDataTab();
+        removeChartTab();
         removeExplainTab(); // the last removal empties the strip → "empty" → hideResultPane
         setActiveExport(null);
+        syncChartButton();
     }
 
     /**
@@ -430,6 +439,11 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
         saveButton.setEnabled(onSave !== undefined && hasSql);
     }
 
+    /** Enable the Chart button only while the Data tab holds a chartable result. */
+    function syncChartButton(): void {
+        chartButton.setEnabled(dataSlot !== null && isChartable(dataSlot.result));
+    }
+
     // Monotonic guard: a slow run whose result arrives after a newer run started
     // is discarded so it can't clobber the newer one (mirrors showProperties's
     // _propsSeq). Run and Explain share the counter so a slow explain can't clobber
@@ -437,11 +451,19 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     // in flight.
     let runSeq = 0;
 
-    /** Disable (or re-enable) the run/explain action buttons around an in-flight run. */
+    /** Disable (or re-enable) the run/explain/chart action buttons around an in-flight run. */
     function setBusy(busy: boolean): void {
         runButton.setEnabled(!busy);
         explainButton.setEnabled(!busy);
         analyzeButton.setEnabled(!busy);
+
+        // Chart builds client-side from the current Data result; keep it off during
+        // a run and restore it from the (possibly refreshed) Data result after.
+        if (busy) {
+            chartButton.setEnabled(false);
+        } else {
+            syncChartButton();
+        }
     }
 
     // The per-panel history-navigation cursor for Ctrl+↑/↓. Built lazily from a
@@ -545,55 +567,79 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
             return;
         }
 
-        // No result set (INSERT/UPDATE/DDL): drop Data/Chart but LEAVE any Explain
-        // tab. If Explain survives it becomes the export source; if nothing is
-        // left the "empty" event has hidden the pane and export becomes null.
-        // (An explain result never reaches here — runExplainRun routes it to
-        // showPlan directly, which needs the source SQL this path lacks.)
-        removeDataChartTabs();
-        lastRowsResult = null;
+        // No result set (INSERT/UPDATE/DDL): drop only the Data tab, LEAVE any
+        // Chart/Explain tab (each owned by its own action). If a tab survives it
+        // becomes the export source; if nothing is left the "empty" event has
+        // hidden the pane and export becomes null. (An explain result never reaches
+        // here — runExplainRun routes it to showPlan directly, which needs the
+        // source SQL this path lacks.)
+        removeDataTab();
         syncExportToActiveTab();
         notify(result.kind === "status" ? result.command || "OK" : "OK");
     }
 
     /**
-     * Show a rows result as a Data tab (always) plus, when chartable, a Chart tab.
-     * The library's Table virtual-scrolls its rows, so the whole result set renders
-     * regardless of size — no client display cap; the backend bounds the fetch and
-     * flags truncation (surfaced by the caller's status message). Refreshes replace
-     * any prior Data/Chart tabs but leave an Explain tab untouched.
+     * Show a rows result in the Data tab. The library's Table virtual-scrolls its
+     * rows, so the whole result set renders regardless of size — no client display
+     * cap; the backend bounds the fetch and flags truncation (surfaced by the
+     * caller's status message). Run refreshes only the Data tab and leaves any
+     * Chart/Explain tab untouched; the Chart button (re)builds the Chart tab
+     * separately from the current Data result.
      *
      * @param result - The rows result to render.
      */
     function showRowsResult(result: QueryRowsResult): void {
-        const nextData  = QueryResultGrid(result);
-        const nextChart = isChartable(result) ? QueryResultChart(result) : null;
+        const nextData = QueryResultGrid(result);
 
         ensureResultPaneShown();
 
-        // Add the replacements, then remove the old tabs, under refreshingTabs so
-        // the interim strip-drain (the new tabs only enter the content list on the
-        // next layout) can't hide the pane. This keeps the pane in the Split and
+        // Add the replacement, then remove the old tab, under refreshingTabs so the
+        // interim strip-drain (the new tab only enters the content list on the next
+        // layout) can't hide the pane. This keeps the pane in the Split and
         // preserves the gutter position across a refresh.
         refreshingTabs = true;
 
         try {
             resultHost.addTab(nextData.content, "Data", { glyph: "table" });
-
-            if (nextChart) {
-                resultHost.addTab(nextChart.content, "Chart", { glyph: "chart-simple" });
-            }
-
-            removeDataChartTabs();
+            removeDataTab();
         } finally {
             refreshingTabs = false;
         }
 
-        dataSlot       = nextData;
-        chartSlot      = nextChart;
-        lastRowsResult = result;
+        dataSlot = { content: nextData.content, dispose: nextData.dispose, result };
 
         tab.setActiveContent(nextData.content);
+        setActiveExport({ kind: "rows", result });
+    }
+
+    /**
+     * Build (or refresh) the Chart tab from the current Data result and select it.
+     * Driven only by the Chart toolbar button — the button is enabled only while
+     * the Data tab holds a chartable result, so this charts exactly what the Data
+     * tab currently shows. Closeable; leaves the Data/Explain tabs untouched.
+     */
+    function showChart(): void {
+        if (!dataSlot || !isChartable(dataSlot.result)) {
+            return; // defensive — the button is disabled otherwise
+        }
+
+        const result = dataSlot.result;
+        const nextChart = QueryResultChart(result);
+
+        ensureResultPaneShown();
+
+        refreshingTabs = true;
+
+        try {
+            resultHost.addTab(nextChart.content, "Chart", { closeable: true, glyph: "chart-simple" });
+            removeChartTab();
+        } finally {
+            refreshingTabs = false;
+        }
+
+        chartSlot = { content: nextChart.content, dispose: nextChart.dispose, result };
+
+        tab.setActiveContent(nextChart.content);
         setActiveExport({ kind: "rows", result });
     }
 
@@ -635,9 +681,7 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
             refreshingTabs = false;
         }
 
-        explainSlot       = { editor };
-        lastExplainResult = result;
-        lastExplainSql    = sql;
+        explainSlot = { editor, result, sql };
 
         tab.setActiveContent(editor);
         setActiveExport({ kind: "plan", plan: { result, sql, runExplain } });
@@ -741,8 +785,9 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     editor.on("change", () => syncToolbarButtons());
 
     // Initial state: Run/Save/Clear disabled for an empty panel (enabled when
-    // seeded); Export disabled until a rows result is shown.
+    // seeded); Chart/Export disabled until a rows result is shown.
     syncToolbarButtons();
+    chartButton.setEnabled(false);
     exportButton.setEnabled(false);
 
     // Focus the editor so the user can type on a fresh tab straight away. The
