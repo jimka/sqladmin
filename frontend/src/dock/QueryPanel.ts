@@ -1,35 +1,50 @@
-// A Dock work panel for arbitrary SQL: a multi-line editor over a result grid.
-// The editor runs on the Run toolbar button or Ctrl/Cmd+Enter. Until a query is
-// executed, the editor fills the panel and no result grid is shown. A rows
-// result adds a resizable result pane below the editor (a draggable Split
-// gutter), seeded so the editor starts ~150px tall; the result is read-only (a
-// query result has no PK and is never written back). A non-row statement
-// (INSERT/UPDATE/DDL) reports its command tag on the status line and removes the
-// result pane (editor back to full height). Errors funnel to onError.
+// A Dock work panel for arbitrary SQL: a multi-line editor over a tabbed result
+// pane. The editor runs on the Run toolbar button or Ctrl/Cmd+Enter. Until a
+// query is executed, the editor fills the panel and no result pane is shown. A
+// result adds a resizable pane below the editor (a draggable Split gutter),
+// seeded so the editor starts ~150px tall; the pane is a TabPanel holding up to
+// three independently-refreshed tabs:
 //
-// Two more toolbar buttons run EXPLAIN and EXPLAIN ANALYZE on the editor's
-// statement: the plan comes back through the same result pane as a read-only,
-// SQL-highlighted CodeEditor. Explain Analyze executes the statement (the
-// backend rolls it back), so the frontend blocks it for a statement that does
-// not look read-only — plain Explain is always safe.
+//   * Data    — the read-only results grid (a query result has no PK and is
+//               never written back). Driven by Run; present for every rows result.
+//   * Chart   — a bar/line chart of the current Data rows over a config strip;
+//               opened/refreshed on demand by the Chart toolbar button (enabled
+//               only for a chartable result — >=1 row, >=1 numeric column) and
+//               closeable. See QueryResultGrid / QueryResultChart in
+//               QueryResultView.
+//   * Explain — a read-only, SQL-highlighted CodeEditor holding an EXPLAIN or
+//               EXPLAIN ANALYZE plan; closeable.
+//
+// Each tab is owned by its own toolbar action and they persist independently:
+// Run refreshes only Data, the Chart button only Chart, Explain only Explain —
+// EXPLAIN no longer destroys the data view, and a re-run does not disturb an open
+// Chart/Explain tab. The pane appears with the first tab and vanishes with the
+// last (the Tab "empty" event). A non-row statement (INSERT/UPDATE/DDL) reports
+// its command tag and drops only the Data tab, leaving any Chart/Explain tab.
+// Errors funnel to onError.
+//
+// Two toolbar buttons run EXPLAIN and EXPLAIN ANALYZE on the editor's statement.
+// One Explain tab serves both — analyze only adds real timings — and its content
+// is replaced per run. Explain Analyze executes the statement (the backend rolls
+// it back), so the frontend blocks it for a statement that does not look
+// read-only — plain Explain is always safe.
 //
 // Built as a callable factory mirroring TableWorkPanel/StructurePanel. The
-// panel's Component subtree (and its MemoryStore) is dropped when the dock
-// tab closes, but neither CodeEditor here (the main editor and, transiently,
-// the plan view) is torn down by that alone — the framework has no cascading
-// dispose. The factory returns a `dispose` alongside its content precisely so
-// the controller can release both editors' CodeMirror views and ThemeManager
-// subscriptions explicitly; see SqlAdminController's `_panelDisposers`.
+// panel's Component subtree is dropped when the dock tab closes, but the live
+// tab views (each Data grid store, a Chart's chart instance, the Explain plan
+// CodeEditor) and the main editor are not torn down by that alone — the
+// framework has no cascading dispose. The factory returns a `dispose` alongside
+// its content precisely so the controller can release each live tab view's and
+// the main editor's CodeMirror views / chart / ThemeManager subscriptions
+// explicitly; see SqlAdminController's `_panelDisposers`.
 
-import { Component, Container, Panel, Event }        from "@jimka/typescript-ui/core";
+import { Component, Container, Event } from "@jimka/typescript-ui/core";
 import { Placement }                     from "@jimka/typescript-ui/primitive";
-import { Border as BorderLayout, Fit, Split } from "@jimka/typescript-ui/layout";
+import { Border as BorderLayout, Split } from "@jimka/typescript-ui/layout";
 import { ToolBar }                       from "@jimka/typescript-ui/component/menubar";
-import { Spacer }                        from "@jimka/typescript-ui/component/container";
+import { Spacer, TabPanel }              from "@jimka/typescript-ui/component/container";
 import { glyphButton }                   from "./glyphButton";
-import { Table }                         from "@jimka/typescript-ui/component/table";
 import { CodeEditor }                    from "@jimka/typescript-ui/component/editor";
-import { MemoryStore }                   from "@jimka/typescript-ui/data";
 import { Menu }                          from "@jimka/typescript-ui/overlay";
 import { Glyph }                         from "@jimka/typescript-ui/component/display";
 import { play }                          from "@jimka/typescript-ui/glyphs/solid/play";
@@ -44,7 +59,10 @@ import { file_lines }                    from "@jimka/typescript-ui/glyphs/solid
 import { diagram_project }               from "@jimka/typescript-ui/glyphs/solid/diagram_project";
 import { flask }                         from "@jimka/typescript-ui/glyphs/solid/flask";
 import { wand_magic_sparkles }           from "@jimka/typescript-ui/glyphs/solid/wand_magic_sparkles";
-import { buildQueryModel }               from "../data/buildModel";
+import { table }                         from "@jimka/typescript-ui/glyphs/solid/table";
+import { chart_simple }                  from "@jimka/typescript-ui/glyphs/solid/chart_simple";
+import { QueryResultGrid, QueryResultChart } from "./QueryResultView";
+import { isChartable }                   from "../data/chartConfig";
 import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
 import { exportQueryResult }             from "./exportQueryResult";
@@ -56,10 +74,10 @@ import {
     RUN_SHORTCUT, SAVE_SHORTCUT, CLEAR_SHORTCUT, EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT,
     OLDER_QUERY_SHORTCUT, NEWER_QUERY_SHORTCUT,
 } from "../shell/queryShortcuts";
-import type { QueryExplainResult, QueryResult } from "../contract";
+import type { QueryExplainResult, QueryResult, QueryRowsResult } from "../contract";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, CAUTION_COLOR, HISTORY_COLOR, NEUTRAL_COLOR } from "../theme";
 
-Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask, wand_magic_sparkles);
+Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask, wand_magic_sparkles, table, chart_simple);
 
 // The editor's starting height once the result pane is shown below it; the Split
 // gutter lets the user resize from there.
@@ -124,19 +142,35 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
 
     const editor = new CodeEditor(initialSql, { language: "sql" });
 
-    // The read-only plan editor shown in the result pane after an EXPLAIN run.
-    // Each run replaces it with a fresh CodeEditor (its own view + theme
-    // subscription), so the previous one must be disposed before it is dropped —
-    // see disposePlanView.
-    let planView: CodeEditor | null = null;
+    // The result pane is a TabPanel with up to three independently-driven tabs,
+    // each owned by its own toolbar action: Data (the grid, from Run), Chart (a
+    // chartable result's chart, from the Chart button), and Explain (a read-only
+    // plan editor, from Explain / Explain Analyze). Each slot holds its
+    // currently-mounted tab's content, the disposer that releases that content's
+    // CodeMirror view / chart (the framework has no cascading dispose), and the
+    // result the tab exports — so switching tabs re-derives the export from the
+    // active slot without a shared stash. A slot is null when its tab is absent.
+    // Run refreshes only Data, the Chart button only Chart, Explain only Explain;
+    // none disturbs another's tab.
+    let dataSlot:    { content: Component; dispose(): void; result: QueryRowsResult } | null = null;
+    let chartSlot:   { content: Component; dispose(): void; result: QueryRowsResult } | null = null;
+    let explainSlot: { editor: CodeEditor; result: QueryExplainResult; sql: string } | null = null;
 
-    /** Dispose the current read-only plan editor (if any) before it is replaced or torn down. */
-    function disposePlanView(): void {
-        planView?.dispose();
-        planView = null;
-    }
+    // Raised around a programmatic closeTab so its "tabclose" emit is ignored by
+    // the onTabClose handler (the caller disposes the removed view itself),
+    // keeping disposal single-owner and preventing double-dispose.
+    let suppressCloseHandler = false;
 
-    const resultHost = Panel({ layoutManager: new Fit() });
+    // Raised around a tab refresh (add the replacement tab(s), then remove the old
+    // ones). A newly-added tab only lands in the Tab manager's content list on the
+    // next scheduled layout, so the interim removal can momentarily drain the strip
+    // to zero and fire "empty" even though a replacement is already queued — the
+    // guard keeps that transient empty from hiding the pane. A refresh always adds
+    // at least one tab, so the pane legitimately stays shown throughout.
+    let refreshingTabs = false;
+
+    const resultHost = TabPanel({});
+    const tab        = resultHost.getTab();
 
     // The body is a vertical Split: the editor alone (filling) until a query
     // runs, then editor over the result pane with a draggable gutter between.
@@ -153,6 +187,9 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     const saveButton    = glyphButton("floppy-disk", PRIMARY_COLOR, `Save query (${SAVE_SHORTCUT})`, () => save());
     const clearButton   = glyphButton("eraser", CAUTION_COLOR, `Clear (${CLEAR_SHORTCUT})`, () => clear());
     const formatButton  = glyphButton("wand-magic-sparkles", NEUTRAL_COLOR, "Format SQL", () => void formatSql());
+    // Chart the current Data result on demand (opens/refreshes the closeable
+    // Chart tab). Enabled only while the Data tab holds a chartable result.
+    const chartButton   = glyphButton("chart-simple", PRIMARY_COLOR, "Chart the results", () => showChart());
     // The glyph registers under its hyphenated name ("diagram-project"), even
     // though the ESM export identifier uses an underscore.
     const explainButton = glyphButton("diagram-project", NEUTRAL_COLOR, `Explain (${EXPLAIN_SHORTCUT})`,
@@ -173,7 +210,7 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
 
     const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
     panel.addComponent(new ToolBar({
-        components: [runButton, saveButton, clearButton, formatButton, explainButton, analyzeButton, exportButton, Spacer.flex(), olderButton, newerButton],
+        components: [runButton, saveButton, clearButton, formatButton, chartButton, explainButton, analyzeButton, exportButton, Spacer.flex(), olderButton, newerButton],
     }), { placement: Placement.NORTH });
     panel.addComponent(body, { placement: Placement.CENTER });
 
@@ -219,12 +256,8 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
         exportMenu.show(event.clientX, event.clientY, items);
     }
 
-    /** Swap in the result grid, adding (and sizing) the result pane on first use. */
-    function showResultPane(table: Component): void {
-        disposePlanView();
-        resultHost.removeAllComponents();
-        resultHost.addComponent(table);
-
+    /** Add the pane to the Split and seed the editor height once per hidden→shown transition. */
+    function ensureResultPaneShown(): void {
         if (!resultShown) {
             body.addComponent(resultHost);
             resultShown = true;
@@ -233,6 +266,44 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
 
         body.doLayout();
         syncToolbarButtons();
+    }
+
+    /** Remove a tab programmatically (no onTabClose side-effects); the caller disposes the removed view. */
+    function removeTabSilently(content: Component): void {
+        suppressCloseHandler = true;
+
+        try {
+            tab.closeTab(content);
+        } finally {
+            suppressCloseHandler = false;
+        }
+    }
+
+    /** Remove and dispose the Data tab (if present). */
+    function removeDataTab(): void {
+        if (dataSlot) {
+            removeTabSilently(dataSlot.content);
+            dataSlot.dispose();
+            dataSlot = null;
+        }
+    }
+
+    /** Remove and dispose the Chart tab (if present). */
+    function removeChartTab(): void {
+        if (chartSlot) {
+            removeTabSilently(chartSlot.content);
+            chartSlot.dispose();
+            chartSlot = null;
+        }
+    }
+
+    /** Remove and dispose the Explain tab (if present). */
+    function removeExplainTab(): void {
+        if (explainSlot) {
+            removeTabSilently(explainSlot.editor);
+            explainSlot.editor.dispose();
+            explainSlot = null;
+        }
     }
 
     // Split the body so the editor starts at EDITOR_HEIGHT and the grid gets the
@@ -260,10 +331,8 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
         }
     }
 
-    /** Drop the result pane so the editor fills the panel again. */
+    /** Drop the result pane so the editor fills the panel again. Wired to the Tab "empty" event. */
     function hideResultPane(): void {
-        disposePlanView();
-
         if (resultShown) {
             body.removeComponent(resultHost);
             resultShown = false;
@@ -273,11 +342,65 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
         syncToolbarButtons();
     }
 
-    /** Reset the panel to its initial state: empty editor, no result pane. */
+    /** Recompute the exportable result from whichever tab is active now (from its own slot). */
+    function syncExportToActiveTab(): void {
+        const active = tab.getActiveContent();
+
+        if (explainSlot && active === explainSlot.editor) {
+            setActiveExport({ kind: "plan", plan: { result: explainSlot.result, sql: explainSlot.sql, runExplain } });
+        } else if (dataSlot && active === dataSlot.content) {
+            setActiveExport({ kind: "rows", result: dataSlot.result });
+        } else if (chartSlot && active === chartSlot.content) {
+            setActiveExport({ kind: "rows", result: chartSlot.result });
+        } else {
+            setActiveExport(null);
+        }
+    }
+
+    // Export follows the active tab on user switches and on the programmatic
+    // setActiveContent each refresh performs. (A fresh tab add auto-selects
+    // visually without emitting "activate", so the explicit setActiveContent
+    // drives this.)
+    tab.on("activate", () => syncExportToActiveTab());
+
+    // The user closed a closeable tab (Chart or Explain — Data is not closeable):
+    // dispose its view. "activate" does NOT fire on the silent post-close
+    // reselection, and getActiveContent() is momentarily stale inside "tabclose"
+    // (emitted before the reselection), so defer the export recompute to a
+    // microtask, by when the surviving tab is selected.
+    tab.on("tabclose", (content: Component) => {
+        if (suppressCloseHandler) {
+            return;
+        }
+
+        if (chartSlot && content === chartSlot.content) {
+            chartSlot.dispose();
+            chartSlot = null;
+        } else if (explainSlot && content === explainSlot.editor) {
+            explainSlot.editor.dispose();
+            explainSlot = null;
+        }
+
+        queueMicrotask(syncExportToActiveTab);
+    });
+
+    // Last tab gone (by user close or programmatic removal): drop the pane —
+    // unless a refresh is mid-flight, where the emptied strip is transient (a
+    // replacement tab is already queued for the next layout).
+    tab.on("empty", () => {
+        if (!refreshingTabs) {
+            hideResultPane();
+        }
+    });
+
+    /** Reset the panel to its initial state: empty editor, no tabs, no result pane. */
     function clear(): void {
         editor.setValue("");
-        hideResultPane();
+        removeDataTab();
+        removeChartTab();
+        removeExplainTab(); // the last removal empties the strip → "empty" → hideResultPane
         setActiveExport(null);
+        syncChartButton();
     }
 
     /**
@@ -316,6 +439,11 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
         saveButton.setEnabled(onSave !== undefined && hasSql);
     }
 
+    /** Enable the Chart button only while the Data tab holds a chartable result. */
+    function syncChartButton(): void {
+        chartButton.setEnabled(dataSlot !== null && isChartable(dataSlot.result));
+    }
+
     // Monotonic guard: a slow run whose result arrives after a newer run started
     // is discarded so it can't clobber the newer one (mirrors showProperties's
     // _propsSeq). Run and Explain share the counter so a slow explain can't clobber
@@ -323,11 +451,19 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     // in flight.
     let runSeq = 0;
 
-    /** Disable (or re-enable) the run/explain action buttons around an in-flight run. */
+    /** Disable (or re-enable) the run/explain/chart action buttons around an in-flight run. */
     function setBusy(busy: boolean): void {
         runButton.setEnabled(!busy);
         explainButton.setEnabled(!busy);
         analyzeButton.setEnabled(!busy);
+
+        // Chart builds client-side from the current Data result; keep it off during
+        // a run and restore it from the (possibly refreshed) Data result after.
+        if (busy) {
+            chartButton.setEnabled(false);
+        } else {
+            syncChartButton();
+        }
     }
 
     // The per-panel history-navigation cursor for Ctrl+↑/↓. Built lazily from a
@@ -423,20 +559,7 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
 
     function showResult(result: QueryResult): void {
         if (result.kind === "rows") {
-            // The library's Table virtual-scrolls its rows, so the whole result set
-            // renders regardless of size — no client display cap. The backend bounds
-            // the fetch (an unbounded SELECT never floods the client) and flags a
-            // truncated result, surfaced in the status message below.
-            const store = new MemoryStore({
-                model   : buildQueryModel(result.columns),
-                data    : result.rows,
-                autoLoad: true,
-            });
-
-            // Read-only: editing a query result is a Non-Goal (no PK, no write-back).
-            // A fresh store + columns per run means columns never bleed across runs.
-            showResultPane(Table(store, { columns: [], rowReadOnly: () => true }));
-            setActiveExport({ kind: "rows", result });
+            showRowsResult(result);
             notify(result.truncated
                 ? `showing first ${result.rowCount} rows — result truncated`
                 : `${result.rowCount} row(s)`);
@@ -444,12 +567,81 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
             return;
         }
 
-        // No result set (INSERT/UPDATE/DDL): drop the grid, editor fills again.
-        // (An explain result never reaches here — runExplainRun routes it to
-        // showPlan directly, which needs the source SQL this path lacks.)
-        hideResultPane();
-        setActiveExport(null);
+        // No result set (INSERT/UPDATE/DDL): drop only the Data tab, LEAVE any
+        // Chart/Explain tab (each owned by its own action). If a tab survives it
+        // becomes the export source; if nothing is left the "empty" event has
+        // hidden the pane and export becomes null. (An explain result never reaches
+        // here — runExplainRun routes it to showPlan directly, which needs the
+        // source SQL this path lacks.)
+        removeDataTab();
+        syncExportToActiveTab();
+        syncChartButton(); // no Data result to chart now (also re-synced by setBusy)
         notify(result.kind === "status" ? result.command || "OK" : "OK");
+    }
+
+    /**
+     * Show a rows result in the Data tab. The library's Table virtual-scrolls its
+     * rows, so the whole result set renders regardless of size — no client display
+     * cap; the backend bounds the fetch and flags truncation (surfaced by the
+     * caller's status message). Run refreshes only the Data tab and leaves any
+     * Chart/Explain tab untouched; the Chart button (re)builds the Chart tab
+     * separately from the current Data result.
+     *
+     * @param result - The rows result to render.
+     */
+    function showRowsResult(result: QueryRowsResult): void {
+        const nextData = QueryResultGrid(result);
+
+        ensureResultPaneShown();
+
+        // Add the replacement, then remove the old tab, under refreshingTabs so the
+        // interim strip-drain (the new tab only enters the content list on the next
+        // layout) can't hide the pane. This keeps the pane in the Split and
+        // preserves the gutter position across a refresh.
+        refreshingTabs = true;
+
+        try {
+            resultHost.addTab(nextData.content, "Data", { glyph: "table" });
+            removeDataTab();
+        } finally {
+            refreshingTabs = false;
+        }
+
+        dataSlot = { content: nextData.content, dispose: nextData.dispose, result };
+
+        tab.setActiveContent(nextData.content);
+        setActiveExport({ kind: "rows", result });
+    }
+
+    /**
+     * Build (or refresh) the Chart tab from the current Data result and select it.
+     * Driven only by the Chart toolbar button — the button is enabled only while
+     * the Data tab holds a chartable result, so this charts exactly what the Data
+     * tab currently shows. Closeable; leaves the Data/Explain tabs untouched.
+     */
+    function showChart(): void {
+        if (!dataSlot || !isChartable(dataSlot.result)) {
+            return; // defensive — the button is disabled otherwise
+        }
+
+        const result = dataSlot.result;
+        const nextChart = QueryResultChart(result);
+
+        ensureResultPaneShown();
+
+        refreshingTabs = true;
+
+        try {
+            resultHost.addTab(nextChart.content, "Chart", { closeable: true, glyph: "chart-simple" });
+            removeChartTab();
+        } finally {
+            refreshingTabs = false;
+        }
+
+        chartSlot = { content: nextChart.content, dispose: nextChart.dispose, result };
+
+        tab.setActiveContent(nextChart.content);
+        setActiveExport({ kind: "rows", result });
     }
 
     /**
@@ -469,15 +661,30 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
      *     re-request it as a FORMAT JSON plan tree.
      */
     function showPlan(result: QueryExplainResult, sql: string): void {
-        // Reuse the same result pane/gutter as a rows Table — just different
-        // content: a read-only, SQL-highlighted CodeEditor seeded with the joined
-        // plan text. Read-only (not disabled) keeps the plan selectable and
-        // copyable while blocking edits (CodeEditor flashes its own overlay).
-        const view = new CodeEditor(result.plan, { language: "sql", readOnly: true });
+        // A read-only, SQL-highlighted CodeEditor seeded with the joined plan text.
+        // Read-only (not disabled) keeps the plan selectable and copyable while
+        // blocking edits (CodeEditor flashes its own overlay). One Explain tab is
+        // reused for both EXPLAIN and EXPLAIN ANALYZE — each run replaces its
+        // content; the analyze-vs-plain distinction lives in the status text only.
+        const editor = new CodeEditor(result.plan, { language: "sql", readOnly: true });
 
-        showResultPane(view);
-        // Set after showResultPane, which disposes the prior planView first.
-        planView = view;
+        ensureResultPaneShown();
+
+        // Add the new plan tab, then remove the old one, under refreshingTabs so
+        // the interim strip-drain (when Explain was the only tab) can't hide the
+        // pane before the replacement lands on the next layout.
+        refreshingTabs = true;
+
+        try {
+            resultHost.addTab(editor, "Explain", { closeable: true, glyph: "diagram-project" });
+            removeExplainTab();
+        } finally {
+            refreshingTabs = false;
+        }
+
+        explainSlot = { editor, result, sql };
+
+        tab.setActiveContent(editor);
         setActiveExport({ kind: "plan", plan: { result, sql, runExplain } });
         notify(result.analyze ? "EXPLAIN ANALYZE plan (side-effects rolled back)" : "EXPLAIN plan");
     }
@@ -579,8 +786,9 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     editor.on("change", () => syncToolbarButtons());
 
     // Initial state: Run/Save/Clear disabled for an empty panel (enabled when
-    // seeded); Export disabled until a rows result is shown.
+    // seeded); Chart/Export disabled until a rows result is shown.
     syncToolbarButtons();
+    chartButton.setEnabled(false);
     exportButton.setEnabled(false);
 
     // Focus the editor so the user can type on a fresh tab straight away. The
@@ -590,16 +798,32 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     // mounts).
     editor.onFirstLayout(() => editor.focus());
 
-    if (autoExplain && initialSql.trim()) {
-        void runExplainRun(autoExplain === "analyze");
-    } else if (autoRun && initialSql.trim()) {
-        void run();
+    // Defer an auto-run/-explain (Open-as-query "Execute", the view panel's
+    // Explain) to the editor's first layout. The FIRST query tab is created while
+    // the work-dock deck page is still hidden (the start page is showing); firing
+    // the run synchronously here would populate the result pane against an
+    // unmounted, unsized panel and race the deck switch — intermittently leaving
+    // the southern region unseeded (blank) until a Clear + re-run. Waiting for
+    // first layout guarantees a mounted, laid-out panel, matching a second tab
+    // opened into the already-visible dock. onFirstLayout fires once, so this
+    // runs exactly once.
+    if ((autoExplain || autoRun) && initialSql.trim()) {
+        editor.onFirstLayout(() => {
+            if (autoExplain) {
+                void runExplainRun(autoExplain === "analyze");
+            } else {
+                void run();
+            }
+        });
     }
 
     return {
         content: panel,
+        // Dispose the live tab views directly — no tab churn on a dying panel.
         dispose: () => {
-            disposePlanView();
+            dataSlot?.dispose();
+            chartSlot?.dispose();
+            explainSlot?.editor.dispose();
             editor.dispose();
         },
     };
