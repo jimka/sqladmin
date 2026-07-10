@@ -4,6 +4,7 @@
 
 import type {
     ColumnMeta,
+    ConnectionPreset,
     DbObjectKind,
     DbObjectRef,
     QueryExplainResult,
@@ -15,6 +16,49 @@ import type {
     TableStructure,
 } from "../contract";
 import type { ExplainOptions } from "./explain";
+
+// The CSRF synchronizer token for the authenticated session. Set from the
+// login/whoami response, held only in memory, and echoed as an `X-CSRF-Token`
+// header on mutating requests. `null` until authenticated.
+let _csrfToken: string | null = null;
+
+/** Store (or clear, with `null`) the session's CSRF token after login/whoami. */
+export function setCsrfToken(token: string | null): void {
+    _csrfToken = token;
+}
+
+/**
+ * The CSRF header to merge into a mutating request — `{ "X-CSRF-Token": token }`
+ * when authenticated, else `{}` (never a null-valued key, so an unauthenticated
+ * request's headers stay exactly what the caller set).
+ */
+export function csrfHeader(): Record<string, string> {
+    return _csrfToken ? { "X-CSRF-Token": _csrfToken } : {};
+}
+
+/** Credentials a login submits (password used once, never stored by us). */
+export interface LoginDetails {
+    host: string;
+    port: number;
+    database: string;
+    username: string;
+    password: string;
+    connectionId?: string;
+}
+
+/** The authenticated session's public fields (no password). */
+export interface Session {
+    connectionId: string;
+    csrfToken: string;
+    username: string;
+    database: string;
+}
+
+/** The pre-auth app config that populates the login screen. */
+export interface AppConfig {
+    presets: ConnectionPreset[]; // admin-defined server presets
+    allowUserPresets: boolean;   // gates the user's own localStorage presets
+}
 
 /** Pull the backend's `{detail}` error message off a non-OK response. */
 async function readDetail(response: Response): Promise<string> {
@@ -46,7 +90,7 @@ async function getJson<T>(url: string): Promise<T> {
 async function postJson<T>(url: string, body: unknown): Promise<T> {
     const response = await fetch(url, {
         method : "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeader() },
         body   : JSON.stringify(body),
     });
 
@@ -55,6 +99,36 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     }
 
     return (await response.json()) as T;
+}
+
+/** Authenticate against the target database; resolves the session on success. */
+export function login(details: LoginDetails): Promise<Session> {
+    return postJson<Session>("/api/login", details);
+}
+
+/** Drop the server-side session and clear the cookie (does not parse the 204). */
+export async function logout(): Promise<void> {
+    await fetch("/api/logout", { method: "POST" });
+}
+
+/** Recover the current session on load, or `null` when unauthenticated (401). */
+export async function whoami(): Promise<Session | null> {
+    const response = await fetch("/api/whoami");
+
+    if (response.status === 401) {
+        return null;
+    }
+
+    if (!response.ok) {
+        throw new Error(await readDetail(response));
+    }
+
+    return (await response.json()) as Session;
+}
+
+/** The pre-auth app config (server presets + allowUserPresets), for the login screen. */
+export function getConfig(): Promise<AppConfig> {
+    return getJson<AppConfig>("/api/config");
 }
 
 /** The navigator's database level. */

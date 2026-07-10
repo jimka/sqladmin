@@ -51,6 +51,7 @@ import {
     isHelpChord,
 } from "./queryShortcuts";
 import { openAboutDialog }         from "./aboutDialog";
+import { logout }                  from "../data/api";
 import { openShortcutsDialog }     from "./shortcutsDialog";
 import { openLocalStorageWindow }  from "./localStorageWindow";
 import type { SqlAdminController } from "../SqlAdminController";
@@ -102,6 +103,7 @@ export function SqlAdminShell(controller: SqlAdminController): Container {
                     onShowLocalStorage : () => openLocalStorageWindow(),
                     onShowShortcuts    : () => openShortcutsDialog(),
                     onAbout            : () => openAboutDialog(),
+                    onLogout           : () => { void logout().then(() => window.location.reload()); },
                     onShowDatabases    : () => sidebar.selectView(DATABASE_VIEW_ID),
                     onShowRoles        : () => sidebar.selectView(ROLES_VIEW_ID),
                     onShowQueries      : () => sidebar.selectView(QUERIES_VIEW_ID),
@@ -299,6 +301,8 @@ interface MenuBarActions {
     onShowShortcuts: () => void;
     /** Opens the About dialog (the far-right menu-bar button). */
     onAbout: () => void;
+    /** Signs out: drops the server-side session and reloads to the login dialog. */
+    onLogout: () => void;
     /** Selects the Databases rail (View → Databases, and the Alt+D accelerator). */
     onShowDatabases: () => void;
     /** Selects the Roles rail (View → Roles, and the Alt+O accelerator). */
@@ -380,9 +384,13 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
     const about = Button({ glyph: "circle-info", text: "About", showText: true, showDescription: false, compact: true, flat: true });
     about.on("action", actions.onAbout);
 
+    const signOut = Button({ glyph: "right-from-bracket", text: "Sign out", showText: true, showDescription: false, compact: true, flat: true });
+    signOut.on("action", actions.onLogout);
+
     menuBar.addComponent(Spacer.flex());
     menuBar.addComponent(shortcuts);
     menuBar.addComponent(about);
+    menuBar.addComponent(signOut);
 
     return menuBar;
 }

@@ -169,3 +169,16 @@ export interface RelationEdge {
     source: RelationNodeRef;
     target: RelationNodeRef;
 }
+
+/**
+ * A named connection target picked at login. Carries host/port/database ONLY —
+ * never a username or password (credentials are per-login, handled by the
+ * browser's own password manager). Shared by server presets (from the pre-auth
+ * `/api/config`) and the user's own localStorage presets.
+ */
+export interface ConnectionPreset {
+    name: string;
+    host: string;
+    port: number;
+    database: string;
+}
