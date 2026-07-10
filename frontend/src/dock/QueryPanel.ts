@@ -321,14 +321,19 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
                 split.setPaneSize(editor, EDITOR_HEIGHT);
                 split.setPaneSize(resultHost, full - EDITOR_HEIGHT);
                 body.doLayout();
+            } else {
+                // The body has laid out but isn't at its real height yet — it can
+                // be momentarily 0/tiny mid start-page→dock deck switch, when
+                // getInnerSize() is already truthy. Seeding here would no-op and,
+                // with nothing rescheduling it, leave the editor (weight 0) filling
+                // the panel and the result pane unseeded (blank south) until a Clear
+                // + re-run. Retry on the next layout so the seed lands once the body
+                // reaches full height.
+                body.onFirstLayout(apply);
             }
         };
 
-        if (body.getInnerSize()) {
-            apply();
-        } else {
-            body.onFirstLayout(apply);
-        }
+        apply();
     }
 
     /** Drop the result pane so the editor fills the panel again. Wired to the Tab "empty" event. */
