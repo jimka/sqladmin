@@ -87,4 +87,22 @@ describe("PresetStore", () => {
 
         expect(await new PresetStore().list()).toEqual([]);
     });
+
+    it("save() recovers from a corrupt blob by discarding it and creating", async () => {
+        localStorage.setItem(KEY, "{not valid json");
+
+        const store = new PresetStore();
+        await store.save(preset("Fresh")); // must not throw
+
+        expect((await store.list()).map(p => p.name)).toEqual(["Fresh"]);
+    });
+
+    it("remove() does not throw on a corrupt blob", async () => {
+        localStorage.setItem(KEY, "{not valid json");
+
+        const store = new PresetStore();
+        await store.remove("anything"); // must not throw
+
+        expect(await store.list()).toEqual([]);
+    });
 });

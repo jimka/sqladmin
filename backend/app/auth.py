@@ -11,6 +11,7 @@ mutating requests.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 
@@ -182,12 +183,12 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
     except (
         asyncpg.InvalidAuthorizationSpecificationError,
         asyncpg.InvalidPasswordError,
-    ):
-        raise Unauthorized("Invalid credentials")
-    except asyncpg.InvalidCatalogNameError:
-        raise Unauthorized("Cannot open target database")
-    except (OSError, ConnectionError, asyncpg.CannotConnectNowError):
-        raise Unauthorized("Cannot reach database")
+    ) as err:
+        raise Unauthorized("Invalid credentials") from err
+    except asyncpg.InvalidCatalogNameError as err:
+        raise Unauthorized("Cannot open target database") from err
+    except (OSError, ConnectionError, asyncpg.CannotConnectNowError, asyncio.TimeoutError) as err:
+        raise Unauthorized("Cannot reach database") from err
 
     response.set_cookie(
         SESSION_COOKIE_NAME,

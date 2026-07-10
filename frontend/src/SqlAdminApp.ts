@@ -12,8 +12,9 @@ import { whoami, setCsrfToken } from "./data/api";
 import { showLoginDialog }    from "./shell/loginDialog";
 
 // An async IIFE (not top-level await) so the boot gate works regardless of the
-// bundler's module target.
-void (async function main(): Promise<void> {
+// bundler's module target. A boot failure (e.g. whoami rejecting for a network
+// reason, not a 401) is surfaced rather than swallowed silently.
+(async function main(): Promise<void> {
     const session = (await whoami()) ?? (await showLoginDialog());
 
     setCsrfToken(session.csrfToken);
@@ -24,4 +25,6 @@ void (async function main(): Promise<void> {
         layoutManager: Fit(),
         components:    [SqlAdminShell(controller)],
     });
-})();
+})().catch((err) => {
+    console.error("SQLAdmin failed to start:", err);
+});

@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 from typing import AsyncIterator
 
 import asyncpg
@@ -69,11 +70,17 @@ _DEFAULT_PAGE_SIZE = 100
 
 async def _sweep_loop() -> None:
     """
-    Periodically evict idle sessions until cancelled (owned by the lifespan).
+    Periodically evict idle sessions until cancelled (owned by the lifespan). A
+    sweep error is logged and swallowed so one bad pass never kills the loop and
+    silently disables idle eviction for the rest of the process.
     """
     while True:
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
-        await sweep_idle_sessions()
+
+        try:
+            await sweep_idle_sessions()
+        except Exception:
+            logging.getLogger(__name__).exception("Idle-session sweep failed")
 
 
 @contextlib.asynccontextmanager

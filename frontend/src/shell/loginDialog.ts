@@ -1,16 +1,20 @@
-// The login / connection dialog: a non-dismissable modal that authenticates the
-// user against the target Postgres server. Its content is a real semantic
+// The login / connection dialog: a modal that authenticates the user against the
+// target Postgres server. The credential inputs live inside a real semantic
 // `<form>` (the `{ tag: "form" }` Component option) so the browser's password
-// manager recognises the credentials; the credential inputs are the library's
-// UsernameField / PasswordField, which already carry the right autocomplete/name
-// attributes. Login is driven off the form's native `submit` event (Enter or the
-// in-form Sign in button), NOT the Dialog's footer buttons (which render outside
-// the form and would not fire a submit the password manager hooks).
+// manager recognises them; the inputs are the library's UsernameField /
+// PasswordField, which carry the right autocomplete/name attributes. Login is
+// driven off the form's native `submit` event (Enter or the in-form Sign in
+// button), NOT the Dialog's footer buttons.
 //
-// A preset picker fills host/port/database from a saved target. Presets carry
-// host/port/database ONLY — username/password stay per-login fields. Server
-// presets come from the pre-auth `/api/config`; the user's own presets live in
-// localStorage and are shown/editable only when the backend allows them.
+// The preset picker and the Save/Delete-preset buttons live OUTSIDE the `<form>`
+// on purpose: a library `Button` (and the picker's own controls) render as
+// `<button>` with no explicit type, which inside a form would default to
+// `type="submit"` and fire a spurious login on every click. Keeping them outside
+// the form avoids that.
+//
+// Presets carry host/port/database ONLY — username/password stay per-login
+// fields. Server presets come from the pre-auth `/api/config`; the user's own
+// presets live in web storage and are shown/editable only when the backend allows.
 
 import { Event, Panel }              from "@jimka/typescript-ui/core";
 import { Dialog }                    from "@jimka/typescript-ui/overlay";
@@ -43,9 +47,11 @@ function entryLabel(entry: PresetEntry): string {
 }
 
 /**
- * Show the login dialog and resolve once the user authenticates. Never rejects:
- * a failed login is shown inline and the dialog stays open until a login
- * succeeds (the shell is gated behind this).
+ * Show the login dialog and resolve once the user authenticates. Effectively
+ * non-dismissable: the library Dialog always renders a title-bar close button,
+ * so if the user closes it without logging in we simply reopen it — the shell is
+ * gated behind this and must never appear unauthenticated. A failed login is
+ * shown inline and keeps the dialog open.
  */
 export async function showLoginDialog(): Promise<Session> {
     const config: AppConfig = await getConfig().catch(
@@ -53,34 +59,50 @@ export async function showLoginDialog(): Promise<Session> {
     );
     const store = new PresetStore();
 
-    return new Promise<Session>((resolve) => {
+    for (;;) {
+        const session = await openOnce(config, store);
+
+        if (session) {
+            return session;
+        }
+        // Closed without authenticating — reopen.
+    }
+}
+
+/** One presentation of the dialog; resolves to the session, or null if closed. */
+function openOnce(config: AppConfig, store: PresetStore): Promise<Session | null> {
+    return new Promise<Session | null>((resolve) => {
         let entries: PresetEntry[] = [];
+        let authenticated: Session | null = null;
 
-        // --- fields (credential inputs carry autocomplete/name from the lib) ---
-        const picker       = new ComboBox({ items: [NO_PRESET] });
-        const hostField    = new TextField({ text: "localhost", placeholder: "Host" });
-        const portField    = new TextField({ text: "5432", placeholder: "Port" });
-        const dbField      = new TextField({ placeholder: "Database" });
-        const userField    = new UsernameField();
-        const passField    = new PasswordField();
-        const errorText    = new Text("");
+        // --- credential form (only inputs + the submit button go in the form) ---
+        const hostField = new TextField({ text: "localhost", placeholder: "Host" });
+        const portField = new TextField({ text: "5432", placeholder: "Port" });
+        const dbField   = new TextField({ placeholder: "Database" });
+        const userField = new UsernameField();
+        const passField = new PasswordField();
+        const errorText = new Text("");
 
-        // The submit control MUST live inside the form: a <button> with no
-        // explicit type defaults to type="submit", so Enter and a click both
-        // fire the form's native submit.
+        // A <button> with no explicit type defaults to type="submit" inside a
+        // form, so Enter and a click both fire the form's native submit.
         const signInButton = new Panel({ tag: "button" });
         signInButton.addComponent(new Text("Sign in"));
 
-        // --- the semantic form container ---
         const form = new Panel({ tag: "form", layoutManager: new VBox() });
-        form.addComponent(picker);
         form.addComponent(hostField);
         form.addComponent(portField);
         form.addComponent(dbField);
         form.addComponent(userField);
         form.addComponent(passField);
+        form.addComponent(errorText);
+        form.addComponent(signInButton);
 
-        // Preset management is shown only when the backend permits user presets.
+        // --- the preset picker + management live OUTSIDE the form ---
+        const picker  = new ComboBox({ items: [NO_PRESET] });
+        const content = new Panel({ layoutManager: new VBox() });
+        content.addComponent(picker);
+        content.addComponent(form);
+
         if (config.allowUserPresets) {
             const saveButton   = new Button({ text: "Save preset", showText: true, compact: true, flat: true });
             const deleteButton = new Button({ text: "Delete preset", showText: true, compact: true, flat: true });
@@ -91,15 +113,12 @@ export async function showLoginDialog(): Promise<Session> {
             const presetBar = new Panel({ layoutManager: new VBox() });
             presetBar.addComponent(saveButton);
             presetBar.addComponent(deleteButton);
-            form.addComponent(presetBar);
+            content.addComponent(presetBar);
         }
-
-        form.addComponent(errorText);
-        form.addComponent(signInButton);
 
         const dialog = Dialog({
             title:            "Connect to database",
-            contentComponent: form,
+            contentComponent: content,
             buttons:          [],       // no footer button — submit lives in the form
             closeOnBackdrop:  false,
             width:            DIALOG_WIDTH,
@@ -123,7 +142,10 @@ export async function showLoginDialog(): Promise<Session> {
         });
 
         void refreshPicker();
-        void dialog.show();
+
+        // Dialog.show() resolves when the dialog is hidden — either by a
+        // successful login (attemptLogin calls hide) or the title-bar close.
+        dialog.show().then(() => resolve(authenticated));
 
         // --- helpers -----------------------------------------------------
 
@@ -142,7 +164,7 @@ export async function showLoginDialog(): Promise<Session> {
             errorText.setText("");
 
             try {
-                const session = await login({
+                authenticated = await login({
                     host:     hostField.getValue().trim(),
                     port:     Number(portField.getValue().trim()),
                     database: dbField.getValue().trim(),
@@ -150,8 +172,7 @@ export async function showLoginDialog(): Promise<Session> {
                     password: passField.getValue(),
                 });
 
-                dialog.hide("close");
-                resolve(session);
+                dialog.hide("close"); // resolves dialog.show() -> resolve(authenticated)
             } catch (err) {
                 errorText.setText(err instanceof Error ? err.message : String(err));
             }
