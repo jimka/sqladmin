@@ -161,6 +161,14 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
     // keeping disposal single-owner and preventing double-dispose.
     let suppressCloseHandler = false;
 
+    // Raised around a tab refresh (add the replacement tab(s), then remove the old
+    // ones). A newly-added tab only lands in the Tab manager's content list on the
+    // next scheduled layout, so the interim removal can momentarily drain the strip
+    // to zero and fire "empty" even though a replacement is already queued — the
+    // guard keeps that transient empty from hiding the pane. A refresh always adds
+    // at least one tab, so the pane legitimately stays shown throughout.
+    let refreshingTabs = false;
+
     const resultHost = TabPanel({});
     const tab        = resultHost.getTab();
 
@@ -369,8 +377,10 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
         }
     });
 
-    // Last tab gone (by user close or programmatic removal): drop the pane.
-    tab.on("empty", () => hideResultPane());
+    // Last tab gone (by user close or programmatic removal): drop the pane —
+    // unless a refresh is mid-flight, where the emptied strip is transient (a
+    // replacement tab is already queued for the next layout).
+    tab.on("empty", () => { if (!refreshingTabs) hideResultPane(); });
 
     /** Reset the panel to its initial state: empty editor, no tabs, no result pane. */
     function clear(): void {
@@ -557,16 +567,24 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
 
         ensureResultPaneShown();
 
-        // Add the replacements BEFORE removing the old tabs so the strip never
-        // empties mid-refresh — that keeps the pane in the Split and preserves the
-        // gutter position (an emptied strip would fire "empty" and hide the pane).
-        resultHost.addTab(nextData.content, "Data", { glyph: "table" });
+        // Add the replacements, then remove the old tabs, under refreshingTabs so
+        // the interim strip-drain (the new tabs only enter the content list on the
+        // next layout) can't hide the pane. This keeps the pane in the Split and
+        // preserves the gutter position across a refresh.
+        refreshingTabs = true;
 
-        if (nextChart) {
-            resultHost.addTab(nextChart.content, "Chart", { glyph: "chart-simple" });
+        try {
+            resultHost.addTab(nextData.content, "Data", { glyph: "table" });
+
+            if (nextChart) {
+                resultHost.addTab(nextChart.content, "Chart", { glyph: "chart-simple" });
+            }
+
+            removeDataChartTabs();
+        } finally {
+            refreshingTabs = false;
         }
 
-        removeDataChartTabs();
         dataSlot       = nextData;
         chartSlot      = nextChart;
         lastRowsResult = result;
@@ -601,10 +619,18 @@ export function QueryPanel(options: QueryPanelOptions): { content: Container; di
 
         ensureResultPaneShown();
 
-        // Add-before-remove: keeps the strip non-empty when Explain was the only
-        // tab, so the pane stays in the Split and the gutter position is preserved.
-        resultHost.addTab(editor, "Explain", { closeable: true, glyph: "diagram-project" });
-        removeExplainTab();
+        // Add the new plan tab, then remove the old one, under refreshingTabs so
+        // the interim strip-drain (when Explain was the only tab) can't hide the
+        // pane before the replacement lands on the next layout.
+        refreshingTabs = true;
+
+        try {
+            resultHost.addTab(editor, "Explain", { closeable: true, glyph: "diagram-project" });
+            removeExplainTab();
+        } finally {
+            refreshingTabs = false;
+        }
+
         explainSlot       = { editor };
         lastExplainResult = result;
         lastExplainSql    = sql;
