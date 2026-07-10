@@ -108,17 +108,20 @@ export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
         // below (a database is neither).
         if (ref && ref.kind === "database") {
             contextMenu.show(event.clientX, event.clientY, [
-                { text: "Open database diagram", glyph: "diagram-project", action: () => void controller.openDatabaseDiagram(ref, node) },
+                { text: "Show database diagram", glyph: "diagram-project", action: () => void controller.openDatabaseDiagram(ref, node) },
             ]);
 
             return;
         }
 
-        // A schema node offers a single item: open its whole-schema ER diagram.
-        // Checked before the relation guard below (a schema is not a relation).
+        // A schema node offers its whole-schema ER diagram plus the dependency
+        // and inheritance graphs. Checked before the relation guard below (a
+        // schema is not a relation).
         if (ref && ref.kind === "schema") {
             contextMenu.show(event.clientX, event.clientY, [
-                { text: "Open schema diagram", glyph: "diagram-project", action: () => void controller.openSchemaDiagram(ref, node) },
+                { text: "Show schema diagram", glyph: "diagram-project", action: () => void controller.openSchemaDiagram(ref, node) },
+                { text: "Show dependency graph", glyph: "diagram-project", action: () => void controller.openSchemaDependencyGraph(ref, node) },
+                { text: "Show inheritance graph", glyph: "diagram-project", action: () => void controller.openSchemaInheritanceGraph(ref, node) },
             ]);
 
             return;
@@ -129,20 +132,35 @@ export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
         }
 
         const items: MenuItemConfig[] = [
-            // "Show data" mirrors the double-click: open (or focus) the relation's
-            // data tab and load it. The glyphs match the tabs each item opens.
-            { text: "Show data", glyph: "table", action: () => void controller.openTable(ref, node) },
+            // Mirrors the double-click: open (or focus) the relation's data tab and
+            // load it. A table's grid is editable (writes back), so it reads "Open
+            // data"; a view/matview grid is read-only, so it reads "Show data". The
+            // glyphs match the tabs each item opens.
+            { text: ref.kind === "table" ? "Open data" : "Show data", glyph: "table", action: () => void controller.openTable(ref, node) },
             { text: "Open as query", glyph: "terminal", action: () => controller.openQueryFor(ref) },
             { separator: true },
-            { text: "Open structure", glyph: "table-columns", action: () => void controller.openStructure(ref, node) },
-            // The relation-rooted ER diagram: this relation as the root, its FK
-            // neighbours around it (direction/depth controls in the panel).
-            { text: "Show relations", glyph: "diagram-project", action: () => void controller.openRelationDiagram(ref, node) },
+            { text: "Show structure", glyph: "table-columns", action: () => void controller.openStructure(ref, node) },
+            // The relation-rooted ER diagram is table-only: PostgreSQL foreign keys
+            // are table-only, so a view/matview root has no FK edges and would render
+            // as a lone, edgeless node. Views/matviews are covered by "Show
+            // dependencies" below instead.
+            ...(ref.kind === "table"
+                ? [{ text: "Show relations", glyph: "diagram-project", action: () => void controller.openRelationDiagram(ref, node) } as MenuItemConfig]
+                : []),
+            // The relation-rooted dependency graph: this relation's connected
+            // dependency component (any relation kind can depend or be depended on).
+            { text: "Show dependencies", glyph: "diagram-project", action: () => void controller.openRelationDependencyGraph(ref, node) },
         ];
 
         // Only a (materialized) view has a definition; a table has none.
         if (ref.kind === "view" || ref.kind === "materializedView") {
-            items.push({ text: "Open definition", glyph: "file-code", action: () => void controller.openDefinition(ref, node) });
+            items.push({ text: "Show definition", glyph: "file-code", action: () => void controller.openDefinition(ref, node) });
+        }
+
+        // Only a table participates in inheritance/partitioning (pg_inherits is
+        // table-only); views/matviews don't offer this item.
+        if (ref.kind === "table") {
+            items.push({ text: "Show inheritance", glyph: "diagram-project", action: () => void controller.openRelationInheritanceGraph(ref, node) });
         }
 
         // Export streams the full relation server-side (not the loaded page), so a
