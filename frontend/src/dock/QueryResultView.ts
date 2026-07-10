@@ -17,8 +17,9 @@
 
 import { Component, Container, Panel }           from "@jimka/typescript-ui/core";
 import { Placement }                             from "@jimka/typescript-ui/primitive";
-import { Border as BorderLayout, Fit }           from "@jimka/typescript-ui/layout";
+import { Border as BorderLayout, Fit, HBox }     from "@jimka/typescript-ui/layout";
 import { ToolBar }                               from "@jimka/typescript-ui/component/menubar";
+import { Spacer }                                from "@jimka/typescript-ui/component/container";
 import { Text, ComboBox }                        from "@jimka/typescript-ui/component/input";
 import { ToggleButton }                          from "@jimka/typescript-ui/component/button";
 import { Table }                                 from "@jimka/typescript-ui/component/table";
@@ -37,6 +38,10 @@ import type { QueryRowsResult } from "../contract";
 // The line/bar type toggles inside the chart strip. The grid/chart glyphs that
 // label the Data/Chart tabs are registered by QueryPanel, which owns the tabs.
 Glyph.register(chart_line, chart_column);
+
+// Horizontal gap (px) separating the x-axis pair from the y-axis pair in the
+// chart config strip, so "x: [..]" and "y: [..]" read as two distinct groups.
+const AXIS_GROUP_GAP = 12;
 
 /**
  * Build the results grid for a rows result.
@@ -106,9 +111,21 @@ export function QueryResultChart(result: QueryRowsResult): { content: Component;
             rebuildChart();
         }
 
-        return new ToolBar({
-            components: [new Text("x:"), xCombo, new Text("y:"), yCombo, lineToggle, barToggle],
+        const toolbar = new ToolBar({
+            components: [
+                new Text("x:"), xCombo,
+                new Spacer(AXIS_GROUP_GAP), new Text("y:"), yCombo,
+                Spacer.flex(), // push the type selector to the far right
+                lineToggle, barToggle,
+            ],
         });
+
+        // ToolBar stretches its children to the full bar height, which disables
+        // HBox baseline alignment; turn it off so the "x:"/"y:" labels sit on the
+        // same text baseline as the combo boxes (the icon toggles stay centered).
+        (toolbar.getLayoutManager() as HBox).setStretching(false);
+
+        return toolbar;
     }
 
     /**
