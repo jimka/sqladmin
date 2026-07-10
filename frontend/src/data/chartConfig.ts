@@ -3,7 +3,8 @@
 // seriesFromStore / ChartPoint), so a usable x is a numeric column, a datetime
 // column (plotted on a time axis), or the synthetic Row-# ordinal — never a
 // string/boolean/json column, which would coerce to NaN. Pure and
-// fully unit-testable; the live view (QueryResultView.ts) is the only caller.
+// fully unit-testable; consumed by QueryPanel (isChartable, to decide whether to
+// add a Chart tab) and QueryResultChart (the rest, to build the chart).
 
 import type { ChartSeries }                     from "@jimka/typescript-ui/component/chart";
 import type { QueryColumnMeta, QueryRowsResult } from "../contract";

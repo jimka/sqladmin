@@ -1,13 +1,19 @@
-// Render a rows query result: a read-only results grid, plus — for a
-// chartable result (>=1 row, >=1 numeric column) — a config strip toggling
-// between the grid and a bar/line chart built from the same rows. A
-// non-chartable result (no numeric column, or zero rows) renders just the
-// grid, identical to today's behaviour, with no strip and a no-op dispose.
+// Render a rows query result as two independent tab bodies, hosted by
+// QueryPanel's result TabPanel:
+//
+//   * QueryResultGrid — the read-only results grid. Built for every rows
+//     result. Its MemoryStore needs no teardown, so dispose is a no-op.
+//   * QueryResultChart — a bar/line chart of the same rows over a config strip
+//     (x/y column combos + a line/bar type toggle). Built only for a chartable
+//     result (>=1 row, >=1 numeric column); the caller (QueryPanel) guards on
+//     isChartable before calling. dispose releases the live chart instance.
 //
 // The chart is built in-memory from `buildChartSeries` (see chartConfig.ts)
-// rather than store-bound: a re-run always rebuilds this whole view (the
-// result set is static), and store binding cannot express a datetime x-axis
-// or an ordinal row-index x (see the plan's Architecture Decisions).
+// rather than store-bound: a re-run always rebuilds the whole view (the result
+// set is static), and store binding cannot express a datetime x-axis or an
+// ordinal row-index x (see chartConfig's Architecture Decisions). The grid and
+// chart are separate tabs, not a toggled single view, so the user can keep the
+// grid while charting; the tab strip owns the grid<->chart switch.
 
 import { Component, Container, Panel }           from "@jimka/typescript-ui/core";
 import { Placement }                             from "@jimka/typescript-ui/primitive";
@@ -19,63 +25,62 @@ import { Table }                                 from "@jimka/typescript-ui/comp
 import { MemoryStore }                           from "@jimka/typescript-ui/data";
 import { Glyph }                                 from "@jimka/typescript-ui/component/display";
 import { LineChart, BarChart }                   from "@jimka/typescript-ui/component/chart";
-import { table }                                 from "@jimka/typescript-ui/glyphs/solid/table";
-import { chart_simple }                          from "@jimka/typescript-ui/glyphs/solid/chart_simple";
 import { chart_line }                            from "@jimka/typescript-ui/glyphs/solid/chart_line";
 import { chart_column }                          from "@jimka/typescript-ui/glyphs/solid/chart_column";
 import { buildQueryModel }                       from "../data/buildModel";
 import {
-    isChartable, defaultChartConfig, xCandidates, numericColumns, isTimeX, buildChartSeries,
+    defaultChartConfig, xCandidates, numericColumns, isTimeX, buildChartSeries,
 } from "../data/chartConfig";
 import type { ChartConfig } from "../data/chartConfig";
 import type { QueryRowsResult } from "../contract";
 
-Glyph.register(table, chart_simple, chart_line, chart_column);
+// The line/bar type toggles inside the chart strip. The grid/chart glyphs that
+// label the Data/Chart tabs are registered by QueryPanel, which owns the tabs.
+Glyph.register(chart_line, chart_column);
 
 /**
- * Build the rows-result view.
+ * Build the results grid for a rows result.
  *
  * @param result - The rows result to render (read-only: a query result has no
  *     PK and is never written back).
- * @returns The view content plus a disposer that releases the chart (if one
- *     was built). A no-op for a non-chartable result, which never builds one.
+ * @returns The grid plus a no-op disposer — the MemoryStore needs no teardown.
  */
-export function QueryResultView(result: QueryRowsResult): { content: Component; dispose: () => void } {
+export function QueryResultGrid(result: QueryRowsResult): { content: Component; dispose: () => void } {
     // A fresh store + columns per run means columns never bleed across runs.
     const store = new MemoryStore({ model: buildQueryModel(result.columns), data: result.rows, autoLoad: true });
     const grid  = Table(store, { columns: [], rowReadOnly: () => true });
 
-    if (!isChartable(result)) {
-        return { content: grid, dispose: () => {} };
-    }
+    return { content: grid, dispose: () => {} };
+}
 
+/**
+ * Build the chart tab for a CHARTABLE rows result: a config strip (x/y column
+ * combos over a line/bar type toggle) above the chart. The caller must
+ * guarantee `isChartable(result)`.
+ *
+ * @param result - The chartable rows result to chart.
+ * @returns The strip-over-chart content plus a disposer releasing the live
+ *     chart instance.
+ */
+export function QueryResultChart(result: QueryRowsResult): { content: Component; dispose: () => void } {
     const { columns, rows } = result;
 
     let config: ChartConfig = defaultChartConfig(columns);
-    let chart: LineChart | BarChart | null = null;
-    let showingChart = false;
 
     const viewHost = Panel({ layoutManager: new Fit() });
 
-    viewHost.addComponent(grid);
+    // Build the chart eagerly — the chart is the tab's only view (there is no
+    // grid toggle here), so it is always the visible component.
+    let chart: LineChart | BarChart = buildChart();
 
-    const strip = buildStrip();
+    viewHost.addComponent(chart);
 
     const content = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
-    content.addComponent(strip.toolbar, { placement: Placement.NORTH });
+    content.addComponent(buildStrip(), { placement: Placement.NORTH });
     content.addComponent(viewHost, { placement: Placement.CENTER });
 
-    /** Build the config strip: view toggle, x/y combos, and chart-type toggle. */
-    function buildStrip(): {
-        toolbar: ToolBar;
-        setChartControlsEnabled: (enabled: boolean) => void;
-    } {
-        const gridToggle  = new ToggleButton("", { selected: true, glyph: "table" });
-        const chartToggle = new ToggleButton("", { selected: false, glyph: "chart-simple" });
-
-        gridToggle.on("action", () => selectView(false));
-        chartToggle.on("action", () => selectView(true));
-
+    /** Build the config strip: x/y column combos and the line/bar type toggle. */
+    function buildStrip(): ToolBar {
         const xCombo = new ComboBox({
             items: xCandidates(columns).map(c => ({ key: c.field, label: c.label })),
             value: config.xField,
@@ -93,32 +98,7 @@ export function QueryResultView(result: QueryRowsResult): { content: Component; 
         lineToggle.on("action", () => selectType("line"));
         barToggle.on("action", () => selectType("bar"));
 
-        const setChartControlsEnabled = (enabled: boolean): void => {
-            xCombo.setEnabled(enabled);
-            yCombo.setEnabled(enabled);
-            lineToggle.setEnabled(enabled);
-            barToggle.setEnabled(enabled);
-        };
-
-        setChartControlsEnabled(false);
-
-        const toolbar = new ToolBar({
-            components: [
-                gridToggle, chartToggle,
-                new Text("x:"), xCombo, new Text("y:"), yCombo,
-                lineToggle, barToggle,
-            ],
-        });
-
-        /** Flip the grid/chart toggle pair and swap the visible view. */
-        function selectView(toChart: boolean): void {
-            gridToggle.setSelected(!toChart);
-            chartToggle.setSelected(toChart);
-            setChartControlsEnabled(toChart);
-            toChart ? showChart() : showGrid();
-        }
-
-        /** Flip the line/bar toggle pair and rebuild the (currently visible) chart. */
+        /** Flip the line/bar toggle pair and rebuild the chart. */
         function selectType(kind: ChartConfig["kind"]): void {
             lineToggle.setSelected(kind === "line");
             barToggle.setSelected(kind === "bar");
@@ -126,42 +106,22 @@ export function QueryResultView(result: QueryRowsResult): { content: Component; 
             rebuildChart();
         }
 
-        return { toolbar, setChartControlsEnabled };
-    }
-
-    /** Swap the view host to the grid. The chart (if built) is left alive, not disposed. */
-    function showGrid(): void {
-        showingChart = false;
-        viewHost.removeAllComponents();
-        viewHost.addComponent(grid);
-        viewHost.doLayout();
-    }
-
-    /** Swap the view host to the chart, building it lazily on first use. */
-    function showChart(): void {
-        showingChart = true;
-        chart ??= buildChart();
-        viewHost.removeAllComponents();
-        viewHost.addComponent(chart);
-        viewHost.doLayout();
+        return new ToolBar({
+            components: [new Text("x:"), xCombo, new Text("y:"), yCombo, lineToggle, barToggle],
+        });
     }
 
     /**
      * Rebuild the chart from the current config (a config change always needs a
-     * fresh instance: line vs. bar are different classes). Swaps the view host
-     * only when the chart is the currently visible view — the combos/toggles
-     * that call this are disabled in grid view, so that is always the case in
-     * practice, but the guard keeps this safe regardless.
+     * fresh instance: line vs. bar are different classes) and swap it into the
+     * view host. The chart is the tab's only view, so it is always visible.
      */
     function rebuildChart(): void {
-        chart?.dispose();
+        chart.dispose();
         chart = buildChart();
-
-        if (showingChart) {
-            viewHost.removeAllComponents();
-            viewHost.addComponent(chart);
-            viewHost.doLayout();
-        }
+        viewHost.removeAllComponents();
+        viewHost.addComponent(chart);
+        viewHost.doLayout();
     }
 
     /** Build a fresh chart instance (line or bar, per `config`) from the result rows. */
@@ -175,6 +135,6 @@ export function QueryResultView(result: QueryRowsResult): { content: Component; 
 
     return {
         content,
-        dispose: () => { chart?.dispose(); },
+        dispose: () => { chart.dispose(); },
     };
 }
