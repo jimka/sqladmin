@@ -138,9 +138,13 @@ export function NavigatorTree(controller: SqlAdminController): ExplorerTree {
             { text: "Open as query", glyph: "terminal", action: () => controller.openQueryFor(ref) },
             { separator: true },
             { text: "Open structure", glyph: "table-columns", action: () => void controller.openStructure(ref, node) },
-            // The relation-rooted ER diagram: this relation as the root, its FK
-            // neighbours around it (direction/depth controls in the panel).
-            { text: "Show relations", glyph: "diagram-project", action: () => void controller.openRelationDiagram(ref, node) },
+            // The relation-rooted ER diagram is table-only: PostgreSQL foreign keys
+            // are table-only, so a view/matview root has no FK edges and would render
+            // as a lone, edgeless node. Views/matviews are covered by "Show
+            // dependencies" below instead.
+            ...(ref.kind === "table"
+                ? [{ text: "Show relations", glyph: "diagram-project", action: () => void controller.openRelationDiagram(ref, node) } as MenuItemConfig]
+                : []),
             // The relation-rooted dependency graph: this relation's connected
             // dependency component (any relation kind can depend or be depended on).
             { text: "Show dependencies", glyph: "diagram-project", action: () => void controller.openRelationDependencyGraph(ref, node) },
