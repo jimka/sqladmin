@@ -12,8 +12,8 @@ import { file_code }                                           from "@jimka/type
 import { key }                                                 from "@jimka/typescript-ui/glyphs/solid/key";
 import { diagram_project }                                     from "@jimka/typescript-ui/glyphs/solid/diagram_project";
 import { file_lines }                                          from "@jimka/typescript-ui/glyphs/solid/file_lines";
-import type { MarkdownEditor }                                 from "@jimka/typescript-ui/component/editor";
-import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
+import { user }                                                from "@jimka/typescript-ui/glyphs/solid/user";
+import type { MarkdownEditor }                                 from "@jimka/typescript-ui/component/editor";import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef, RoleDetail, RolePrivilege, RoleSummary, TableStructure } from "./contract";
 import { getColumns, getObjects, getRoleDetail, getRoles, getSchemas, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";
@@ -23,7 +23,8 @@ import type { ActiveExport }                                   from "./data/expl
 import { buildModel }                                          from "./data/buildModel";
 import { buildSchemaDiagram }                                  from "./data/buildSchemaDiagram";
 import { annotateFkCardinality }                                from "./data/fkCardinality";
-import { buildSelectSql }                                      from "./data/sql";
+import { buildRoleMembershipDiagram }                          from "./data/buildRoleMembershipDiagram";
+import { buildRoleGrantsDiagram }                              from "./data/buildRoleGrantsDiagram";import { buildSelectSql }                                      from "./data/sql";
 import { buildStore }                                          from "./data/stores";
 import { TableWorkPanel }                                      from "./dock/TableWorkPanel";
 import { ViewWorkPanel }                                       from "./dock/ViewWorkPanel";
@@ -37,7 +38,7 @@ import { SchemaDiagramPanel }                                  from "./dock/Sche
 import { RelationDiagramPanel }                                from "./dock/RelationDiagramPanel";
 import { DatabaseDiagramPanel }                                from "./dock/DatabaseDiagramPanel";
 import type { SchemaTables }                                   from "./data/buildDatabaseDiagram";
-import type { DiagramData, DiagramNodeData }                   from "@jimka/typescript-ui/component/diagram";
+import { RoleGrantsDiagramPanel }                              from "./dock/RoleGrantsDiagramPanel";import type { DiagramData, DiagramNodeData }                   from "@jimka/typescript-ui/component/diagram";
 import { PropertiesPanel, relationTypeLabel }                  from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                from "./roles/RolesPropertiesPanel";
 import { KIND_GLYPH }                                          from "./navigator/objectGlyphs";
@@ -48,9 +49,16 @@ import { promptQueryName }                                     from "./promptQue
 
 // The non-relation dock-tab glyphs (query / structure / definition / grants /
 // schema diagram / notes). The relation-kind glyphs (table / view / materialized
-// view) come from objectGlyphs via KIND_GLYPH, which registers them.
-Glyph.register(terminal, table_columns, file_code, key, diagram_project, file_lines);
+// view) come from objectGlyphs via KIND_GLYPH, which registers them. `user` is
+// the membership-diagram root's glyph — also registered by RolesTree.ts, but
+// registered here too so the root node always renders regardless of whether the
+// Roles rail has mounted yet.
+Glyph.register(terminal, table_columns, file_code, key, diagram_project, file_lines, user);
 
+// The registered glyph name for a role node in the diagram views (the
+// membership root, and buildRoleGrantsDiagram's/buildRoleMembershipDiagram's
+// own role nodes). Keep in sync with those builders' inline `ROLE_GLYPH`.
+const ROLE_GLYPH = "user";
 /** A focusable section of the Queries view — the Saved or the Recent list. */
 export type QueriesSection = "saved" | "recent";
 
@@ -1100,6 +1108,109 @@ export class SqlAdminController {
     }
 
     /**
+     * Open (or focus) the role-membership graph rooted at `name`: every role as
+     * a node, `role -> parent` edges from each role's `memberOf`, driven by the
+     * reused RelationDiagramPanel (direction / depth / legend). The membership
+     * DAG needs every role's detail, so this fans out N per-role fetches
+     * (mirroring buildSchemaGraphData's per-table fan-out) — acceptable for a
+     * small role list. Double-clicking another role node shows its properties
+     * in the inspector; it does not open a table tab.
+     *
+     * @param name - The role to root the graph at.
+     */
+    async openRoleMembershipDiagram(name: string): Promise<void> {
+        const id = this.roleMembershipDiagramPanelId(name);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        let details: RoleDetail[];
+
+        try {
+            const roles = await this.loadRoles();
+            details = await Promise.all(roles.map(r => getRoleDetail(this._connectionId, r.name)));
+        } catch (err) {
+            this.notifyError(err);
+
+            return;
+        }
+
+        const full = buildRoleMembershipDiagram(details);
+        const root: DiagramNodeData = { id: name, label: name, glyph: ROLE_GLYPH };
+
+        this.dock.addPanel({
+            id,
+            title  : `${name} (membership)`,
+            glyph  : "diagram-project",
+            content: RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName)),
+        });
+        this.statusBar.setMessage(`${this._connectionId} · ${name}: membership (${full.nodes.length} roles)`);
+    }
+
+    /**
+     * Open (or focus) the per-role grants graph for `name`: the role node at
+     * the centre, one node per distinct table it holds a privilege on.
+     * Double-clicking a table node reveals + opens it via openGrantedTable.
+     *
+     * @param name - The role whose grants to graph.
+     */
+    async openRoleGrantsDiagram(name: string): Promise<void> {
+        const id = this.roleGrantsDiagramPanelId(name);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const detail = await this.fetchRoleDetail(name);
+
+        if (!detail) {
+            return;
+        }
+
+        const data = buildRoleGrantsDiagram(name, detail.privileges);
+
+        this.dock.addPanel({
+            id,
+            title  : `${name} (grants graph)`,
+            glyph  : "diagram-project",
+            content: RoleGrantsDiagramPanel(data, (schema, table) => this.openGrantedTable(schema, table)),
+        });
+        this.statusBar.setMessage(`${this._connectionId} · ${name}: grants graph (${data.nodes.length - 1} tables)`);
+    }
+
+    /**
+     * Reveal a granted table in the navigator by schema+name and open it
+     * (best-effort). `RolePrivilege` carries no database (the roles endpoint is
+     * not database-scoped), so — unlike openReferencedTable, which matches on
+     * database + schema + name — this matches on schema + name only and adopts
+     * whichever database the first matching revealed navigator node carries. If
+     * no node matches (the table's database was never browsed, or the tree is
+     * not loaded), status-bars a "not found" message and opens nothing.
+     *
+     * @param schema - The granted table's schema.
+     * @param table - The granted table's name.
+     */
+    openGrantedTable(schema: string, table: string): void {
+        void (async () => {
+            const node = (await this._navigator?.revealByPredicate((data: unknown) => {
+                const r = data as DbObjectRef | undefined;
+
+                return !!r && r.schema === schema && r.name === table;
+            })) ?? undefined;
+
+            if (!node) {
+                this.statusBar.setMessage(`${this._connectionId} · ${schema}.${table}: not found in navigator`);
+
+                return;
+            }
+
+            await this.openTable(node.data as DbObjectRef, node);
+            this._navigator?.selectNode(node);
+        })();
+    }
+
+    /**
      * Refresh the active work tab if it is a reloadable data grid: reload the
      * table's or view's store from the server, discarding a table's unsaved edits
      * first (mirroring the grid's own Refresh button — a read-only view has no
@@ -1188,6 +1299,18 @@ export class SqlAdminController {
     private databaseDiagramPanelId(ref: DbObjectRef): string {
         return `${ref.connectionId}/${ref.database}::db-diagram`;
     }
+
+    /** Stable id for a role's membership-diagram tab. */
+    private roleMembershipDiagramPanelId(role: string): string {
+        return `roles/${this._connectionId}/${role}::membership`;
+    }
+
+    /**
+     * Stable id for a role's grants-diagram tab, distinct from openRoleGrants'
+     * `grants/${conn}/${role}` grid tab id.
+     */
+    private roleGrantsDiagramPanelId(role: string): string {
+        return `roles/${this._connectionId}/${role}::grants-diagram`;    }
 
     /**
      * Hover tooltip for a tab: the object name, then Type/Schema/Database ordered

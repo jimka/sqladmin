@@ -61,6 +61,9 @@ export function RolesTree(controller: SqlAdminController): ExplorerTree {
             // tab. Glyphs match the grants tab and the export formats.
             { text: "Show data", glyph: "key", action: () => void controller.showRole(name) },
             { separator: true },
+            { text: "Show membership graph", glyph: "diagram-project", action: () => void controller.openRoleMembershipDiagram(name) },
+            { text: "Show grants graph", glyph: "diagram-project", action: () => void controller.openRoleGrantsDiagram(name) },
+            { separator: true },
             { text: "Export grants", glyph: "file-export", submenu: { label: "Export grants", items: [
                 { text: "CSV (.csv)",   glyph: "file-csv",  action: () => void controller.exportRole(name, "csv") },
                 { text: "JSON (.json)", glyph: "file-code", action: () => void controller.exportRole(name, "json") },
