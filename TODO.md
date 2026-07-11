@@ -1,15 +1,7 @@
 # SQLAdmin — Future Work / Backlog
 
-Deferred features and known issues. Items with an implementation plan live in
-`plans/`; everything else is backlog awaiting a plan.
-
-## Planned (see `plans/`)
-
-- **schema-views** — views & materialized views in the navigator, read-only grid
-  + a Definition tab.
-- **result-export** — CSV / JSON export (query results and navigator table export).
-- **structure-detail** — indexes, constraints, foreign keys in the Structure
-  panel, with foreign-key click-through.
+Deferred features and known issues. Implemented work lives in
+`plans/implemented/`; everything below is backlog awaiting a plan.
 
 ## Backlog (no plan yet)
 
@@ -37,11 +29,9 @@ Deferred features and known issues. Items with an implementation plan live in
 - **Connection-management UI** — add/switch connections (activates the
   `connectionId` route/registry seam from `tsui-sql-admin.md`); needs auth/session
   thinking.
-- **App-level auth / sessions.**
 
 ### Polish
 - **Dark theme** — the theme system already has a classic/default toggle.
-- **"Connected to X" indicator** — the start page is a natural home.
 
 ## Known issues / loose ends
 
