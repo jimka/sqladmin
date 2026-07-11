@@ -57,6 +57,7 @@ from .operations import (
     RoleMembershipsQuery,
     RolePrivilegesQuery,
     RunQueryCommand,
+    TablePrivilegesQuery,
     UpdateRowCommand,
     ViewDefinitionQuery,
 )
@@ -303,6 +304,29 @@ async def columns(
     """
     async with session_pool_for(session, connection_id).acquire() as c:
         op = ListColumnsQuery(c, TableRef(database, schema, table))
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.get("/api/{connection_id}/{database}/{schema}/{table}/privileges")
+async def table_privileges(
+    connection_id: str, database: str, schema: str, table: str,
+    session: Session = Depends(require_session),
+) -> dict:
+    """
+    Report the connected user's effective rights on a table.
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/{table}/privileges``.
+
+    Returns:
+        ``{"select", "insert", "update", "delete"}`` booleans — what this login
+        may do on the table (``has_table_privilege``, membership-aware). The
+        frontend gates the editor's Add/Delete/Save actions and cell editing on
+        these.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = TablePrivilegesQuery(c, TableRef(database, schema, table))
         await op.apply()
 
         return op.get_result()

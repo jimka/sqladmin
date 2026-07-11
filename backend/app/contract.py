@@ -74,6 +74,35 @@ class ColumnMeta:
 
 
 @dataclass(frozen=True)
+class TablePrivileges:
+    """
+    The current session role's effective privileges on one table — what it may
+    actually do, accounting for role membership/inheritance (``has_table_privilege``
+    checks the connected user). Drives the edit toolbar's Add/Delete/Save gating
+    and cell editability on the frontend.
+    """
+
+    select: bool
+    insert: bool
+    update: bool
+    delete: bool
+
+    def to_contract(self) -> dict:
+        """
+        Serialize to the contract JSON the ``/privileges`` route returns.
+
+        Returns:
+            A dict with select, insert, update, and delete boolean flags.
+        """
+        return {
+            "select": self.select,
+            "insert": self.insert,
+            "update": self.update,
+            "delete": self.delete,
+        }
+
+
+@dataclass(frozen=True)
 class RoleSummary:
     """
     One PostgreSQL role (user or group) with its ``pg_roles`` attribute flags.
