@@ -24,7 +24,7 @@ import { showLoginDialog }    from "./shell/LoginDialog";
 
     setCsrfToken(session.csrfToken);
 
-    const controller = new SqlAdminController(session.connectionId);
+    const controller = new SqlAdminController(session.connectionId, session.username, session.database);
 
     // Now that we are authenticated, mount the shell into the already-initialised
     // Body.
