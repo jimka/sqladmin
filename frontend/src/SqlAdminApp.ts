@@ -9,7 +9,7 @@ import { Fit }                from "@jimka/typescript-ui/layout";
 import { SqlAdminController } from "./SqlAdminController";
 import { SqlAdminShell }      from "./shell/SqlAdminShell";
 import { whoami, setCsrfToken } from "./data/api";
-import { showLoginDialog }    from "./shell/loginDialog";
+import { showLoginDialog }    from "./shell/LoginDialog";
 
 // An async IIFE (not top-level await) so the boot gate works regardless of the
 // bundler's module target. A boot failure (e.g. whoami rejecting for a network
