@@ -50,3 +50,20 @@ class ConflictError(DomainError):
     """
 
     status_code: int = 409
+
+
+class Unauthorized(DomainError):
+    """
+    Missing/invalid session, or Postgres rejected the supplied credentials
+    (bad password, unreachable host, or nonexistent target database).
+    """
+
+    status_code: int = 401
+
+
+class Forbidden(DomainError):
+    """
+    CSRF check failed, or the requested host is not in the allowlist.
+    """
+
+    status_code: int = 403

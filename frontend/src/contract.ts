@@ -36,6 +36,18 @@ export interface ColumnMeta {
     wireType: WireType;
 }
 
+/**
+ * The connected user's effective rights on a table (membership-aware, from
+ * `has_table_privilege`). Drives the table editor's Add/Delete/Save gating and
+ * cell editability.
+ */
+export interface TablePrivileges {
+    select: boolean;
+    insert: boolean;
+    update: boolean;
+    delete: boolean;
+}
+
 /** A (materialized) view's reconstructed SELECT (pg_get_viewdef). */
 export interface ViewDefinition {
     definition: string; // the pretty-printed pg_get_viewdef(oid, true) SQL
@@ -168,4 +180,17 @@ export interface RelationNodeRef {
 export interface RelationEdge {
     source: RelationNodeRef;
     target: RelationNodeRef;
+}
+
+/**
+ * A named connection target picked at login. Carries host/port/database ONLY —
+ * never a username or password (credentials are per-login, handled by the
+ * browser's own password manager). Shared by server presets (from the pre-auth
+ * `/api/config`) and the user's own localStorage presets.
+ */
+export interface ConnectionPreset {
+    name: string;
+    host: string;
+    port: number;
+    database: string;
 }

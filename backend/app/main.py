@@ -1,27 +1,40 @@
 """
-FastAPI app: lifespan (open/close pools), the exception handler mapping the
-typed taxonomy to ``(status, {detail})``, CORS for the Vite dev origin, and the
-thin routes (acquire -> construct op -> apply -> get_result).
+FastAPI app: lifespan (start/stop the idle-session sweep), the exception handler
+mapping the typed taxonomy to ``(status, {detail})``, credentialed CORS for the
+dev origins, the auth/config routes, and the thin per-object routes (resolve the
+session's pool -> acquire -> construct op -> apply -> get_result).
 
-All routes are namespaced ``/api/{connection_id}/...``. ``connection_id`` is an
-opaque key into the pool registry (see ``connections.py``) — the multi-database
-seam; Phase 0-1 ship a single ``"default"`` connection, so every URL begins
-``/api/default/``. The remaining path segments (``{database}``, ``{schema}``,
-``{table}``) identify the object the route acts on.
+Authenticated routes are namespaced ``/api/{connection_id}/...``. The pool is
+resolved from the request's **session cookie** (see ``auth.py`` /
+``connections.py``), not from the ``connection_id`` path segment — that segment is
+only validated against the session's own label. Read routes depend on
+``require_session``; mutating routes depend on ``require_csrf``. ``GET /api/config``
+is deliberately unauthenticated (it feeds the login screen). The app boots with
+zero pools; a pool exists only for the lifetime of a logged-in session.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
+import logging
 from typing import AsyncIterator
 
 import asyncpg
-from fastapi import Body, FastAPI, Request
+from fastapi import Body, Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from .connections import close_pools, get_pool, open_pools
+from .auth import login, logout, require_csrf, require_session, whoami
+from .config import app_config
+from .connections import (
+    SWEEP_INTERVAL_SECONDS,
+    Session,
+    close_all_sessions,
+    session_pool_for,
+    sweep_idle_sessions,
+)
 from .contract import ColumnMeta, TableRef
 from .errors import DomainError, NotFound, ValidationError
 from .operations import (
@@ -44,6 +57,7 @@ from .operations import (
     RoleMembershipsQuery,
     RolePrivilegesQuery,
     RunQueryCommand,
+    TablePrivilegesQuery,
     UpdateRowCommand,
     ViewDefinitionQuery,
 )
@@ -55,16 +69,39 @@ _DEV_ORIGINS = ["http://localhost:5173", "http://localhost:8015"]
 _DEFAULT_PAGE_SIZE = 100
 
 
+async def _sweep_loop() -> None:
+    """
+    Periodically evict idle sessions until cancelled (owned by the lifespan). A
+    sweep error is logged and swallowed so one bad pass never kills the loop and
+    silently disables idle eviction for the rest of the process.
+    """
+    while True:
+        await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
+
+        try:
+            await sweep_idle_sessions()
+        except Exception:
+            logging.getLogger(__name__).exception("Idle-session sweep failed")
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
-    Open the connection pools on startup; close them on shutdown.
+    Start the idle-session sweep on startup; cancel it and close every session
+    pool on shutdown. The app boots with **zero** pools — they are created only
+    by a successful login.
     """
-    await open_pools()
+    sweep_task = asyncio.create_task(_sweep_loop())
 
-    yield
+    try:
+        yield
+    finally:
+        sweep_task.cancel()
 
-    await close_pools()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sweep_task
+
+        await close_all_sessions()
 
 
 app = FastAPI(title="SQLAdmin", lifespan=lifespan)
@@ -72,9 +109,17 @@ app = FastAPI(title="SQLAdmin", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_DEV_ORIGINS,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Auth routes plus the pre-auth config route (handlers live in auth.py/config.py).
+# GET /api/config takes no session dependency — it populates the login screen.
+app.post("/api/login")(login)
+app.post("/api/logout")(logout)
+app.get("/api/whoami")(whoami)
+app.get("/api/config")(app_config)
 
 
 @app.exception_handler(DomainError)
@@ -144,7 +189,9 @@ async def _columns_for(conn: asyncpg.Connection, table: TableRef) -> list[Column
 
 
 @app.get("/api/{connection_id}/databases")
-async def databases(connection_id: str) -> list[dict]:
+async def databases(
+    connection_id: str, session: Session = Depends(require_session)
+) -> list[dict]:
     """
     List the databases available on a connection.
 
@@ -153,7 +200,7 @@ async def databases(connection_id: str) -> list[dict]:
     Returns:
         ``[{"name": str}]`` — one entry per non-template, connectable database.
     """
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         op = ListDatabasesQuery(c)
         await op.apply()
 
@@ -161,7 +208,9 @@ async def databases(connection_id: str) -> list[dict]:
 
 
 @app.get("/api/{connection_id}/{database}/schemas")
-async def schemas(connection_id: str, database: str) -> list[dict]:
+async def schemas(
+    connection_id: str, database: str, session: Session = Depends(require_session)
+) -> list[dict]:
     """
     List the non-system schemas in a database.
 
@@ -170,7 +219,7 @@ async def schemas(connection_id: str, database: str) -> list[dict]:
     Returns:
         ``[{"name": str}]`` — one entry per schema.
     """
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         op = ListSchemasQuery(c, database)
         await op.apply()
 
@@ -178,7 +227,10 @@ async def schemas(connection_id: str, database: str) -> list[dict]:
 
 
 @app.get("/api/{connection_id}/{database}/{schema}/objects")
-async def objects(connection_id: str, database: str, schema: str) -> list[dict]:
+async def objects(
+    connection_id: str, database: str, schema: str,
+    session: Session = Depends(require_session),
+) -> list[dict]:
     """
     List the tables, views, and materialized views in a schema.
 
@@ -187,7 +239,7 @@ async def objects(connection_id: str, database: str, schema: str) -> list[dict]:
     Returns:
         ``[{"name": str, "kind": "table" | "view" | "materializedView"}]``.
     """
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         op = ListObjectsQuery(c, schema)
         await op.apply()
 
@@ -195,7 +247,10 @@ async def objects(connection_id: str, database: str, schema: str) -> list[dict]:
 
 
 @app.get("/api/{connection_id}/{database}/{schema}/dependencies")
-async def dependencies(connection_id: str, database: str, schema: str) -> list[dict]:
+async def dependencies(
+    connection_id: str, database: str, schema: str,
+    session: Session = Depends(require_session),
+) -> list[dict]:
     """
     List the view/matview dependency edges in a schema (what each view reads).
 
@@ -205,7 +260,7 @@ async def dependencies(connection_id: str, database: str, schema: str) -> list[d
         ``[{"source": RelationNodeRef, "target": RelationNodeRef}]`` — source is
         the dependent view/matview, target is the underlying relation it reads.
     """
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         op = ListDependenciesQuery(c, schema)
         await op.apply()
 
@@ -213,7 +268,10 @@ async def dependencies(connection_id: str, database: str, schema: str) -> list[d
 
 
 @app.get("/api/{connection_id}/{database}/{schema}/inheritance")
-async def inheritance(connection_id: str, database: str, schema: str) -> list[dict]:
+async def inheritance(
+    connection_id: str, database: str, schema: str,
+    session: Session = Depends(require_session),
+) -> list[dict]:
     """
     List the table inheritance/partitioning edges in a schema.
 
@@ -223,7 +281,7 @@ async def inheritance(connection_id: str, database: str, schema: str) -> list[di
         ``[{"source": RelationNodeRef, "target": RelationNodeRef}]`` — source is
         the parent relation, target is the child (partition or inheriting table).
     """
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         op = ListInheritanceQuery(c, schema)
         await op.apply()
 
@@ -231,7 +289,10 @@ async def inheritance(connection_id: str, database: str, schema: str) -> list[di
 
 
 @app.get("/api/{connection_id}/{database}/{schema}/{table}/columns")
-async def columns(connection_id: str, database: str, schema: str, table: str) -> list[dict]:
+async def columns(
+    connection_id: str, database: str, schema: str, table: str,
+    session: Session = Depends(require_session),
+) -> list[dict]:
     """
     Introspect a table's columns.
 
@@ -241,15 +302,41 @@ async def columns(connection_id: str, database: str, schema: str, table: str) ->
         ``[ColumnMeta]`` as contract JSON (name, dataType, nullable,
         isPrimaryKey, isGenerated, wireType) — one entry per column.
     """
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         op = ListColumnsQuery(c, TableRef(database, schema, table))
         await op.apply()
 
         return op.get_result()
 
 
+@app.get("/api/{connection_id}/{database}/{schema}/{table}/privileges")
+async def table_privileges(
+    connection_id: str, database: str, schema: str, table: str,
+    session: Session = Depends(require_session),
+) -> dict:
+    """
+    Report the connected user's effective rights on a table.
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/{table}/privileges``.
+
+    Returns:
+        ``{"select", "insert", "update", "delete"}`` booleans — what this login
+        may do on the table (``has_table_privilege``, membership-aware). The
+        frontend gates the editor's Add/Delete/Save actions and cell editing on
+        these.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = TablePrivilegesQuery(c, TableRef(database, schema, table))
+        await op.apply()
+
+        return op.get_result()
+
+
 @app.get("/api/{connection_id}/{database}/{schema}/{table}/definition")
-async def view_definition(connection_id: str, database: str, schema: str, table: str) -> dict:
+async def view_definition(
+    connection_id: str, database: str, schema: str, table: str,
+    session: Session = Depends(require_session),
+) -> dict:
     """
     Return a (materialized) view's reconstructed ``SELECT`` (pg_get_viewdef).
 
@@ -261,7 +348,7 @@ async def view_definition(connection_id: str, database: str, schema: str, table:
     Returns:
         ``{"definition": str}`` — the pretty-printed view definition SQL.
     """
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         op = ViewDefinitionQuery(c, TableRef(database, schema, table))
         await op.apply()
 
@@ -269,7 +356,10 @@ async def view_definition(connection_id: str, database: str, schema: str, table:
 
 
 @app.get("/api/{connection_id}/{database}/{schema}/{table}/structure")
-async def structure(connection_id: str, database: str, schema: str, table: str) -> dict:
+async def structure(
+    connection_id: str, database: str, schema: str, table: str,
+    session: Session = Depends(require_session),
+) -> dict:
     """
     Introspect a table's indexes, non-FK constraints, and foreign keys in one
     round trip (mirroring the combined ``/roles/{role}`` detail endpoint).
@@ -283,7 +373,7 @@ async def structure(connection_id: str, database: str, schema: str, table: str) 
     """
     ref = TableRef(database, schema, table)
 
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         indexes = ListIndexesQuery(c, ref)
         await indexes.apply()
 
@@ -304,7 +394,9 @@ async def structure(connection_id: str, database: str, schema: str, table: str) 
 
 
 @app.get("/api/{connection_id}/roles")
-async def roles(connection_id: str) -> list[dict]:
+async def roles(
+    connection_id: str, session: Session = Depends(require_session)
+) -> list[dict]:
     """
     List the roles (users and groups) on a connection with their attributes.
 
@@ -313,7 +405,7 @@ async def roles(connection_id: str) -> list[dict]:
     Returns:
         ``[RoleSummary]`` as contract JSON — one entry per role, name-ordered.
     """
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         op = ListRolesQuery(c)
         await op.apply()
 
@@ -321,7 +413,9 @@ async def roles(connection_id: str) -> list[dict]:
 
 
 @app.get("/api/{connection_id}/roles/{role}")
-async def role_detail(connection_id: str, role: str) -> dict:
+async def role_detail(
+    connection_id: str, role: str, session: Session = Depends(require_session)
+) -> dict:
     """
     One role's attributes plus the roles it belongs to and the table grants it
     holds.
@@ -334,7 +428,7 @@ async def role_detail(connection_id: str, role: str) -> dict:
     Returns:
         The ``RoleDetail`` contract shape ``{role, memberOf, privileges}``.
     """
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         attrs = RoleAttributesQuery(c, role)
         await attrs.apply()
         summary = attrs.get_result()
@@ -368,6 +462,7 @@ async def list_rows(
     pageSize: int = _DEFAULT_PAGE_SIZE,
     sort: str | None = None,
     filter: str | None = None,
+    session: Session = Depends(require_session),
 ) -> dict:
     """
     Read one page of a table's rows, honoring sort/filter from the proxy.
@@ -385,7 +480,7 @@ async def list_rows(
     """
     ref = TableRef(database, schema, table)
 
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         cols = await _columns_for(c, ref)
         op = ListRowsQuery(
             c, ref, page, pageSize, _parse_json_array(sort), _parse_json_array(filter), cols
@@ -397,7 +492,8 @@ async def list_rows(
 
 @app.post("/api/{connection_id}/{database}/{schema}/{table}/rows")
 async def insert_row(
-    connection_id: str, database: str, schema: str, table: str, data: dict = Body(...)
+    connection_id: str, database: str, schema: str, table: str, data: dict = Body(...),
+    session: Session = Depends(require_csrf),
 ) -> dict:
     """
     Insert a row and return the created record.
@@ -413,7 +509,7 @@ async def insert_row(
     """
     ref = TableRef(database, schema, table)
 
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         cols = await _columns_for(c, ref)
         op = InsertRowCommand(c, ref, data, cols)
         await op.apply()
@@ -423,7 +519,8 @@ async def insert_row(
 
 @app.put("/api/{connection_id}/{database}/{schema}/{table}/rows/{row_id}")
 async def update_row(
-    connection_id: str, database: str, schema: str, table: str, row_id: str, data: dict = Body(...)
+    connection_id: str, database: str, schema: str, table: str, row_id: str,
+    data: dict = Body(...), session: Session = Depends(require_csrf),
 ) -> dict:
     """
     Update a row by primary key and return the updated record.
@@ -439,7 +536,7 @@ async def update_row(
     """
     ref = TableRef(database, schema, table)
 
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         cols = await _columns_for(c, ref)
         op = UpdateRowCommand(c, ref, row_id, data, cols)
         await op.apply()
@@ -449,7 +546,8 @@ async def update_row(
 
 @app.delete("/api/{connection_id}/{database}/{schema}/{table}/rows/{row_id}", status_code=204)
 async def delete_row(
-    connection_id: str, database: str, schema: str, table: str, row_id: str
+    connection_id: str, database: str, schema: str, table: str, row_id: str,
+    session: Session = Depends(require_csrf),
 ) -> Response:
     """
     Delete a row by primary key.
@@ -464,7 +562,7 @@ async def delete_row(
     """
     ref = TableRef(database, schema, table)
 
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         cols = await _columns_for(c, ref)
         op = DeleteRowCommand(c, ref, row_id, cols)
         await op.apply()
@@ -476,7 +574,9 @@ async def delete_row(
 
 
 @app.post("/api/{connection_id}/query")
-async def run_query(connection_id: str, body: dict = Body(...)) -> dict:
+async def run_query(
+    connection_id: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
     """
     Run one arbitrary SQL statement and return its result.
 
@@ -493,7 +593,7 @@ async def run_query(connection_id: str, body: dict = Body(...)) -> dict:
         ``{"kind": "status", "command", "rowCount"}`` for one that did not
         (INSERT/UPDATE/DDL).
     """
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         op = RunQueryCommand(c, body.get("sql", ""))
         await op.apply()
 
@@ -501,7 +601,9 @@ async def run_query(connection_id: str, body: dict = Body(...)) -> dict:
 
 
 @app.post("/api/{connection_id}/explain")
-async def explain_query(connection_id: str, body: dict = Body(...)) -> dict:
+async def explain_query(
+    connection_id: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
     """
     Run EXPLAIN / EXPLAIN ANALYZE for one statement and return its query plan.
 
@@ -517,7 +619,7 @@ async def explain_query(connection_id: str, body: dict = Body(...)) -> dict:
         ``{"kind": "explain", "format", "analyze", "plan"}`` — the joined plan
         text for FORMAT TEXT, plus a ``planJson`` tree for FORMAT JSON.
     """
-    async with get_pool(connection_id).acquire() as c:
+    async with session_pool_for(session, connection_id).acquire() as c:
         op = ExplainQueryCommand(
             c,
             body.get("sql", ""),
@@ -538,7 +640,8 @@ _EXPORT_MEDIA = {"csv": ("text/csv", "csv"), "json": ("application/json", "json"
 
 @app.get("/api/{connection_id}/{database}/{schema}/{table}/export")
 async def export_rows(
-    connection_id: str, database: str, schema: str, table: str, format: str = "csv"
+    connection_id: str, database: str, schema: str, table: str, format: str = "csv",
+    session: Session = Depends(require_session),
 ) -> StreamingResponse:
     """
     Stream a table/view's full contents as CSV or JSON (attachment download).
@@ -560,7 +663,7 @@ async def export_rows(
         attachment named ``<schema>.<table>.<ext>``.
     """
     ref = TableRef(database, schema, table)
-    pool = get_pool(connection_id)
+    pool = session_pool_for(session, connection_id)
     conn = await pool.acquire()
 
     try:

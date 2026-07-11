@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./api";
+import {
+    getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl,
+    setCsrfToken, csrfHeader,
+} from "./api";
 import type { DbObjectRef } from "../contract";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+    vi.restoreAllMocks();
+    setCsrfToken(null); // reset module-level token so header assertions stay isolated
+});
 
 describe("getViewDefinition", () => {
     const ref: DbObjectRef = {
@@ -168,5 +174,27 @@ describe("runExplain", () => {
 
         await expect(runExplain("default", "slect 1", { analyze: true, format: "text" }))
             .rejects.toThrow("syntax error");
+    });
+});
+
+describe("csrfHeader / setCsrfToken", () => {
+    it("returns {} when no token is set (so postJson sends only Content-Type)", () => {
+        expect(csrfHeader()).toEqual({});
+    });
+
+    it("adds X-CSRF-Token to a mutating request once a token is set", async () => {
+        setCsrfToken("tok-123");
+        const envelope  = { kind: "status", command: "SELECT", rowCount: 0 };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => envelope });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await runQuery("default", "select 1");
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/default/query",
+            expect.objectContaining({
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": "tok-123" },
+            }),
+        );
     });
 });

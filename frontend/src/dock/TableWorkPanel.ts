@@ -24,7 +24,7 @@ import { plus }                        from "@jimka/typescript-ui/glyphs/solid/p
 import { minus }                       from "@jimka/typescript-ui/glyphs/solid/minus";
 import { save }                        from "@jimka/typescript-ui/glyphs/solid/save";
 import { filter }                      from "@jimka/typescript-ui/glyphs/solid/filter";
-import type { ColumnMeta }             from "../contract";
+import type { ColumnMeta, TablePrivileges } from "../contract";
 import { openFilterDialog }            from "./FilterDialog";
 import { buildExportButton }           from "./exportButton";
 import { workPanelShell }              from "./workPanelShell";
@@ -38,12 +38,19 @@ export type Notify = (message: string) => void;
 /** Export the whole relation server-side (the streaming full-table export). */
 export type ExportTable = (format: "csv" | "json") => void;
 
-/** Build the work panel hosting a table's data grid. */
-export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable): Container {
-    const dataGrid = Table(store, buildColumnSpec(columns));
+/**
+ * Build the work panel hosting a table's data grid.
+ *
+ * @param privileges - The connected user's effective rights on the table. They
+ *   gate the write actions: no UPDATE makes every cell read-only, no INSERT
+ *   disables Add, no DELETE disables Delete, and Save enables only when a
+ *   permitted change is pending.
+ */
+export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable, privileges: TablePrivileges): Container {
+    const dataGrid = Table(store, buildColumnSpec(columns, privileges.update));
 
     return workPanelShell(
-        buildToolBar(store, dataGrid, columns, notify, onExport),
+        buildToolBar(store, dataGrid, columns, notify, onExport, privileges),
         Panel({ layoutManager: new Fit(), components: [dataGrid] }),
     );
 }
@@ -51,16 +58,29 @@ export function TableWorkPanel(store: AjaxStore, columns: ColumnMeta[], notify: 
 /**
  * Build the data grid's column spec. Cells are inline-editable by default;
  * generated columns are marked read-only since the DB assigns their values
- * (the SqlAdminWriter also strips them from writes).
+ * (the SqlAdminWriter also strips them from writes). When the user lacks UPDATE
+ * on the table, every column is forced read-only so no edit can be started that
+ * Save could not persist.
  */
-function buildColumnSpec(columns: ColumnMeta[]): ColumnSpec {
-    return { columns: columns.map(c => ({ field: c.name, readOnly: c.isGenerated })) };
+function buildColumnSpec(columns: ColumnMeta[], canUpdate: boolean): ColumnSpec {
+    return { columns: columns.map(c => ({ field: c.name, readOnly: !canUpdate || c.isGenerated })) };
 }
 
 /** Glyph-only toolbar wired to the store (CRUD) with validation + confirmation. */
-function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], notify: Notify, onExport: ExportTable): ToolBar {
-    const deleteButton = glyphButton("minus", DESTRUCTIVE_COLOR, "Delete row", () => void confirmDelete(store, dataGrid));
-    const saveButton = glyphButton("save", PRIMARY_COLOR, "Save", () => save_(store, columns, notify));
+function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], notify: Notify, onExport: ExportTable, privileges: TablePrivileges): ToolBar {
+    // A change can only be persisted with at least one write privilege; Save
+    // enables only when a *permitted* change is pending (Add/Delete and cell
+    // editing are themselves gated below, so pending changes never outrun this).
+    const canWrite = privileges.insert || privileges.update || privileges.delete;
+
+    // A permission-denied tooltip when the verb isn't granted, so a greyed-out
+    // button explains itself rather than looking broken.
+    const addButton = glyphButton("plus", CONSTRUCTIVE_COLOR,
+        privileges.insert ? "Add row" : "Add row (no insert permission)", () => store.add({}));
+    const deleteButton = glyphButton("minus", DESTRUCTIVE_COLOR,
+        privileges.delete ? "Delete row" : "Delete row (no delete permission)", () => void confirmDelete(store, dataGrid));
+    const saveButton = glyphButton("save", PRIMARY_COLOR,
+        canWrite ? "Save" : "Save (read-only — no write permission)", () => save_(store, columns, notify));
     const filterButton = glyphButton("filter", PRIMARY_COLOR, "Filter rows", () => openFilterDialog(store, columns));
 
     // The full-relation export runs server-side (it streams the whole table, not
@@ -70,7 +90,7 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
 
     const bar = new ToolBar({
         components: [
-            glyphButton("plus", CONSTRUCTIVE_COLOR, "Add row", () => store.add({})),
+            addButton,
             deleteButton,
             saveButton,
             // Flex spacer pushes the view actions (Filter, Export, Refresh) to the
@@ -98,20 +118,24 @@ function buildToolBar(store: AjaxStore, dataGrid: Table, columns: ColumnMeta[], 
     syncFilterActive();
     store.on("filterchange", syncFilterActive);
 
-    // Save is only meaningful with unsaved edits/adds/removes; 'datachange'
-    // fires on each of those (and after a sync clears them).
-    const syncSaveEnabled = (): void => void saveButton.setEnabled(store.hasPendingChanges());
+    // Add is a fixed capability: without INSERT it stays disabled for the
+    // panel's life; otherwise it is always available.
+    addButton.setEnabled(privileges.insert);
+
+    // Save is only meaningful with unsaved edits/adds/removes AND some write
+    // right; 'datachange' fires on each of those (and after a sync clears them).
+    const syncSaveEnabled = (): void => void saveButton.setEnabled(canWrite && store.hasPendingChanges());
     syncSaveEnabled();
     store.on("datachange", syncSaveEnabled);
 
-    // Delete needs at least one selected row that still exists. Re-check on
-    // selection changes and on 'datachange' (a removal drops rows from the
-    // store, so a now-deleted selection no longer counts).
+    // Delete needs DELETE on the table plus at least one selected row that still
+    // exists. Re-check on selection changes and on 'datachange' (a removal drops
+    // rows from the store, so a now-deleted selection no longer counts).
     const syncDeleteEnabled = (): void => {
         const live             = new Set(store.getAll());
         const hasLiveSelection = dataGrid.getSelectedRecords().some((r: ModelRecord) => live.has(r));
 
-        deleteButton.setEnabled(hasLiveSelection);
+        deleteButton.setEnabled(privileges.delete && hasLiveSelection);
     };
     syncDeleteEnabled();
     dataGrid.on("selection", syncDeleteEnabled);

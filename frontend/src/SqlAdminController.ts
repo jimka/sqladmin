@@ -2,9 +2,12 @@
 // the open-panel registry (deduped by panel id). Components stay dumb: they emit,
 // the controller decides. All app-side errors funnel to notifyError.
 
-import { Dock }                                                from "@jimka/typescript-ui/overlay";
+import { Dock, Tooltip }                                       from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent }                                 from "@jimka/typescript-ui/overlay";
+import { Component }                                           from "@jimka/typescript-ui/core";
+import { HBox }                                                from "@jimka/typescript-ui/layout";
 import { StatusBar }                                           from "@jimka/typescript-ui/component/container";
+import { Text }                                                from "@jimka/typescript-ui/component/input";
 import { Glyph }                                               from "@jimka/typescript-ui/component/display";
 import { terminal }                                            from "@jimka/typescript-ui/glyphs/solid/terminal";
 import { table_columns }                                       from "@jimka/typescript-ui/glyphs/solid/table_columns";
@@ -15,8 +18,8 @@ import { file_lines }                                          from "@jimka/type
 import { user }                                                from "@jimka/typescript-ui/glyphs/solid/user";
 import type { MarkdownEditor }                                 from "@jimka/typescript-ui/component/editor";import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TableStructure } from "./contract";
-import { getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";import { exportQueryResult }                                   from "./dock/exportQueryResult";
+import type { ColumnMeta, DbObjectRef, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TablePrivileges, TableStructure } from "./contract";
+import { getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";import { exportQueryResult }                                   from "./dock/exportQueryResult";
 import { exportExplainPlan }                                   from "./dock/exportExplainResult";
 import type { ActiveExport }                                   from "./data/explain";
 import { buildModel }                                          from "./data/buildModel";
@@ -61,6 +64,23 @@ Glyph.register(terminal, table_columns, file_code, key, diagram_project, file_li
 // membership root, and buildRoleGrantsDiagram's/buildRoleMembershipDiagram's
 // own role nodes). Keep in sync with those builders' inline `ROLE_GLYPH`.
 const ROLE_GLYPH = "user";
+
+/**
+ * The signed-in-user badge for the status bar's right zone: a user glyph beside
+ * the username, with the fuller "username @ database" carried in a hover
+ * tooltip (the left zone's "Connection" id is an internal handle, not the DB).
+ */
+function buildIdentityWidget(username: string, database?: string): Component {
+    const widget = new Component({
+        layoutManager: new HBox({ spacing: 6 }),
+        components:    [new Glyph(ROLE_GLYPH), new Text(username)],
+    });
+
+    Tooltip.attach(widget, database ? `Signed in as ${username} @ ${database}` : `Signed in as ${username}`);
+
+    return widget;
+}
+
 /** A focusable section of the Queries view — the Saved or the Recent list. */
 export type QueriesSection = "saved" | "recent";
 
@@ -87,6 +107,11 @@ interface RecentTable {
 // How many recently opened tables the start page lists. Small enough to stay a
 // glanceable "jump back in" strip, not a full history.
 const MAX_RECENT_TABLES = 8;
+
+// The write-nothing default carried down the read-only (view/matview) path,
+// where TableWorkPanel is never built and the value is unused — it only keeps
+// the editable-table privileges variable definitely-assigned.
+const NO_TABLE_PRIVILEGES: TablePrivileges = { select: false, insert: false, update: false, delete: false };
 
 // Dependency graph reads left-to-right as a dependency flow (view -> underlying),
 // matching the FK schema diagram's RIGHT layered layout.
@@ -162,8 +187,11 @@ export class SqlAdminController {
      * Dock's panel-close and focus events.
      *
      * @param connectionId - The connection these operations target (Phase 0-1: "default").
+     * @param username - The signed-in database user, pinned to the status bar's
+     *   right zone. Omitted only by DOM-less callers that never show the bar.
+     * @param database - The connected database, shown in the identity tooltip.
      */
-    constructor(connectionId: string = "default") {
+    constructor(connectionId: string = "default", username?: string, database?: string) {
         this._connectionId = connectionId;
         // The dock owns its own emptiness; drive the start-page deck straight off
         // its "emptychange" aggregate (empty↔populated, once per transition)
@@ -206,6 +234,13 @@ export class SqlAdminController {
         });
 
         this.statusBar.setMessage(`Connection: ${connectionId}`);
+
+        // Pin the signed-in identity to the status bar's RIGHT zone. The left
+        // zone shows transient per-operation messages (setMessage), so identity
+        // lives on the right where those never clobber it.
+        if (username) {
+            this.statusBar.addRight(buildIdentityWidget(username, database));
+        }
     }
 
     get connectionId(): string {
@@ -234,21 +269,27 @@ export class SqlAdminController {
             return;
         }
 
+        // A view/matview is read-only: it opens the ViewWorkPanel and never
+        // writes, so the 'sync' write-feedback listener is not attached and the
+        // per-user table privileges (which gate the editable panel's write
+        // actions) are not fetched.
+        const isReadOnly = ref.kind === "view" || ref.kind === "materializedView";
+
         let store: AjaxStore;
         let columns: ColumnMeta[];
+        let privileges: TablePrivileges = NO_TABLE_PRIVILEGES;
 
         try {
             columns = await getColumns(ref);
+            if (!isReadOnly) {
+                privileges = await getTablePrivileges(ref);
+            }
             store = buildStore(ref, buildModel(columns), columns);
         } catch (err) {
             this.notifyError(err, ref);
 
             return;
         }
-
-        // A view/matview is read-only: it opens the ViewWorkPanel and never
-        // writes, so the 'sync' write-feedback listener is not attached.
-        const isReadOnly = ref.kind === "view" || ref.kind === "materializedView";
 
         store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
 
@@ -276,7 +317,7 @@ export class SqlAdminController {
                     // (no LIMIT — a LIMIT node would mask the plan's real cost) and
                     // auto-runs EXPLAIN / EXPLAIN ANALYZE there.
                     analyze => this.openQuery(buildSelectSql(ref, null), false, ref.name, analyze ? "analyze" : "plain"))
-                : () => TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format))
+                : () => TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format), privileges)
         });
 
         try {

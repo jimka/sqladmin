@@ -30,8 +30,16 @@ services:
     container_name: sqladmin-backend
     restart: unless-stopped
     environment:
-      # in-container the host is the `db` service, not localhost
-      DATABASE_URL: postgresql://sqladmin:sqladmin@db:5432/sqladmin
+      # The backend dials the host each login supplies, guarded by a default-deny
+      # allowlist — so it must name the db. On the compose network the db is
+      # reachable by its service name (`db`) and its container name
+      # (`sqladmin-db`); allow both on 5432. From inside this container
+      # `localhost` is the backend itself, not the db, so it is intentionally not
+      # listed — log in against `sqladmin-db` (or `db`), not `localhost`.
+      SQLADMIN_ALLOWED_HOSTS: "db:5432,sqladmin-db:5432"
+      # A ready-made login target so the connection dialog offers the local db
+      # (credentials are still entered per login — presets carry none).
+      SERVER_PRESETS: '[{"name":"Local (docker)","host":"sqladmin-db","port":5432,"database":"sqladmin"}]'
     ports:
       - "8000:8000"
     depends_on:

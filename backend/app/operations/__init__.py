@@ -18,6 +18,7 @@ from .list_schemas import ListSchemasQuery
 from .role_detail import RoleAttributesQuery, RoleMembershipsQuery, RolePrivilegesQuery
 from .roles import ListRolesQuery
 from .run_query import RunQueryCommand
+from .table_privileges import TablePrivilegesQuery
 from .table_structure import (
     ListConstraintsQuery,
     ListForeignKeysQuery,
@@ -34,6 +35,7 @@ __all__ = [
     "ListSchemasQuery",
     "ListObjectsQuery",
     "ListColumnsQuery",
+    "TablePrivilegesQuery",
     "ListRowsQuery",
     "ListDependenciesQuery",
     "ListInheritanceQuery",

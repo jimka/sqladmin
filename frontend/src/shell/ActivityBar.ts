@@ -19,7 +19,8 @@ import { Component, Container }             from "@jimka/typescript-ui/core";
 import { Placement }                    from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Card } from "@jimka/typescript-ui/layout";
 import { ToolBar }                      from "@jimka/typescript-ui/component/menubar";
-import { ToggleButton }                 from "@jimka/typescript-ui/component/button";
+import { Button, ToggleButton }         from "@jimka/typescript-ui/component/button";
+import { Spacer }                       from "@jimka/typescript-ui/component/container";
 import { Tooltip }                      from "@jimka/typescript-ui/overlay";
 
 // Width of the always-visible icon rail — one icon-button column, matching the
@@ -52,6 +53,15 @@ export interface ActivityView {
     component: Component;
 }
 
+/** Optional extras layered onto the rail beyond the view buttons. */
+export interface ActivityBarOptions {
+    /**
+     * Sign-out action. When set, a matching icon-only button is pinned to the
+     * bottom of the rail (a flex spacer separates it from the view buttons).
+     */
+    onSignOut?: () => void;
+}
+
 /**
  * Drives the width of the sidebar pane in the shell's Split. The shell owns the
  * Split and injects this so the bar can collapse/expand without knowing about
@@ -80,10 +90,11 @@ export interface ActivityBarHandle {
  * Build the activity bar for the shell's WEST region.
  *
  * @param views - The view containers; the first starts active and expanded.
+ * @param options - Optional rail extras (e.g. a bottom-pinned sign-out button).
  *
  * @returns The activity-bar component and its collapse toggle.
  */
-export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
+export function ActivityBar(views: ActivityView[], options: ActivityBarOptions = {}): ActivityBarHandle {
     const card        = new Card();
     const deck        = Container({ layoutManager: card });
     const rail        = new ToolBar({ orientation: "vertical" });
@@ -160,6 +171,22 @@ export function ActivityBar(views: ActivityView[]): ActivityBarHandle {
 
         rail.addComponent(button);
         buttonById.set(view.id, button);
+    }
+
+    // Pin a sign-out control to the bottom of the rail: a flex spacer eats the
+    // gap between the view buttons and this trailing action, so it hugs the
+    // rail's foot the way VSCode's account/settings icons do. A plain Button
+    // (an action, not a selectable mode) sized and tooltipped like the view
+    // icons above it.
+    if (options.onSignOut) {
+        const signOut = new Button("", { glyph: "right-from-bracket" });
+
+        signOut.pinGlyphSize(GLYPH_SIZE);
+        Tooltip.attach(signOut, "Sign out");
+        signOut.on("action", options.onSignOut);
+
+        rail.addComponent(Spacer.flex());
+        rail.addComponent(signOut);
     }
 
     rail.setPreferredSize(RAIL_WIDTH, 0);
