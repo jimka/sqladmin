@@ -36,6 +36,18 @@ export interface ColumnMeta {
     wireType: WireType;
 }
 
+/**
+ * The connected user's effective rights on a table (membership-aware, from
+ * `has_table_privilege`). Drives the table editor's Add/Delete/Save gating and
+ * cell editability.
+ */
+export interface TablePrivileges {
+    select: boolean;
+    insert: boolean;
+    update: boolean;
+    delete: boolean;
+}
+
 /** A (materialized) view's reconstructed SELECT (pg_get_viewdef). */
 export interface ViewDefinition {
     definition: string; // the pretty-printed pg_get_viewdef(oid, true) SQL

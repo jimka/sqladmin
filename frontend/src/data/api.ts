@@ -4,6 +4,7 @@
 
 import type {
     ColumnMeta,
+    TablePrivileges,
     ConnectionPreset,
     DbObjectKind,
     DbObjectRef,
@@ -173,6 +174,13 @@ export function getColumns(ref: DbObjectRef): Promise<ColumnMeta[]> {
     const url = `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/columns`;
 
     return getJson<ColumnMeta[]>(url);
+}
+
+/** The connected user's INSERT/UPDATE/DELETE/SELECT rights on a table. */
+export function getTablePrivileges(ref: DbObjectRef): Promise<TablePrivileges> {
+    const url = `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/privileges`;
+
+    return getJson<TablePrivileges>(url);
 }
 
 /** Fetch a (materialized) view's definition SQL (pg_get_viewdef). */

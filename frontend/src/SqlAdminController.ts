@@ -15,8 +15,8 @@ import { file_lines }                                          from "@jimka/type
 import { user }                                                from "@jimka/typescript-ui/glyphs/solid/user";
 import type { MarkdownEditor }                                 from "@jimka/typescript-ui/component/editor";import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TableStructure } from "./contract";
-import { getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";import { exportQueryResult }                                   from "./dock/exportQueryResult";
+import type { ColumnMeta, DbObjectRef, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TablePrivileges, TableStructure } from "./contract";
+import { getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";import { exportQueryResult }                                   from "./dock/exportQueryResult";
 import { exportExplainPlan }                                   from "./dock/exportExplainResult";
 import type { ActiveExport }                                   from "./data/explain";
 import { buildModel }                                          from "./data/buildModel";
@@ -87,6 +87,11 @@ interface RecentTable {
 // How many recently opened tables the start page lists. Small enough to stay a
 // glanceable "jump back in" strip, not a full history.
 const MAX_RECENT_TABLES = 8;
+
+// The write-nothing default carried down the read-only (view/matview) path,
+// where TableWorkPanel is never built and the value is unused — it only keeps
+// the editable-table privileges variable definitely-assigned.
+const NO_TABLE_PRIVILEGES: TablePrivileges = { select: false, insert: false, update: false, delete: false };
 
 // Dependency graph reads left-to-right as a dependency flow (view -> underlying),
 // matching the FK schema diagram's RIGHT layered layout.
@@ -234,21 +239,27 @@ export class SqlAdminController {
             return;
         }
 
+        // A view/matview is read-only: it opens the ViewWorkPanel and never
+        // writes, so the 'sync' write-feedback listener is not attached and the
+        // per-user table privileges (which gate the editable panel's write
+        // actions) are not fetched.
+        const isReadOnly = ref.kind === "view" || ref.kind === "materializedView";
+
         let store: AjaxStore;
         let columns: ColumnMeta[];
+        let privileges: TablePrivileges = NO_TABLE_PRIVILEGES;
 
         try {
             columns = await getColumns(ref);
+            if (!isReadOnly) {
+                privileges = await getTablePrivileges(ref);
+            }
             store = buildStore(ref, buildModel(columns), columns);
         } catch (err) {
             this.notifyError(err, ref);
 
             return;
         }
-
-        // A view/matview is read-only: it opens the ViewWorkPanel and never
-        // writes, so the 'sync' write-feedback listener is not attached.
-        const isReadOnly = ref.kind === "view" || ref.kind === "materializedView";
 
         store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
 
@@ -276,7 +287,7 @@ export class SqlAdminController {
                     // (no LIMIT — a LIMIT node would mask the plan's real cost) and
                     // auto-runs EXPLAIN / EXPLAIN ANALYZE there.
                     analyze => this.openQuery(buildSelectSql(ref, null), false, ref.name, analyze ? "analyze" : "plain"))
-                : () => TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format))
+                : () => TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format), privileges)
         });
 
         try {
