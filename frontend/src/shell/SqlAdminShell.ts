@@ -37,6 +37,7 @@ import { file_csv }                from "@jimka/typescript-ui/glyphs/solid/file_
 import { file_code }               from "@jimka/typescript-ui/glyphs/solid/file_code";
 import { bars }                    from "@jimka/typescript-ui/glyphs/solid/bars";
 import { keyboard }                from "@jimka/typescript-ui/glyphs/solid/keyboard";
+import { right_from_bracket }      from "@jimka/typescript-ui/glyphs/solid/right_from_bracket";
 import { ActivityBar, SIDEBAR_RAIL_WIDTH, SIDEBAR_DEFAULT_WIDTH } from "./ActivityBar";
 import type { ActivityBarHandle, SidebarSizer } from "./ActivityBar";
 import { DatabaseExplorerView }    from "./DatabaseExplorerView";
@@ -63,7 +64,7 @@ import type { SqlAdminController } from "../SqlAdminController";
 // composition root, and referenced by name downstream.
 Glyph.register(database, circle_info, users, terminal, arrows_rotate);
 // Glyphs decorating the menu bar's menus, items, and submenus.
-Glyph.register(plus, floppy_disk, clock_rotate_left, wrench, eye, file_export, file_lines, file_csv, file_code, bars, keyboard);
+Glyph.register(plus, floppy_disk, clock_rotate_left, wrench, eye, file_export, file_lines, file_csv, file_code, bars, keyboard, right_from_bracket);
 
 // The view-container ids; each view's rail button selects it by this id.
 const DATABASE_VIEW_ID = "database";
@@ -77,7 +78,11 @@ const CENTER_START_ID = "work-start";
 
 /** Build the shell container, hosting the controller's Dock and StatusBar. */
 export function SqlAdminShell(controller: SqlAdminController): Container {
-    const sidebar  = buildSidebar(controller);
+    // Signs out: drops the server-side session and reloads to the login dialog.
+    // Wired to the rail's bottom-pinned sign-out button (buildSidebar).
+    const onLogout = (): void => { void logout().then(() => window.location.reload()); };
+
+    const sidebar  = buildSidebar(controller, onLogout);
     const workArea = buildWorkArea(sidebar, controller);
 
     // The menu's "Open Saved…"/"Query History…" entry points route through the
@@ -103,7 +108,6 @@ export function SqlAdminShell(controller: SqlAdminController): Container {
                     onShowLocalStorage : () => openLocalStorageWindow(),
                     onShowShortcuts    : () => openShortcutsDialog(),
                     onAbout            : () => openAboutDialog(),
-                    onLogout           : () => { void logout().then(() => window.location.reload()); },
                     onShowDatabases    : () => sidebar.selectView(DATABASE_VIEW_ID),
                     onShowRoles        : () => sidebar.selectView(ROLES_VIEW_ID),
                     onShowQueries      : () => sidebar.selectView(QUERIES_VIEW_ID),
@@ -301,8 +305,6 @@ interface MenuBarActions {
     onShowShortcuts: () => void;
     /** Opens the About dialog (the far-right menu-bar button). */
     onAbout: () => void;
-    /** Signs out: drops the server-side session and reloads to the login dialog. */
-    onLogout: () => void;
     /** Selects the Databases rail (View → Databases, and the Alt+D accelerator). */
     onShowDatabases: () => void;
     /** Selects the Roles rail (View → Roles, and the Alt+O accelerator). */
@@ -384,13 +386,9 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
     const about = Button({ glyph: "circle-info", text: "About", showText: true, showDescription: false, compact: true, flat: true });
     about.on("action", actions.onAbout);
 
-    const signOut = Button({ glyph: "right-from-bracket", text: "Sign out", showText: true, showDescription: false, compact: true, flat: true });
-    signOut.on("action", actions.onLogout);
-
     menuBar.addComponent(Spacer.flex());
     menuBar.addComponent(shortcuts);
     menuBar.addComponent(about);
-    menuBar.addComponent(signOut);
 
     return menuBar;
 }
@@ -401,7 +399,7 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
  * accordion) — which is also the documented Phase-2 seam (one more rail button +
  * one more deck page adds a view).
  */
-function buildSidebar(controller: SqlAdminController): ActivityBarHandle {
+function buildSidebar(controller: SqlAdminController, onLogout: () => void): ActivityBarHandle {
     const explorer = DatabaseExplorerView(controller, DATABASE_VIEW_ID);
     const roles    = RolesExplorerView(controller, ROLES_VIEW_ID);
     const queries  = QueriesView(controller, QUERIES_VIEW_ID);
@@ -410,5 +408,5 @@ function buildSidebar(controller: SqlAdminController): ActivityBarHandle {
         { id: DATABASE_VIEW_ID, label: "Database", shortcut: DATABASES_RAIL_SHORTCUT, glyph: "database", component: explorer },
         { id: ROLES_VIEW_ID,    label: "Roles",    shortcut: ROLES_RAIL_SHORTCUT,     glyph: "users",    component: roles },
         { id: QUERIES_VIEW_ID,  label: "Queries",  shortcut: QUERIES_RAIL_SHORTCUT,   glyph: "terminal", component: queries },
-    ]);
+    ], { onSignOut: onLogout });
 }
