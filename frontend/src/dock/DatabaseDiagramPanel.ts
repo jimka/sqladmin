@@ -10,6 +10,15 @@
 // to that schema; double-clicking a leaf in Tables mode opens that table
 // (using *that leaf's own* schema, read off its node data, since it varies
 // across the diagram); double-clicking a container is a no-op.
+//
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): extends Panel directly,
+// following RelationDiagramPanel's pattern. Every former factory-closure `let`
+// becomes a private instance field; the closure helpers (`applyFilter`,
+// `rebuildLegend`, `rebuildBase`, `focusSchema`, `isHiddenLeaf`) become
+// arrow-function fields (consistency with the set — `applyFilter` is passed by
+// reference to `schemaLegendRow`, so it must be one). `modeControl`,
+// `rootControl`, `tablesControls`, and `legend` are fields (not just locals)
+// because `focusSchema` and the mode listener mutate them after construction.
 
 import { Component, Panel }         from "@jimka/typescript-ui/core";
 import { Border, HBox, VBox }       from "@jimka/typescript-ui/layout";
@@ -42,210 +51,226 @@ const ROOT_NONE = "(none)";
 type DiagramMode = "overview" | "tables";
 
 /**
- * Build the database diagram panel: a Border layout with a WEST mode toggle +
+ * The database diagram panel: a Border layout with a WEST mode toggle +
  * (Tables-mode-only) root/direction/depth/prune controls + per-schema legend,
  * and a CENTER DiagramView.
- *
- * @param schemas - Every schema's tables + structures (from buildDatabaseGraphData).
- * @param onSelectTable - Invoked with the activated leaf's schema + table.
- * @returns A Component to host as the tab content.
  */
-export function DatabaseDiagramPanel(
-    schemas: SchemaTables[],
-    onSelectTable: (schema: string, table: string) => void,
-): Component {
+export class DatabaseDiagramPanel extends Panel {
     // Assembled once from the fetched schemas; both modes derive from these
     // without re-fetching. `full` is the flat, ungrouped table graph the
     // rooted/prune traversal runs on (grouping happens last, only for display).
-    const full          = buildDatabaseDiagram(schemas);
-    const overviewGraph = buildSchemaOverviewDiagram(schemas);
-    const schemaNames   = schemas.map(s => s.schema);
+    private readonly full:          DiagramData;
+    private readonly overviewGraph: DiagramData;
+    private readonly schemaNames:   string[];
 
-    // View state, held in the factory closure and re-derived on each control /
-    // legend change — the same pattern RelationDiagramPanel uses. `base` is the
-    // direction+depth-rooted graph (or the whole `full` graph when no root is
-    // chosen); the filtered (per-schema hide, optionally pruned) view over it
-    // is what Tables mode actually shows, after grouping by schema.
-    let mode: DiagramMode = "overview";
-    let rootId: string | null = null;
-    let direction: TraversalDirection = "both";
-    let depth = DEFAULT_DEPTH;
-    let prune = false;
-    const hiddenSchemas = new Set<string>();
-    let base: DiagramData = full;
+    // View state, re-derived on each control / legend change — the same
+    // pattern RelationDiagramPanel uses. `base` is the direction+depth-rooted
+    // graph (or the whole `full` graph when no root is chosen); the filtered
+    // (per-schema hide, optionally pruned) view over it is what Tables mode
+    // actually shows, after grouping by schema. `base` is seeded post-`super()`.
+    private mode: DiagramMode = "overview";
+    private rootId: string | null = null;
+    private direction: TraversalDirection = "both";
+    private depth = DEFAULT_DEPTH;
+    private prune = false;
+    private readonly hiddenSchemas = new Set<string>();
+    private base!: DiagramData;
 
-    const view = DiagramView({ data: overviewGraph });
+    private readonly view:           DiagramView;
+    private readonly modeControl:    ComboBox;
+    private readonly rootControl:    ComboBox;
+    private readonly tablesControls: Panel;
+    private readonly legend:         Panel;
 
-    view.on("activate", (node: DiagramNodeData) => {
-        if (mode === "overview") {
-            focusSchema(node.id); // the overview node's id is the bare schema name
+    /**
+     * @param schemas - Every schema's tables + structures (from buildDatabaseGraphData).
+     * @param onSelectTable - Invoked with the activated leaf's schema + table.
+     */
+    constructor(schemas: SchemaTables[], onSelectTable: (schema: string, table: string) => void) {
+        // Locals before super() — they are super()'s children (this is
+        // unavailable until super() returns).
+        const full          = buildDatabaseDiagram(schemas);
+        const overviewGraph = buildSchemaOverviewDiagram(schemas);
+        const schemaNames   = schemas.map(s => s.schema);
+
+        const view = DiagramView({ data: overviewGraph });
+
+        const rootControl = ComboBox({ items: [ROOT_NONE, ...full.nodes.map(n => n.id)], value: ROOT_NONE });
+
+        const directionControl = ComboBox({
+            items: [
+                { key: "downstream", label: "Downstream" },
+                { key: "upstream",   label: "Upstream" },
+                { key: "both",       label: "Both" },
+            ],
+            value: "both",
+        });
+
+        const depthControl = ComboBox({ items: DEPTH_CHOICES, value: String(DEFAULT_DEPTH) });
+        const pruneControl = Checkbox({ value: false });
+
+        const tablesControls = Panel({
+            layoutManager: new VBox({ spacing: 4 }),
+            components: [
+                labelledRow("Root table", rootControl),
+                labelledRow("Direction", directionControl),
+                labelledRow("Depth", depthControl),
+                new Component({ layoutManager: new HBox({ spacing: 4 }), components: [pruneControl, new Text("Hide with prune")] }),
+            ],
+        });
+
+        const modeControl = ComboBox({
+            items: [
+                { key: "overview", label: "Overview" },
+                { key: "tables",   label: "Tables" },
+            ],
+            value: "overview",
+        });
+
+        const legend = Panel({ layoutManager: new VBox({ spacing: 2 }), autoScroll: "auto" });
+
+        // Overview is the default mode: the Tables-only controls + legend start
+        // hidden until the user switches (or drills in via focusSchema).
+        tablesControls.setDisplayed(false);
+        legend.setDisplayed(false);
+
+        const controls = Panel({
+            layoutManager: new VBox({ spacing: 4 }),
+            components: [labelledRow("Mode", modeControl), tablesControls],
+        });
+
+        const west = Panel({
+            layoutManager: new Border(),
+            preferredSize: { width: LEGEND_WIDTH, height: 0 },
+            minSize      : { width: LEGEND_WIDTH, height: 0 },
+            components: [
+                { component: controls, constraints: { placement: Placement.NORTH } },
+                { component: legend,   constraints: { placement: Placement.CENTER } },
+            ],
+        });
+
+        super({
+            layoutManager: new Border(),
+            components: [
+                { component: west, constraints: { placement: Placement.WEST } },
+                { component: view, constraints: { placement: Placement.CENTER } },
+            ],
+        });
+
+        this.full          = full;
+        this.overviewGraph = overviewGraph;
+        this.schemaNames   = schemaNames;
+        this.base           = full;
+        this.view           = view;
+        this.modeControl    = modeControl;
+        this.rootControl    = rootControl;
+        this.tablesControls = tablesControls;
+        this.legend         = legend;
+
+        // Wire listeners after super() (this now available). Moved from the
+        // construction-time `listeners:` bag to post-super() `.on()` calls so
+        // `this` is initialized when a change fires.
+        view.on("activate", (node: DiagramNodeData) => {
+            if (this.mode === "overview") {
+                this.focusSchema(node.id); // the overview node's id is the bare schema name
+                return;
+            }
+
+            if ((node.children?.length ?? 0) > 0) {
+                return; // a container (schema box): activation is a no-op
+            }
+
+            const data = node.data as TableNodeData | undefined;
+
+            if (data) {
+                onSelectTable(data.schema, data.table);
+            }
+        });
+
+        rootControl.on("change", (v: string) => { this.rootId = v === ROOT_NONE ? null : v; this.rebuildBase(); });
+        directionControl.on("change", (v: string) => { this.direction = v as TraversalDirection; this.rebuildBase(); });
+        depthControl.on("change", (v: string) => { this.depth = Number(v); this.rebuildBase(); });
+        pruneControl.on("change", (v: boolean) => { this.prune = v; this.applyFilter(); });
+        modeControl.on("change", (v: string) => {
+            this.mode = v as DiagramMode;
+
+            if (this.mode === "overview") {
+                this.tablesControls.setDisplayed(false);
+                this.legend.setDisplayed(false);
+                this.view.setData(this.overviewGraph);
+            } else {
+                this.tablesControls.setDisplayed(true);
+                this.legend.setDisplayed(true);
+                this.rebuildBase();
+                this.rebuildLegend();
+            }
+        });
+    }
+
+    // True when `n`'s schema (read off its leaf data) is currently hidden.
+    // Passed by reference to Array#filter within applyFilter — kept an
+    // arrow-function field for consistency with the rest of this helper set.
+    private isHiddenLeaf = (n: DiagramNodeData): boolean =>
+        this.hiddenSchemas.has((n.data as TableNodeData).schema);
+
+    // Push the current base + per-schema hide/prune state into the view
+    // (Tables mode only). Passed by reference to schemaLegendRow — MUST be an
+    // arrow field, or it would lose `this` when invoked as a callback.
+    private applyFilter = (): void => {
+        if (this.mode !== "tables") {
             return;
         }
 
-        if ((node.children?.length ?? 0) > 0) {
-            return; // a container (schema box): activation is a no-op
-        }
+        const filtered = this.rootId !== null
+            ? applyHide(this.base, this.rootId, new Set(this.base.nodes.filter(this.isHiddenLeaf).map(n => n.id)), this.prune, this.direction)
+            : subgraph(this.base, new Set(this.base.nodes.filter(n => !this.isHiddenLeaf(n)).map(n => n.id)));
 
-        const data = node.data as TableNodeData | undefined;
-
-        if (data) {
-            onSelectTable(data.schema, data.table);
-        }
-    });
-
-    /** True when `n`'s schema (read off its leaf data) is currently hidden. */
-    const isHiddenLeaf = (n: DiagramNodeData): boolean =>
-        hiddenSchemas.has((n.data as TableNodeData).schema);
-
-    /** Push the current base + per-schema hide/prune state into the view (Tables mode only). */
-    const applyFilter = (): void => {
-        if (mode !== "tables") {
-            return;
-        }
-
-        const filtered = rootId !== null
-            ? applyHide(base, rootId, new Set(base.nodes.filter(isHiddenLeaf).map(n => n.id)), prune, direction)
-            : subgraph(base, new Set(base.nodes.filter(n => !isHiddenLeaf(n)).map(n => n.id)));
-
-        view.setData(groupBySchema(filtered));
+        this.view.setData(groupBySchema(filtered));
     };
 
-    /** Rebuild the per-schema legend rows from the full schema set. */
-    const rebuildLegend = (): void => {
-        legend.removeAllComponents();
+    // Rebuild the per-schema legend rows from the full schema set.
+    private rebuildLegend = (): void => {
+        this.legend.removeAllComponents();
 
-        for (const schema of schemaNames) {
-            legend.addComponent(schemaLegendRow(schema, hiddenSchemas, applyFilter));
+        for (const schema of this.schemaNames) {
+            this.legend.addComponent(schemaLegendRow(schema, this.hiddenSchemas, this.applyFilter));
         }
     };
 
-    /** Re-root (or un-root) on a root/direction/depth change: fresh base. */
-    const rebuildBase = (): void => {
-        if (rootId === null) {
-            base = full;
+    // Re-root (or un-root) on a root/direction/depth change: fresh base.
+    private rebuildBase = (): void => {
+        if (this.rootId === null) {
+            this.base = this.full;
         } else {
-            const rootNode = full.nodes.find(n => n.id === rootId);
-            base = rootNode ? rootedDiagram(full, rootNode, direction, depth) : full;
+            const rootNode = this.full.nodes.find(n => n.id === this.rootId);
+            this.base = rootNode ? rootedDiagram(this.full, rootNode, this.direction, this.depth) : this.full;
         }
 
-        applyFilter();
+        this.applyFilter();
     };
 
-    /** Switch to Tables mode, hiding every schema except `schema` (Overview drill-down). */
-    const focusSchema = (schema: string): void => {
-        mode = "tables";
-        rootId = null;
-        hiddenSchemas.clear();
+    // Switch to Tables mode, hiding every schema except `schema` (Overview
+    // drill-down). Called from the view's "activate" handler — needs no
+    // by-reference registration itself, but kept an arrow field for
+    // consistency with the rest of this helper set.
+    private focusSchema = (schema: string): void => {
+        this.mode = "tables";
+        this.rootId = null;
+        this.hiddenSchemas.clear();
 
-        for (const s of schemaNames) {
+        for (const s of this.schemaNames) {
             if (s !== schema) {
-                hiddenSchemas.add(s);
+                this.hiddenSchemas.add(s);
             }
         }
 
-        modeControl.setValue("tables");
-        rootControl.setValue(ROOT_NONE);
-        tablesControls.setDisplayed(true);
-        legend.setDisplayed(true);
-        rebuildBase();
-        rebuildLegend();
+        this.modeControl.setValue("tables");
+        this.rootControl.setValue(ROOT_NONE);
+        this.tablesControls.setDisplayed(true);
+        this.legend.setDisplayed(true);
+        this.rebuildBase();
+        this.rebuildLegend();
     };
-
-    const rootControl = ComboBox({
-        items: [ROOT_NONE, ...full.nodes.map(n => n.id)],
-        value: ROOT_NONE,
-        listeners: {
-            change: (v: string) => {
-                rootId = v === ROOT_NONE ? null : v;
-                rebuildBase();
-            },
-        },
-    });
-
-    const directionControl = ComboBox({
-        items: [
-            { key: "downstream", label: "Downstream" },
-            { key: "upstream",   label: "Upstream" },
-            { key: "both",       label: "Both" },
-        ],
-        value: "both",
-        listeners: { change: (v: string) => { direction = v as TraversalDirection; rebuildBase(); } },
-    });
-
-    const depthControl = ComboBox({
-        items: DEPTH_CHOICES,
-        value: String(DEFAULT_DEPTH),
-        listeners: { change: (v: string) => { depth = Number(v); rebuildBase(); } },
-    });
-
-    const pruneControl = Checkbox({
-        value: false,
-        listeners: { change: (v: boolean) => { prune = v; applyFilter(); } },
-    });
-
-    const tablesControls = Panel({
-        layoutManager: new VBox({ spacing: 4 }),
-        components: [
-            labelledRow("Root table", rootControl),
-            labelledRow("Direction", directionControl),
-            labelledRow("Depth", depthControl),
-            new Component({ layoutManager: new HBox({ spacing: 4 }), components: [pruneControl, new Text("Hide with prune")] }),
-        ],
-    });
-
-    const modeControl = ComboBox({
-        items: [
-            { key: "overview", label: "Overview" },
-            { key: "tables",   label: "Tables" },
-        ],
-        value: "overview",
-        listeners: {
-            change: (v: string) => {
-                mode = v as DiagramMode;
-
-                if (mode === "overview") {
-                    tablesControls.setDisplayed(false);
-                    legend.setDisplayed(false);
-                    view.setData(overviewGraph);
-                } else {
-                    tablesControls.setDisplayed(true);
-                    legend.setDisplayed(true);
-                    rebuildBase();
-                    rebuildLegend();
-                }
-            },
-        },
-    });
-
-    const legend = Panel({ layoutManager: new VBox({ spacing: 2 }), autoScroll: "auto" });
-
-    // Overview is the default mode: the Tables-only controls + legend start
-    // hidden until the user switches (or drills in via focusSchema).
-    tablesControls.setDisplayed(false);
-    legend.setDisplayed(false);
-
-    const controls = Panel({
-        layoutManager: new VBox({ spacing: 4 }),
-        components: [labelledRow("Mode", modeControl), tablesControls],
-    });
-
-    const west = Panel({
-        layoutManager: new Border(),
-        preferredSize: { width: LEGEND_WIDTH, height: 0 },
-        minSize      : { width: LEGEND_WIDTH, height: 0 },
-        components: [
-            { component: controls, constraints: { placement: Placement.NORTH } },
-            { component: legend,   constraints: { placement: Placement.CENTER } },
-        ],
-    });
-
-    return Panel({
-        layoutManager: new Border(),
-        components: [
-            { component: west, constraints: { placement: Placement.WEST } },
-            { component: view, constraints: { placement: Placement.CENTER } },
-        ],
-    });
 }
 
 /**

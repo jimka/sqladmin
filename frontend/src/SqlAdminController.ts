@@ -452,7 +452,7 @@ export class SqlAdminController {
             id,
             title  : `${ref.schema} (diagram)`,
             glyph  : "diagram-project",
-            content: SchemaDiagramPanel(data, table => this.openReferencedTable({
+            content: new SchemaDiagramPanel(data, table => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : ref.schema,
@@ -534,7 +534,7 @@ export class SqlAdminController {
             id,
             title  : `${ref.database} (diagram)`,
             glyph  : "diagram-project",
-            content: DatabaseDiagramPanel(schemas, (schema, table) => this.openReferencedTable({
+            content: new DatabaseDiagramPanel(schemas, (schema, table) => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema,
@@ -610,7 +610,7 @@ export class SqlAdminController {
             title  : `${ref.name} (relations)`,
             glyph  : "diagram-project",
             tooltip: this.panelTooltip(ref),
-            content: RelationDiagramPanel(full, root, table => this.openReferencedTable({
+            content: new RelationDiagramPanel(full, root, table => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : ref.schema,
@@ -692,7 +692,7 @@ export class SqlAdminController {
             id,
             title  : `${ref.schema} (dependencies)`,
             glyph  : "diagram-project",
-            content: RelationGraphPanel(data, nd => this.openReferencedTable({
+            content: new RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -739,7 +739,7 @@ export class SqlAdminController {
             title  : `${ref.name} (dependencies)`,
             glyph  : "diagram-project",
             tooltip: this.panelTooltip(ref),
-            content: RelationGraphPanel(data, nd => this.openReferencedTable({
+            content: new RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -776,7 +776,7 @@ export class SqlAdminController {
             id,
             title  : `${ref.schema} (inheritance)`,
             glyph  : "diagram-project",
-            content: RelationGraphPanel(data, nd => this.openReferencedTable({
+            content: new RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -824,7 +824,7 @@ export class SqlAdminController {
             title  : `${ref.name} (inheritance)`,
             glyph  : "diagram-project",
             tooltip: this.panelTooltip(ref),
-            content: RelationGraphPanel(data, nd => this.openReferencedTable({
+            content: new RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -1407,7 +1407,7 @@ export class SqlAdminController {
             id,
             title  : `${name} (membership)`,
             glyph  : "diagram-project",
-            content: RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName)),
+            content: new RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName)),
         });
         this.statusBar.setMessage(`${this._connectionId} · ${name}: membership (${full.nodes.length} roles)`);
     }
@@ -1438,7 +1438,7 @@ export class SqlAdminController {
             id,
             title  : `${name} (grants graph)`,
             glyph  : "diagram-project",
-            content: RoleGrantsDiagramPanel(data, (schema, table) => this.openGrantedTable(schema, table)),
+            content: new RoleGrantsDiagramPanel(data, (schema, table) => this.openGrantedTable(schema, table)),
         });
         this.statusBar.setMessage(`${this._connectionId} · ${name}: grants graph (${data.nodes.length - 1} tables)`);
     }

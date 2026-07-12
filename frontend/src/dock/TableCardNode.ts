@@ -6,6 +6,13 @@
 // with the ELK port an FK edge was pinned to, without either side measuring the
 // other. A node with no card `data` (or no columns — e.g. the injected root
 // buildSchemaDiagram never fetches columns for) renders header-only.
+//
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): extends Panel directly, so
+// `setSelected` is a real public method rather than a grafted-on cast.
+// DiagramView.applySelectedVisual calls it as `component.setSelected?.(value)`
+// — a method call on the node object, never a detached reference — so `this`
+// is bound correctly and no arrow-function field is needed. `columnRow` stays a
+// stateless module-level function.
 
 import { Component, Panel }  from "@jimka/typescript-ui/core";
 import { VBox, HBox }        from "@jimka/typescript-ui/layout";
@@ -48,54 +55,53 @@ const CARD_BG = "var(--ts-ui-diagram-node-bg, var(--ts-ui-button-bg, rgb(245, 24
 // card-mode diagram as it does in the flat one.
 const CARD_SELECTED_BG = "var(--ts-ui-diagram-node-selected-bg, var(--ts-ui-table-row-selected, rgba(30, 100, 200, 0.15)))";
 
-// A DiagramView-recognised selection hook: DiagramView toggles a node's
-// selected visual by duck-typing `component.setSelected?.(value)`
-// (DiagramView.applySelectedVisual). A TableCardNode is a plain Panel, so it
-// carries no such method by default — we graft this shape onto it.
-interface SelectableCard {
-    setSelected(value: boolean): void;
-}
-
 /**
- * Build one table card. Renders a header (the table name) followed by one row
- * per `CardNodeData` column; a node whose `data` is absent or carries no
- * columns renders header-only. Rows take pointer events (for their hover
- * tooltip) but clicks/double-clicks still resolve to the card — DiagramView's
- * nodeIdAt matches any target the card element contains — so its
- * activation/selection wiring keeps working; the card carries a `setSelected`
- * for the selection highlight DiagramView drives.
- *
- * @param node - The node's data, including its card `data.columns` when present.
- * @param isRoot - Whether this card is the diagram's rooted relation (accent border).
- * @returns The card Component, hosted directly by DiagramView.
+ * One table card: a header (the table name) followed by one row per
+ * `CardNodeData` column; a node whose `data` is absent or carries no columns
+ * renders header-only. Rows take pointer events (for their hover tooltip) but
+ * clicks/double-clicks still resolve to the card — DiagramView's nodeIdAt
+ * matches any target the card element contains — so its activation/selection
+ * wiring keeps working; `setSelected` is the selection highlight DiagramView
+ * drives via its duck-typed `component.setSelected?.(value)`.
  */
-export function TableCardNode(node: DiagramNodeData, isRoot: boolean): Component {
-    const columns = (node.data as CardNodeData | undefined)?.columns ?? [];
+export class TableCardNode extends Panel {
+    /**
+     * @param node - The node's data, including its card `data.columns` when present.
+     * @param isRoot - Whether this card is the diagram's rooted relation (accent border).
+     */
+    constructor(node: DiagramNodeData, isRoot: boolean) {
+        const columns = (node.data as CardNodeData | undefined)?.columns ?? [];
 
-    const header = new Text(node.label ?? node.id);
+        const header = new Text(node.label ?? node.id);
 
-    header.setFontWeight("bold");
-    header.setPreferredSize(CARD_WIDTH, CARD_HEADER_HEIGHT);
-    header.setPointerEvents("none");
+        header.setFontWeight("bold");
+        header.setPreferredSize(CARD_WIDTH, CARD_HEADER_HEIGHT);
+        header.setPointerEvents("none");
 
-    const card = Panel({
-        layoutManager: new VBox({ spacing: 0 }),
-        preferredSize: { width: CARD_WIDTH, height: cardHeight(columns.length) },
-        components   : [header, ...columns.map(columnRow)],
-    });
+        super({
+            layoutManager: new VBox({ spacing: 0 }),
+            preferredSize: { width: CARD_WIDTH, height: cardHeight(columns.length) },
+            components   : [header, ...columns.map(columnRow)],
+        });
 
-    card.setBorder(isRoot ? ROOT_BORDER : CARD_BORDER);
-    card.setBackgroundColor(CARD_BG);
-    card.setCursor("pointer");
+        this.setBorder(isRoot ? ROOT_BORDER : CARD_BORDER);
+        this.setBackgroundColor(CARD_BG);
+        this.setCursor("pointer");
+    }
 
-    // Restore the single-click selection highlight DiagramView drives through a
-    // duck-typed setSelected: swap the background to the accent shade while
-    // selected. The border is left as-is so a root card keeps its accent frame.
-    (card as unknown as SelectableCard).setSelected = (selected: boolean): void => {
-        card.setBackgroundColor(selected ? CARD_SELECTED_BG : CARD_BG);
-    };
-
-    return card;
+    /**
+     * Restores the single-click selection highlight DiagramView drives through
+     * a duck-typed `setSelected` call: swap the background to the accent shade
+     * while selected. The border is left as-is so a root card keeps its accent
+     * frame. A real method — DiagramView.applySelectedVisual calls it as
+     * `component.setSelected?.(value)`, a method call (never a detached
+     * reference), so `this` is bound correctly and no arrow field is needed.
+     *
+     * @param value - Whether the card is selected.
+     */
+    setSelected(value: boolean): void {
+        this.setBackgroundColor(value ? CARD_SELECTED_BG : CARD_BG);
+    }
 }
 
 /**
