@@ -1,20 +1,16 @@
-// The app shell: a Border-laid Panel with MenuBar (NORTH), the StatusBar
-// (SOUTH), and a horizontal Split (CENTER) holding the activity bar beside the
-// Dock work area. The Dock and StatusBar are owned by the controller; the shell
-// only arranges them. The sidebar seeds at its natural width and stays fixed on
-// viewport resize (weight 0) while the Dock absorbs the slack (weight 1); the
-// gutter between them is user-drag-resizable. Collapse runs through the Split:
-// the shell injects a SidebarSizer into the activity bar that pins the sidebar
-// pane to the rail width (min == max) to collapse and restores a draggable width
-// to expand — the Split ignores a pane's preferred size after its one-time seed,
-// so preferred can no longer drive collapse.
-//
-// Built as a callable factory (not `extends Panel`) for now: subclassing a
-// library base is fully supported today (the .d.ts's unresolved `~/*` aliases
-// were fixed with a post-emit `tsc-alias` pass — see LIBRARY_NOTES.md,
-// "External consumers couldn't subclass a library class"). The shell staying
-// a factory is a not-yet-migrated holdover, not a constraint — ActivityBar
-// and TableWorkPanel are the class-first precedent (COMPONENT_CONVENTIONS.md).
+// The app shell: a class-first, Border-laid Container with MenuBar (NORTH),
+// the StatusBar (SOUTH), and a horizontal Split (CENTER) holding the activity
+// bar beside the Dock work area. The instance itself is the mountable
+// component (COMPONENT_CONVENTIONS.md (d)) — the call site constructs it with
+// `new` and mounts it directly. The Dock and StatusBar are owned by the
+// controller; the shell only arranges them. The sidebar seeds at its natural
+// width and stays fixed on viewport resize (weight 0) while the Dock absorbs
+// the slack (weight 1); the gutter between them is user-drag-resizable.
+// Collapse runs through the Split: the shell injects a SidebarSizer into the
+// activity bar that pins the sidebar pane to the rail width (min == max) to
+// collapse and restores a draggable width to expand — the Split ignores a
+// pane's preferred size after its one-time seed, so preferred can no longer
+// drive collapse.
 
 import { Component, Container }        from "@jimka/typescript-ui/core";
 import { Placement, UNBOUNDED }    from "@jimka/typescript-ui/primitive";
@@ -78,49 +74,54 @@ const QUERIES_VIEW_ID  = "queries";
 const CENTER_DOCK_ID  = "work-dock";
 const CENTER_START_ID = "work-start";
 
-/** Build the shell container, hosting the controller's Dock and StatusBar. */
-export function SqlAdminShell(controller: SqlAdminController): Container {
-    // Signs out: drops the server-side session and reloads to the login dialog.
-    // Wired to the rail's bottom-pinned sign-out button (buildSidebar).
-    const onLogout = (): void => { void logout().then(() => window.location.reload()); };
+/** The shell container, hosting the controller's Dock and StatusBar. */
+export class SqlAdminShell extends Container {
+    constructor(controller: SqlAdminController) {
+        // Signs out: drops the server-side session and reloads to the login
+        // dialog. Wired to the rail's bottom-pinned sign-out button (buildSidebar).
+        const onLogout = (): void => { void logout().then(() => window.location.reload()); };
 
-    const sidebar  = buildSidebar(controller, onLogout);
-    const workArea = buildWorkArea(sidebar, controller);
+        // Locals needed by super()'s components array — `this` is unavailable
+        // before super() returns (COMPONENT_CONVENTIONS.md (b)).
+        const sidebar  = buildSidebar(controller, onLogout);
+        const workArea = buildWorkArea(sidebar, controller);
+        const menuBar  = buildMenuBar({
+            onToggleSidebar    : sidebar.toggleCollapsed,
+            onNewQuery         : () => controller.openQuery(),
+            onOpenSaved        : () => controller.showQueriesView("saved"),
+            onQueryHistory     : () => controller.showQueriesView("recent"),
+            onExportResults    : format => controller.exportActive(format),
+            activeExportKind   : () => controller.activeExportKind(),
+            canExportActive    : () => controller.canExportActive(),
+            onOpenDocumentation: () => controller.openDocumentation(),
+            onShowLocalStorage : () => openLocalStorageWindow(),
+            onShowShortcuts    : () => openShortcutsDialog(),
+            onAbout            : () => openAboutDialog(),
+            onShowDatabases    : () => sidebar.selectView(DATABASE_VIEW_ID),
+            onShowRoles        : () => sidebar.selectView(ROLES_VIEW_ID),
+            onShowQueries      : () => sidebar.selectView(QUERIES_VIEW_ID),
+            onRefresh          : () => controller.refreshActive(),
+        });
 
-    // The menu's "Open Saved…"/"Query History…" entry points route through the
-    // controller; give it the shell-owned selector for the Queries view. The
-    // New-Query menu shortcut is a display hint only (MenuItem.ts), so install
-    // the real Alt+N accelerator as a document keydown listener.
-    controller.setShowQueriesView(() => sidebar.selectView(QUERIES_VIEW_ID));
-    installAccelerators(controller, sidebar);
+        super({
+            layoutManager: new BorderLayout({ spacing: 0 }),
+            components: [
+                { component: menuBar,              constraints: { placement: Placement.NORTH } },
+                { component: workArea,             constraints: { placement: Placement.CENTER } },
+                { component: controller.statusBar, constraints: { placement: Placement.SOUTH } },
+            ],
+        });
 
-    return Container({
-        layoutManager: new BorderLayout({ spacing: 0 }),
-        components: [
-            {
-                component: buildMenuBar({
-                    onToggleSidebar    : sidebar.toggleCollapsed,
-                    onNewQuery         : () => controller.openQuery(),
-                    onOpenSaved        : () => controller.showQueriesView("saved"),
-                    onQueryHistory     : () => controller.showQueriesView("recent"),
-                    onExportResults    : format => controller.exportActive(format),
-                    activeExportKind   : () => controller.activeExportKind(),
-                    canExportActive    : () => controller.canExportActive(),
-                    onOpenDocumentation: () => controller.openDocumentation(),
-                    onShowLocalStorage : () => openLocalStorageWindow(),
-                    onShowShortcuts    : () => openShortcutsDialog(),
-                    onAbout            : () => openAboutDialog(),
-                    onShowDatabases    : () => sidebar.selectView(DATABASE_VIEW_ID),
-                    onShowRoles        : () => sidebar.selectView(ROLES_VIEW_ID),
-                    onShowQueries      : () => sidebar.selectView(QUERIES_VIEW_ID),
-                    onRefresh          : () => controller.refreshActive(),
-                }), 
-                constraints      : { placement: Placement.NORTH }
-            },
-            { component: workArea,             constraints: { placement: Placement.CENTER } },
-            { component: controller.statusBar, constraints: { placement: Placement.SOUTH } },
-        ],
-    });
+        // Post-super() wiring: neither touches `this` nor feeds the components
+        // array, so running them after super() is behaviour-neutral
+        // (COMPONENT_CONVENTIONS.md (b) step 3). The menu's "Open Saved…"/"Query
+        // History…" entry points route through the controller; give it the
+        // shell-owned selector for the Queries view. The New-Query menu shortcut
+        // is a display hint only (MenuItem.ts), so install the real Alt+N
+        // accelerator as a document keydown listener.
+        controller.setShowQueriesView(() => sidebar.selectView(QUERIES_VIEW_ID));
+        installAccelerators(controller, sidebar);
+    }
 }
 
 /**

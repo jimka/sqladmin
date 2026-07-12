@@ -28,7 +28,7 @@ import { showLoginDialog }    from "./shell/LoginDialog";
 
     // Now that we are authenticated, mount the shell into the already-initialised
     // Body.
-    Body.getInstance().addComponent(SqlAdminShell(controller));
+    Body.getInstance().addComponent(new SqlAdminShell(controller));
 })().catch((err) => {
     console.error("SQLAdmin failed to start:", err);
 });
