@@ -299,6 +299,31 @@ cannot exercise layout, keyboard events, or drag). Drive them in the running app
   *Expected Behaviour* list — render of all four regions, each Alt-chord, Toggle
   Sidebar, rail collapse/expand + gutter drag, and StartPage ↔ Dock switching.
 
+**Performed at implementation time:** the dev server was launched against the
+already-running seed-DB/backend Docker stack and driven through
+`chrome-devtools` (an already-authenticated session, so the shell mounted
+directly). All four regions rendered — MenuBar (NORTH) with Query/Tools/View
+menus and Shortcuts/About buttons, the ActivityBar rail + sidebar (WEST) with
+the Databases tree open by default, the Dock/StartPage deck (CENTER), and the
+StatusBar (SOUTH) showing `Connection: default` / `sqladmin`. `document
+.querySelector('[class*="SqlAdminShell"]').className === "SqlAdminShell"`
+confirmed convention (e) took effect (not the generic `"Container"`).
+Every accelerator in the Alt+D/O/Q/R/N/S/H + Help family was exercised via
+`press_key` and screenshotted: **Alt+N** opened a new Query tab, replacing
+StartPage with the Dock (confirms the CENTER Card-deck toggle);
+**Alt+O**/**Alt+Q**/**Alt+D** switched the sidebar to Roles/Queries/Databases
+respectively; **Alt+S** switched to Queries with the Saved section expanded;
+**Alt+R** fired with no console error; **`?`** (Help) opened the Keyboard
+Shortcuts dialog, closed cleanly via its Close button. **View → Toggle
+Sidebar** collapsed the sidebar to the rail width (Dock reclaimed the space)
+and, toggled again, re-expanded to the prior width. Clicking the **active
+rail icon** independently collapsed/re-expanded the sidebar (the
+`SidebarSizer` path). A synthetic `mousedown`/`mousemove`/`mouseup` sequence
+on the `.SplitGutter` element dragged the gutter from `x=280` to `x=360`,
+confirming the Split-hosted gutter is still drag-resizable post-conversion.
+`list_console_messages` showed only the two expected Vite HMR debug lines
+(`connecting…` / `connected.`) throughout — no runtime errors at any step.
+
 ---
 
 ## Potential Challenges
