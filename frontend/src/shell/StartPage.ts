@@ -7,6 +7,15 @@
 // recent tables / saved queries and a right column of the keyboard-shortcut
 // legend and connection info. It rebuilds on the controller's onWorkspaceChanged
 // seam so the recent/saved lists stay current.
+//
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): the page `extends Panel`
+// directly, so the instance itself is the mountable component. `id` and
+// `autoScroll` must both land in the single `super({...})` options object,
+// with `id` first — `autoScroll` registers its eased wheel-scroll listener
+// under the component's id during the option cascade that runs inside
+// super(), and a later `setId`/`setAutoScroll` would not re-register it (see
+// the constructor doc below). `rebuild` and the `welcome` mutable state stay
+// constructor-local closures, same as the original factory.
 
 import { Component, Panel }         from "@jimka/typescript-ui/core";
 import { VBox, HBox }               from "@jimka/typescript-ui/layout";
@@ -49,65 +58,69 @@ work.
 - Save a query to pin it to this page`;
 
 /**
- * Build the start page shown when the workspace has no open panels.
- *
- * @param controller - The mediator supplying the quick actions and stored lists.
- * @param id - The CENTER Card-deck page id. It MUST be set here, in the Panel
- *   constructor, rather than via a later `setId`: `autoScroll` registers the
- *   eased wheel-scroll listener under the component's id at construction, and
- *   `setId` re-points the DOM id without re-registering that listener — so a
- *   post-construction `setId` would leave the page scrolling natively (not
- *   smoothly) because the wheel listener no longer matches the element's id.
- *
- * @returns The start-page component.
+ * The start page shown when the workspace has no open panels.
  */
-export function StartPage(controller: SqlAdminController, id: string): Component {
-    const page = Panel({
-        // Set before autoScroll (applyOptions dispatches id first) so the eased
-        // wheel-scroll listener registers under this id — see the `id` param doc.
-        id,
-        layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
-        // The page is the bounded scroll host (the CENTER card sizes it to the
-        // viewport): autoScroll — not `overflow`, which only clips — mounts a
-        // scrollbar so a short viewport scrolls the whole home rather than
-        // clipping the shortcut legend below the fold.
-        autoScroll   : "y",
-    });
-    page.setInsets(new Insets(PAGE_PADDING, PAGE_PADDING, PAGE_PADDING, PAGE_PADDING));
+export class StartPage extends Panel {
+    /**
+     * @param controller - The mediator supplying the quick actions and stored lists.
+     * @param id - The CENTER Card-deck page id. It MUST be set here, in the
+     *   `super(...)` options object, rather than via a later `setId`:
+     *   `autoScroll` registers the eased wheel-scroll listener under the
+     *   component's id at construction, and `setId` re-points the DOM id
+     *   without re-registering that listener — so a post-construction `setId`
+     *   would leave the page scrolling natively (not smoothly) because the
+     *   wheel listener no longer matches the element's id.
+     */
+    constructor(controller: SqlAdminController, id: string) {
+        super({
+            // Set before autoScroll (applyOptions dispatches id first) so the
+            // eased wheel-scroll listener registers under this id — see the
+            // `id` param doc.
+            id,
+            layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
+            // The page is the bounded scroll host (the CENTER card sizes it to
+            // the viewport): autoScroll — not `overflow`, which only clips —
+            // mounts a scrollbar so a short viewport scrolls the whole home
+            // rather than clipping the shortcut legend below the fold.
+            autoScroll: "y",
+        });
 
-    // The welcome blurb is transient: rebuilt (and disposed) each time the
-    // workspace toggles between empty and non-empty. removeAllComponents()
-    // below detaches it from the DOM but does not call dispose(), so its theme
-    // listener must be released explicitly before each rebuild.
-    let welcome: Markdown | null = null;
+        this.setInsets(new Insets(PAGE_PADDING, PAGE_PADDING, PAGE_PADDING, PAGE_PADDING));
 
-    /** Repopulate the page from the current stores. */
-    function rebuild(): void {
-        if (welcome) {
-            welcome.dispose();
-            welcome = null;
-        }
+        // The welcome blurb is transient: rebuilt (and disposed) each time the
+        // workspace toggles between empty and non-empty. removeAllComponents()
+        // below detaches it from the DOM but does not call dispose(), so its
+        // theme listener must be released explicitly before each rebuild. A
+        // constructor-local closure captures `this` lexically, so passing
+        // `rebuild` to `controller.onWorkspaceChanged` below is safe without an
+        // arrow-function field.
+        let welcome: Markdown | null = null;
 
-        page.removeAllComponents();
+        const rebuild = (): void => {
+            if (welcome) {
+                welcome.dispose();
+                welcome = null;
+            }
 
-        // Full-width header above the columns: the app heading, and — only on an
-        // empty workspace — the transient welcome blurb.
-        page.addComponent(heading("SQL Admin", "600"));
+            this.removeAllComponents();
 
-        if (shouldShowWelcome(controller)) {
-            welcome = Markdown(GETTING_STARTED_MARKDOWN);
-            page.addComponent(welcome);
-        }
+            // Full-width header above the columns: the app heading, and — only
+            // on an empty workspace — the transient welcome blurb.
+            this.addComponent(heading("SQL Admin", "600"));
 
-        page.addComponent(buildColumns(controller));
+            if (shouldShowWelcome(controller)) {
+                welcome = Markdown(GETTING_STARTED_MARKDOWN);
+                this.addComponent(welcome);
+            }
 
-        page.doLayout();
+            this.addComponent(buildColumns(controller));
+
+            this.doLayout();
+        };
+
+        controller.onWorkspaceChanged(rebuild);
+        rebuild();
     }
-
-    controller.onWorkspaceChanged(rebuild);
-    rebuild();
-
-    return page;
 }
 
 /**
