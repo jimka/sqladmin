@@ -268,7 +268,7 @@ function buildCenterDeck(controller: SqlAdminController): Component {
     // page's autoScroll registers its eased wheel-scroll listener under the id at
     // construction, and setId does not re-register it (see StartPage), so a late
     // setId would leave the page scrolling natively instead of smoothly.
-    const start = StartPage(controller, CENTER_START_ID);
+    const start = new StartPage(controller, CENTER_START_ID);
 
     deck.addComponent(controller.dock);
     deck.addComponent(start);
@@ -402,9 +402,9 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
  * one more deck page adds a view).
  */
 function buildSidebar(controller: SqlAdminController, onLogout: () => void): ActivityBar {
-    const explorer = DatabaseExplorerView(controller, DATABASE_VIEW_ID);
-    const roles    = RolesExplorerView(controller, ROLES_VIEW_ID);
-    const queries  = QueriesView(controller, QUERIES_VIEW_ID);
+    const explorer = new DatabaseExplorerView(controller, DATABASE_VIEW_ID);
+    const roles    = new RolesExplorerView(controller, ROLES_VIEW_ID);
+    const queries  = new QueriesView(controller, QUERIES_VIEW_ID);
 
     return new ActivityBar([
         { id: DATABASE_VIEW_ID, label: "Database", shortcut: DATABASES_RAIL_SHORTCUT, glyph: "database", component: explorer },
