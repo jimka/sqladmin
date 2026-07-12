@@ -312,7 +312,7 @@ export class SqlAdminController {
             glyph  : KIND_GLYPH[ref.kind],
             tooltip: this.panelTooltip(ref),
             content: isReadOnly
-                ? () => ViewWorkPanel(store, columns, format => this.exportTable(ref, format),
+                ? () => new ViewWorkPanel(store, columns, format => this.exportTable(ref, format),
                     // Explain opens a query tab seeded with the view's own query
                     // (no LIMIT — a LIMIT node would mask the plan's real cost) and
                     // auto-runs EXPLAIN / EXPLAIN ANALYZE there.
@@ -1363,7 +1363,7 @@ export class SqlAdminController {
             id,
             title  : `Grants: ${role}`,
             glyph  : "key",
-            content: RoleGrantsPanel(role, privileges),
+            content: new RoleGrantsPanel(role, privileges),
         });
 
         // Track the grant set so the active-tab export (Tools menu) can reach it
