@@ -19,7 +19,7 @@ import type { SqlAdminController } from "../SqlAdminController";
 export function DatabaseExplorerView(controller: SqlAdminController, id: string): Component {
     return buildTreeExplorerView({
         id,
-        explorer:       NavigatorTree(controller),
+        explorer:       new NavigatorTree(controller),
         treeLabel:      "Databases",
         treeGlyph:      "database",
         inspector:      controller.properties.component,
