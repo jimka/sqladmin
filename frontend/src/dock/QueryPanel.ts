@@ -60,6 +60,7 @@ import { file_code }                     from "@jimka/typescript-ui/glyphs/solid
 import { file_lines }                    from "@jimka/typescript-ui/glyphs/solid/file_lines";
 import { diagram_project }               from "@jimka/typescript-ui/glyphs/solid/diagram_project";
 import { flask }                         from "@jimka/typescript-ui/glyphs/solid/flask";
+import { sitemap }                       from "@jimka/typescript-ui/glyphs/solid/sitemap";
 import { wand_magic_sparkles }           from "@jimka/typescript-ui/glyphs/solid/wand_magic_sparkles";
 import { table }                         from "@jimka/typescript-ui/glyphs/solid/table";
 import { chart_simple }                  from "@jimka/typescript-ui/glyphs/solid/chart_simple";
@@ -67,6 +68,9 @@ import { QueryResultGrid, QueryResultChart } from "./QueryResultView";
 import { isChartable }                   from "../data/chartConfig";
 import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
+import { parseExplainPlan, parseExplainSummary } from "../data/parseExplainPlan";
+import type { ExplainPlanNode, ExplainSummary }  from "../data/parseExplainPlan";
+import { ExplainDiagramPanel }           from "./ExplainDiagramPanel";
 import { exportQueryResult }             from "./exportQueryResult";
 import { exportExplainPlan }             from "./exportExplainResult";
 import type { ActiveExport, RunExplain } from "../data/explain";
@@ -79,7 +83,7 @@ import {
 import type { QueryExplainResult, QueryResult, QueryRowsResult } from "../contract";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, CAUTION_COLOR, HISTORY_COLOR, NEUTRAL_COLOR } from "../theme";
 
-Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask, wand_magic_sparkles, table, chart_simple);
+Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask, sitemap, wand_magic_sparkles, table, chart_simple);
 
 // The editor's starting height once the result pane is shown below it; the Split
 // gutter lets the user resize from there.
@@ -160,6 +164,10 @@ export class QueryPanel {
         let dataSlot:    { content: Component; dispose(): void; result: QueryRowsResult } | null = null;
         let chartSlot:   { content: Component; dispose(): void; result: QueryRowsResult } | null = null;
         let explainSlot: { editor: CodeEditor; result: QueryExplainResult; sql: string } | null = null;
+        // The plan tree + diagram tab, built from the shown Explain plan re-fetched
+        // as FORMAT JSON. Closeable; a fresh build replaces it. Diagram/Tree hold no
+        // CodeMirror/chart, so its disposer is a no-op (the DOM subtree is enough).
+        let diagramSlot: { content: Component; dispose(): void } | null = null;
 
         // Raised around a programmatic closeTab so its "tabclose" emit is ignored by
         // the onTabClose handler (the caller disposes the removed view itself),
@@ -201,6 +209,11 @@ export class QueryPanel {
                                           () => void runExplainRun(false));
         const analyzeButton = glyphButton("flask", CAUTION_COLOR, `Explain Analyze (${EXPLAIN_ANALYZE_SHORTCUT})\n\nexecutes the statement`,
                                           () => void runExplainRun(true));
+        // Opens the shown Explain plan as a tree + diagram tab in the result pane.
+        // Enabled only while an Explain plan is on screen (showDiagram re-requests it
+        // as a FORMAT JSON plan tree).
+        const diagramButton = glyphButton("sitemap", NEUTRAL_COLOR, "Explain diagram\n\ntree + diagram of the current plan",
+                                          () => void showDiagram());
         const exportButton  = glyphButton("file-export", PRIMARY_COLOR, "Export results (CSV / JSON)", (e: MouseEvent) => openExportMenu(e));
 
         // The CSV/JSON chooser shown under the Export button; reused across clicks.
@@ -215,7 +228,7 @@ export class QueryPanel {
 
         const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
         panel.addComponent(new ToolBar({
-            components: [runButton, saveButton, clearButton, formatButton, chartButton, explainButton, analyzeButton, exportButton, Spacer.flex(), olderButton, newerButton],
+            components: [runButton, saveButton, clearButton, formatButton, chartButton, explainButton, analyzeButton, diagramButton, exportButton, Spacer.flex(), olderButton, newerButton],
         }), { placement: Placement.NORTH });
         panel.addComponent(body, { placement: Placement.CENTER });
 
@@ -308,6 +321,16 @@ export class QueryPanel {
                 removeTabSilently(explainSlot.editor);
                 explainSlot.editor.dispose();
                 explainSlot = null;
+                syncDiagramButton();
+            }
+        }
+
+        /** Remove and dispose the Diagram tab (if present). */
+        function removeDiagramTab(): void {
+            if (diagramSlot) {
+                removeTabSilently(diagramSlot.content);
+                diagramSlot.dispose();
+                diagramSlot = null;
             }
         }
 
@@ -373,11 +396,11 @@ export class QueryPanel {
         // drives this.)
         tab.on("activate", () => syncExportToActiveTab());
 
-        // The user closed a closeable tab (Chart or Explain — Data is not closeable):
-        // dispose its view. "activate" does NOT fire on the silent post-close
-        // reselection, and getActiveContent() is momentarily stale inside "tabclose"
-        // (emitted before the reselection), so defer the export recompute to a
-        // microtask, by when the surviving tab is selected.
+        // The user closed a closeable tab (Chart, Explain, or Diagram — Data is not
+        // closeable): dispose its view. "activate" does NOT fire on the silent
+        // post-close reselection, and getActiveContent() is momentarily stale inside
+        // "tabclose" (emitted before the reselection), so defer the export recompute
+        // to a microtask, by when the surviving tab is selected.
         tab.on("tabclose", (content: Component) => {
             if (suppressCloseHandler) {
                 return;
@@ -389,6 +412,10 @@ export class QueryPanel {
             } else if (explainSlot && content === explainSlot.editor) {
                 explainSlot.editor.dispose();
                 explainSlot = null;
+                syncDiagramButton();
+            } else if (diagramSlot && content === diagramSlot.content) {
+                diagramSlot.dispose();
+                diagramSlot = null;
             }
 
             queueMicrotask(syncExportToActiveTab);
@@ -408,6 +435,7 @@ export class QueryPanel {
             editor.setValue("");
             removeDataTab();
             removeChartTab();
+            removeDiagramTab();
             removeExplainTab(); // the last removal empties the strip → "empty" → hideResultPane
             setActiveExport(null);
             syncChartButton();
@@ -454,6 +482,87 @@ export class QueryPanel {
             chartButton.setEnabled(dataSlot !== null && isChartable(dataSlot.result));
         }
 
+        /** Enable the Explain-diagram button only while an Explain plan is on screen. */
+        function syncDiagramButton(): void {
+            diagramButton.setEnabled(explainSlot !== null);
+        }
+
+        /**
+         * Re-request the shown Explain plan as a FORMAT JSON plan tree, parse it, and
+         * open (or refresh) the Diagram tab in the result pane. Uses the shown plan's
+         * statement and analyze flag, so it needs no read-only re-check (the text
+         * Explain already ran). Shares the runSeq guard / busy-button behaviour with
+         * the other actions. A no-op when no plan is shown (the button is disabled
+         * then, so defensive); a malformed/empty plan notifies and opens nothing.
+         */
+        async function showDiagram(): Promise<void> {
+            if (!explainSlot) {
+                return;
+            }
+
+            const { sql }  = explainSlot;
+            const analyze  = explainSlot.result.analyze;
+            const seq      = ++runSeq;
+
+            historyCursor = null;
+            setBusy(true);
+            notify("Building the plan diagram…");
+
+            try {
+                const json = await runExplain(sql, { analyze, format: "json" });
+
+                if (seq !== runSeq) {
+                    return;
+                }
+
+                const roots = parseExplainPlan(json.planJson);
+
+                if (roots.length === 0) {
+                    notify("no JSON plan tree to diagram");
+
+                    return;
+                }
+
+                showDiagramTab(roots, parseExplainSummary(json.planJson));
+                notify(`plan diagram (${roots.length} plan root(s))`);
+            } catch (error) {
+                if (seq === runSeq) {
+                    onError(error);
+                }
+            } finally {
+                if (seq === runSeq) {
+                    setBusy(false);
+                }
+            }
+        }
+
+        /**
+         * Mount the plan tree + diagram as the (closeable) Diagram tab, replacing any
+         * prior one. Mirrors showChart's add-then-remove-under-refreshingTabs dance so
+         * the interim strip-drain can't hide the pane before the replacement lands.
+         *
+         * @param roots - The parsed plan roots to diagram.
+         * @param summary - The plan's top-level planning/execution times.
+         */
+        function showDiagramTab(roots: ExplainPlanNode[], summary: ExplainSummary): void {
+            const nextDiagram = new ExplainDiagramPanel(roots, summary);
+
+            ensureResultPaneShown();
+
+            refreshingTabs = true;
+
+            try {
+                resultHost.addTab(nextDiagram, "Diagram", { closeable: true, glyph: "sitemap" });
+                removeDiagramTab();
+            } finally {
+                refreshingTabs = false;
+            }
+
+            diagramSlot = { content: nextDiagram, dispose: () => {} };
+
+            tab.setActiveContent(nextDiagram);
+        }
+
         // Monotonic guard: a slow run whose result arrives after a newer run started
         // is discarded so it can't clobber the newer one (mirrors showProperties's
         // _propsSeq). Run and Explain share the counter so a slow explain can't clobber
@@ -467,12 +576,15 @@ export class QueryPanel {
             explainButton.setEnabled(!busy);
             analyzeButton.setEnabled(!busy);
 
-            // Chart builds client-side from the current Data result; keep it off during
-            // a run and restore it from the (possibly refreshed) Data result after.
+            // Chart builds client-side from the current Data result, and the Explain
+            // diagram opens from the current plan; keep both off during a run and
+            // restore them from the (possibly refreshed) result / plan slot after.
             if (busy) {
                 chartButton.setEnabled(false);
+                diagramButton.setEnabled(false);
             } else {
                 syncChartButton();
+                syncDiagramButton();
             }
         }
 
@@ -696,6 +808,7 @@ export class QueryPanel {
 
             tab.setActiveContent(editor);
             setActiveExport({ kind: "plan", plan: { result, sql, runExplain } });
+            syncDiagramButton();
             notify(result.analyze ? "EXPLAIN ANALYZE plan (side-effects rolled back)" : "EXPLAIN plan");
         }
 
@@ -799,6 +912,7 @@ export class QueryPanel {
         // seeded); Chart/Export disabled until a rows result is shown.
         syncToolbarButtons();
         chartButton.setEnabled(false);
+        diagramButton.setEnabled(false);
         exportButton.setEnabled(false);
 
         // Focus the editor so the user can type on a fresh tab straight away. The
@@ -833,6 +947,7 @@ export class QueryPanel {
             dataSlot?.dispose();
             chartSlot?.dispose();
             explainSlot?.editor.dispose();
+            diagramSlot?.dispose();
             editor.dispose();
         };
     }
