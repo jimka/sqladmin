@@ -36,7 +36,9 @@ Call sites needing `new` (both are SHARED files — see the Files table):
 [`SqlAdminShell.ts`](frontend/src/shell/SqlAdminShell.ts) constructs the four
 shell views (lines 271, 405–407);
 [`SqlAdminController.ts`](frontend/src/SqlAdminController.ts) constructs
-`StructurePanel` (line 394). No barrel or test re-exports any of the five.
+`StructurePanel` (line 385 on this branch's base — the original draft cited
+394, which predated the sibling-merge base this branch starts from). No barrel
+or test re-exports any of the five.
 
 ---
 
@@ -335,7 +337,8 @@ helpers stay module-level, unchanged.
    line 406 `RolesExplorerView(...)` → `new RolesExplorerView(...)`;
    line 407 `QueriesView(...)` → `new QueriesView(...)`. Imports stay (named).
 
-8. **`SqlAdminController.ts`** (SHARED) — line 394
+8. **`SqlAdminController.ts`** (SHARED) — line 385 (this branch's base; the
+   draft cited 394 pre-merge)
    `StructurePanel(columns, structure, ...)` → `new StructurePanel(columns,
    structure, ...)`. Import stays.
 
@@ -438,11 +441,14 @@ manual-verify, not a full walkthrough of every bullet.
   here are surgical single-token `new` additions on distinct lines; sequence
   after (or rebase over) siblings to avoid a textual conflict. Declared in
   frontmatter `touches-shared`.
-- **`TreeExplorerConfig.explorer` destructuring before `super`** — `const { tree,
-  refresh } = config.explorer` and `tree.setPreferredSize(0,0)` must run before
-  `super()` (the section array needs `tree`); `refresh` is also used post-super
-  by `bindRefreshShortcut`. Keep the single destructure at the top of the
-  constructor so both phases see it.
+- **`TreeExplorerConfig.explorer` read before `super`** — per the Reconciliation
+  note, `config.explorer` is now an `ExplorerTree extends Tree` (the tree
+  instance itself), so the pre-super setup is two `const` reads, not a `{ tree,
+  refresh }` handle destructure: `const tree = config.explorer; const refresh =
+  config.explorer.refresh;` followed by `tree.setPreferredSize(0,0)`, all before
+  `super()` (the section array needs `tree`). `refresh` is also used post-super
+  by `bindRefreshShortcut`. Keep both `const` reads at the top of the
+  constructor so both phases see them.
 
 ---
 
