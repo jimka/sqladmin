@@ -45,6 +45,38 @@ export interface ExplainPlanNode {
     children: ExplainPlanNode[];
 }
 
+/** The top-level EXPLAIN timing summary (ms), sitting beside "Plan" — not in it. */
+export interface ExplainSummary {
+    /** "Planning Time" (ms) — the time spent planning the query. */
+    planningTime?: number;
+    /** "Execution Time" (ms) — the total run time; present only with ANALYZE. */
+    executionTime?: number;
+}
+
+/**
+ * Parse the top-level "Planning Time" / "Execution Time" (ms) that sit beside
+ * "Plan" on the first statement entry of a Postgres `EXPLAIN (FORMAT JSON)`
+ * payload — the summary times, not the per-node fields inside the plan tree.
+ * Tolerant of shape: returns an empty summary for anything that is not an array
+ * whose first element is an object, and drops a non-finite time.
+ *
+ * @param planJson - The raw `QueryExplainResult.planJson` (typed unknown).
+ *
+ * @returns The planning/execution times, each `undefined` when absent.
+ */
+export function parseExplainSummary(planJson: unknown): ExplainSummary {
+    const entry = Array.isArray(planJson) && isObject(planJson[0]) ? planJson[0] : undefined;
+
+    if (!entry) {
+        return {};
+    }
+
+    return {
+        planningTime : num(entry, "Planning Time"),
+        executionTime: num(entry, "Execution Time"),
+    };
+}
+
 /**
  * Parse a Postgres `EXPLAIN (FORMAT JSON)` payload into a plan-node forest.
  * Tolerant of shape: returns `[]` for anything that is not an array of objects

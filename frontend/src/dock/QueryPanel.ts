@@ -68,8 +68,8 @@ import { QueryResultGrid, QueryResultChart } from "./QueryResultView";
 import { isChartable }                   from "../data/chartConfig";
 import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
-import { parseExplainPlan }              from "../data/parseExplainPlan";
-import type { ExplainPlanNode }          from "../data/parseExplainPlan";
+import { parseExplainPlan, parseExplainSummary } from "../data/parseExplainPlan";
+import type { ExplainPlanNode, ExplainSummary }  from "../data/parseExplainPlan";
 import { ExplainDiagramPanel }           from "./ExplainDiagramPanel";
 import { exportQueryResult }             from "./exportQueryResult";
 import { exportExplainPlan }             from "./exportExplainResult";
@@ -523,7 +523,7 @@ export class QueryPanel {
                     return;
                 }
 
-                showDiagramTab(roots);
+                showDiagramTab(roots, parseExplainSummary(json.planJson));
                 notify(`plan diagram (${roots.length} plan root(s))`);
             } catch (error) {
                 if (seq === runSeq) {
@@ -542,9 +542,10 @@ export class QueryPanel {
          * the interim strip-drain can't hide the pane before the replacement lands.
          *
          * @param roots - The parsed plan roots to diagram.
+         * @param summary - The plan's top-level planning/execution times.
          */
-        function showDiagramTab(roots: ExplainPlanNode[]): void {
-            const nextDiagram = new ExplainDiagramPanel(roots);
+        function showDiagramTab(roots: ExplainPlanNode[], summary: ExplainSummary): void {
+            const nextDiagram = new ExplainDiagramPanel(roots, summary);
 
             ensureResultPaneShown();
 

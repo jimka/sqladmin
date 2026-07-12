@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseExplainPlan } from "../../src/data/parseExplainPlan";
+import { parseExplainPlan, parseExplainSummary } from "../../src/data/parseExplainPlan";
 
 /**
  * Wrap one root Plan object as Postgres' FORMAT JSON payload shape: an array
@@ -156,5 +156,37 @@ describe("parseExplainPlan", () => {
 
         expect(roots.map(r => r.id)).toEqual(["0", "1"]);
         expect(roots.map(r => r.relationName)).toEqual(["a", "b"]);
+    });
+});
+
+describe("parseExplainSummary", () => {
+    it("reads planning and execution time from the top-level entry", () => {
+        const summary = parseExplainSummary([{
+            "Plan": { "Node Type": "Seq Scan" },
+            "Planning Time": 0.123,
+            "Execution Time": 4.567,
+        }]);
+
+        expect(summary.planningTime).toBe(0.123);
+        expect(summary.executionTime).toBe(4.567);
+    });
+
+    it("leaves execution time undefined for a plain (non-analyze) plan", () => {
+        const summary = parseExplainSummary([{
+            "Plan": { "Node Type": "Seq Scan" },
+            "Planning Time": 0.2,
+        }]);
+
+        expect(summary.planningTime).toBe(0.2);
+        expect(summary.executionTime).toBeUndefined();
+    });
+
+    it("returns an empty summary for every malformed or empty input shape", () => {
+        expect(parseExplainSummary(undefined)).toEqual({});
+        expect(parseExplainSummary(null)).toEqual({});
+        expect(parseExplainSummary({})).toEqual({});
+        expect(parseExplainSummary([])).toEqual({});
+        expect(parseExplainSummary([5])).toEqual({});
+        expect(parseExplainSummary([{ "Planning Time": "slow" }])).toEqual({});
     });
 });

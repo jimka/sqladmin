@@ -1,47 +1,116 @@
-// A read-only Dock panel pairing a structural plan Tree (WEST) with the plan
+// A read-only Dock panel pairing a collapsible WEST info column with the plan
 // DiagramView (CENTER), opened from QueryPanel's "Explain diagram" button. The
-// two views are correlated by node id (ExplainPlanNode.id === DiagramNodeData.id
-// === the id carried on each TreeNode.data): selecting a tree row selects and
-// scrolls the matching diagram node into the viewport (the feature's hard
-// requirement), and selecting a diagram node highlights and scrolls its tree
-// row. Neither programmatic selectNode emits, so the two directions never feed
-// back into each other — only genuine user clicks drive a cross-selection.
+// WEST column is an accordion of three sections — a Summary table (planning /
+// execution time), the structural plan Tree, and a flat Plan-steps table — and
+// collapses away entirely (the Border WEST region's chevron) to give the diagram
+// the full width. The tree and diagram stay correlated by node id
+// (ExplainPlanNode.id === DiagramNodeData.id === the id carried on each
+// TreeNode.data): selecting a tree row selects and scrolls the matching diagram
+// node into the viewport (the feature's hard requirement), and selecting a
+// diagram node highlights and scrolls its tree row. Neither programmatic
+// selectNode emits, so the two directions never feed back into each other — only
+// genuine user clicks drive a cross-selection.
+//
+// The Plan-steps table is the plan laid out flat, one row per node in plan
+// (depth-first) order — its default, unsorted order. Only the Action and Cost
+// columns show by default; the rest are spec-hidden and user-revealable via the
+// table's column context menu. Its metric columns carry the *raw* numbers (see
+// buildPlanSteps) so a header click sorts them numerically; clicking through to
+// clear returns to plan order.
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): extends Panel directly (a
-// Border-layout Panel, like RelationDiagramPanel). The Tree and DiagramView are
-// built as locals before super() (they are super()'s children — the
-// super-cascade trap) and their "selection" listeners are wired after super()
-// via .on(...), capturing the locals directly; the handlers close over the
-// sibling view and the id→TreeNode map rather than instance fields. No disposer
-// is registered — Tree and DiagramView need no explicit teardown (SchemaDiagram/
-// RelationDiagram panels are likewise opened without a _panelDisposers entry).
+// Border-layout Panel, like RelationDiagramPanel). The accordion (with its
+// tables + tree) and the DiagramView are built as locals before super() (they
+// are super()'s children — the super-cascade trap) and the tree/diagram
+// "selection" listeners are wired after super() via .on(...), capturing the
+// locals directly; the handlers close over the sibling view and the id→TreeNode
+// map rather than instance fields. No disposer is registered — the Tree,
+// DiagramView, and MemoryStore-backed tables need no explicit teardown (the
+// SchemaDiagram/RelationDiagram panels and QueryResultGrid are likewise opened
+// without a _panelDisposers entry).
 
-import { Panel }             from "@jimka/typescript-ui/core";
-import { Border }            from "@jimka/typescript-ui/layout";
-import { Placement }         from "@jimka/typescript-ui/primitive";
-import { Tree }              from "@jimka/typescript-ui/component/tree";
-import type { TreeNode }     from "@jimka/typescript-ui/component/tree";
-import { DiagramView }       from "@jimka/typescript-ui/component/diagram";
-import type { DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
-import { buildExplainDiagram } from "../data/buildExplainDiagram";
-import { ExplainNode }         from "./ExplainNode";
-import type { ExplainPlanNode } from "../data/parseExplainPlan";
+import { Component, Panel }         from "@jimka/typescript-ui/core";
+import { Border }                   from "@jimka/typescript-ui/layout";
+import { Placement }                from "@jimka/typescript-ui/primitive";
+import { Tree }                     from "@jimka/typescript-ui/component/tree";
+import type { TreeNode }            from "@jimka/typescript-ui/component/tree";
+import { AccordionPanel }           from "@jimka/typescript-ui/component/container";
+import { Table }                    from "@jimka/typescript-ui/component/table";
+import type { ColumnSpec }          from "@jimka/typescript-ui/component/table";
+import { Model, MemoryStore }       from "@jimka/typescript-ui/data";
+import type { FieldType }           from "@jimka/typescript-ui/data";
+import { DiagramView }              from "@jimka/typescript-ui/component/diagram";
+import type { DiagramNodeData }     from "@jimka/typescript-ui/component/diagram";
+import { buildExplainDiagram }      from "../data/buildExplainDiagram";
+import { buildPlanStepsRows }       from "../data/buildPlanSteps";
+import { formatMetric }             from "../data/explainFormat";
+import { ExplainNode }              from "./ExplainNode";
+import type { ExplainPlanNode, ExplainSummary } from "../data/parseExplainPlan";
 
-// Fixed width of the WEST plan tree: fits a node-type heading plus indentation
-// without stealing canvas width from the diagram (mirrors RelationDiagramPanel's
-// LEGEND_WIDTH rationale).
-const TREE_WIDTH = 300;
+// Fixed width of the WEST info column: fits the Action + Cost columns of the
+// steps table and a node-type tree heading without stealing canvas width from
+// the diagram (mirrors RelationDiagramPanel's LEGEND_WIDTH rationale). The column
+// collapses to a strip via the Border region's chevron when the user wants it out
+// of the way.
+const LEFT_WIDTH = 320;
+
+// The Summary table's fixed height (px): a header row plus one value row plus its
+// border. Pinned so the tiny two-column summary doesn't claim a section share the
+// tree/steps sections need.
+const SUMMARY_HEIGHT = 62;
+
+// The flat plan-steps model, one field per column. Metric fields are numeric so a
+// header click sorts by magnitude, not lexically; the field *names* are the column
+// headers the table renders (a PlanStepRow is keyed by these names, so it doubles
+// as the store record).
+const STEP_FIELDS: { name: string; type: FieldType }[] = [
+    { name: "Action",        type: "string" },
+    { name: "Cost",          type: "number" },
+    { name: "Expected Rows", type: "number" },
+    { name: "Actual Rows",   type: "number" },
+    { name: "Width",         type: "number" },
+    { name: "Time",          type: "number" },
+    { name: "Batches",       type: "number" },
+    { name: "Group",         type: "string" },
+    { name: "Memory",        type: "number" },
+];
+
+// Only Action and Cost show by default; every other column starts hidden and the
+// user reveals it from the table's column context menu.
+const STEP_COLUMNS: ColumnSpec = {
+    columns: [
+        { field: "Action" },
+        { field: "Cost" },
+        { field: "Expected Rows", hidden: true },
+        { field: "Actual Rows",   hidden: true },
+        { field: "Width",         hidden: true },
+        { field: "Time",          hidden: true },
+        { field: "Batches",       hidden: true },
+        { field: "Group",         hidden: true },
+        { field: "Memory",        hidden: true },
+    ],
+};
+
+// The two-column summary model: planning and execution time, formatted for
+// display (a one-row table, so the fields are plain strings — nothing to sort).
+const SUMMARY_FIELDS: { name: string; type: FieldType }[] = [
+    { name: "Planning Time",  type: "string" },
+    { name: "Execution Time", type: "string" },
+];
 
 /**
- * A read-only Dock panel pairing a structural plan Tree (WEST) with the plan
- * DiagramView (CENTER). Tree selection selects + reveals the diagram node;
- * diagram selection selects + reveals the tree row. Class-first: extends Panel.
+ * A read-only Dock panel pairing a collapsible WEST accordion (Summary table /
+ * plan Tree / flat Plan-steps table) with the plan DiagramView (CENTER). Tree
+ * selection selects + reveals the diagram node; diagram selection selects +
+ * reveals the tree row. Class-first: extends Panel.
  */
 export class ExplainDiagramPanel extends Panel {
     /**
      * @param roots - The parsed plan roots (from `parseExplainPlan`).
+     * @param summary - The top-level planning/execution times (from
+     *   `parseExplainSummary`); defaults to empty (both shown as an en dash).
      */
-    constructor(roots: ExplainPlanNode[]) {
+    constructor(roots: ExplainPlanNode[], summary: ExplainSummary = {}) {
         // Locals before super() — they are super()'s children (this is
         // unavailable until super() returns).
         const data         = buildExplainDiagram(roots);
@@ -54,22 +123,31 @@ export class ExplainDiagramPanel extends Panel {
         // diagram→tree reverse selection.
         tree.expandAll();
 
+        // The WEST info column: a Summary table over the plan tree over the flat
+        // steps table. The tree + steps sections share the column's leftover
+        // height (fillWeight) so each scrolls internally; the summary stays pinned
+        // at its small fixed height.
+        const accordion = new AccordionPanel({
+            preferredSize: { width: LEFT_WIDTH, height: 0 },
+            minSize      : { width: LEFT_WIDTH, height: 0 },
+            sections: [
+                { label: "Summary",    component: buildSummaryTable(summary), initiallyOpen: true },
+                { label: "Plan tree",  component: tree,                       initiallyOpen: true,  fillWeight: 1 },
+                { label: "Plan steps", component: buildStepsTable(roots),     initiallyOpen: false, fillWeight: 1 },
+            ],
+        });
+
         // Custom node renderer: each node is a metric card (costs, rows, actual
         // timings, group key, batches, memory) heat-tinted by its plan share.
         const diagram = new DiagramView({ data, nodeRenderer: (n: DiagramNodeData) => new ExplainNode(n) });
 
-        const west = Panel({
-            layoutManager: new Border(),
-            preferredSize: { width: TREE_WIDTH, height: 0 },
-            minSize      : { width: TREE_WIDTH, height: 0 },
-            components   : [{ component: tree, constraints: { placement: Placement.CENTER } }],
-        });
-
         super({
             layoutManager: new Border(),
             components   : [
-                { component: west,    constraints: { placement: Placement.WEST } },
-                { component: diagram, constraints: { placement: Placement.CENTER } },
+                // collapsible: the Border region grows a chevron that tucks the
+                // whole info column into a strip, handing its width to the diagram.
+                { component: accordion, constraints: { placement: Placement.WEST, collapsible: true } },
+                { component: diagram,   constraints: { placement: Placement.CENTER } },
             ],
         });
 
@@ -95,6 +173,66 @@ export class ExplainDiagramPanel extends Panel {
             }
         });
     }
+}
+
+/**
+ * Build the two-column Summary table: one row showing the plan's planning and
+ * execution time. A MemoryStore-backed {@link Table} (no column spec, so both
+ * fields show), pinned to a small fixed height and relaxed min so the accordion
+ * section hugs it rather than reserving the Table's default 100px floor.
+ *
+ * @param summary - The parsed top-level times.
+ *
+ * @returns The summary table component.
+ */
+function buildSummaryTable(summary: ExplainSummary): Component {
+    const model = new Model({ fields: SUMMARY_FIELDS.map((field, order) => ({ ...field, order })) });
+    const store = new MemoryStore({
+        model,
+        data    : [{ "Planning Time": formatMs(summary.planningTime), "Execution Time": formatMs(summary.executionTime) }],
+        autoLoad: true,
+    });
+    const table = Table(store);
+
+    table.setMinSize(0, 0);
+    table.setPreferredSize(LEFT_WIDTH, SUMMARY_HEIGHT);
+
+    return table;
+}
+
+/**
+ * Build the flat Plan-steps table: one row per plan node in plan order, only
+ * Action + Cost shown (the rest spec-hidden, user-revealable). Unsorted, so the
+ * default order is plan order; a header click sorts numerically and clearing the
+ * sort returns to plan order.
+ *
+ * @param roots - The parsed plan roots.
+ *
+ * @returns The steps table component.
+ */
+function buildStepsTable(roots: ExplainPlanNode[]): Component {
+    const model = new Model({ fields: STEP_FIELDS.map((field, order) => ({ ...field, order })) });
+    const store = new MemoryStore({ model, data: buildPlanStepsRows(roots), autoLoad: true });
+    const table = Table(store, STEP_COLUMNS);
+
+    // Relax the Table's default 100×100 floor so the accordion can size the
+    // section to the column's height rather than the Table's minimum.
+    table.setMinSize(0, 0);
+
+    return table;
+}
+
+/**
+ * Format a millisecond time for the summary table: the trimmed number with a
+ * " ms" suffix, or an en dash when the time is absent (e.g. execution time on a
+ * plain, non-analyze plan).
+ *
+ * @param ms - The time in milliseconds, or `undefined`.
+ *
+ * @returns The display string.
+ */
+function formatMs(ms: number | undefined): string {
+    return ms === undefined ? "–" : `${formatMetric(ms)} ms`;
 }
 
 /**
