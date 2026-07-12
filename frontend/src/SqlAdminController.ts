@@ -382,7 +382,7 @@ export class SqlAdminController {
             title  : `${ref.name ?? id} (structure)`,
             glyph  : "table-columns",
             tooltip: this.panelTooltip(ref),
-            content: StructurePanel(columns, structure, (refSchema, refTable) =>
+            content: new StructurePanel(columns, structure, (refSchema, refTable) =>
                 this.openReferencedTable({
                     connectionId: ref.connectionId,
                     database    : ref.database,
