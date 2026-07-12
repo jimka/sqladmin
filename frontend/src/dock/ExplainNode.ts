@@ -23,7 +23,7 @@ import { Text }                              from "@jimka/typescript-ui/componen
 import type { DiagramNodeData }              from "@jimka/typescript-ui/component/diagram";
 import type { ExplainNodeData }              from "../data/buildExplainDiagram";
 import type { ExplainPlanNode }              from "../data/parseExplainPlan";
-import { formatMetric, formatRange }         from "../data/explainFormat";
+import { formatMetric, formatRange, formatRowCount } from "../data/explainFormat";
 
 // Fixed card width: wide enough for a node-type heading and a "label   value"
 // row without wrapping, narrow enough to keep a deep plan's columns readable. The
@@ -152,6 +152,12 @@ function detailRows(plan: ExplainPlanNode, memShare: number): CardRow[] {
 
     if (plan.startupCost !== undefined || plan.totalCost !== undefined) {
         rows.push({ label: "cost", value: valueText(formatRange(plan.startupCost, plan.totalCost)) });
+    }
+
+    if (plan.planRows !== undefined) {
+        // The planner's row estimate; the actual produced rows ride the edge, so
+        // card vs edge shows estimate vs reality side by side.
+        rows.push({ label: "expected rows", value: valueText(formatRowCount(plan.planRows)) });
     }
 
     if (plan.planWidth !== undefined) {

@@ -122,15 +122,9 @@ describe("buildExplainDiagram", () => {
         expect(edge.style?.endMarker).toBeUndefined();
     });
 
-    it("labels an edge with a ~-prefixed estimate when the child has no actual rows", () => {
+    it("leaves an edge unlabelled (arrow only) when the child has only an estimate", () => {
+        // Plain EXPLAIN: no actual rows → no edge label; the estimate is on the card.
         const roots = [node("0", { children: [node("0/0", { planRows: 1234 })] })];
-        const edge  = buildExplainDiagram(roots).edges[0];
-
-        expect(edge.style?.label).toBe("~1.2k");
-    });
-
-    it("still draws the (source-end) arrow when the child reports no rows", () => {
-        const roots = [node("0", { children: [node("0/0")] })];
         const edge  = buildExplainDiagram(roots).edges[0];
 
         expect(edge.style?.startMarker).toBe("arrow");

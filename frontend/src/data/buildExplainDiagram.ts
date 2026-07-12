@@ -43,9 +43,9 @@ export interface ExplainNodeData {
  * Build the DiagramView graph for a parsed plan forest: one node per plan node
  * (id === {@link ExplainPlanNode.id}), one edge per parent→child link, each node
  * carrying its {@link ExplainNodeData}. Top-down layered so the root sits above
- * its inputs, like the text plan. Each edge is labelled with the rows the child
- * produces (they flow up the edge to the parent) — actual when analyzed, else the
- * `~`-prefixed estimate.
+ * its inputs, like the text plan. Each edge is labelled with the actual rows the
+ * child produces (they flow up the edge to the parent) when analyzed; the planner
+ * estimate lives on the card's "expected rows" row instead.
  *
  * @param roots - The parsed plan roots (from `parseExplainPlan`).
  *
@@ -89,21 +89,17 @@ export function buildExplainDiagram(roots: ExplainPlanNode[]): DiagramData {
 }
 
 /**
- * The edge label for the rows a node produces (which flow up to its parent): the
- * actual total (rows × loops) when analyzed, otherwise the `~`-prefixed planner
- * estimate. `undefined` when the node reports neither.
+ * The edge label for the rows a node actually produces (which flow up to its
+ * parent): the actual total, rows × loops, when analyzed. `undefined` for a plain
+ * (non-analyze) plan — there the estimate lives on the card's "expected rows" row.
  *
  * @param node - The child plan node the edge points to.
  *
- * @returns The compact rows label, or `undefined`.
+ * @returns The compact actual-rows label, or `undefined`.
  */
 function producedRowsLabel(node: ExplainPlanNode): string | undefined {
     if (node.actualRows !== undefined) {
         return formatRowCount(node.actualRows * (node.actualLoops ?? 1));
-    }
-
-    if (node.planRows !== undefined) {
-        return `~${formatRowCount(node.planRows)}`;
     }
 
     return undefined;
