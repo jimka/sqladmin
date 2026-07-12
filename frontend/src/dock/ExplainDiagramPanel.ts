@@ -23,12 +23,9 @@ import { Tree }              from "@jimka/typescript-ui/component/tree";
 import type { TreeNode }     from "@jimka/typescript-ui/component/tree";
 import { DiagramView }       from "@jimka/typescript-ui/component/diagram";
 import type { DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
-import { Glyph }             from "@jimka/typescript-ui/component/display";
-import { sitemap }           from "@jimka/typescript-ui/glyphs/solid/sitemap";
 import { buildExplainDiagram } from "../data/buildExplainDiagram";
+import { ExplainNode }         from "./ExplainNode";
 import type { ExplainPlanNode } from "../data/parseExplainPlan";
-
-Glyph.register(sitemap);
 
 // Fixed width of the WEST plan tree: fits a node-type heading plus indentation
 // without stealing canvas width from the diagram (mirrors RelationDiagramPanel's
@@ -57,7 +54,9 @@ export class ExplainDiagramPanel extends Panel {
         // diagram→tree reverse selection.
         tree.expandAll();
 
-        const diagram = new DiagramView({ data });
+        // Custom node renderer: each node is a metric card (costs, rows, actual
+        // timings, group key, batches, memory) heat-tinted by its plan share.
+        const diagram = new DiagramView({ data, nodeRenderer: (n: DiagramNodeData) => new ExplainNode(n) });
 
         const west = Panel({
             layoutManager: new Border(),

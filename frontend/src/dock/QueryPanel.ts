@@ -68,6 +68,9 @@ import { QueryResultGrid, QueryResultChart } from "./QueryResultView";
 import { isChartable }                   from "../data/chartConfig";
 import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
+import { parseExplainPlan }              from "../data/parseExplainPlan";
+import type { ExplainPlanNode }          from "../data/parseExplainPlan";
+import { ExplainDiagramPanel }           from "./ExplainDiagramPanel";
 import { exportQueryResult }             from "./exportQueryResult";
 import { exportExplainPlan }             from "./exportExplainResult";
 import type { ActiveExport, RunExplain } from "../data/explain";
@@ -131,14 +134,6 @@ export interface QueryPanelOptions {
      * reference back to it.
      */
     onResult?: (active: ActiveExport | null) => void;
-    /**
-     * Open the current Explain plan as a tree + diagram tab. The panel calls this
-     * with the statement it explained and that plan's analyze flag; the controller
-     * re-requests the plan as FORMAT JSON, parses it, and opens an
-     * ExplainDiagramPanel. Invoked only while an Explain plan is on screen (the
-     * button is disabled otherwise).
-     */
-    onExplainDiagram?: (sql: string, analyze: boolean) => void;
 }
 
 /**
@@ -152,7 +147,7 @@ export class QueryPanel {
     readonly dispose: () => void;
 
     constructor(options: QueryPanelOptions) {
-        const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult, onExplainDiagram } = options;
+        const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult } = options;
 
         const editor = new CodeEditor(initialSql, { language: "sql" });
 
@@ -169,6 +164,10 @@ export class QueryPanel {
         let dataSlot:    { content: Component; dispose(): void; result: QueryRowsResult } | null = null;
         let chartSlot:   { content: Component; dispose(): void; result: QueryRowsResult } | null = null;
         let explainSlot: { editor: CodeEditor; result: QueryExplainResult; sql: string } | null = null;
+        // The plan tree + diagram tab, built from the shown Explain plan re-fetched
+        // as FORMAT JSON. Closeable; a fresh build replaces it. Diagram/Tree hold no
+        // CodeMirror/chart, so its disposer is a no-op (the DOM subtree is enough).
+        let diagramSlot: { content: Component; dispose(): void } | null = null;
 
         // Raised around a programmatic closeTab so its "tabclose" emit is ignored by
         // the onTabClose handler (the caller disposes the removed view itself),
@@ -210,10 +209,11 @@ export class QueryPanel {
                                           () => void runExplainRun(false));
         const analyzeButton = glyphButton("flask", CAUTION_COLOR, `Explain Analyze (${EXPLAIN_ANALYZE_SHORTCUT})\n\nexecutes the statement`,
                                           () => void runExplainRun(true));
-        // Opens the shown Explain plan as a tree + diagram tab. Enabled only while
-        // an Explain plan is on screen (openExplainDiagram re-requests it as JSON).
+        // Opens the shown Explain plan as a tree + diagram tab in the result pane.
+        // Enabled only while an Explain plan is on screen (showDiagram re-requests it
+        // as a FORMAT JSON plan tree).
         const diagramButton = glyphButton("sitemap", NEUTRAL_COLOR, "Explain diagram\n\ntree + diagram of the current plan",
-                                          () => openExplainDiagram());
+                                          () => void showDiagram());
         const exportButton  = glyphButton("file-export", PRIMARY_COLOR, "Export results (CSV / JSON)", (e: MouseEvent) => openExportMenu(e));
 
         // The CSV/JSON chooser shown under the Export button; reused across clicks.
@@ -325,6 +325,15 @@ export class QueryPanel {
             }
         }
 
+        /** Remove and dispose the Diagram tab (if present). */
+        function removeDiagramTab(): void {
+            if (diagramSlot) {
+                removeTabSilently(diagramSlot.content);
+                diagramSlot.dispose();
+                diagramSlot = null;
+            }
+        }
+
         // Split the body so the editor starts at EDITOR_HEIGHT and the grid gets the
         // rest; the gutter then lets the user resize (and subsequent runs keep that
         // position — the pane is reused, only its table content swaps). setPaneSize
@@ -387,11 +396,11 @@ export class QueryPanel {
         // drives this.)
         tab.on("activate", () => syncExportToActiveTab());
 
-        // The user closed a closeable tab (Chart or Explain — Data is not closeable):
-        // dispose its view. "activate" does NOT fire on the silent post-close
-        // reselection, and getActiveContent() is momentarily stale inside "tabclose"
-        // (emitted before the reselection), so defer the export recompute to a
-        // microtask, by when the surviving tab is selected.
+        // The user closed a closeable tab (Chart, Explain, or Diagram — Data is not
+        // closeable): dispose its view. "activate" does NOT fire on the silent
+        // post-close reselection, and getActiveContent() is momentarily stale inside
+        // "tabclose" (emitted before the reselection), so defer the export recompute
+        // to a microtask, by when the surviving tab is selected.
         tab.on("tabclose", (content: Component) => {
             if (suppressCloseHandler) {
                 return;
@@ -404,6 +413,9 @@ export class QueryPanel {
                 explainSlot.editor.dispose();
                 explainSlot = null;
                 syncDiagramButton();
+            } else if (diagramSlot && content === diagramSlot.content) {
+                diagramSlot.dispose();
+                diagramSlot = null;
             }
 
             queueMicrotask(syncExportToActiveTab);
@@ -423,6 +435,7 @@ export class QueryPanel {
             editor.setValue("");
             removeDataTab();
             removeChartTab();
+            removeDiagramTab();
             removeExplainTab(); // the last removal empties the strip → "empty" → hideResultPane
             setActiveExport(null);
             syncChartButton();
@@ -475,16 +488,78 @@ export class QueryPanel {
         }
 
         /**
-         * Hand the shown Explain plan's statement and analyze flag to the controller,
-         * which re-requests it as a FORMAT JSON plan tree and opens the diagram tab.
-         * A no-op when no plan is shown (the button is disabled then, so defensive).
+         * Re-request the shown Explain plan as a FORMAT JSON plan tree, parse it, and
+         * open (or refresh) the Diagram tab in the result pane. Uses the shown plan's
+         * statement and analyze flag, so it needs no read-only re-check (the text
+         * Explain already ran). Shares the runSeq guard / busy-button behaviour with
+         * the other actions. A no-op when no plan is shown (the button is disabled
+         * then, so defensive); a malformed/empty plan notifies and opens nothing.
          */
-        function openExplainDiagram(): void {
+        async function showDiagram(): Promise<void> {
             if (!explainSlot) {
                 return;
             }
 
-            onExplainDiagram?.(explainSlot.sql, explainSlot.result.analyze);
+            const { sql }  = explainSlot;
+            const analyze  = explainSlot.result.analyze;
+            const seq      = ++runSeq;
+
+            historyCursor = null;
+            setBusy(true);
+            notify("Building the plan diagram…");
+
+            try {
+                const json = await runExplain(sql, { analyze, format: "json" });
+
+                if (seq !== runSeq) {
+                    return;
+                }
+
+                const roots = parseExplainPlan(json.planJson);
+
+                if (roots.length === 0) {
+                    notify("no JSON plan tree to diagram");
+
+                    return;
+                }
+
+                showDiagramTab(roots);
+                notify(`plan diagram (${roots.length} plan root(s))`);
+            } catch (error) {
+                if (seq === runSeq) {
+                    onError(error);
+                }
+            } finally {
+                if (seq === runSeq) {
+                    setBusy(false);
+                }
+            }
+        }
+
+        /**
+         * Mount the plan tree + diagram as the (closeable) Diagram tab, replacing any
+         * prior one. Mirrors showChart's add-then-remove-under-refreshingTabs dance so
+         * the interim strip-drain can't hide the pane before the replacement lands.
+         *
+         * @param roots - The parsed plan roots to diagram.
+         */
+        function showDiagramTab(roots: ExplainPlanNode[]): void {
+            const nextDiagram = new ExplainDiagramPanel(roots);
+
+            ensureResultPaneShown();
+
+            refreshingTabs = true;
+
+            try {
+                resultHost.addTab(nextDiagram, "Diagram", { closeable: true, glyph: "sitemap" });
+                removeDiagramTab();
+            } finally {
+                refreshingTabs = false;
+            }
+
+            diagramSlot = { content: nextDiagram, dispose: () => {} };
+
+            tab.setActiveContent(nextDiagram);
         }
 
         // Monotonic guard: a slow run whose result arrives after a newer run started
@@ -871,6 +946,7 @@ export class QueryPanel {
             dataSlot?.dispose();
             chartSlot?.dispose();
             explainSlot?.editor.dispose();
+            diagramSlot?.dispose();
             editor.dispose();
         };
     }

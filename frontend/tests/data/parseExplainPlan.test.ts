@@ -13,10 +13,11 @@ function envelope(plan: Record<string, unknown>): unknown {
 }
 
 describe("parseExplainPlan", () => {
-    it("parses a single-node plain plan into one root with cost/rows/width metrics", () => {
+    it("parses a single-node plain plan's cost/rows/width fields", () => {
         const roots = parseExplainPlan(envelope({
             "Node Type": "Seq Scan",
             "Relation Name": "users",
+            "Startup Cost": 0.29,
             "Total Cost": 12.5,
             "Plan Rows": 100,
             "Plan Width": 8,
@@ -31,31 +32,35 @@ describe("parseExplainPlan", () => {
         expect(root.label).toBe("Seq Scan on users");
         expect(root.relationName).toBe("users");
         expect(root.children).toEqual([]);
-        expect(root.metrics).toEqual([
-            { label: "cost", value: 12.5 },
-            { label: "rows", value: 100 },
-            { label: "width", value: 8 },
-        ]);
+        expect(root.startupCost).toBe(0.29);
+        expect(root.totalCost).toBe(12.5);
+        expect(root.planRows).toBe(100);
+        expect(root.planWidth).toBe(8);
+        // No analyze fields on a plain plan.
+        expect(root.actualStartupTime).toBeUndefined();
+        expect(root.actualTotalTime).toBeUndefined();
+        expect(root.actualRows).toBeUndefined();
+        expect(root.actualLoops).toBeUndefined();
+        // No extras absent from the source.
+        expect(root.groupKey).toBeUndefined();
+        expect(root.hashBatches).toBeUndefined();
+        expect(root.peakMemoryUsage).toBeUndefined();
     });
 
     it("assigns path ids across a nested plan and preserves the hierarchy", () => {
         const roots = parseExplainPlan(envelope({
             "Node Type": "Hash Join",
             "Total Cost": 50,
-            "Plan Rows": 10,
-            "Plan Width": 4,
             "Plans": [
                 {
                     "Node Type": "Seq Scan",
                     "Relation Name": "a",
                     "Total Cost": 5,
-                    "Plan Rows": 1,
-                    "Plan Width": 4,
                     "Plans": [
-                        { "Node Type": "Result", "Total Cost": 1, "Plan Rows": 1, "Plan Width": 4 },
+                        { "Node Type": "Result", "Total Cost": 1 },
                     ],
                 },
-                { "Node Type": "Seq Scan", "Relation Name": "b", "Total Cost": 6, "Plan Rows": 2, "Plan Width": 4 },
+                { "Node Type": "Seq Scan", "Relation Name": "b", "Total Cost": 6 },
             ],
         }));
 
@@ -70,53 +75,68 @@ describe("parseExplainPlan", () => {
         expect(root.children[0].children[0].nodeType).toBe("Result");
     });
 
-    it("appends actual-time / actual-rows / loops metrics for an analyze plan", () => {
+    it("captures the analyze timing fields when present", () => {
         const roots = parseExplainPlan(envelope({
             "Node Type": "Seq Scan",
             "Relation Name": "users",
             "Total Cost": 12.5,
-            "Plan Rows": 100,
-            "Plan Width": 8,
+            "Actual Startup Time": 0.02,
             "Actual Total Time": 3.14,
             "Actual Rows": 99,
-            "Actual Loops": 1,
+            "Actual Loops": 2,
         }));
 
-        expect(roots[0].metrics).toEqual([
-            { label: "cost", value: 12.5 },
-            { label: "rows", value: 100 },
-            { label: "width", value: 8 },
-            { label: "actual time (ms)", value: 3.14 },
-            { label: "actual rows", value: 99 },
-            { label: "loops", value: 1 },
-        ]);
+        expect(roots[0].actualStartupTime).toBe(0.02);
+        expect(roots[0].actualTotalTime).toBe(3.14);
+        expect(roots[0].actualRows).toBe(99);
+        expect(roots[0].actualLoops).toBe(2);
+    });
+
+    it("captures group key, hash batches, and peak memory usage", () => {
+        const roots = parseExplainPlan(envelope({
+            "Node Type": "HashAggregate",
+            "Total Cost": 20,
+            "Group Key": ["u.dept_id", "u.region"],
+            "Hash Batches": 4,
+            "Peak Memory Usage": 512,
+        }));
+
+        expect(roots[0].groupKey).toEqual(["u.dept_id", "u.region"]);
+        expect(roots[0].hashBatches).toBe(4);
+        expect(roots[0].peakMemoryUsage).toBe(512);
     });
 
     it("labels a node without a Relation Name by its node type alone", () => {
-        const roots = parseExplainPlan(envelope({
-            "Node Type": "Hash Join",
-            "Total Cost": 50,
-            "Plan Rows": 10,
-            "Plan Width": 4,
-        }));
+        const roots = parseExplainPlan(envelope({ "Node Type": "Hash Join", "Total Cost": 50 }));
 
         expect(roots[0].label).toBe("Hash Join");
         expect(roots[0].relationName).toBeUndefined();
     });
 
-    it("omits a metric whose source numeric field is missing", () => {
+    it("appends a differing alias to the label in parentheses", () => {
+        const roots = parseExplainPlan(envelope({
+            "Node Type": "Seq Scan",
+            "Relation Name": "users",
+            "Alias": "u",
+            "Total Cost": 1,
+        }));
+
+        expect(roots[0].label).toBe("Seq Scan on users (u)");
+    });
+
+    it("omits a numeric field whose source value is missing or non-finite", () => {
         const roots = parseExplainPlan(envelope({
             "Node Type": "Seq Scan",
             "Relation Name": "users",
             "Total Cost": 12.5,
             "Plan Rows": 100,
-            // no "Plan Width"
+            // no "Plan Width", no "Startup Cost"
         }));
 
-        expect(roots[0].metrics).toEqual([
-            { label: "cost", value: 12.5 },
-            { label: "rows", value: 100 },
-        ]);
+        expect(roots[0].totalCost).toBe(12.5);
+        expect(roots[0].planRows).toBe(100);
+        expect(roots[0].planWidth).toBeUndefined();
+        expect(roots[0].startupCost).toBeUndefined();
     });
 
     it("returns [] for every malformed or empty input shape", () => {
@@ -130,8 +150,8 @@ describe("parseExplainPlan", () => {
 
     it("parses a multi-statement array into one root per entry", () => {
         const roots = parseExplainPlan([
-            { "Plan": { "Node Type": "Seq Scan", "Relation Name": "a", "Total Cost": 1, "Plan Rows": 1, "Plan Width": 1 } },
-            { "Plan": { "Node Type": "Seq Scan", "Relation Name": "b", "Total Cost": 2, "Plan Rows": 2, "Plan Width": 2 } },
+            { "Plan": { "Node Type": "Seq Scan", "Relation Name": "a", "Total Cost": 1 } },
+            { "Plan": { "Node Type": "Seq Scan", "Relation Name": "b", "Total Cost": 2 } },
         ]);
 
         expect(roots.map(r => r.id)).toEqual(["0", "1"]);

@@ -1,17 +1,9 @@
 // Pure, DOM-free parser turning a Postgres `EXPLAIN (FORMAT JSON)` payload into
 // a plan-node forest for the diagram + tree. Kept beside explain.ts so the app's
 // node-only vitest can red-green it without a backend or a DOM; it imports no
-// UI-bundle code (the diagram builder that consumes it does the same, see
-// buildExplainDiagram.ts) so importing it never triggers a component module's
+// UI-bundle code (the diagram builder and node renderer that consume it read
+// these plain fields) so importing it never triggers a component module's
 // DOM-touching side effects under the node test environment.
-
-/** One key metric shown for a plan node (numeric so tests can assert it). */
-export interface ExplainMetric {
-    /** Display label, e.g. "cost", "rows", "actual time (ms)". */
-    label: string;
-    /** The finite numeric value read from the source plan field. */
-    value: number;
-}
 
 /** A parsed EXPLAIN plan node; the tree and diagram share these ids. */
 export interface ExplainPlanNode {
@@ -23,29 +15,35 @@ export interface ExplainPlanNode {
     label: string;
     /** The node's "Relation Name" when the source carries one. */
     relationName?: string;
-    /** cost/rows/width (+ actual-* when analyze), in fixed order, finite only. */
-    metrics: ExplainMetric[];
+
+    /** "Startup Cost" — the estimated cost before the first row is returned. */
+    startupCost?: number;
+    /** "Total Cost" — the estimated cost to return all rows (cumulative). */
+    totalCost?: number;
+    /** "Plan Rows" — the estimated output row count. */
+    planRows?: number;
+    /** "Plan Width" — the estimated average output row width, in bytes. */
+    planWidth?: number;
+
+    /** "Actual Startup Time" (ms) — analyze only. */
+    actualStartupTime?: number;
+    /** "Actual Total Time" (ms, per loop) — analyze only. */
+    actualTotalTime?: number;
+    /** "Actual Rows" (per loop) — analyze only. */
+    actualRows?: number;
+    /** "Actual Loops" — how many times the node ran; analyze only. */
+    actualLoops?: number;
+
+    /** "Group Key" — the grouping expressions of an aggregate/group node. */
+    groupKey?: string[];
+    /** "Hash Batches" — batches a hash node spilled into (1 = fully in memory). */
+    hashBatches?: number;
+    /** "Peak Memory Usage" (kB) — peak working memory of a hash/sort node. */
+    peakMemoryUsage?: number;
+
     /** Child plan nodes (from the source "Plans" array). */
     children: ExplainPlanNode[];
 }
-
-/** One metric's display label paired with the source field it reads from. */
-interface MetricSpec {
-    label: string;
-    field: string;
-}
-
-// The plan metrics every EXPLAIN carries (cost/rows/width), then the analyze-only
-// timing metrics — pushed in this order so a node's metric list reads plan-first,
-// actuals-second, matching the text plan's own left-to-right ordering.
-const METRIC_SPECS: readonly MetricSpec[] = [
-    { label: "cost",             field: "Total Cost" },
-    { label: "rows",             field: "Plan Rows" },
-    { label: "width",            field: "Plan Width" },
-    { label: "actual time (ms)", field: "Actual Total Time" },
-    { label: "actual rows",      field: "Actual Rows" },
-    { label: "loops",            field: "Actual Loops" },
-];
 
 /**
  * Parse a Postgres `EXPLAIN (FORMAT JSON)` payload into a plan-node forest.
@@ -98,7 +96,21 @@ function parseNode(plan: Record<string, unknown>, id: string): ExplainPlanNode {
         nodeType,
         label: nodeLabel(nodeType, relationName, plan["Alias"]),
         relationName,
-        metrics: collectMetrics(plan),
+
+        startupCost: num(plan, "Startup Cost"),
+        totalCost  : num(plan, "Total Cost"),
+        planRows   : num(plan, "Plan Rows"),
+        planWidth  : num(plan, "Plan Width"),
+
+        actualStartupTime: num(plan, "Actual Startup Time"),
+        actualTotalTime  : num(plan, "Actual Total Time"),
+        actualRows       : num(plan, "Actual Rows"),
+        actualLoops      : num(plan, "Actual Loops"),
+
+        groupKey       : stringArray(plan, "Group Key"),
+        hashBatches    : num(plan, "Hash Batches"),
+        peakMemoryUsage: num(plan, "Peak Memory Usage"),
+
         children,
     };
 }
@@ -125,26 +137,37 @@ function nodeLabel(nodeType: string, relationName: string | undefined, alias: un
 }
 
 /**
- * Collect a node's metrics in {@link METRIC_SPECS} order, pushing each only when
- * its source field is a finite number (so a plain plan omits the actual-* four
- * and a missing optional field is skipped rather than emitted as NaN).
+ * Read a finite numeric field, or `undefined` when it is absent or not a finite
+ * number (so a missing/non-finite source value is dropped, never surfaced as NaN).
  *
  * @param plan - The raw Plan object.
+ * @param field - The source field name.
  *
- * @returns The finite metrics, in fixed order.
+ * @returns The finite number, or `undefined`.
  */
-function collectMetrics(plan: Record<string, unknown>): ExplainMetric[] {
-    const metrics: ExplainMetric[] = [];
+function num(plan: Record<string, unknown>, field: string): number | undefined {
+    const value = plan[field];
 
-    for (const spec of METRIC_SPECS) {
-        const value = plan[spec.field];
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
 
-        if (typeof value === "number" && Number.isFinite(value)) {
-            metrics.push({ label: spec.label, value });
-        }
+/**
+ * Read a field that is an array of strings (e.g. "Group Key"), or `undefined`
+ * when it is absent or not such an array.
+ *
+ * @param plan - The raw Plan object.
+ * @param field - The source field name.
+ *
+ * @returns The string array, or `undefined`.
+ */
+function stringArray(plan: Record<string, unknown>, field: string): string[] | undefined {
+    const value = plan[field];
+
+    if (Array.isArray(value) && value.every(v => typeof v === "string")) {
+        return value as string[];
     }
 
-    return metrics;
+    return undefined;
 }
 
 /**
