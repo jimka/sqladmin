@@ -60,6 +60,7 @@ import { file_code }                     from "@jimka/typescript-ui/glyphs/solid
 import { file_lines }                    from "@jimka/typescript-ui/glyphs/solid/file_lines";
 import { diagram_project }               from "@jimka/typescript-ui/glyphs/solid/diagram_project";
 import { flask }                         from "@jimka/typescript-ui/glyphs/solid/flask";
+import { sitemap }                       from "@jimka/typescript-ui/glyphs/solid/sitemap";
 import { wand_magic_sparkles }           from "@jimka/typescript-ui/glyphs/solid/wand_magic_sparkles";
 import { table }                         from "@jimka/typescript-ui/glyphs/solid/table";
 import { chart_simple }                  from "@jimka/typescript-ui/glyphs/solid/chart_simple";
@@ -79,7 +80,7 @@ import {
 import type { QueryExplainResult, QueryResult, QueryRowsResult } from "../contract";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, CAUTION_COLOR, HISTORY_COLOR, NEUTRAL_COLOR } from "../theme";
 
-Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask, wand_magic_sparkles, table, chart_simple);
+Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask, sitemap, wand_magic_sparkles, table, chart_simple);
 
 // The editor's starting height once the result pane is shown below it; the Split
 // gutter lets the user resize from there.
@@ -130,6 +131,14 @@ export interface QueryPanelOptions {
      * reference back to it.
      */
     onResult?: (active: ActiveExport | null) => void;
+    /**
+     * Open the current Explain plan as a tree + diagram tab. The panel calls this
+     * with the statement it explained and that plan's analyze flag; the controller
+     * re-requests the plan as FORMAT JSON, parses it, and opens an
+     * ExplainDiagramPanel. Invoked only while an Explain plan is on screen (the
+     * button is disabled otherwise).
+     */
+    onExplainDiagram?: (sql: string, analyze: boolean) => void;
 }
 
 /**
@@ -143,7 +152,7 @@ export class QueryPanel {
     readonly dispose: () => void;
 
     constructor(options: QueryPanelOptions) {
-        const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult } = options;
+        const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult, onExplainDiagram } = options;
 
         const editor = new CodeEditor(initialSql, { language: "sql" });
 
@@ -201,6 +210,10 @@ export class QueryPanel {
                                           () => void runExplainRun(false));
         const analyzeButton = glyphButton("flask", CAUTION_COLOR, `Explain Analyze (${EXPLAIN_ANALYZE_SHORTCUT})\n\nexecutes the statement`,
                                           () => void runExplainRun(true));
+        // Opens the shown Explain plan as a tree + diagram tab. Enabled only while
+        // an Explain plan is on screen (openExplainDiagram re-requests it as JSON).
+        const diagramButton = glyphButton("sitemap", NEUTRAL_COLOR, "Explain diagram\n\ntree + diagram of the current plan",
+                                          () => openExplainDiagram());
         const exportButton  = glyphButton("file-export", PRIMARY_COLOR, "Export results (CSV / JSON)", (e: MouseEvent) => openExportMenu(e));
 
         // The CSV/JSON chooser shown under the Export button; reused across clicks.
@@ -215,7 +228,7 @@ export class QueryPanel {
 
         const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
         panel.addComponent(new ToolBar({
-            components: [runButton, saveButton, clearButton, formatButton, chartButton, explainButton, analyzeButton, exportButton, Spacer.flex(), olderButton, newerButton],
+            components: [runButton, saveButton, clearButton, formatButton, chartButton, explainButton, analyzeButton, diagramButton, exportButton, Spacer.flex(), olderButton, newerButton],
         }), { placement: Placement.NORTH });
         panel.addComponent(body, { placement: Placement.CENTER });
 
@@ -308,6 +321,7 @@ export class QueryPanel {
                 removeTabSilently(explainSlot.editor);
                 explainSlot.editor.dispose();
                 explainSlot = null;
+                syncDiagramButton();
             }
         }
 
@@ -389,6 +403,7 @@ export class QueryPanel {
             } else if (explainSlot && content === explainSlot.editor) {
                 explainSlot.editor.dispose();
                 explainSlot = null;
+                syncDiagramButton();
             }
 
             queueMicrotask(syncExportToActiveTab);
@@ -454,6 +469,24 @@ export class QueryPanel {
             chartButton.setEnabled(dataSlot !== null && isChartable(dataSlot.result));
         }
 
+        /** Enable the Explain-diagram button only while an Explain plan is on screen. */
+        function syncDiagramButton(): void {
+            diagramButton.setEnabled(explainSlot !== null);
+        }
+
+        /**
+         * Hand the shown Explain plan's statement and analyze flag to the controller,
+         * which re-requests it as a FORMAT JSON plan tree and opens the diagram tab.
+         * A no-op when no plan is shown (the button is disabled then, so defensive).
+         */
+        function openExplainDiagram(): void {
+            if (!explainSlot) {
+                return;
+            }
+
+            onExplainDiagram?.(explainSlot.sql, explainSlot.result.analyze);
+        }
+
         // Monotonic guard: a slow run whose result arrives after a newer run started
         // is discarded so it can't clobber the newer one (mirrors showProperties's
         // _propsSeq). Run and Explain share the counter so a slow explain can't clobber
@@ -467,12 +500,15 @@ export class QueryPanel {
             explainButton.setEnabled(!busy);
             analyzeButton.setEnabled(!busy);
 
-            // Chart builds client-side from the current Data result; keep it off during
-            // a run and restore it from the (possibly refreshed) Data result after.
+            // Chart builds client-side from the current Data result, and the Explain
+            // diagram opens from the current plan; keep both off during a run and
+            // restore them from the (possibly refreshed) result / plan slot after.
             if (busy) {
                 chartButton.setEnabled(false);
+                diagramButton.setEnabled(false);
             } else {
                 syncChartButton();
+                syncDiagramButton();
             }
         }
 
@@ -696,6 +732,7 @@ export class QueryPanel {
 
             tab.setActiveContent(editor);
             setActiveExport({ kind: "plan", plan: { result, sql, runExplain } });
+            syncDiagramButton();
             notify(result.analyze ? "EXPLAIN ANALYZE plan (side-effects rolled back)" : "EXPLAIN plan");
         }
 
@@ -799,6 +836,7 @@ export class QueryPanel {
         // seeded); Chart/Export disabled until a rows result is shown.
         syncToolbarButtons();
         chartButton.setEnabled(false);
+        diagramButton.setEnabled(false);
         exportButton.setEnabled(false);
 
         // Focus the editor so the user can type on a fresh tab straight away. The

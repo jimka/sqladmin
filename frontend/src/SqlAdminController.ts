@@ -41,6 +41,8 @@ import { QueryPanel }                                                           
 import { RoleGrantsPanel }                                                                                                                                                                         from "./dock/RoleGrantsPanel";
 import { exportRoleGrants }                                                                                                                                                                        from "./dock/exportRoleGrants";
 import { SchemaDiagramPanel }                                                                                                                                                                      from "./dock/SchemaDiagramPanel";
+import { ExplainDiagramPanel }                                                                                                                                                                     from "./dock/ExplainDiagramPanel";
+import { parseExplainPlan }                                                                                                                                                                        from "./data/parseExplainPlan";
 import { RelationDiagramPanel }                                                                                                                                                                    from "./dock/RelationDiagramPanel";
 import { DatabaseDiagramPanel }                                                                                                                                                                    from "./dock/DatabaseDiagramPanel";
 import type { SchemaTables }                                                                                                                                                                       from "./data/buildDatabaseDiagram";
@@ -162,6 +164,10 @@ export class SqlAdminController {
     // Monotonic counter minting unique ids for scratch query panels, which are
     // never deduped (each "New Query" / "Open as query" opens a fresh panel).
     private _queryCounter: number = 0;
+
+    // Monotonic counter minting unique ids for Explain-diagram panels, which are
+    // never deduped (each "Explain diagram" click opens a fresh tab).
+    private _explainDiagramCounter: number = 0;
 
     // Bumped on every showProperties call so a slow column fetch whose selection
     // has since moved on is discarded instead of clobbering the current view.
@@ -470,6 +476,50 @@ export class SqlAdminController {
             })),
         });
         this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}: diagram (${data.nodes.length} tables)`);
+    }
+
+    /**
+     * Open a plan tree + diagram tab for a shown Explain plan: re-request the
+     * statement as a FORMAT JSON plan tree (an ANALYZE re-executes, rolled back on
+     * the backend — same on-demand-JSON pattern the JSON export uses), parse it,
+     * and mount an ExplainDiagramPanel. A failed re-request surfaces through
+     * notifyError; a malformed/empty plan notifies and opens nothing. Not deduped —
+     * each call opens a fresh tab.
+     *
+     * @param sql - The statement to explain (the one the panel already explained).
+     * @param analyze - The shown plan's analyze flag, reused for the JSON re-request.
+     * @param label - The originating query panel's label, for the tab title.
+     */
+    async openExplainDiagram(sql: string, analyze: boolean, label?: string): Promise<void> {
+        let planJson: unknown;
+
+        try {
+            const result = await runExplain(this._connectionId, sql, { analyze, format: "json" });
+
+            planJson = result.planJson;
+        } catch (err) {
+            this.notifyError(err);
+
+            return;
+        }
+
+        const roots = parseExplainPlan(planJson);
+
+        if (roots.length === 0) {
+            this.statusBar.setMessage(`${this._connectionId}: no JSON plan tree to diagram`);
+
+            return;
+        }
+
+        const id = `explain-diagram-${++this._explainDiagramCounter}`;
+
+        this.dock.addPanel({
+            id,
+            title  : `${label ?? "Query"} (plan diagram)`,
+            glyph  : "sitemap",
+            content: new ExplainDiagramPanel(roots),
+        });
+        this.statusBar.setMessage(`${this._connectionId}: plan diagram (${roots.length} plan root(s))`);
     }
 
     /**
@@ -920,7 +970,9 @@ export class SqlAdminController {
             onSave    : (sql: string) => void this.promptAndSaveQuery(sql),
             // Mirror this panel's latest exportable result (rows or plan) so
             // the menubar export can reach it while it is the active panel.
-            onResult  : (active: ActiveExport | null) => this._activeQueryResult.set(id, active)
+            onResult  : (active: ActiveExport | null) => this._activeQueryResult.set(id, active),
+            // Open the shown plan as a tree + diagram tab (re-requested as JSON).
+            onExplainDiagram: (sql, analyze) => void this.openExplainDiagram(sql, analyze, label)
         });
 
         this._panelDisposers.set(id, panel.dispose);
