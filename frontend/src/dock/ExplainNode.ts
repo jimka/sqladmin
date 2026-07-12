@@ -49,10 +49,17 @@ const CARD_INSET = 6;
 // value column, so labels and values never touch.
 const LABEL_GAP = 8;
 
-// The card's border colours: a plain 1px frame deselected, a 2px accent frame
-// selected (DiagramView drives the swap through setSelected).
+// The card border: a plain 1px frame, recoloured to the accent when selected.
+// The width stays 1px in both states so selecting a card never reflows its
+// content (a 1px→2px border would nudge everything in); the extra prominence
+// comes from SELECTED_SHADOW, a box-shadow ring that takes no layout space.
 const CARD_BORDER     = "1px solid var(--ts-ui-border-color, rgb(180, 180, 180))";
-const SELECTED_BORDER = "2px solid var(--ts-ui-accent-color, rgb(30, 100, 200))";
+const SELECTED_BORDER = "1px solid var(--ts-ui-accent-color, rgb(30, 100, 200))";
+
+// The selection highlight: a crisp accent ring plus a soft glow, drawn as a
+// box-shadow (outside the border box) so it's clearly visible without displacing
+// the card's content the way a thicker border would.
+const SELECTED_SHADOW = "0 0 0 3px var(--ts-ui-accent-color, rgb(30, 100, 200)), 0 0 10px 1px rgba(30, 100, 200, 0.45)";
 
 // Heat tint endpoints: a node with heat 0 sits at the neutral base; heat 1 sits
 // at the warm "hot spot" colour. The card background is a linear blend between
@@ -125,15 +132,18 @@ export class ExplainNode extends Panel {
 
     /**
      * Restores the single-click selection highlight DiagramView drives through a
-     * duck-typed `setSelected` call: swap to the accent border while selected. The
-     * background is left as-is so the node's heat tint stays visible. A real method
-     * (DiagramView.applySelectedVisual calls it as `component.setSelected?.(value)`),
-     * so `this` is bound and no arrow field is needed.
+     * duck-typed `setSelected` call: recolour the border to the accent and add the
+     * box-shadow ring while selected. The border width and the background (heat
+     * tint) are left as-is, so selecting never reflows the card's content. A real
+     * method (DiagramView.applySelectedVisual calls it as
+     * `component.setSelected?.(value)`), so `this` is bound and no arrow field is
+     * needed.
      *
      * @param value - Whether the node is selected.
      */
     setSelected(value: boolean): void {
         this.setBorder(value ? SELECTED_BORDER : CARD_BORDER);
+        this.setShadow(value ? SELECTED_SHADOW : "none");
     }
 }
 
