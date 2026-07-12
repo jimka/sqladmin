@@ -138,3 +138,57 @@ self-documenting, and safe under minification because `vite.config.ts` sets
 targeting the old generic class name (e.g. `.Container`) under the subtree
 being converted, since the class name changing would break that selector; none
 of the pilot conversions had one.
+
+## (f) The composition fallback
+
+Not every builder can become an `extends` class cheaply. When a builder's
+body is too large or closure-dense to hoist mechanically into an `extends`
+class under the super-cascade constraint (b) — dozens of interdependent
+inner functions and mutable locals that would each need to become a method
+and a field — converting it is a wholesale, high-risk rewrite disproportionate
+to a dispose-shape cleanup. `QueryPanel` (`src/dock/QueryPanel.ts`, ~700
+lines, ~25 interdependent closures) is the worked example.
+
+There, class-first still applies, but as a **composition wrapper**: a plain
+class that owns a `content` (`Container`/`Component`) field and a `dispose`
+field, instead of `extends`-ing a library base. The factory's body moves into
+the constructor **verbatim**, ending in two field assignments instead of a
+`return { content, dispose }`:
+
+```ts
+export class QueryPanel {
+    readonly content: Container;
+    readonly dispose: () => void;
+
+    constructor(options: QueryPanelOptions) {
+        // ...the original factory body, unchanged...
+        this.content = panel;
+        this.dispose = () => { /* ...original dispose closure... */ };
+    }
+}
+```
+
+The consumer constructs with `new` and mounts `instance.content`, calling
+`instance.dispose()` on teardown — the same call-site shape as `extends`
+classes get from section (d), just without `this` referring to the mountable
+component itself.
+
+`dispose` must still be a `readonly` **arrow-function field**, not a method,
+for the same by-reference reason as section (c): a consumer that stores
+`panel.dispose` (e.g. in a disposer map, or in a slot object handed off
+elsewhere) needs it bound at read time. The composition wrapper's closures
+otherwise stay ordinary local functions/`let`s inside the constructor — they
+are not hoisted to fields or methods, since composition only needs `content`
+and `dispose` as public surface.
+
+This is a **fallback from the preferred `extends` form (section (d))**, not
+an equal alternative — reach for `extends` first, and use composition only
+when the super-cascade hoist genuinely doesn't pay for itself. Within one
+module family sharing a single disposal path (e.g. several Dock panel
+builders feeding one `_panelDisposers` map), prefer applying composition
+uniformly across the family rather than mixing `extends` and composition,
+even where a smaller sibling could technically take `extends` — a mixed
+shape fragments the pattern for no benefit. See
+`plans/implemented/class-first-lifecycle-panels.md` for the worked
+conversion of `QueryPanel`, `QueryResultChart`, `QueryResultGrid`,
+`DefinitionPanel`, and `DocumentationPanel`.

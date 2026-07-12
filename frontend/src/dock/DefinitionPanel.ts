@@ -9,15 +9,19 @@ import { Fit }        from "@jimka/typescript-ui/layout";
 import { CodeEditor } from "@jimka/typescript-ui/component/editor";
 
 /**
- * Build a panel showing a view's SQL definition as read-only, SQL-highlighted,
- * selectable text.
- *
- * @returns The panel content plus a disposer that must be called on teardown
- *     to release the editor's view and theme subscription.
+ * A panel showing a view's SQL definition as read-only, SQL-highlighted,
+ * selectable text. A class-first composition wrapper: the instance owns
+ * `content` (the mountable subtree) and `dispose` (releasing the editor's
+ * view and theme subscription) rather than `extends`-ing a library base.
  */
-export function DefinitionPanel(definition: string): { content: Container; dispose: () => void } {
-    const editor = new CodeEditor(definition, { language: "sql", readOnly: true });
-    const content = Container({ layoutManager: new Fit(), components: [editor] });
+export class DefinitionPanel {
+    readonly content: Container;
+    readonly dispose: () => void;
 
-    return { content, dispose: () => editor.dispose() };
+    constructor(definition: string) {
+        const editor = new CodeEditor(definition, { language: "sql", readOnly: true });
+
+        this.content = Container({ layoutManager: new Fit(), components: [editor] });
+        this.dispose = () => editor.dispose();
+    }
 }

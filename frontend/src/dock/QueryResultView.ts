@@ -44,114 +44,124 @@ Glyph.register(chart_line, chart_column);
 const AXIS_GROUP_GAP = 12;
 
 /**
- * Build the results grid for a rows result.
- *
- * @param result - The rows result to render (read-only: a query result has no
- *     PK and is never written back).
- * @returns The grid plus a no-op disposer — the MemoryStore needs no teardown.
+ * The results grid for a rows result. A class-first composition wrapper: the
+ * instance owns `content` (the grid) and `dispose` (a no-op — the MemoryStore
+ * needs no teardown).
  */
-export function QueryResultGrid(result: QueryRowsResult): { content: Component; dispose: () => void } {
-    // A fresh store + columns per run means columns never bleed across runs.
-    const store = new MemoryStore({ model: buildQueryModel(result.columns), data: result.rows, autoLoad: true });
-    const grid  = Table(store, { columns: [], rowReadOnly: () => true });
+export class QueryResultGrid {
+    readonly content: Component;
+    readonly dispose: () => void;
 
-    return { content: grid, dispose: () => {} };
+    /**
+     * @param result - The rows result to render (read-only: a query result
+     *     has no PK and is never written back).
+     */
+    constructor(result: QueryRowsResult) {
+        // A fresh store + columns per run means columns never bleed across runs.
+        const store = new MemoryStore({ model: buildQueryModel(result.columns), data: result.rows, autoLoad: true });
+        const grid  = Table(store, { columns: [], rowReadOnly: () => true });
+
+        this.content = grid;
+        this.dispose = () => {};
+    }
 }
 
 /**
- * Build the chart tab for a CHARTABLE rows result: a config strip (x/y column
- * combos over a line/bar type toggle) above the chart. The caller must
+ * The chart tab for a CHARTABLE rows result: a config strip (x/y column
+ * combos over a line/bar type toggle) above the chart. A class-first
+ * composition wrapper: the instance owns `content` (the strip-over-chart
+ * subtree) and `dispose` (releasing the live chart instance). The caller must
  * guarantee `isChartable(result)`.
- *
- * @param result - The chartable rows result to chart.
- * @returns The strip-over-chart content plus a disposer releasing the live
- *     chart instance.
  */
-export function QueryResultChart(result: QueryRowsResult): { content: Component; dispose: () => void } {
-    const { columns, rows } = result;
+export class QueryResultChart {
+    readonly content: Component;
+    readonly dispose: () => void;
 
-    let config: ChartConfig = defaultChartConfig(columns);
+    /** @param result - The chartable rows result to chart. */
+    constructor(result: QueryRowsResult) {
+        const { columns, rows } = result;
 
-    const viewHost = Panel({ layoutManager: new Fit() });
+        let config: ChartConfig = defaultChartConfig(columns);
 
-    // Build the chart eagerly — the chart is the tab's only view (there is no
-    // grid toggle here), so it is always the visible component.
-    let chart: LineChart | BarChart = buildChart();
+        const viewHost = Panel({ layoutManager: new Fit() });
 
-    viewHost.addComponent(chart);
+        // Build the chart eagerly — the chart is the tab's only view (there is
+        // no grid toggle here), so it is always the visible component.
+        let chart: LineChart | BarChart = buildChart();
 
-    const content = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
-    content.addComponent(buildStrip(), { placement: Placement.NORTH });
-    content.addComponent(viewHost, { placement: Placement.CENTER });
+        viewHost.addComponent(chart);
 
-    /** Build the config strip: x/y column combos and the line/bar type toggle. */
-    function buildStrip(): ToolBar {
-        const xCombo = new ComboBox({
-            items: xCandidates(columns).map(c => ({ key: c.field, label: c.label })),
-            value: config.xField,
-            listeners: { change: value => { config = { ...config, xField: value }; rebuildChart(); } },
-        });
-        const yCombo = new ComboBox({
-            items: numericColumns(columns).map(c => c.name),
-            value: config.yField,
-            listeners: { change: value => { config = { ...config, yField: value }; rebuildChart(); } },
-        });
+        const content = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
+        content.addComponent(buildStrip(), { placement: Placement.NORTH });
+        content.addComponent(viewHost, { placement: Placement.CENTER });
 
-        const lineToggle = new ToggleButton("", { selected: config.kind === "line", glyph: "chart-line" });
-        const barToggle  = new ToggleButton("", { selected: config.kind === "bar", glyph: "chart-column" });
+        /** Build the config strip: x/y column combos and the line/bar type toggle. */
+        function buildStrip(): ToolBar {
+            const xCombo = new ComboBox({
+                items: xCandidates(columns).map(c => ({ key: c.field, label: c.label })),
+                value: config.xField,
+                listeners: { change: value => { config = { ...config, xField: value }; rebuildChart(); } },
+            });
+            const yCombo = new ComboBox({
+                items: numericColumns(columns).map(c => c.name),
+                value: config.yField,
+                listeners: { change: value => { config = { ...config, yField: value }; rebuildChart(); } },
+            });
 
-        lineToggle.on("action", () => selectType("line"));
-        barToggle.on("action", () => selectType("bar"));
+            const lineToggle = new ToggleButton("", { selected: config.kind === "line", glyph: "chart-line" });
+            const barToggle  = new ToggleButton("", { selected: config.kind === "bar", glyph: "chart-column" });
 
-        /** Flip the line/bar toggle pair and rebuild the chart. */
-        function selectType(kind: ChartConfig["kind"]): void {
-            lineToggle.setSelected(kind === "line");
-            barToggle.setSelected(kind === "bar");
-            config = { ...config, kind };
-            rebuildChart();
+            lineToggle.on("action", () => selectType("line"));
+            barToggle.on("action", () => selectType("bar"));
+
+            /** Flip the line/bar toggle pair and rebuild the chart. */
+            function selectType(kind: ChartConfig["kind"]): void {
+                lineToggle.setSelected(kind === "line");
+                barToggle.setSelected(kind === "bar");
+                config = { ...config, kind };
+                rebuildChart();
+            }
+
+            const toolbar = new ToolBar({
+                components: [
+                    new Text("x:"), xCombo,
+                    new Spacer(AXIS_GROUP_GAP), new Text("y:"), yCombo,
+                    Spacer.flex(), // push the type selector to the far right
+                    lineToggle, barToggle,
+                ],
+            });
+
+            // ToolBar stretches its children to the full bar height, which disables
+            // HBox baseline alignment; turn it off so the "x:"/"y:" labels sit on the
+            // same text baseline as the combo boxes (the icon toggles stay centered).
+            (toolbar.getLayoutManager() as HBox).setStretching(false);
+
+            return toolbar;
         }
 
-        const toolbar = new ToolBar({
-            components: [
-                new Text("x:"), xCombo,
-                new Spacer(AXIS_GROUP_GAP), new Text("y:"), yCombo,
-                Spacer.flex(), // push the type selector to the far right
-                lineToggle, barToggle,
-            ],
-        });
+        /**
+         * Rebuild the chart from the current config (a config change always needs
+         * a fresh instance: line vs. bar are different classes) and swap it into
+         * the view host. The chart is the tab's only view, so it is always visible.
+         */
+        function rebuildChart(): void {
+            chart.dispose();
+            chart = buildChart();
+            viewHost.removeAllComponents();
+            viewHost.addComponent(chart);
+            viewHost.doLayout();
+        }
 
-        // ToolBar stretches its children to the full bar height, which disables
-        // HBox baseline alignment; turn it off so the "x:"/"y:" labels sit on the
-        // same text baseline as the combo boxes (the icon toggles stay centered).
-        (toolbar.getLayoutManager() as HBox).setStretching(false);
+        /** Build a fresh chart instance (line or bar, per `config`) from the result rows. */
+        function buildChart(): LineChart | BarChart {
+            const series = buildChartSeries(columns, rows, config);
 
-        return toolbar;
+            return config.kind === "line"
+                ? new LineChart({ series, xScaleType: isTimeX(columns, config.xField) ? "time" : "linear" })
+                : new BarChart({ series });
+        }
+
+        this.content = content;
+        this.dispose = () => { chart.dispose(); };
     }
-
-    /**
-     * Rebuild the chart from the current config (a config change always needs a
-     * fresh instance: line vs. bar are different classes) and swap it into the
-     * view host. The chart is the tab's only view, so it is always visible.
-     */
-    function rebuildChart(): void {
-        chart.dispose();
-        chart = buildChart();
-        viewHost.removeAllComponents();
-        viewHost.addComponent(chart);
-        viewHost.doLayout();
-    }
-
-    /** Build a fresh chart instance (line or bar, per `config`) from the result rows. */
-    function buildChart(): LineChart | BarChart {
-        const series = buildChartSeries(columns, rows, config);
-
-        return config.kind === "line"
-            ? new LineChart({ series, xScaleType: isTimeX(columns, config.xField) ? "time" : "linear" })
-            : new BarChart({ series });
-    }
-
-    return {
-        content,
-        dispose: () => { chart.dispose(); },
-    };
 }

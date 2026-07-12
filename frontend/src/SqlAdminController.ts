@@ -16,7 +16,7 @@ import { key }                                                 from "@jimka/type
 import { diagram_project }                                     from "@jimka/typescript-ui/glyphs/solid/diagram_project";
 import { file_lines }                                          from "@jimka/typescript-ui/glyphs/solid/file_lines";
 import { user }                                                from "@jimka/typescript-ui/glyphs/solid/user";
-import type { MarkdownEditor }                                 from "@jimka/typescript-ui/component/editor";import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
+import type { Tree, TreeNode }                                 from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TablePrivileges, TableStructure } from "./contract";
 import { getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";import { exportQueryResult }                                   from "./dock/exportQueryResult";
@@ -128,9 +128,10 @@ export class SqlAdminController {
 
     private readonly _connectionId: string;
     private readonly _openPanels  : Map<string, OpenPanel> = new Map();
-    // Live-only panels (QueryPanel, DefinitionPanel) return a teardown closure
-    // that must run on tab close — the framework has no cascading dispose, so
-    // the controller owns invoking it (see the "close" handler below).
+    // Live-only panels (QueryPanel, DefinitionPanel, DocumentationPanel) expose
+    // a `dispose` that must run on tab close — the framework has no cascading
+    // dispose, so the controller owns invoking it (see the "close" handler
+    // below).
     private readonly _panelDisposers: Map<string, () => void> = new Map();
     private _navigator            : Tree | null = null;
 
@@ -139,11 +140,6 @@ export class SqlAdminController {
     private readonly _history: QueryHistoryStore;
     private readonly _saved  : SavedQueryStore;
     private readonly _notes  : NotesStore;
-
-    // The live MarkdownEditor backing the notes tab, held so it can be disposed
-    // by hand on tab close (MarkdownEditor.dispose() is not framework-driven —
-    // see the "close" handler below).
-    private _notesEditor: MarkdownEditor | null = null;
 
     // Recently opened tables (newest-first), surfaced on the start page.
     private readonly _recentTables: RecentTable[] = [];
@@ -216,11 +212,6 @@ export class SqlAdminController {
             this._activeRoleGrants.delete(e.id);
             this._panelDisposers.get(e.id)?.();
             this._panelDisposers.delete(e.id);
-
-            if (e.id === this.notesPanelId()) {
-                this._notesEditor?.dispose();
-                this._notesEditor = null;
-            }
         });
 
         // Switching tabs syncs the navigator selection and the status bar to the
@@ -352,16 +343,16 @@ export class SqlAdminController {
             return;
         }
 
-        const { content, dispose } = DefinitionPanel(definition);
+        const panel = new DefinitionPanel(definition);
 
         this._openPanels.set(id, { ref, node, detail: "definition" });
-        this._panelDisposers.set(id, dispose);
+        this._panelDisposers.set(id, panel.dispose);
         this.dock.addPanel({
             id,
             title  : `${ref.name ?? id} (definition)`,
             glyph  : "file-code",
             tooltip: this.panelTooltip(ref),
-            content
+            content: panel.content
         });
         this.syncToPanel(id);
     }
@@ -405,9 +396,9 @@ export class SqlAdminController {
 
     /**
      * Open (or focus) the singleton documentation/notes tab for this connection:
-     * a WYSIWYG MarkdownEditor seeded from and persisting to the per-connection
-     * notes store. Not registered in `_openPanels` (it carries no `DbObjectRef`),
-     * matching how scratch query panels are handled.
+     * a WYSIWYG DocumentationPanel seeded from and persisting to the
+     * per-connection notes store. Not registered in `_openPanels` (it carries
+     * no `DbObjectRef`), matching how scratch query panels are handled.
      */
     openDocumentation(): void {
         const id = this.notesPanelId();
@@ -416,13 +407,13 @@ export class SqlAdminController {
             return;
         }
 
-        const { component, editor } = DocumentationPanel(
+        const panel = new DocumentationPanel(
             this._notes.load(),
             markdown => this._notes.save(markdown),
         );
-        this._notesEditor = editor;
+        this._panelDisposers.set(id, panel.dispose);
 
-        this.dock.addPanel({ id, title: "Notes", glyph: "file-lines", content: component });
+        this.dock.addPanel({ id, title: "Notes", glyph: "file-lines", content: panel.content });
     }
 
     /**
@@ -893,7 +884,7 @@ export class SqlAdminController {
             this.statusBar.setMessage(`${this._connectionId} · ${label}: ${message}`);
         };
 
-        const { content, dispose } = QueryPanel({
+        const panel = new QueryPanel({
             runQuery  : sql => runQuery(this._connectionId, sql),
             runExplain: (sql, opts) => runExplain(this._connectionId, sql, opts),
             notify,
@@ -914,8 +905,8 @@ export class SqlAdminController {
             onResult  : (active: ActiveExport | null) => this._activeQueryResult.set(id, active)
         });
 
-        this._panelDisposers.set(id, dispose);
-        this.dock.addPanel({ id, title: label, glyph: "terminal", content });
+        this._panelDisposers.set(id, panel.dispose);
+        this.dock.addPanel({ id, title: label, glyph: "terminal", content: panel.content });
     }
 
     /**
