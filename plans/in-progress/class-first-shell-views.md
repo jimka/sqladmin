@@ -40,6 +40,42 @@ shell views (lines 271, 405–407);
 
 ---
 
+## Reconciliation note (added at implementation time)
+
+This branch starts from the tip of a Phase-1 stack that already merged
+`feature/class-first-explorer-trees`, which reshaped `TreeExplorerConfig`'s
+`explorer` field ahead of this plan and already converted the two tree call
+sites to `new`. Concretely, as-implemented differs from the snippets above:
+
+- **`treeExplorerView.ts`** — `ExplorerTree` is now `interface ExplorerTree
+  extends Tree { refresh(): void }`, i.e. **the tree instance itself is the
+  explorer** (both `NavigatorTree` and `RolesTree` `extends Tree implements
+  ExplorerTree`, with `refresh` a public arrow-function field). The old `{
+  tree, refresh } = config.explorer` destructure is already gone from
+  `buildTreeExplorerView`; it now reads `const tree = config.explorer; const
+  refresh = config.explorer.refresh;`. `TreeExplorerConfig` itself
+  (`explorer: ExplorerTree`, the label/glyph/inspector fields) is unchanged —
+  only how the body reads `tree`/`refresh` off it changed. The `TreeExplorerView`
+  base class built in this plan is hoisted from that already-reshaped body
+  (see the updated _Internal Structure_ below), not from the original
+  destructuring snippet.
+- **`DatabaseExplorerView.ts`** / **`RolesExplorerView.ts`** — already
+  construct `explorer: new NavigatorTree(controller)` / `explorer: new
+  RolesTree(controller)` (class construction, not a factory call). This
+  plan's conversion **preserves** those `new` calls verbatim inside the
+  `super({...})` config passed from the new subclasses — nothing about the
+  tree construction changes, only the surrounding factory function becomes a
+  subclass constructor.
+
+No conflict of intent was found: the sibling plan's reshape (tree-instance-is-
+the-explorer) and this plan's goal (builder → class hierarchy) are
+orthogonal — one changed *what shape `config.explorer` is*, the other changes
+*how the assembly around `config` is packaged*. The `Internal Structure` and
+`Ordered Implementation Steps` sections below are updated in place to reflect
+the current file contents rather than the stale original snippets.
+
+---
+
 ## Architecture Decisions
 
 ### Bases are the concrete library class each builder assembles, not a generic Container/Panel
@@ -165,12 +201,17 @@ properties; no accessors/setters introduced.
 
 ### `TreeExplorerView` (treeExplorerView.ts)
 
-Body is the current `buildTreeExplorerView` re-shaped into constructor phases:
+**Updated per the Reconciliation note** — `config.explorer` is already an
+`ExplorerTree extends Tree` (the tree instance itself), not a `{ tree,
+refresh }` handle; hoist the *current* `buildTreeExplorerView` body (which
+already reads `const tree = config.explorer; const refresh =
+config.explorer.refresh;`) into constructor phases:
 
 ```ts
 export class TreeExplorerView extends AccordionPanel {
     constructor(config: TreeExplorerConfig) {
-        const { tree, refresh } = config.explorer;
+        const tree    = config.explorer;
+        const refresh = config.explorer.refresh;
         tree.setPreferredSize(0, 0);                       // pre-super: child-widget setup
         super({
             id: config.id,
@@ -189,8 +230,9 @@ export class TreeExplorerView extends AccordionPanel {
 ```
 
 Subclasses forward a config to `super(...)` verbatim from the current factory
-bodies (e.g. `DatabaseExplorerView`: `explorer: NavigatorTree(controller)`,
-`treeLabel: "Databases"`, `treeGlyph: "database"`, `inspector:
+bodies (e.g. `DatabaseExplorerView`: `explorer: new NavigatorTree(controller)`
+— already a class construction, preserved as-is, not reverted to a factory
+call —, `treeLabel: "Databases"`, `treeGlyph: "database"`, `inspector:
 controller.properties.component`, `inspectorLabel: "Properties"`).
 
 ### `QueriesView` (QueriesView.ts)
@@ -251,22 +293,26 @@ helpers stay module-level, unchanged.
 
 1. **`treeExplorerView.ts`** — replace `export function buildTreeExplorerView(config): Component`
    with `export class TreeExplorerView extends AccordionPanel` per _Internal
-   Structure_. Keep `TreeExplorerConfig` and all imports; `Component` is still
-   used by `TreeExplorerConfig.inspector`, so keep it. Move `tree.setPreferredSize(0,0)`
-   before `super`, the section array into `super(...)`, and the three
-   `getAccordion()`/`bindRefreshShortcut` calls after `super`.
+   Structure_ (updated for the already-reshaped `config.explorer: ExplorerTree`
+   — no `{ tree, refresh }` destructure). Keep `TreeExplorerConfig` and all
+   imports; `Component` is still used by `TreeExplorerConfig.inspector`, so keep
+   it. Move `tree.setPreferredSize(0,0)` before `super`, the section array into
+   `super(...)`, and the three `getAccordion()`/`bindRefreshShortcut` calls
+   after `super`.
 
 2. **`DatabaseExplorerView.ts`** — replace the factory with
    `export class DatabaseExplorerView extends TreeExplorerView`; constructor
-   `(controller, id)` calls `super({ id, explorer: NavigatorTree(controller),
+   `(controller, id)` calls `super({ id, explorer: new NavigatorTree(controller),
    treeLabel: "Databases", treeGlyph: "database", inspector:
-   controller.properties.component, inspectorLabel: "Properties" })`. Change the
-   import from `{ buildTreeExplorerView }` to `{ TreeExplorerView }`. Remove the
-   now-unused `Component` import.
+   controller.properties.component, inspectorLabel: "Properties" })` —
+   preserving the already-present `new NavigatorTree(...)` construction. Change
+   the import from `{ buildTreeExplorerView }` to `{ TreeExplorerView }`. Remove
+   the now-unused `Component` import.
 
 3. **`RolesExplorerView.ts`** — same as step 2 with the Roles config
-   (`explorer: RolesTree(controller)`, `treeLabel: "Roles"`, `treeGlyph: "users"`,
-   `inspector: controller.rolesProperties.component`, `inspectorLabel: "Details"`).
+   (`explorer: new RolesTree(controller)` — preserving the already-present `new`
+   —, `treeLabel: "Roles"`, `treeGlyph: "users"`, `inspector:
+   controller.rolesProperties.component`, `inspectorLabel: "Details"`).
    Swap the import to `{ TreeExplorerView }`; remove the unused `Component` import.
 
 4. **`QueriesView.ts`** — replace the factory with `export class QueriesView
