@@ -37,80 +37,85 @@ function roleRowGlyph(node: TreeNode): string {
 }
 
 /** Build the roles Tree, wired to show a role's detail and report load errors. */
-export function RolesTree(controller: SqlAdminController): ExplorerTree {
-    const tree = Tree();
+export class RolesTree extends Tree implements ExplorerTree {
+    private readonly controller: SqlAdminController;
+    private readonly contextMenu = Menu();
 
-    // Render each row as its glyph (group parent or role leaf) beside its label.
-    tree.setRendererFactory(() => new IconLabelTreeNodeRenderer(roleRowGlyph));
+    constructor(controller: SqlAdminController) {
+        super();
+        this.controller = controller;
 
-    // A single click only selects: show the role's base info in the inspector
-    // without opening a tab. Group parents (non-string data) are skipped here —
-    // clicking one only toggles its expansion. Opening the grants tab is
-    // reserved for a double-click and the "Show data" context item.
-    tree.on("selection", (nodes: TreeNode[]) => {
-        const name = nodes[0]?.data;
+        // Render each row as its glyph (group parent or role leaf) beside its label.
+        this.setRendererFactory(() => new IconLabelTreeNodeRenderer(roleRowGlyph));
 
-        if (typeof name === "string") {
-            void controller.showRoleProperties(name);
-        }
-    });
+        // A single click only selects: show the role's base info in the inspector
+        // without opening a tab. Group parents (non-string data) are skipped here —
+        // clicking one only toggles its expansion. Opening the grants tab is
+        // reserved for a double-click and the "Show data" context item.
+        this.on("selection", (nodes: TreeNode[]) => {
+            const name = nodes[0]?.data;
 
-    // A double-click on a role leaf shows its detail and opens (or focuses) its
-    // grants tab in the Dock — the behaviour a single click used to have.
-    tree.on("dblclick", (node: TreeNode) => {
-        const name = node.data;
+            if (typeof name === "string") {
+                void this.controller.showRoleProperties(name);
+            }
+        });
 
-        if (typeof name === "string") {
-            void controller.showRole(name);
-        }
-    });
+        // A double-click on a role leaf shows its detail and opens (or focuses) its
+        // grants tab in the Dock — the behaviour a single click used to have.
+        this.on("dblclick", (node: TreeNode) => {
+            const name = node.data;
 
-    // Right-clicking a role offers a CSV/JSON export of its full grant set,
-    // fetched on demand so the role need not be open. Mirrors NavigatorTree's
-    // table/view Export submenu. Group parents have no context menu.
-    const contextMenu = Menu();
+            if (typeof name === "string") {
+                void this.controller.showRole(name);
+            }
+        });
 
-    tree.on("contextmenu", (node: TreeNode, event: MouseEvent) => {
-        const name = node.data;
+        // Right-clicking a role offers a CSV/JSON export of its full grant set,
+        // fetched on demand so the role need not be open. Mirrors NavigatorTree's
+        // table/view Export submenu. Group parents have no context menu.
+        this.on("contextmenu", (node: TreeNode, event: MouseEvent) => {
+            const name = node.data;
 
-        if (typeof name !== "string") {
-            return;
-        }
+            if (typeof name !== "string") {
+                return;
+            }
 
-        contextMenu.show(event.clientX, event.clientY, [
-            // "Show data" mirrors the double-click: show the role and open its grants
-            // tab. Glyphs match the grants tab and the export formats.
-            { text: "Show data", glyph: "key", action: () => void controller.showRole(name) },
-            { separator: true },
-            { text: "Show membership graph", glyph: "diagram-project", action: () => void controller.openRoleMembershipDiagram(name) },
-            { text: "Show grants graph", glyph: "diagram-project", action: () => void controller.openRoleGrantsDiagram(name) },
-            { separator: true },
-            { text: "Export grants", glyph: "file-export", submenu: { label: "Export grants", items: [
-                { text: "CSV (.csv)",   glyph: "file-csv",  action: () => void controller.exportRole(name, "csv") },
-                { text: "JSON (.json)", glyph: "file-code", action: () => void controller.exportRole(name, "json") },
-            ] } },
-        ]);
-    });
+            this.contextMenu.show(event.clientX, event.clientY, [
+                // "Show data" mirrors the double-click: show the role and open its grants
+                // tab. Glyphs match the grants tab and the export formats.
+                { text: "Show data", glyph: "key", action: () => void this.controller.showRole(name) },
+                { separator: true },
+                { text: "Show membership graph", glyph: "diagram-project", action: () => void this.controller.openRoleMembershipDiagram(name) },
+                { text: "Show grants graph", glyph: "diagram-project", action: () => void this.controller.openRoleGrantsDiagram(name) },
+                { separator: true },
+                { text: "Export grants", glyph: "file-export", submenu: { label: "Export grants", items: [
+                    { text: "CSV (.csv)",   glyph: "file-csv",  action: () => void this.controller.exportRole(name, "csv") },
+                    { text: "JSON (.json)", glyph: "file-code", action: () => void this.controller.exportRole(name, "json") },
+                ] } },
+            ]);
+        });
+
+        // (Re)load the role list; used for the initial load.
+        this.refresh();
+    }
 
     // (Re)load the role list; used for the initial load and the refresh tool.
     // setNodes collapses every group, so afterwards we reveal the first login
     // role to expand the "Users" section by default — the real users sit up
-    // front while the noisy Groups / Predefined sections stay collapsed.
-    const refresh = (): void => {
-        void controller.loadRoles()
+    // front while the noisy Groups / Predefined sections stay collapsed. A
+    // public arrow-function field: refreshTool/bindRefreshShortcut hold this by
+    // reference, which would lose `this` if it were a plain method.
+    refresh = (): void => {
+        void this.controller.loadRoles()
             .then(roles => {
-                tree.setNodes(groupRoles(roles));
+                this.setNodes(groupRoles(roles));
 
                 const firstUser = roles.find(role => role.canLogin);
 
                 if (firstUser) {
-                    void tree.revealByPredicate(data => data === firstUser.name);
+                    void this.revealByPredicate(data => data === firstUser.name);
                 }
             })
-            .catch(error => controller.notifyError(error));
+            .catch(error => this.controller.notifyError(error));
     };
-
-    refresh();
-
-    return { tree, refresh };
 }
