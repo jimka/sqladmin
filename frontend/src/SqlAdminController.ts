@@ -317,7 +317,7 @@ export class SqlAdminController {
                     // (no LIMIT — a LIMIT node would mask the plan's real cost) and
                     // auto-runs EXPLAIN / EXPLAIN ANALYZE there.
                     analyze => this.openQuery(buildSelectSql(ref, null), false, ref.name, analyze ? "analyze" : "plain"))
-                : () => TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format), privileges)
+                : () => new TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format), privileges)
         });
 
         try {

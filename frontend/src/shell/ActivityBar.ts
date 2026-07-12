@@ -14,6 +14,13 @@
 // setSizer) so the Dock reclaims the space, while the rail stays put; clicking
 // the icon again expands. The same collapse/expand is exposed as
 // `toggleCollapsed` for the menu's "Toggle Sidebar" command.
+//
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): the bar `extends
+// Container` directly, so the instance itself is the mountable component (no
+// handle/`.component`). `toggleCollapsed`/`setSizer`/`selectView` are
+// arrow-function fields — the shell passes/holds them by reference (see
+// SqlAdminShell.ts), which would silently drop `this` if they were plain
+// methods.
 
 import { Component, Container }             from "@jimka/typescript-ui/core";
 import { Placement }                    from "@jimka/typescript-ui/primitive";
@@ -74,38 +81,81 @@ export interface SidebarSizer {
     expand(): void;
 }
 
-/** The activity bar plus the external collapse control the menu drives. */
-export interface ActivityBarHandle {
-    /** The activity-bar component to mount in the shell's sidebar pane. */
-    component: Component;
-    /** Collapse the deck if expanded, or re-open the active view if collapsed. */
-    toggleCollapsed(): void;
-    /** Wire the Split-backed sizer once the shell has built the Split. */
-    setSizer(sizer: SidebarSizer): void;
-    /** Select and expand a view by its id (the menu's entry point to a view). */
-    selectView(id: string): void;
-}
-
 /**
- * Build the activity bar for the shell's WEST region.
- *
- * @param views - The view containers; the first starts active and expanded.
- * @param options - Optional rail extras (e.g. a bottom-pinned sign-out button).
- *
- * @returns The activity-bar component and its collapse toggle.
+ * The shell's WEST activity bar: an always-visible icon rail beside a
+ * collapsible view deck. The instance itself is the mountable component
+ * (`extends Container`) — callers place it directly, no handle object.
  */
-export function ActivityBar(views: ActivityView[], options: ActivityBarOptions = {}): ActivityBarHandle {
-    const card        = new Card();
-    const deck        = Container({ layoutManager: card });
-    const rail        = new ToolBar({ orientation: "vertical" });
-    const activityBar = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
-    const buttonById  = new Map<string, ToggleButton>();
+export class ActivityBar extends Container {
+    private readonly card:       Card;
+    private readonly deck:       Container;
+    private readonly rail:       ToolBar;
+    private readonly buttonById: Map<string, ToggleButton>;
 
     // The last-shown view (restored on expand), the current collapsed state, and
     // the shell-injected sizer that drives the sidebar pane in the Split.
-    let activeId = views[0].id;
-    let collapsed = false;
-    let sizer: SidebarSizer | null = null;
+    private activeId:  string;
+    private collapsed: boolean;
+    private sizer:     SidebarSizer | null;
+
+    /**
+     * @param views - The view containers; the first starts active and expanded.
+     * @param options - Optional rail extras (e.g. a bottom-pinned sign-out button).
+     */
+    constructor(views: ActivityView[], options: ActivityBarOptions = {}) {
+        super({ layoutManager: new BorderLayout({ spacing: 0 }) });
+
+        this.card       = new Card();
+        this.deck       = Container({ layoutManager: this.card });
+        this.rail       = new ToolBar({ orientation: "vertical" });
+        this.buttonById = new Map();
+        this.activeId   = views[0].id;
+        this.collapsed  = false;
+        this.sizer      = null;
+
+        for (const view of views) {
+            this.deck.addComponent(view.component);
+
+            const button = new ToggleButton("", { selected: view.id === this.activeId, glyph: view.glyph });
+
+            button.pinGlyphSize(GLYPH_SIZE);
+            Tooltip.attach(button, view.shortcut ? `${view.label} (${view.shortcut})` : view.label);
+
+            // The click already flipped `selected`: now-selected means this view was
+            // chosen (show it); now-deselected means the active view was clicked off.
+            button.on("action", () => (button.isSelected() ? this.showView(view.id) : this.collapse()));
+
+            this.rail.addComponent(button);
+            this.buttonById.set(view.id, button);
+        }
+
+        // Pin a sign-out control to the bottom of the rail: a flex spacer eats the
+        // gap between the view buttons and this trailing action, so it hugs the
+        // rail's foot the way VSCode's account/settings icons do. A plain Button
+        // (an action, not a selectable mode) sized and tooltipped like the view
+        // icons above it.
+        if (options.onSignOut) {
+            const signOut = new Button("", { glyph: "right-from-bracket" });
+
+            signOut.pinGlyphSize(GLYPH_SIZE);
+            Tooltip.attach(signOut, "Sign out");
+            signOut.on("action", options.onSignOut);
+
+            this.rail.addComponent(Spacer.flex());
+            this.rail.addComponent(signOut);
+        }
+
+        this.rail.setPreferredSize(RAIL_WIDTH, 0);
+        this.card.setVisibleComponentId(this.activeId);
+
+        // The bar is a Container (not a Panel) so it carries zero content insets: a
+        // Panel's default 4px inset would eat into the WEST region and squeeze the
+        // rail when the bar collapses to RAIL_WIDTH, changing the rail — and thus
+        // the icon column — width across toggles. Zero insets keep it constant.
+        this.addComponent(this.rail, { placement: Placement.WEST });
+        this.addComponent(this.deck, { placement: Placement.CENTER });
+        this.setPreferredSize(RAIL_WIDTH + DECK_WIDTH, 0);
+    }
 
     // Collapse hides the deck and asks the shell's Split to pin the sidebar to
     // the rail width; the rail stays visible. The Split ignores a pane's
@@ -119,91 +169,60 @@ export function ActivityBar(views: ActivityView[], options: ActivityBarOptions =
     // sizer.expand() (setPaneSize + doLayout) on each switch let the pane creep
     // wider, and would also discard a width the user had dragged. Guarding on the
     // transition leaves the pane's width untouched across switches.
-    const setCollapsed = (value: boolean): void => {
-        if (value === collapsed) {
+    private setCollapsed(value: boolean): void {
+        if (value === this.collapsed) {
             return;
         }
 
-        collapsed = value;
-        deck.setDisplayed(!value);
+        this.collapsed = value;
+        this.deck.setDisplayed(!value);
 
         if (value) {
-            sizer?.collapse();
+            this.sizer?.collapse();
         } else {
-            sizer?.expand();
+            this.sizer?.expand();
         }
-    };
+    }
 
-    // Make `id` the active view: select only its rail button, show its deck page,
-    // and ensure the deck is expanded.
-    const showView = (id: string): void => {
-        buttonById.forEach((button, buttonId) => button.setSelected(buttonId === id));
-        card.setVisibleComponentId(id);
-        activeId = id;
-        setCollapsed(false);
-    };
+    // Make `id` the active view: select only its rail button, show its deck
+    // page, and ensure the deck is expanded.
+    private showView(id: string): void {
+        this.buttonById.forEach((button, buttonId) => button.setSelected(buttonId === id));
+        this.card.setVisibleComponentId(id);
+        this.activeId = id;
+        this.setCollapsed(false);
+    }
 
     // Collapse the deck; the rail stays, with no active highlight while collapsed.
-    const collapse = (): void => {
-        buttonById.forEach(button => button.setSelected(false));
-        setCollapsed(true);
-    };
+    private collapse(): void {
+        this.buttonById.forEach(button => button.setSelected(false));
+        this.setCollapsed(true);
+    }
 
-    const toggleCollapsed = (): void => {
-        if (collapsed) {
-            showView(activeId);
+    /**
+     * Collapse the deck if expanded, or re-open the active view if collapsed.
+     * An arrow-function field (not a plain method): the shell passes this by
+     * reference (`onToggleSidebar: sidebar.toggleCollapsed`), which would lose
+     * `this` if it were a plain method.
+     */
+    toggleCollapsed = (): void => {
+        if (this.collapsed) {
+            this.showView(this.activeId);
         } else {
-            collapse();
+            this.collapse();
         }
     };
 
-    for (const view of views) {
-        deck.addComponent(view.component);
+    /**
+     * Wire the Split-backed sizer once the shell has built the Split. An
+     * arrow-function field: the shell holds/passes this by reference.
+     */
+    setSizer = (sizer: SidebarSizer): void => {
+        this.sizer = sizer;
+    };
 
-        const button = new ToggleButton("", { selected: view.id === activeId, glyph: view.glyph });
-
-        button.pinGlyphSize(GLYPH_SIZE);
-        Tooltip.attach(button, view.shortcut ? `${view.label} (${view.shortcut})` : view.label);
-
-        // The click already flipped `selected`: now-selected means this view was
-        // chosen (show it); now-deselected means the active view was clicked off.
-        button.on("action", () => (button.isSelected() ? showView(view.id) : collapse()));
-
-        rail.addComponent(button);
-        buttonById.set(view.id, button);
-    }
-
-    // Pin a sign-out control to the bottom of the rail: a flex spacer eats the
-    // gap between the view buttons and this trailing action, so it hugs the
-    // rail's foot the way VSCode's account/settings icons do. A plain Button
-    // (an action, not a selectable mode) sized and tooltipped like the view
-    // icons above it.
-    if (options.onSignOut) {
-        const signOut = new Button("", { glyph: "right-from-bracket" });
-
-        signOut.pinGlyphSize(GLYPH_SIZE);
-        Tooltip.attach(signOut, "Sign out");
-        signOut.on("action", options.onSignOut);
-
-        rail.addComponent(Spacer.flex());
-        rail.addComponent(signOut);
-    }
-
-    rail.setPreferredSize(RAIL_WIDTH, 0);
-    card.setVisibleComponentId(activeId);
-
-    // The bar is a Container (not a Panel) so it carries zero content insets: a
-    // Panel's default 4px inset would eat into the WEST region and squeeze the
-    // rail when the bar collapses to RAIL_WIDTH, changing the rail — and thus the
-    // icon column — width across toggles. Zero insets keep it constant.
-    activityBar.addComponent(rail, { placement: Placement.WEST });
-    activityBar.addComponent(deck, { placement: Placement.CENTER });
-    activityBar.setPreferredSize(RAIL_WIDTH + DECK_WIDTH, 0);
-
-    return {
-        component: activityBar,
-        toggleCollapsed,
-        setSizer: (value: SidebarSizer): void => { sizer = value; },
-        selectView: showView,
+    /** Select and expand a view by its id (the menu's entry point to a view). */
+    selectView = (id: string): void => {
+        this.showView(id);
     };
 }

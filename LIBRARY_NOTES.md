@@ -808,7 +808,9 @@ generic) — all now fixed.
 
 **App change:** `SqlAdminShell` can subclass `Panel` again, and
 `data/PagingMemoryProxy.ts` now `extends MemoryProxy` (dropping its reimplemented
-array storage) instead of the abstract `Proxy`.
+array storage) instead of the abstract `Proxy`. See `frontend/COMPONENT_CONVENTIONS.md`
+for the class-first component pattern this fix unblocked (`ActivityBar` and
+`TableWorkPanel` are the worked examples).
 
 ---
 
