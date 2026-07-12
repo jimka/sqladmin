@@ -127,6 +127,7 @@ export class SqlAdminController {
     readonly rolesProperties: RolesPropertiesPanel;
 
     private readonly _connectionId: string;
+    private readonly _database    : string | undefined;
     private readonly _openPanels  : Map<string, OpenPanel> = new Map();
     // Live-only panels (QueryPanel, DefinitionPanel, DocumentationPanel) expose
     // a `dispose` that must run on tab close — the framework has no cascading
@@ -185,10 +186,13 @@ export class SqlAdminController {
      * @param connectionId - The connection these operations target (Phase 0-1: "default").
      * @param username - The signed-in database user, pinned to the status bar's
      *   right zone. Omitted only by DOM-less callers that never show the bar.
-     * @param database - The connected database, shown in the identity tooltip.
+     * @param database - The connected database: roots the navigator at its
+     *   schemas, labels the status bar's left zone, and shows in the identity
+     *   tooltip. Omitted only by DOM-less callers.
      */
     constructor(connectionId: string = "default", username?: string, database?: string) {
         this._connectionId = connectionId;
+        this._database     = database;
         // The dock owns its own emptiness; drive the start-page deck straight off
         // its "emptychange" aggregate (empty↔populated, once per transition)
         // instead of shadow-counting opens and closes here.
@@ -224,7 +228,9 @@ export class SqlAdminController {
             }
         });
 
-        this.statusBar.setMessage(`Connection: ${connectionId}`);
+        // Show the connected database in the status bar's left zone. Falls back
+        // to the connection id only for the DOM-less path that omits `database`.
+        this.statusBar.setMessage(`Database: ${database ?? connectionId}`);
 
         // Pin the signed-in identity to the status bar's RIGHT zone. The left
         // zone shows transient per-operation messages (setMessage), so identity
@@ -236,6 +242,15 @@ export class SqlAdminController {
 
     get connectionId(): string {
         return this._connectionId;
+    }
+
+    /**
+     * The connected database name (from the authenticated session), or
+     * undefined for DOM-less callers that omit it. Feeds the navigator root and
+     * the status bar.
+     */
+    get database(): string | undefined {
+        return this._database;
     }
 
     /** Register the navigator tree so the focused tab can drive its selection. */

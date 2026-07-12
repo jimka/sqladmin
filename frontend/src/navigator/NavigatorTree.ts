@@ -1,6 +1,8 @@
-// The lazy object navigator: a Tree whose levels (databases -> schemas ->
-// Tables/Views/Materialized Views category groups -> object leaves) are fetched
-// on first expansion via the introspection api. Each object leaf carries its
+// The lazy object navigator: a Tree rooted at the logged-in database's schemas,
+// whose levels (schemas -> Tables/Views/Materialized Views category groups ->
+// object leaves) are fetched on first expansion via the introspection api. The
+// app connects to one database per session, so there is no database level. Each
+// object leaf carries its
 // DbObjectRef on node.data; selecting one shows its metadata in the Properties
 // inspector, and double-clicking a relation (or its "Show data" context item)
 // opens the object in the Dock through the controller. Category nodes carry no
@@ -12,7 +14,7 @@ import type { TreeNode }                        from "@jimka/typescript-ui/compo
 import { Menu }                                 from "@jimka/typescript-ui/overlay";
 import type { MenuItemConfig }                  from "@jimka/typescript-ui/component/container";
 import type { DbObjectKind, DbObjectRef }       from "../contract";
-import { getDatabases, getObjects, getSchemas } from "../data/api";
+import { getObjects, getSchemas }               from "../data/api";
 import { KIND_GLYPH }                           from "./objectGlyphs";
 import type { SqlAdminController }              from "../SqlAdminController";
 
@@ -65,12 +67,16 @@ export interface ExplorerTree extends Tree {
 export class NavigatorTree extends Tree implements ExplorerTree {
     private readonly controller: SqlAdminController;
     private readonly conn:       string;
+    // The logged-in database, whose schemas are the tree's top level. `?? ""`
+    // covers only DOM-less callers that omit it; in-app it is always set.
+    private readonly database:   string;
     private readonly contextMenu = Menu();
 
     constructor(controller: SqlAdminController) {
         super();
         this.controller = controller;
         this.conn       = controller.connectionId;
+        this.database   = controller.database ?? "";
 
         // Render each row as a kind glyph beside its label.
         this.setRendererFactory(() => new IconLabelTreeNodeRenderer(nodeGlyph));
@@ -92,7 +98,7 @@ export class NavigatorTree extends Tree implements ExplorerTree {
 
         // A double-click on a table, view, or materialized view opens (or focuses)
         // its data tab in the Dock and loads it — the behaviour a single click used
-        // to have. Non-relation nodes (databases, schemas, categories) have no tab.
+        // to have. Non-relation nodes (schemas, categories) have no tab.
         this.on("dblclick", (node: TreeNode) => {
             const ref = node.data as DbObjectRef | undefined;
 
@@ -107,25 +113,17 @@ export class NavigatorTree extends Tree implements ExplorerTree {
         this.on("contextmenu", (node: TreeNode, event: MouseEvent) => {
             const ref = node.data as DbObjectRef | undefined;
 
-            // A database node offers a single item: open its database-wide ER
-            // diagram (all schemas). Checked ahead of the schema/relation branches
-            // below (a database is neither).
-            if (ref && ref.kind === "database") {
-                this.contextMenu.show(event.clientX, event.clientY, [
-                    { text: "Show database diagram", glyph: "diagram-project", action: () => void this.controller.openDatabaseDiagram(ref, node) },
-                ]);
-
-                return;
-            }
-
             // A schema node offers its whole-schema ER diagram plus the dependency
-            // and inheritance graphs. Checked before the relation guard below (a
-            // schema is not a relation).
+            // and inheritance graphs, and — since there is no database level — the
+            // whole-database ER diagram (all schemas), whose database ref is
+            // synthesized from the schema's own ref. Checked before the relation
+            // guard below (a schema is not a relation).
             if (ref && ref.kind === "schema") {
                 this.contextMenu.show(event.clientX, event.clientY, [
                     { text: "Show schema diagram", glyph: "diagram-project", action: () => void this.controller.openSchemaDiagram(ref, node) },
                     { text: "Show dependency graph", glyph: "diagram-project", action: () => void this.controller.openSchemaDependencyGraph(ref, node) },
                     { text: "Show inheritance graph", glyph: "diagram-project", action: () => void this.controller.openSchemaInheritanceGraph(ref, node) },
+                    { text: "Show database diagram", glyph: "diagram-project", action: () => void this.controller.openDatabaseDiagram({ connectionId: ref.connectionId, database: ref.database, kind: "database" }) },
                 ]);
 
                 return;
@@ -183,34 +181,32 @@ export class NavigatorTree extends Tree implements ExplorerTree {
         // Let the controller drive selection when a dock tab is focused.
         this.controller.setNavigator(this);
 
-        // (Re)load the top-level databases; the lazy schema/object levels reload on
-        // their next expansion. Used for the initial load.
+        // (Re)load the top-level schemas; the lazy object levels reload on their
+        // next expansion. Used for the initial load.
         this.refresh();
     }
 
-    // (Re)load the top-level databases; the lazy schema/object levels reload on
-    // their next expansion. Used for the initial load and the section refresh
-    // tool. A public arrow-function field: refreshTool/bindRefreshShortcut hold
-    // this by reference, which would lose `this` if it were a plain method.
+    // (Re)load the top-level schemas of the logged-in database (there is no
+    // database level); the lazy object levels reload on their next expansion.
+    // Used for the initial load and the section refresh tool. A public
+    // arrow-function field: refreshTool/bindRefreshShortcut hold this by
+    // reference, which would lose `this` if it were a plain method.
     refresh = (): void => {
-        void loadDatabases(this.conn)
-            .then(nodes => this.setNodes(nodes))
+        void loadSchemas(this.conn, this.database)
+            .then(nodes => {
+                this.setNodes(nodes);
+
+                // A single-schema database: expand that lone schema so its
+                // category folders show immediately. revealByPredicate expands
+                // the match's ANCESTORS (not the match), so match the schema's
+                // first category node — the only nodes with no `data` (see
+                // categoryNode) — to expand exactly the schema, one level. An
+                // empty schema has no category to match, so nothing expands.
+                if (nodes.length === 1) {
+                    void this.revealByPredicate(data => data === undefined);
+                }
+            })
             .catch(error => this.controller.notifyError(error));
-    };
-}
-
-async function loadDatabases(conn: string): Promise<TreeNode[]> {
-    const databases = await getDatabases(conn);
-
-    return databases.map(db => databaseNode(conn, db.name));
-}
-
-function databaseNode(conn: string, database: string): TreeNode {
-    return {
-        label       : database,
-        hasChildren : true,
-        data        : { connectionId: conn, database, kind: "database" } satisfies DbObjectRef,
-        loadChildren: () => loadSchemas(conn, database),
     };
 }
 
