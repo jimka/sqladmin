@@ -8,11 +8,12 @@
 // Chosen over an inline per-column filter row because the library's header /
 // column geometry is not an app seam (see plans/implemented/grid-filter-sort).
 //
-// The rows live in a vertically-scrolling viewport capped at VIEWPORT_HEIGHT;
-// the dialog re-fits to the form on each add/remove (Dialog.resizeToContent), so
-// it grows and shrinks with the rows up to that cap, then the viewport scrolls.
-// An "Add condition" button appends rows for more than the initial few criteria,
-// and each row's "−" button removes it (down to one).
+// The dialog re-fits to the form on each add/remove (Dialog.resizeToContent), so
+// it grows and shrinks with the rows as far as the viewport allows; past that the
+// Dialog's own content container scrolls (the form itself hosts no scroll region,
+// so there is a single scrollbar — the same idiom as LoginDialog). An "Add
+// condition" button appends rows for more than the initial few criteria, and each
+// row's "−" button removes it (down to one).
 //
 // Behaviour (verified manually — the node-only harness can't drive the inputs,
 // focus, scrolling, or the store's network reload):
@@ -66,19 +67,12 @@ const CONDITION_ROWS = 2;
 // a fixed remove-button column. The inputs share the dialog's inner width in
 // these proportions (column : operator : value) rather than taking fixed widths,
 // so the fields grow with the dialog instead of sitting squished at a preferred
-// size. Rows are a fixed INPUT_HEIGHT tall; DIALOG_WIDTH sets the dialog's width.
+// size. Rows take the inputs' own preferred height; DIALOG_WIDTH sets the width.
 const COLUMN_WEIGHT   = 150;
 const OPERATOR_WEIGHT = 130;
 const VALUE_WEIGHT    = 170;
-const INPUT_HEIGHT    = 30;
 const ROW_SPACING     = 6;
 const DIALOG_WIDTH    = 500;
-
-// The condition rows live in a vertically-scrolling viewport that grows with the
-// rows up to this cap (six rows plus their inter-row gaps): below the cap the
-// viewport hugs its rows so the Add button sits directly beneath the last one;
-// at the cap it stops growing and further rows scroll into view.
-const VIEWPORT_HEIGHT = (6 * INPUT_HEIGHT) + (5 * ROW_SPACING);
 
 /** The empty column choice that marks a condition row as unset (dropped on Apply). */
 const NO_COLUMN = "";
@@ -227,19 +221,19 @@ function buildConditionForm(
         ],
     });
 
-    // The scrolling viewport hosting the grid. It is NOT pinned: with no explicit
-    // preferred height it reports the grid's content height, so it hugs the rows
-    // and grows as they are added — keeping the Add button directly beneath the
-    // last row. `maxSize.height = VIEWPORT_HEIGHT` caps that growth, and
-    // `autoScroll: "y"` scrolls the overflow once the rows exceed the cap.
-    const viewport = Panel({
-        autoScroll:    "y",
+    // The container hosting the grid. It reports the grid's content height as its
+    // preferred size (no explicit cap), so it hugs the rows and grows as they are
+    // added — the form's preferred height grows with it, the host dialog re-fits to
+    // that (up to the viewport), and past the viewport the Dialog's own content
+    // container scrolls. It deliberately does NOT scroll itself: a nested scroll
+    // region here would fight the Dialog's content-height computation and produce a
+    // second scrollbar. Scrolling is left entirely to the Dialog (see LoginDialog).
+    const gridPanel = Panel({
         layoutManager: grid,
         insets:       new Insets(0, 0, 0, 0),
-        maxSize:       { width: Number.MAX_VALUE, height: VIEWPORT_HEIGHT },
     });
 
-    // The Add button sits in its own fixed-height row beneath the viewport; the
+    // The Add button sits in its own fixed-height row beneath the grid; the
     // flex spacer keeps the glyph button compact rather than stretching it across.
     // glyphColor tints only the glyph green (its SVG fills with `currentColor`),
     // leaving the button's own color unset so the label stays default black.
@@ -254,21 +248,22 @@ function buildConditionForm(
     addButton.on("action", () => appendRow());
 
     // The form takes its natural (content-sized) height: the VBox packs the
-    // content-sized viewport and the Add row, so its preferred height is the Add
-    // button plus the viewport's rows (capped at VIEWPORT_HEIGHT). The host dialog
-    // re-fits to that height on each add/remove (see onContentChange), so the
-    // dialog grows and shrinks with the rows instead of staying a constant size.
-    // The dialog forces the content width, so the form needs no explicit width.
+    // content-sized grid panel and the Add row, so its preferred height is the Add
+    // button plus the grid's rows. The host dialog re-fits to that height on
+    // each add/remove (see onContentChange), so the dialog grows and shrinks with
+    // the rows instead of staying a constant size — up to the viewport, past which
+    // the dialog's own content container scrolls. The dialog forces the content
+    // width, so the form needs no explicit width.
     const form = Panel({
         layoutManager: new VBox({ spacing: ROW_SPACING }),
-        components:    [addButton, viewport],
+        components:    [addButton, gridPanel],
     });
 
     // Resize the grid to the current row count (every row a fixed-height track)
     // and keep the sole remaining row's remove button disabled — the form always
-    // keeps at least one condition row. Adding/removing a row's cells on the
-    // viewport propagates a preferred-size change up to the form (and on to the
-    // dialog), so the form's VBox re-measures the viewport at its new content
+    // keeps at least one condition row. Adding/removing a row's cells on the grid
+    // panel propagates a preferred-size change up to the form (and on to the
+    // dialog), so the form's VBox re-measures the grid panel at its new content
     // height and repositions the Add button without an explicit relayout here.
     const syncGrid = (): void => {
         grid.setRows(rows.length);
@@ -280,7 +275,7 @@ function buildConditionForm(
         }
 
         // Let the host dialog re-fit to the form's new preferred height (grow on
-        // add, shrink on remove) up to the viewport cap. A no-op until the dialog
+        // add, shrink on remove) up to the viewport. A no-op until the dialog
         // wires it after construction, so the initial rows added below don't fire.
         onContentChange();
     };
@@ -293,7 +288,7 @@ function buildConditionForm(
         }
 
         for (const input of row.inputs) {
-            viewport.removeComponent(input);
+            gridPanel.removeComponent(input);
         }
 
         rows.splice(index, 1);
@@ -306,7 +301,7 @@ function buildConditionForm(
         rows.push(row);
 
         for (const input of row.inputs) {
-            viewport.addComponent(input);
+            gridPanel.addComponent(input);
         }
 
         syncGrid();
