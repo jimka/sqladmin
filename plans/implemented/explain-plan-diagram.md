@@ -423,7 +423,15 @@ Regression checkpoint after step 9: `grep -n "sitemap" frontend/src/dock/QueryPa
 
 ## Non-Goals
 
-- A custom multi-line diagram-node renderer showing a full metrics table — the default single-line `DiagramNode` label (heading + first metric) is enough for the first cut.
 - A resizable gutter between tree and diagram — the fixed-width WEST tree matches `RelationDiagramPanel`; a `Split` can come later.
 - Deduping diagram tabs by SQL, an inspector/detail pane on selection, or editing/re-running the plan from the diagram.
 - Parsing `FORMAT TEXT` plans — the diagram consumes `planJson` only.
+
+---
+
+## Post-implementation amendments
+
+Two changes landed on the branch after the initial cut, superseding parts of the plan above:
+
+1. **The diagram opens in the query panel's south result pane, not its own Dock tab.** `QueryPanel` gained a `diagramSlot` and an async `showDiagram()`/`showDiagramTab()` that re-requests the shown plan as `FORMAT JSON`, parses it, and mounts `ExplainDiagramPanel` as a closeable "Diagram" tab beside Data/Chart/Explain (mirroring `showChart`). The controller's `openExplainDiagram`, `_explainDiagramCounter`, and the `onExplainDiagram` `QueryPanelOptions` callback were removed — the panel owns the JSON re-request via its existing `runExplain`.
+2. **A custom multi-line node renderer replaced the default single-line node** (reversing the original "custom renderer" Non-Goal). `frontend/src/dock/ExplainNode.ts` renders each node as a metric card: startup/total cost, rows/width, actual startup/total time + loops, actual rows, group-key chips, a hash-batches badge (amber when spilled past one batch), and a peak-memory bar. `parseExplainPlan` now yields structured fields (`startupCost`, `totalCost`, `planRows`, `planWidth`, `actualStartupTime`, `actualTotalTime`, `actualRows`, `actualLoops`, `groupKey`, `hashBatches`, `peakMemoryUsage`) instead of a flat `metrics` array, and `buildExplainDiagram` attaches an `ExplainNodeData` (`{ plan, heat, memShare }`) per node — `heat` being the node's self-cost (or self-time when analyzed) share of the hottest node, painted as a background tint; `memShare` sizing the memory bar. `DiagramView` is constructed with a `nodeRenderer` producing `ExplainNode`s.
