@@ -18,7 +18,7 @@ import type { SqlAdminController } from "../SqlAdminController";
 export function RolesExplorerView(controller: SqlAdminController, id: string): Component {
     return buildTreeExplorerView({
         id,
-        explorer:       RolesTree(controller),
+        explorer:       new RolesTree(controller),
         treeLabel:      "Roles",
         treeGlyph:      "users",
         inspector:      controller.rolesProperties.component,
