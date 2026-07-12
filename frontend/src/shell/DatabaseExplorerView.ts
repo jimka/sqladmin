@@ -3,7 +3,7 @@
 // inspector (fixed height). See TreeExplorerView for the shared assembly.
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): a thin subclass of
-// TreeExplorerView that just fixes the config for the Databases tree.
+// TreeExplorerView that just fixes the config for the Database tree.
 
 import { NavigatorTree }           from "../navigator/NavigatorTree";
 import { TreeExplorerView }        from "./treeExplorerView";
@@ -20,7 +20,7 @@ export class DatabaseExplorerView extends TreeExplorerView {
         super({
             id,
             explorer:       new NavigatorTree(controller),
-            treeLabel:      "Databases",
+            treeLabel:      "Database",
             treeGlyph:      "database",
             inspector:      controller.properties.component,
             inspectorLabel: "Properties",
