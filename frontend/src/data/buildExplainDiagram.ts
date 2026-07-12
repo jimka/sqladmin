@@ -11,10 +11,13 @@ import type { ExplainPlanNode } from "./parseExplainPlan";
 import { formatRowCount } from "./explainFormat";
 
 // Top-down layered layout: the root plan node sits above the inputs it consumes,
-// matching how the text plan reads (parent first, indented children below).
+// matching how the text plan reads (parent first, indented children below). The
+// between-layers spacing is widened past ELK's ~20px default so the row-count
+// label sitting mid-edge has clear vertical room between two cards.
 const LAYOUT_OPTIONS: Record<string, string> = {
     "elk.algorithm": "layered",
     "elk.direction": "DOWN",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "50",
 };
 
 /**
