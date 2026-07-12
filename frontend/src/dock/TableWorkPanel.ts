@@ -9,12 +9,12 @@
 // (see StructurePanel / SqlAdminController).
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the panel `extends
-// Container`, inlining the Border frame `workPanelShell` builds for the
-// not-yet-converted panels (ViewWorkPanel/RoleGrantsPanel still call it). The
-// three sync handlers are arrow-function fields — they're registered by
-// reference on `store`/`dataGrid` events, which would drop `this` if they
-// were plain methods. `buildColumnSpec`/`save_`/`missingRequiredFields`/
-// `confirmDelete` stay stateless module-level functions.
+// Container`, inlining its own Border frame directly (the same shape
+// ViewWorkPanel and RoleGrantsPanel now inline too). The three sync handlers
+// are arrow-function fields — they're registered by reference on
+// `store`/`dataGrid` events, which would drop `this` if they were plain
+// methods. `buildColumnSpec`/`save_`/`missingRequiredFields`/`confirmDelete`
+// stay stateless module-level functions.
 
 import { Container, Panel }            from "@jimka/typescript-ui/core";
 import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
