@@ -70,11 +70,11 @@ export function buildExplainDiagram(roots: ExplainPlanNode[]): DiagramData {
             const edge: DiagramEdgeData = { id: `${node.id}->${child.id}`, source: node.id, target: child.id };
             const label = producedRowsLabel(child);
 
-            if (label !== undefined) {
-                // Keep the default end arrow (a style with no endMarker would drop
-                // it — see DiagramEdgeLayer) and add the rows-flowing label.
-                edge.style = { endMarker: "arrow", label };
-            }
+            // Rows flow from the child up to the parent, so the arrow points at the
+            // parent. The edge runs parent(source)→child(target) to keep ELK's
+            // parent-on-top layering, so the arrowhead goes on the *source* end
+            // (startMarker, auto-reversed to point up) rather than the child end.
+            edge.style = label !== undefined ? { startMarker: "arrow", label } : { startMarker: "arrow" };
 
             edges.push(edge);
             walk(child);

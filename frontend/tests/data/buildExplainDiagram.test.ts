@@ -117,8 +117,9 @@ describe("buildExplainDiagram", () => {
         const edge  = buildExplainDiagram(roots).edges[0];
 
         expect(edge.style?.label).toBe("300");
-        // Keep the default end arrow when adding a label.
-        expect(edge.style?.endMarker).toBe("arrow");
+        // The arrow sits at the source (parent) end so it points up toward the parent.
+        expect(edge.style?.startMarker).toBe("arrow");
+        expect(edge.style?.endMarker).toBeUndefined();
     });
 
     it("labels an edge with a ~-prefixed estimate when the child has no actual rows", () => {
@@ -128,10 +129,11 @@ describe("buildExplainDiagram", () => {
         expect(edge.style?.label).toBe("~1.2k");
     });
 
-    it("leaves an edge unlabelled when the child reports no rows", () => {
+    it("still draws the (source-end) arrow when the child reports no rows", () => {
         const roots = [node("0", { children: [node("0/0")] })];
         const edge  = buildExplainDiagram(roots).edges[0];
 
-        expect(edge.style).toBeUndefined();
+        expect(edge.style?.startMarker).toBe("arrow");
+        expect(edge.style?.label).toBeUndefined();
     });
 });
