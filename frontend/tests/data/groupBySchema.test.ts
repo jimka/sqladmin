@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupBySchema } from "./groupBySchema";
+import { groupBySchema } from "../../src/data/groupBySchema";
 import type { DiagramData } from "@jimka/typescript-ui/component/diagram";
 
 describe("groupBySchema", () => {

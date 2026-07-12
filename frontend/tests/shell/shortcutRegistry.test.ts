@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { SHORTCUTS, groupByCategory } from "./shortcutRegistry";
-import type { ShortcutCategory } from "./shortcutRegistry";
+import { SHORTCUTS, groupByCategory } from "../../src/shell/shortcutRegistry";
+import type { ShortcutCategory } from "../../src/shell/shortcutRegistry";
 import {
     RUN_SHORTCUT, SAVE_SHORTCUT, CLEAR_SHORTCUT, HISTORY_RECALL_SHORTCUT,
     EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT,
     NEW_QUERY_SHORTCUT, OPEN_SAVED_SHORTCUT, QUERY_HISTORY_SHORTCUT,
     DATABASES_RAIL_SHORTCUT, ROLES_RAIL_SHORTCUT, QUERIES_RAIL_SHORTCUT,
     REFRESH_SHORTCUT, HELP_SHORTCUT, isHelpChord,
-} from "./queryShortcuts";
+} from "../../src/shell/queryShortcuts";
 
 // The 14 ids the registry must carry: all 13 pre-existing shortcuts plus the new
 // Help chord. Pins that no entry is dropped or duplicated as the app grows.

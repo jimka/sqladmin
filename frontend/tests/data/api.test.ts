@@ -2,8 +2,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
     getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl,
     setCsrfToken, csrfHeader,
-} from "./api";
-import type { DbObjectRef } from "../contract";
+} from "../../src/data/api";
+import type { DbObjectRef } from "../../src/contract";
 
 afterEach(() => {
     vi.restoreAllMocks();

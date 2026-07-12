@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { HistoryCursor } from "./historyCursor";
+import { HistoryCursor } from "../../src/data/historyCursor";
 
 describe("HistoryCursor", () => {
     it("is inactive before begin() and active after", () => {

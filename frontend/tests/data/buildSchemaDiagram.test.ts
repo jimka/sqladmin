@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { buildSchemaDiagram } from "./buildSchemaDiagram";
-import { CARD_WIDTH, cardHeight, columnPortY, portId } from "./schemaCardModel";
-import type { TableStructure, ForeignKeyMeta, ColumnMeta } from "../contract";
+import { buildSchemaDiagram } from "../../src/data/buildSchemaDiagram";
+import { CARD_WIDTH, cardHeight, columnPortY, portId } from "../../src/data/schemaCardModel";
+import type { TableStructure, ForeignKeyMeta, ColumnMeta } from "../../src/contract";
 
 /** Build a minimal ForeignKeyMeta, filling in the fields these tests don't vary. */
 function fk(name: string, refTable: string): ForeignKeyMeta {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isReadOnlyStatement } from "./explain";
+import { isReadOnlyStatement } from "../../src/data/explain";
 
 describe("isReadOnlyStatement", () => {
     it("treats SELECT / TABLE / VALUES / SHOW as read-only, case- and space-insensitively", () => {

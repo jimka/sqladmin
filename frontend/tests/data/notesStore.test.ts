@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { NotesStore } from "./notesStore";
-import type { KeyValueStore } from "./queryStore";
+import { NotesStore } from "../../src/data/notesStore";
+import type { KeyValueStore } from "../../src/data/queryStore";
 
 /** A trivial in-memory KeyValueStore fake (the node vitest env has no localStorage). */
 function fakeStorage(): KeyValueStore & { map: Map<string, string> } {

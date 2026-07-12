@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { PresetStore } from "./presetStore";
-import type { ConnectionPreset } from "../contract";
+import { PresetStore } from "../../src/data/presetStore";
+import type { ConnectionPreset } from "../../src/contract";
 
 // sqladmin's vitest runs the node environment (no DOM), so WebStorageProxy's
 // `localStorage` global must be stubbed with a Map-backed stand-in.

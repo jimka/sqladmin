@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
-import { reachableNodeIds, subgraph, rootedDiagram, applyHide } from "./relationDiagram";
+import { reachableNodeIds, subgraph, rootedDiagram, applyHide } from "../../src/data/relationDiagram";
 
 /** A bare node with matching id/label. */
 function node(id: string): DiagramNodeData {

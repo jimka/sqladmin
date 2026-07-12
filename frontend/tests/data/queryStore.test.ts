@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { QueryHistoryStore, SavedQueryStore } from "./queryStore";
-import type { KeyValueStore, HistoryEntry } from "./queryStore";
+import { QueryHistoryStore, SavedQueryStore } from "../../src/data/queryStore";
+import type { KeyValueStore, HistoryEntry } from "../../src/data/queryStore";
 
 /** A trivial in-memory KeyValueStore fake (the node vitest env has no localStorage). */
 function fakeStorage(): KeyValueStore & { map: Map<string, string> } {

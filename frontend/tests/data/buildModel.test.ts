@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Field } from "@jimka/typescript-ui/data";
-import { buildQueryModel } from "./buildModel";
-import type { QueryColumnMeta } from "../contract";
+import { buildQueryModel } from "../../src/data/buildModel";
+import type { QueryColumnMeta } from "../../src/contract";
 
 describe("buildQueryModel", () => {
     it("maps wire types to field types, in order, with no primary key", () => {

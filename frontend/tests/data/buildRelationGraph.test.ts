@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildRelationGraph, relationNodeId } from "./buildRelationGraph";
-import type { RelationEdge, RelationNodeRef } from "../contract";
+import { buildRelationGraph, relationNodeId } from "../../src/data/buildRelationGraph";
+import type { RelationEdge, RelationNodeRef } from "../../src/contract";
 
 const LAYOUT = { "elk.algorithm": "layered", "elk.direction": "RIGHT" };
 
