@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { DiagramData, DiagramEdgeData } from "@jimka/typescript-ui/component/diagram";
-import type { ColumnMeta, ConstraintMeta, IndexMeta, TableStructure } from "../contract";
-import type { FkEdgeData } from "./buildSchemaDiagram";
+import type { ColumnMeta, ConstraintMeta, IndexMeta, TableStructure } from "../../src/contract";
+import type { FkEdgeData } from "../../src/data/buildSchemaDiagram";
 import {
     parseIndexColumns,
     isFkUnique,
@@ -9,7 +9,7 @@ import {
     isFkCovered,
     annotateFkCardinality,
     applyCoverageStyle,
-} from "./fkCardinality";
+} from "../../src/data/fkCardinality";
 
 /** Build a minimal ColumnMeta, filling in the fields these tests don't vary. */
 function column(name: string, nullable: boolean): ColumnMeta {

@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
 // used; component/DOM behaviour is verified live, not here.
 export default defineConfig({
     test: {
-        include: ["src/**/*.test.ts"],
+        include: ["tests/**/*.test.ts"],
         environment: "node",
     },
 });

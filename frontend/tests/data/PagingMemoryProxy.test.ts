@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { PagingMemoryProxy } from "./PagingMemoryProxy";
+import { PagingMemoryProxy } from "../../src/data/PagingMemoryProxy";
 
 /** n rows shaped { i: 0 }, { i: 1 }, … for slice assertions. */
 function rows(n: number): { i: number }[] {

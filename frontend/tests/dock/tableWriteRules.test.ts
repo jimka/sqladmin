@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildColumnSpec, missingRequiredFields } from "./tableWriteRules";
-import type { ColumnMeta } from "../contract";
+import { buildColumnSpec, missingRequiredFields } from "../../src/dock/tableWriteRules";
+import type { ColumnMeta } from "../../src/contract";
 
 function column(overrides: Partial<ColumnMeta> = {}): ColumnMeta {
     return {

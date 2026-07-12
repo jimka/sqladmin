@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { toCSV, toJSON }        from "./serialize";
-import type { ExportColumn }    from "./serialize";
+import { toCSV, toJSON }        from "../../src/data/serialize";
+import type { ExportColumn }    from "../../src/data/serialize";
 
 // The CSV dialect: comma delimiter, CRLF record separator, a header row, and
 // every line (header included) terminated by CRLF so the string is byte-

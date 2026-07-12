@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { RolePrivilege } from "../contract";
-import { buildRoleGrantsDiagram } from "./buildRoleGrantsDiagram";
+import type { RolePrivilege } from "../../src/contract";
+import { buildRoleGrantsDiagram } from "../../src/data/buildRoleGrantsDiagram";
 
 /** A single table privilege, defaulting to a plain non-grantable SELECT. */
 function priv(overrides: Partial<RolePrivilege> = {}): RolePrivilege {

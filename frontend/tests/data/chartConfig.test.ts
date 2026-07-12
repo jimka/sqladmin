@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
     numericColumns, xCandidates, isChartable, defaultChartConfig, isTimeX, buildChartSeries,
     ROW_INDEX_FIELD,
-} from "./chartConfig";
-import type { QueryColumnMeta, QueryRowsResult } from "../contract";
+} from "../../src/data/chartConfig";
+import type { QueryColumnMeta, QueryRowsResult } from "../../src/contract";
 
 const NUMERIC_COL: QueryColumnMeta  = { name: "amount", wireType: "number" };
 const NUMERIC_COL2: QueryColumnMeta = { name: "quantity", wireType: "number" };

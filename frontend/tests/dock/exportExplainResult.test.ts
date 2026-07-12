@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock the DOM-bound download so the export logic is testable in node vitest.
-vi.mock("../data/download", () => ({ download: vi.fn() }));
+vi.mock("../../src/data/download", () => ({ download: vi.fn() }));
 
-import { exportExplainPlan } from "./exportExplainResult";
-import { download }          from "../data/download";
-import type { PlanSource }   from "../data/explain";
-import type { QueryExplainResult } from "../contract";
+import { exportExplainPlan } from "../../src/dock/exportExplainResult";
+import { download }          from "../../src/data/download";
+import type { PlanSource }   from "../../src/data/explain";
+import type { QueryExplainResult } from "../../src/contract";
 
 const downloadMock = vi.mocked(download);
 

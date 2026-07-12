@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { roleBaseInfoRows } from "./roleBaseInfoRows";
-import type { RoleDetail, RoleSummary } from "../contract";
+import { roleBaseInfoRows } from "../../src/roles/roleBaseInfoRows";
+import type { RoleDetail, RoleSummary } from "../../src/contract";
 
 function summary(overrides: Partial<RoleSummary> = {}): RoleSummary {
     return {

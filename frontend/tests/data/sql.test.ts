@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildSelectSql } from "./sql";
-import type { DbObjectRef } from "../contract";
+import { buildSelectSql } from "../../src/data/sql";
+import type { DbObjectRef } from "../../src/contract";
 
 const ref = (over: Partial<DbObjectRef> = {}): DbObjectRef => ({
     connectionId: "default",

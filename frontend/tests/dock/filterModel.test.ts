@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { buildFilters, conditionsFromFilters, type FilterCondition } from "./filterModel";
+import { buildFilters, conditionsFromFilters, type FilterCondition } from "../../src/dock/filterModel";
 import type { FilterDescriptor } from "@jimka/typescript-ui/data";
-import type { ColumnMeta, WireType } from "../contract";
+import type { ColumnMeta, WireType } from "../../src/contract";
 
 /** Build a minimal ColumnMeta for a given name/wire type (other flags irrelevant here). */
 function col(name: string, wireType: WireType): ColumnMeta {

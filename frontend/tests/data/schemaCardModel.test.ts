@@ -7,9 +7,9 @@ import {
     columnTooltip,
     deriveColumnRows,
     portId,
-} from "./schemaCardModel";
-import type { ColumnRowData } from "./schemaCardModel";
-import type { ColumnMeta, ForeignKeyMeta } from "../contract";
+} from "../../src/data/schemaCardModel";
+import type { ColumnRowData } from "../../src/data/schemaCardModel";
+import type { ColumnMeta, ForeignKeyMeta } from "../../src/contract";
 
 /** Build a minimal ColumnMeta, filling in the fields these tests don't vary. */
 function column(name: string, dataType: string, isPrimaryKey = false): ColumnMeta {

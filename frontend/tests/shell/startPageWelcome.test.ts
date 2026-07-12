@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { shouldShowWelcome } from "./startPageWelcome";
-import type { DbObjectRef } from "../contract";
-import type { SavedQuery } from "../data/queryStore";
+import { shouldShowWelcome } from "../../src/shell/startPageWelcome";
+import type { DbObjectRef } from "../../src/contract";
+import type { SavedQuery } from "../../src/data/queryStore";
 
 const TABLE_REF: DbObjectRef = { connectionId: "default", schema: "public", name: "orders", kind: "table" };
 const SAVED_QUERY: SavedQuery = { name: "top orders", sql: "select 1", savedAt: 0 };
