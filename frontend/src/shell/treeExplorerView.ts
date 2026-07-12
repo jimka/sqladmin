@@ -34,7 +34,8 @@ export interface TreeExplorerConfig {
  * @returns The explorer view component.
  */
 export function buildTreeExplorerView(config: TreeExplorerConfig): Component {
-    const { tree, refresh } = config.explorer;
+    const tree    = config.explorer;
+    const refresh = config.explorer.refresh;
 
     // The tree carries no intrinsic height — its section's fillWeight grows it
     // into the leftover space, so a 0 preferred keeps the sections underflowing
