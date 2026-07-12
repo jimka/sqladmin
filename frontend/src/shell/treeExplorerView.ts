@@ -2,6 +2,11 @@
 // explorer tree (filling) over a read-only inspector (fixed height). The Database
 // and Roles rails are the same shape — only their tree, labels, glyphs, and
 // inspector differ — so the assembly lives here once.
+//
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): the base `extends
+// AccordionPanel` directly, so the instance itself is the mountable component.
+// DatabaseExplorerView/RolesExplorerView are thin subclasses that forward a
+// config to `super(...)` (see those files).
 
 import { Component }               from "@jimka/typescript-ui/core";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
@@ -25,36 +30,36 @@ export interface TreeExplorerConfig {
 }
 
 /**
- * Build a sidebar explorer view. Both sections stay open; the tree section takes
- * a fill weight so the accordion grows it into every pixel the fixed-height
- * inspector leaves — the tree fills, the inspector stays compact.
- *
- * @param config - The view's id, its tree + refresh, and the two sections' labels/glyphs.
- *
- * @returns The explorer view component.
+ * A sidebar explorer view: both sections stay open; the tree section takes a
+ * fill weight so the accordion grows it into every pixel the fixed-height
+ * inspector leaves — the tree fills, the inspector stays compact. Constructed
+ * directly for a one-off view, or subclassed (`DatabaseExplorerView`,
+ * `RolesExplorerView`) to fix the config for a specific tree.
  */
-export function buildTreeExplorerView(config: TreeExplorerConfig): Component {
-    const tree    = config.explorer;
-    const refresh = config.explorer.refresh;
+export class TreeExplorerView extends AccordionPanel {
+    /** @param config - The view's id, its tree + refresh, and the two sections' labels/glyphs. */
+    constructor(config: TreeExplorerConfig) {
+        const tree    = config.explorer;
+        const refresh = config.explorer.refresh;
 
-    // The tree carries no intrinsic height — its section's fillWeight grows it
-    // into the leftover space, so a 0 preferred keeps the sections underflowing
-    // (the precondition for fill) regardless of the rail's height.
-    tree.setPreferredSize(0, 0);
+        // The tree carries no intrinsic height — its section's fillWeight grows
+        // it into the leftover space, so a 0 preferred keeps the sections
+        // underflowing (the precondition for fill) regardless of the rail's
+        // height. Pre-super: `this` is unavailable until super() returns.
+        tree.setPreferredSize(0, 0);
 
-    const view = new AccordionPanel({
-        id: config.id,
-        sections: [
-            { label: config.treeLabel, component: tree, initiallyOpen: true, glyph: config.treeGlyph, tools: [refreshTool(refresh)], fillWeight: 1 },
-            { label: config.inspectorLabel, component: config.inspector, initiallyOpen: true, glyph: config.inspectorGlyph ?? "circle-info" },
-        ],
-    });
+        super({
+            id: config.id,
+            sections: [
+                { label: config.treeLabel, component: tree, initiallyOpen: true, glyph: config.treeGlyph, tools: [refreshTool(refresh)], fillWeight: 1 },
+                { label: config.inspectorLabel, component: config.inspector, initiallyOpen: true, glyph: config.inspectorGlyph ?? "circle-info" },
+            ],
+        });
 
-    view.getAccordion().setCompact(true);
-    view.getAccordion().setToolsVisibility("always");
+        this.getAccordion().setCompact(true);
+        this.getAccordion().setToolsVisibility("always");
 
-    // Alt+R refreshes the tree while this rail has focus (see refreshTool).
-    bindRefreshShortcut(view, refresh);
-
-    return view;
+        // Alt+R refreshes the tree while this rail has focus (see refreshTool).
+        bindRefreshShortcut(this, refresh);
+    }
 }

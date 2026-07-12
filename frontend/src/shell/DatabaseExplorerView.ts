@@ -1,28 +1,29 @@
 // The Database explorer — a Card page in the activity bar's deck: a compact
 // Accordion of the lazy object navigator (filling) over the read-only Properties
-// inspector (fixed height). See buildTreeExplorerView for the shared assembly.
+// inspector (fixed height). See TreeExplorerView for the shared assembly.
+//
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): a thin subclass of
+// TreeExplorerView that just fixes the config for the Databases tree.
 
-import { Component }               from "@jimka/typescript-ui/core";
 import { NavigatorTree }           from "../navigator/NavigatorTree";
-import { buildTreeExplorerView }   from "./treeExplorerView";
+import { TreeExplorerView }        from "./treeExplorerView";
 import type { SqlAdminController } from "../SqlAdminController";
 
-/**
- * Build the Database explorer view (Navigator + Properties accordion).
- *
- * @param controller - The mediator owning the navigator's data and the
- *   Properties inspector.
- * @param id - The Card-page key the activity-bar rail selects this view by.
- *
- * @returns The explorer view component.
- */
-export function DatabaseExplorerView(controller: SqlAdminController, id: string): Component {
-    return buildTreeExplorerView({
-        id,
-        explorer:       new NavigatorTree(controller),
-        treeLabel:      "Databases",
-        treeGlyph:      "database",
-        inspector:      controller.properties.component,
-        inspectorLabel: "Properties",
-    });
+/** The Database explorer view (Navigator + Properties accordion). */
+export class DatabaseExplorerView extends TreeExplorerView {
+    /**
+     * @param controller - The mediator owning the navigator's data and the
+     *   Properties inspector.
+     * @param id - The Card-page key the activity-bar rail selects this view by.
+     */
+    constructor(controller: SqlAdminController, id: string) {
+        super({
+            id,
+            explorer:       new NavigatorTree(controller),
+            treeLabel:      "Databases",
+            treeGlyph:      "database",
+            inspector:      controller.properties.component,
+            inspectorLabel: "Properties",
+        });
+    }
 }

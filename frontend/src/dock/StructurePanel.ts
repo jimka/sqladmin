@@ -8,6 +8,9 @@
 // read-only Table over a MemoryStore; array fields are pre-joined to
 // comma-separated display strings because the library Table has no array cell
 // renderer.
+//
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): the panel `extends Panel`
+// directly, so the instance itself is the mountable component.
 
 import { Component, Panel }    from "@jimka/typescript-ui/core";
 import { Border, VBox }        from "@jimka/typescript-ui/layout";
@@ -32,30 +35,35 @@ import type {
 const SECTION_HEIGHT = 200;
 
 /**
- * Build the structure inspector panel for one table.
- *
- * @param columns - The table's introspected columns (the Columns grid).
- * @param structure - The table's indexes, constraints, and foreign keys.
- * @param onOpenReferenced - Invoked with a foreign key's referenced schema and
- *   table when its row is selected, so the controller can open that table.
- *
- * @returns A scrolling Panel stacking the four labelled read-only grids.
+ * The structure inspector panel for one table: a scrolling stack of the four
+ * labelled read-only grids.
  */
-export function StructurePanel(
-    columns: ColumnMeta[],
-    structure: TableStructure,
-    onOpenReferenced: (refSchema: string, refTable: string) => void,
-): Panel {
-    return Panel({
-        layoutManager: new VBox({ stretching: true }),
-        autoScroll   : "auto",
-        components   : [
-            section("Columns", buildColumnsGrid(columns)),
-            section("Indexes", buildIndexesGrid(structure.indexes)),
-            section("Constraints", buildConstraintsGrid(structure.constraints)),
-            section("Foreign Keys", buildForeignKeysGrid(structure.foreignKeys, onOpenReferenced)),
-        ],
-    });
+export class StructurePanel extends Panel {
+    /**
+     * @param columns - The table's introspected columns (the Columns grid).
+     * @param structure - The table's indexes, constraints, and foreign keys.
+     * @param onOpenReferenced - Invoked with a foreign key's referenced schema
+     *   and table when its row is selected, so the controller can open that
+     *   table.
+     */
+    constructor(
+        columns: ColumnMeta[],
+        structure: TableStructure,
+        onOpenReferenced: (refSchema: string, refTable: string) => void,
+    ) {
+        // The four sections are built as locals — `this` is unavailable until
+        // super() returns, and none of them need it.
+        const s1 = section("Columns", buildColumnsGrid(columns));
+        const s2 = section("Indexes", buildIndexesGrid(structure.indexes));
+        const s3 = section("Constraints", buildConstraintsGrid(structure.constraints));
+        const s4 = section("Foreign Keys", buildForeignKeysGrid(structure.foreignKeys, onOpenReferenced));
+
+        super({
+            layoutManager: new VBox({ stretching: true }),
+            autoScroll   : "auto",
+            components   : [s1, s2, s3, s4],
+        });
+    }
 }
 
 /**

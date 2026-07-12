@@ -14,6 +14,12 @@
 //
 // Each section's list re-populates on the controller's onWorkspaceChanged seam
 // (and on Refresh), so the view is always current.
+//
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): the view `extends
+// AccordionPanel` directly, so the instance itself is the mountable component.
+// `rebuild` and the section wiring stay constructor-local closures (per the
+// plan's Architecture Decisions) — nothing here is a plain method registered
+// by reference, so no instance fields are needed.
 
 import { Component, Panel }        from "@jimka/typescript-ui/core";
 import { Fit }                     from "@jimka/typescript-ui/layout";
@@ -82,73 +88,75 @@ interface SectionConfig {
 }
 
 /**
- * Build the Queries view: an Accordion of the Saved and Recent sections over the
+ * The Queries view: an Accordion of the Saved and Recent sections over the
  * controller's stores.
- *
- * @param controller - The mediator owning the query stores and open actions.
- * @param id - The Card-page key the activity-bar rail selects this view by; it
- *   becomes the view component's id, which the deck's `Card` matches against.
- *
- * @returns The Queries view component.
  */
-export function QueriesView(controller: SqlAdminController, id: string): Component {
-    const saved = buildSection({
-        title    : "Saved",
-        glyph    : "floppy-disk",
-        empty    : "No saved queries",
-        rows     : () => controller.savedList().map(q => ({ key: q.name, label: q.name, sql: q.sql, name: q.name })),
-        open     : row => controller.openSavedQuery(row.name!, false),
-        execute  : row => controller.openSavedQuery(row.name!, true),
-        secondary: { glyph: "trash", color: DESTRUCTIVE_COLOR, label: "Remove",
-                     run: row => controller.removeSavedQuery(row.name!) },
-    });
+export class QueriesView extends AccordionPanel {
+    /**
+     * @param controller - The mediator owning the query stores and open actions.
+     * @param id - The Card-page key the activity-bar rail selects this view by; it
+     *   becomes the view component's id, which the deck's `Card` matches against.
+     */
+    constructor(controller: SqlAdminController, id: string) {
+        // `this` is unavailable until super() returns, so both sections are
+        // built as locals first.
+        const saved = buildSection({
+            title    : "Saved",
+            glyph    : "floppy-disk",
+            empty    : "No saved queries",
+            rows     : () => controller.savedList().map(q => ({ key: q.name, label: q.name, sql: q.sql, name: q.name })),
+            open     : row => controller.openSavedQuery(row.name!, false),
+            execute  : row => controller.openSavedQuery(row.name!, true),
+            secondary: { glyph: "trash", color: DESTRUCTIVE_COLOR, label: "Remove",
+                         run: row => controller.removeSavedQuery(row.name!) },
+        });
 
-    const recent = buildSection({
-        title    : "Recent",
-        glyph    : "clock-rotate-left",
-        empty    : "No recent queries",
-        rows     : () => controller.historyList().map((h, i) => ({ key: String(i), label: snippet(h.sql), sql: h.sql })),
-        open     : row => controller.openQuery(row.sql, false),
-        execute  : row => controller.openQuery(row.sql, true),
-        secondary: { glyph: "floppy-disk", color: PRIMARY_COLOR, label: "Save under a name",
-                     run: row => void controller.promptAndSaveQuery(row.sql) },
-    });
+        const recent = buildSection({
+            title    : "Recent",
+            glyph    : "clock-rotate-left",
+            empty    : "No recent queries",
+            rows     : () => controller.historyList().map((h, i) => ({ key: String(i), label: snippet(h.sql), sql: h.sql })),
+            open     : row => controller.openQuery(row.sql, false),
+            execute  : row => controller.openQuery(row.sql, true),
+            secondary: { glyph: "floppy-disk", color: PRIMARY_COLOR, label: "Save under a name",
+                         run: row => void controller.promptAndSaveQuery(row.sql) },
+        });
 
-    const view = new AccordionPanel({
-        id,
-        sections: [
-            // Equal fill weights split the leftover height between the two lists.
-            { label: "Saved",  component: saved.host,  initiallyOpen: true, glyph: "floppy-disk",       tools: saved.tools,  fillWeight: 1 },
-            { label: "Recent", component: recent.host, initiallyOpen: true, glyph: "clock-rotate-left", tools: recent.tools, fillWeight: 1 },
-        ],
-    });
+        super({
+            id,
+            sections: [
+                // Equal fill weights split the leftover height between the two lists.
+                { label: "Saved",  component: saved.host,  initiallyOpen: true, glyph: "floppy-disk",       tools: saved.tools,  fillWeight: 1 },
+                { label: "Recent", component: recent.host, initiallyOpen: true, glyph: "clock-rotate-left", tools: recent.tools, fillWeight: 1 },
+            ],
+        });
 
-    const accordion = view.getAccordion();
-    accordion.setCompact(true);
-    // Keep the header tools visible (not hover-only) so the affordances are
-    // always discoverable, matching the Database view's tools.
-    accordion.setToolsVisibility("always");
+        const accordion = this.getAccordion();
+        accordion.setCompact(true);
+        // Keep the header tools visible (not hover-only) so the affordances are
+        // always discoverable, matching the Database view's tools.
+        accordion.setToolsVisibility("always");
 
-    // The menu's "Open Saved…" / "Query History…" land the keyboard on the right
-    // list: expand its section and focus it. Saved is section 0, Recent is 1.
-    controller.setQueriesSectionFocus(section => {
-        const target = section === "saved" ? saved : recent;
-        accordion.openSection(section === "saved" ? 0 : 1);
-        target.focusList();
-    });
+        // The menu's "Open Saved…" / "Query History…" land the keyboard on the
+        // right list: expand its section and focus it. Saved is section 0,
+        // Recent is 1.
+        controller.setQueriesSectionFocus(section => {
+            const target = section === "saved" ? saved : recent;
+            accordion.openSection(section === "saved" ? 0 : 1);
+            target.focusList();
+        });
 
-    const rebuild = (): void => {
-        saved.refresh();
-        recent.refresh();
-    };
+        const rebuild = (): void => {
+            saved.refresh();
+            recent.refresh();
+        };
 
-    controller.onWorkspaceChanged(rebuild);
-    rebuild();
+        controller.onWorkspaceChanged(rebuild);
+        rebuild();
 
-    // Alt+R re-reads both sections' stores while this rail has focus (see refreshTool).
-    bindRefreshShortcut(view, rebuild);
-
-    return view;
+        // Alt+R re-reads both sections' stores while this rail has focus (see refreshTool).
+        bindRefreshShortcut(this, rebuild);
+    }
 }
 
 /** A section's live handles: its content host, its header tools, and a refresh. */
