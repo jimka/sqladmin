@@ -38,7 +38,7 @@ import { AccordionPanel }           from "@jimka/typescript-ui/component/contain
 import { Table }                    from "@jimka/typescript-ui/component/table";
 import type { ColumnSpec }          from "@jimka/typescript-ui/component/table";
 import { Model, MemoryStore }       from "@jimka/typescript-ui/data";
-import type { FieldType }           from "@jimka/typescript-ui/data";
+import type { FieldType, ModelRecord } from "@jimka/typescript-ui/data";
 import { DiagramView }              from "@jimka/typescript-ui/component/diagram";
 import type { DiagramNodeData }     from "@jimka/typescript-ui/component/diagram";
 import { buildExplainDiagram }      from "../data/buildExplainDiagram";
@@ -54,16 +54,19 @@ import type { ExplainPlanNode, ExplainSummary } from "../data/parseExplainPlan";
 // of the way.
 const LEFT_WIDTH = 320;
 
-// The Summary table's fixed height (px): a header row plus one value row plus its
-// border. Pinned so the tiny two-column summary doesn't claim a section share the
-// tree/steps sections need.
-const SUMMARY_HEIGHT = 62;
+// The Summary table's fixed height (px): a header row plus the two metric rows
+// (planning / execution time) plus its border. Pinned so the tiny summary doesn't
+// claim a section share the tree/steps sections need.
+const SUMMARY_HEIGHT = 88;
 
 // The flat plan-steps model, one field per column. Metric fields are numeric so a
 // header click sorts by magnitude, not lexically; the field *names* are the column
 // headers the table renders (a PlanStepRow is keyed by these names, so it doubles
 // as the store record).
 const STEP_FIELDS: { name: string; type: FieldType }[] = [
+    // The plan-node id, carried on the record for row→tree/diagram selection;
+    // never a column (STEP_COLUMNS omits it and sets appendUnlisted: false).
+    { name: "id",            type: "string" },
     { name: "Action",        type: "string" },
     { name: "Cost",          type: "number" },
     { name: "Expected Rows", type: "number" },
@@ -76,8 +79,11 @@ const STEP_FIELDS: { name: string; type: FieldType }[] = [
 ];
 
 // Only Action and Cost show by default; every other column starts hidden and the
-// user reveals it from the table's column context menu.
+// user reveals it from the table's column context menu. appendUnlisted: false
+// keeps the unlisted "id" field off the table (and out of the column menu) while
+// the record still carries it for selection.
 const STEP_COLUMNS: ColumnSpec = {
+    appendUnlisted: false,
     columns: [
         { field: "Action" },
         { field: "Cost" },
@@ -91,11 +97,12 @@ const STEP_COLUMNS: ColumnSpec = {
     ],
 };
 
-// The two-column summary model: planning and execution time, formatted for
-// display (a one-row table, so the fields are plain strings — nothing to sort).
+// The summary model: a label column and a value column, one row per metric
+// (planning / execution time) — labels on the left, formatted values on the
+// right. Plain strings; a two-row summary has nothing worth sorting.
 const SUMMARY_FIELDS: { name: string; type: FieldType }[] = [
-    { name: "Planning Time",  type: "string" },
-    { name: "Execution Time", type: "string" },
+    { name: "Metric", type: "string" },
+    { name: "Value",  type: "string" },
 ];
 
 /**
@@ -123,6 +130,10 @@ export class ExplainDiagramPanel extends Panel {
         // diagram→tree reverse selection.
         tree.expandAll();
 
+        // The flat steps table — built as a local so its row selection can be
+        // wired to cross-select the tree + diagram (below).
+        const stepsTable = buildStepsTable(roots);
+
         // The WEST info column: a Summary table over the plan tree over the flat
         // steps table. The tree + steps sections share the column's leftover
         // height (fillWeight) so each scrolls internally; the summary stays pinned
@@ -133,7 +144,7 @@ export class ExplainDiagramPanel extends Panel {
             sections: [
                 { label: "Summary",    component: buildSummaryTable(summary), initiallyOpen: true },
                 { label: "Plan tree",  component: tree,                       initiallyOpen: true,  fillWeight: 1 },
-                { label: "Plan steps", component: buildStepsTable(roots),     initiallyOpen: false, fillWeight: 1 },
+                { label: "Plan steps", component: stepsTable,                 initiallyOpen: false, fillWeight: 1 },
             ],
         });
 
@@ -151,35 +162,95 @@ export class ExplainDiagramPanel extends Panel {
             ],
         });
 
-        // Tree → diagram: select + scroll the matching node into the diagram
-        // viewport (the hard requirement). The id lives on the TreeNode's data.
+        // Three-way cross-selection: a click in any of the three views (tree row,
+        // diagram card, steps-table row) selects and reveals the matching entry in
+        // the other two, so a plan node stays highlighted everywhere at once. All
+        // views correlate by the plan-node id (the tree→diagram select+scroll is
+        // the feature's hard requirement).
+        //
+        // `syncing` guards re-entrancy: tree.selectNode / diagram.selectNode are
+        // programmatic and don't emit, but Table.selectRecord does fire
+        // "selection" like a user click, so without the guard driving the table
+        // from a tree/diagram click would re-enter this wiring. Each handler
+        // early-returns while a sync is in flight.
+        let syncing = false;
+
+        /** Select + reveal the matching diagram card for a plan id. */
+        const selectInDiagram = (id: string): void => {
+            diagram.selectNode(id).revealNode(id);
+        };
+
+        /**
+         * Select + scroll the matching tree row. expandAll above guarantees the
+         * row is in the flattened (visible) set, so the select never no-ops.
+         */
+        const selectInTree = (id: string): void => {
+            const treeNode = treeNodeById.get(id);
+
+            if (treeNode) {
+                tree.selectNode(treeNode);
+            }
+        };
+
+        /**
+         * Select + scroll the matching steps-table row. The id is looked up on
+         * each record's hidden "id" field, so it resolves after a re-sort.
+         */
+        const selectInSteps = (id: string): void => {
+            const record = stepsTable.getStore().getRecords().find(r => r.get("id") === id);
+
+            if (record) {
+                stepsTable.selectRecord(record);
+            }
+        };
+
+        /** Run `apply` under the re-entrancy guard. */
+        const sync = (apply: () => void): void => {
+            if (syncing) {
+                return;
+            }
+
+            syncing = true;
+
+            try {
+                apply();
+            } finally {
+                syncing = false;
+            }
+        };
+
         tree.on("selection", (nodes: TreeNode[]) => {
             const id = nodes[0]?.data;
 
             if (typeof id === "string") {
-                diagram.selectNode(id).revealNode(id);
+                sync(() => { selectInDiagram(id); selectInSteps(id); });
             }
         });
 
-        // Diagram → tree: highlight + scroll the row. tree.selectNode also scrolls
-        // it into view, and expandAll above guarantees the row is in the flattened
-        // (visible) set so the select never no-ops.
         diagram.on("selection", (selection: DiagramNodeData[]) => {
-            const picked   = selection[0];
-            const treeNode = picked ? treeNodeById.get(picked.id) : undefined;
+            const id = selection[0]?.id;
 
-            if (treeNode) {
-                tree.selectNode(treeNode);
+            if (id !== undefined) {
+                sync(() => { selectInTree(id); selectInSteps(id); });
+            }
+        });
+
+        stepsTable.on("selection", (records: ModelRecord[]) => {
+            const id = records[0]?.get("id");
+
+            if (typeof id === "string") {
+                sync(() => { selectInDiagram(id); selectInTree(id); });
             }
         });
     }
 }
 
 /**
- * Build the two-column Summary table: one row showing the plan's planning and
- * execution time. A MemoryStore-backed {@link Table} (no column spec, so both
- * fields show), pinned to a small fixed height and relaxed min so the accordion
- * section hugs it rather than reserving the Table's default 100px floor.
+ * Build the Summary table: two rows (planning / execution time) with the metric
+ * label on the left and its formatted value on the right. A MemoryStore-backed
+ * {@link Table} (no column spec, so both fields show), pinned to a small fixed
+ * height and relaxed min so the accordion section hugs it rather than reserving
+ * the Table's default 100px floor.
  *
  * @param summary - The parsed top-level times.
  *
@@ -189,7 +260,10 @@ function buildSummaryTable(summary: ExplainSummary): Component {
     const model = new Model({ fields: SUMMARY_FIELDS.map((field, order) => ({ ...field, order })) });
     const store = new MemoryStore({
         model,
-        data    : [{ "Planning Time": formatMs(summary.planningTime), "Execution Time": formatMs(summary.executionTime) }],
+        data    : [
+            { "Metric": "Planning Time",  "Value": formatMs(summary.planningTime) },
+            { "Metric": "Execution Time", "Value": formatMs(summary.executionTime) },
+        ],
         autoLoad: true,
     });
     const table = Table(store);
@@ -208,9 +282,9 @@ function buildSummaryTable(summary: ExplainSummary): Component {
  *
  * @param roots - The parsed plan roots.
  *
- * @returns The steps table component.
+ * @returns The steps table (typed, so its `"selection"` event can be wired).
  */
-function buildStepsTable(roots: ExplainPlanNode[]): Component {
+function buildStepsTable(roots: ExplainPlanNode[]): Table {
     const model = new Model({ fields: STEP_FIELDS.map((field, order) => ({ ...field, order })) });
     const store = new MemoryStore({ model, data: buildPlanStepsRows(roots), autoLoad: true });
     const table = Table(store, STEP_COLUMNS);

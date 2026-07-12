@@ -70,6 +70,12 @@ describe("buildPlanStepsRows", () => {
         expect(row.Memory).toBeUndefined();
     });
 
+    it("carries each node's plan id onto its row (for row→tree/diagram selection)", () => {
+        const roots = [node("0", { children: [node("0/0"), node("0/1")] })];
+
+        expect(buildPlanStepsRows(roots).map(r => r.id)).toEqual(["0", "0/0", "0/1"]);
+    });
+
     it("returns [] for an empty forest", () => {
         expect(buildPlanStepsRows([])).toEqual([]);
     });

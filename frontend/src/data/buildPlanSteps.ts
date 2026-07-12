@@ -16,6 +16,13 @@ import type { ExplainPlanNode } from "./parseExplainPlan";
  * timings on a plain EXPLAIN).
  */
 export interface PlanStepRow {
+    /**
+     * The plan-node id (path string, e.g. "0/1"), correlating a row back to its
+     * tree node and diagram card. Carried as a model field so a selected record
+     * resolves to an id even after the user re-sorts the table; not a display
+     * column (the table excludes it via `appendUnlisted: false`).
+     */
+    "id": string;
     /** The node's one-line heading, e.g. "Seq Scan on users". */
     "Action": string;
     /** "Total Cost" — the cumulative estimated cost. */
@@ -73,7 +80,7 @@ export function buildPlanStepsRows(roots: ExplainPlanNode[]): PlanStepRow[] {
  * @returns The flat row for this node.
  */
 function toRow(node: ExplainPlanNode): PlanStepRow {
-    const row: PlanStepRow = { "Action": node.label };
+    const row: PlanStepRow = { "id": node.id, "Action": node.label };
 
     if (node.totalCost !== undefined) {
         row["Cost"] = node.totalCost;
