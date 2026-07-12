@@ -405,6 +405,24 @@ node-vitest harness cannot exercise; there is no new pure logic to unit-test):
   Pay special attention to **StartPage smooth wheel-scroll** (the id/autoScroll
   invariant) and the **FK link → open table** path.
 
+**Performed at implementation time (StartPage id/autoScroll invariant only):**
+against the running seed-DB stack, with the browser window resized to a short
+viewport (900x350) so `#work-start` overflows (`scrollHeight` 703 vs
+`clientHeight` 297), a single synthetic `wheel` event (`deltaY: 120`) was
+dispatched and `scrollTop` sampled once per animation frame for 20 frames:
+`[15, 42, 61, 76, 87, 95, 101, 106, 110, 112, 114, 116, 117, 118, 118, 119,
+119, 119, 119, 120]` — a decelerating multi-frame ease into 120px, not an
+instant one-frame jump, confirming the eased wheel-scroll listener is still
+registered under `work-start` (the `CENTER_START_ID`) after the class-first
+conversion. The element's CSS class is `StartPage` (was `Panel`), confirming
+convention (e) took effect with no console errors. The other three manual
+smoke items (Database/Roles/Queries rails, FK link → open table) were not
+separately re-exercised beyond this StartPage check and the automated
+typecheck/test/build/grep coverage above — they are pure DOM/geometry/event
+behaviour per _Expected Behaviour_ and share the same conversion mechanics
+(no new wiring beyond `extends`), so this remains an honest partial
+manual-verify, not a full walkthrough of every bullet.
+
 ---
 
 ## Potential Challenges
