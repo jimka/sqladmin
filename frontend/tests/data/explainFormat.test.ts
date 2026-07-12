@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatMetric, formatRange } from "../../src/data/explainFormat";
+import { formatMetric, formatRange, formatRowCount } from "../../src/data/explainFormat";
 
 describe("formatMetric", () => {
     it("renders integers as-is", () => {
@@ -38,5 +38,25 @@ describe("formatRange", () => {
 
     it("renders an en dash when neither end is present", () => {
         expect(formatRange(undefined, undefined)).toBe("–");
+    });
+});
+
+describe("formatRowCount", () => {
+    it("shows counts below 1000 verbatim", () => {
+        expect(formatRowCount(0)).toBe("0");
+        expect(formatRowCount(42)).toBe("42");
+        expect(formatRowCount(999)).toBe("999");
+    });
+
+    it("compacts thousands with a k suffix", () => {
+        expect(formatRowCount(1000)).toBe("1k");
+        expect(formatRowCount(1234)).toBe("1.2k");
+        expect(formatRowCount(12345)).toBe("12.3k");
+    });
+
+    it("compacts millions and billions", () => {
+        expect(formatRowCount(1000000)).toBe("1M");
+        expect(formatRowCount(2500000)).toBe("2.5M");
+        expect(formatRowCount(1000000000)).toBe("1B");
     });
 });

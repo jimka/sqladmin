@@ -111,4 +111,27 @@ describe("buildExplainDiagram", () => {
         expect(data.get("0")?.heat).toBe(0);
         expect(data.get("0")?.memShare).toBe(0);
     });
+
+    it("labels each edge with the child's produced rows — actual (×loops) when analyzed", () => {
+        const roots = [node("0", { children: [node("0/0", { actualRows: 100, actualLoops: 3 })] })];
+        const edge  = buildExplainDiagram(roots).edges[0];
+
+        expect(edge.style?.label).toBe("300");
+        // Keep the default end arrow when adding a label.
+        expect(edge.style?.endMarker).toBe("arrow");
+    });
+
+    it("labels an edge with a ~-prefixed estimate when the child has no actual rows", () => {
+        const roots = [node("0", { children: [node("0/0", { planRows: 1234 })] })];
+        const edge  = buildExplainDiagram(roots).edges[0];
+
+        expect(edge.style?.label).toBe("~1.2k");
+    });
+
+    it("leaves an edge unlabelled when the child reports no rows", () => {
+        const roots = [node("0", { children: [node("0/0")] })];
+        const edge  = buildExplainDiagram(roots).edges[0];
+
+        expect(edge.style).toBeUndefined();
+    });
 });

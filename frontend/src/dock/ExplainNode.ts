@@ -1,7 +1,9 @@
 // The custom DiagramView node renderer for the EXPLAIN plan diagram: a card with
-// a bold header over a metric grid — costs, rows/width, actual timings (when
+// a bold header over a metric grid — costs, row width, actual timings (when
 // analyzed), group key, hash batches, and peak memory, the last three as small
-// visuals (a batches badge, a memory bar, group-key chips). The whole card is
+// visuals (a batches badge, a memory bar, group-key chips). Row *counts* aren't
+// on the card — they label the edges, where they read as data flowing between
+// nodes (see buildExplainDiagram). The whole card is
 // tinted by its `heat` (self-cost / self-time share of the plan) so hot spots
 // stand out. The metric rows live in a Grid whose first column is `"content"`-
 // sized, so the label column auto-widens to its longest label (e.g. "actual
@@ -137,8 +139,8 @@ export class ExplainNode extends Panel {
 
 /**
  * Build the card's metric rows, in fixed order, each present only when its source
- * fields are: cost, rows/width, actual time (analyze), actual rows (analyze),
- * group key, hash batches, and peak memory.
+ * fields are: cost, row width, actual time (analyze), group key, hash batches,
+ * and peak memory. Row counts are not here — they label the edges instead.
  *
  * @param plan - The plan node.
  * @param memShare - The node's plan-relative memory share (0..1) for the bar.
@@ -152,18 +154,14 @@ function detailRows(plan: ExplainPlanNode, memShare: number): CardRow[] {
         rows.push({ label: "cost", value: valueText(formatRange(plan.startupCost, plan.totalCost)) });
     }
 
-    if (plan.planRows !== undefined || plan.planWidth !== undefined) {
-        rows.push({ label: "rows", value: valueText(`${formatMetric(plan.planRows)}    width ${formatMetric(plan.planWidth)}`) });
+    if (plan.planWidth !== undefined) {
+        rows.push({ label: "width", value: valueText(`${formatMetric(plan.planWidth)} B`) });
     }
 
     if (plan.actualTotalTime !== undefined || plan.actualStartupTime !== undefined) {
         const loops = plan.actualLoops !== undefined ? `  ×${formatMetric(plan.actualLoops)}` : "";
 
         rows.push({ label: "time", value: valueText(`${formatRange(plan.actualStartupTime, plan.actualTotalTime)} ms${loops}`) });
-    }
-
-    if (plan.actualRows !== undefined) {
-        rows.push({ label: "actual rows", value: valueText(formatMetric(plan.actualRows)) });
     }
 
     if (plan.groupKey && plan.groupKey.length > 0) {

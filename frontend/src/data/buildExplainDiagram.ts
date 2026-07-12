@@ -8,6 +8,7 @@
 
 import type { DiagramData, DiagramNodeData, DiagramEdgeData } from "@jimka/typescript-ui/component/diagram";
 import type { ExplainPlanNode } from "./parseExplainPlan";
+import { formatRowCount } from "./explainFormat";
 
 // Top-down layered layout: the root plan node sits above the inputs it consumes,
 // matching how the text plan reads (parent first, indented children below).
@@ -39,11 +40,13 @@ export interface ExplainNodeData {
  * Build the DiagramView graph for a parsed plan forest: one node per plan node
  * (id === {@link ExplainPlanNode.id}), one edge per parent→child link, each node
  * carrying its {@link ExplainNodeData}. Top-down layered so the root sits above
- * its inputs, like the text plan.
+ * its inputs, like the text plan. Each edge is labelled with the rows the child
+ * produces (they flow up the edge to the parent) — actual when analyzed, else the
+ * `~`-prefixed estimate.
  *
  * @param roots - The parsed plan roots (from `parseExplainPlan`).
  *
- * @returns Nodes (with `data`) + edges + DOWN-layered layout options.
+ * @returns Nodes (with `data`) + edges (labelled) + DOWN-layered layout options.
  */
 export function buildExplainDiagram(roots: ExplainPlanNode[]): DiagramData {
     const visuals = computeNodeVisuals(roots);
@@ -61,7 +64,16 @@ export function buildExplainDiagram(roots: ExplainPlanNode[]): DiagramData {
         });
 
         for (const child of node.children) {
-            edges.push({ id: `${node.id}->${child.id}`, source: node.id, target: child.id });
+            const edge: DiagramEdgeData = { id: `${node.id}->${child.id}`, source: node.id, target: child.id };
+            const label = producedRowsLabel(child);
+
+            if (label !== undefined) {
+                // Keep the default end arrow (a style with no endMarker would drop
+                // it — see DiagramEdgeLayer) and add the rows-flowing label.
+                edge.style = { endMarker: "arrow", label };
+            }
+
+            edges.push(edge);
             walk(child);
         }
     };
@@ -71,6 +83,27 @@ export function buildExplainDiagram(roots: ExplainPlanNode[]): DiagramData {
     }
 
     return { nodes, edges, layoutOptions: LAYOUT_OPTIONS };
+}
+
+/**
+ * The edge label for the rows a node produces (which flow up to its parent): the
+ * actual total (rows × loops) when analyzed, otherwise the `~`-prefixed planner
+ * estimate. `undefined` when the node reports neither.
+ *
+ * @param node - The child plan node the edge points to.
+ *
+ * @returns The compact rows label, or `undefined`.
+ */
+function producedRowsLabel(node: ExplainPlanNode): string | undefined {
+    if (node.actualRows !== undefined) {
+        return formatRowCount(node.actualRows * (node.actualLoops ?? 1));
+    }
+
+    if (node.planRows !== undefined) {
+        return `~${formatRowCount(node.planRows)}`;
+    }
+
+    return undefined;
 }
 
 /** A node's plan-relative visual intensities, keyed by node id. */
