@@ -9,10 +9,12 @@
 // to expand — the Split ignores a pane's preferred size after its one-time seed,
 // so preferred can no longer drive collapse.
 //
-// Built as a callable factory (not `extends Panel`): subclassing the callable
-// Panel export type-checks against the library source but not against its built
-// .d.ts (the callable constructor type drops instance methods for external
-// consumers). See LIBRARY_NOTES.md.
+// Built as a callable factory (not `extends Panel`) for now: subclassing a
+// library base is fully supported today (the .d.ts's unresolved `~/*` aliases
+// were fixed with a post-emit `tsc-alias` pass — see LIBRARY_NOTES.md,
+// "External consumers couldn't subclass a library class"). The shell staying
+// a factory is a not-yet-migrated holdover, not a constraint — ActivityBar
+// and TableWorkPanel are the class-first precedent (COMPONENT_CONVENTIONS.md).
 
 import { Component, Container }        from "@jimka/typescript-ui/core";
 import { Placement, UNBOUNDED }    from "@jimka/typescript-ui/primitive";
@@ -39,7 +41,7 @@ import { bars }                    from "@jimka/typescript-ui/glyphs/solid/bars"
 import { keyboard }                from "@jimka/typescript-ui/glyphs/solid/keyboard";
 import { right_from_bracket }      from "@jimka/typescript-ui/glyphs/solid/right_from_bracket";
 import { ActivityBar, SIDEBAR_RAIL_WIDTH, SIDEBAR_DEFAULT_WIDTH } from "./ActivityBar";
-import type { ActivityBarHandle, SidebarSizer } from "./ActivityBar";
+import type { SidebarSizer } from "./ActivityBar";
 import { DatabaseExplorerView }    from "./DatabaseExplorerView";
 import { RolesExplorerView }       from "./RolesExplorerView";
 import { QueriesView }             from "./QueriesView";
@@ -137,7 +139,7 @@ export function SqlAdminShell(controller: SqlAdminController): Container {
  * @param controller - The mediator the query/refresh chords drive.
  * @param sidebar - The activity bar the rail chords switch views on.
  */
-function installAccelerators(controller: SqlAdminController, sidebar: ActivityBarHandle): void {
+function installAccelerators(controller: SqlAdminController, sidebar: ActivityBar): void {
     document.addEventListener("keydown", (event: KeyboardEvent) => {
         let matched = true;
 
@@ -179,10 +181,10 @@ function installAccelerators(controller: SqlAdminController, sidebar: ActivityBa
  * SidebarSizer is wired into the bar so its collapse/expand drives the pane's
  * width through the Split's live min/max instead of a (now-ignored) preferred.
  */
-function buildWorkArea(sidebar: ActivityBarHandle, controller: SqlAdminController): Component {
+function buildWorkArea(sidebar: ActivityBar, controller: SqlAdminController): Component {
     const split  = new Split({ orientation: "horizontal" });
     const body   = Container({ layoutManager: split });
-    const pane   = sidebar.component;
+    const pane   = sidebar;
     const center = buildCenterDeck(controller);
 
     // collapsible: false suppresses the gutter's native collapse chevron and
@@ -399,12 +401,12 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
  * accordion) — which is also the documented Phase-2 seam (one more rail button +
  * one more deck page adds a view).
  */
-function buildSidebar(controller: SqlAdminController, onLogout: () => void): ActivityBarHandle {
+function buildSidebar(controller: SqlAdminController, onLogout: () => void): ActivityBar {
     const explorer = DatabaseExplorerView(controller, DATABASE_VIEW_ID);
     const roles    = RolesExplorerView(controller, ROLES_VIEW_ID);
     const queries  = QueriesView(controller, QUERIES_VIEW_ID);
 
-    return ActivityBar([
+    return new ActivityBar([
         { id: DATABASE_VIEW_ID, label: "Database", shortcut: DATABASES_RAIL_SHORTCUT, glyph: "database", component: explorer },
         { id: ROLES_VIEW_ID,    label: "Roles",    shortcut: ROLES_RAIL_SHORTCUT,     glyph: "users",    component: roles },
         { id: QUERIES_VIEW_ID,  label: "Queries",  shortcut: QUERIES_RAIL_SHORTCUT,   glyph: "terminal", component: queries },
