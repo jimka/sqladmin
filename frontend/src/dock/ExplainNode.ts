@@ -18,6 +18,7 @@ import { Text }                    from "@jimka/typescript-ui/component/input";
 import type { DiagramNodeData }    from "@jimka/typescript-ui/component/diagram";
 import type { ExplainNodeData }    from "../data/buildExplainDiagram";
 import type { ExplainPlanNode }    from "../data/parseExplainPlan";
+import { formatMetric, formatRange } from "../data/explainFormat";
 
 // Fixed card width: wide enough for a node-type heading and a "label   value"
 // row without wrapping, narrow enough to keep a deep plan's columns readable.
@@ -59,6 +60,10 @@ const BATCH_SPILL_BG = "rgba(240, 180, 60, 0.35)";
 
 // The dim colour weight for a row's leading label, so the value reads as primary.
 const LABEL_OPACITY = 0.6;
+
+// Fixed width (px) of every row's leading label column, so all rows' values —
+// text, chips, badges, the memory bar — line up in a single column down the card.
+const LABEL_WIDTH = 72;
 
 /**
  * One plan-node card in the EXPLAIN diagram. Renders a heat-tinted header plus a
@@ -110,7 +115,7 @@ export class ExplainNode extends Panel {
 /**
  * Build the card's detail rows, in fixed order, each present only when its source
  * fields are: cost, rows/width, actual time (analyze), actual rows (analyze),
- * group key, and a batches badge + memory bar.
+ * group key, hash batches, and peak memory.
  *
  * @param plan - The plan node.
  * @param memShare - The node's plan-relative memory share (0..1) for the bar.
@@ -121,36 +126,65 @@ function detailRows(plan: ExplainPlanNode, memShare: number): Component[] {
     const rows: Component[] = [];
 
     if (plan.startupCost !== undefined || plan.totalCost !== undefined) {
-        rows.push(labeledRow("cost", range(plan.startupCost, plan.totalCost)));
+        rows.push(labeledRow("cost", formatRange(plan.startupCost, plan.totalCost)));
     }
 
     if (plan.planRows !== undefined || plan.planWidth !== undefined) {
-        rows.push(labeledRow("rows", `${fmt(plan.planRows)}    width ${fmt(plan.planWidth)}`));
+        rows.push(labeledRow("rows", `${formatMetric(plan.planRows)}    width ${formatMetric(plan.planWidth)}`));
     }
 
     if (plan.actualTotalTime !== undefined || plan.actualStartupTime !== undefined) {
-        const loops = plan.actualLoops !== undefined ? `  ×${fmt(plan.actualLoops)}` : "";
+        const loops = plan.actualLoops !== undefined ? `  ×${formatMetric(plan.actualLoops)}` : "";
 
-        rows.push(labeledRow("time", `${range(plan.actualStartupTime, plan.actualTotalTime)} ms${loops}`));
+        rows.push(labeledRow("time", `${formatRange(plan.actualStartupTime, plan.actualTotalTime)} ms${loops}`));
     }
 
     if (plan.actualRows !== undefined) {
-        rows.push(labeledRow("actual rows", fmt(plan.actualRows)));
+        rows.push(labeledRow("actual rows", formatMetric(plan.actualRows)));
     }
 
     if (plan.groupKey && plan.groupKey.length > 0) {
         rows.push(chipRow("group", plan.groupKey));
     }
 
-    if (plan.hashBatches !== undefined || plan.peakMemoryUsage !== undefined) {
-        rows.push(batchesMemoryRow(plan.hashBatches, plan.peakMemoryUsage, memShare));
+    if (plan.hashBatches !== undefined) {
+        rows.push(batchesRow(plan.hashBatches));
+    }
+
+    if (plan.peakMemoryUsage !== undefined) {
+        rows.push(memoryRow(plan.peakMemoryUsage, memShare));
     }
 
     return rows;
 }
 
 /**
- * One fixed-height row: a dim leading label and its value.
+ * One fixed-height row: a dim leading label in the shared label column, then the
+ * given value components. Every row is built through here, so their values line
+ * up in one column regardless of whether the value is text, chips, or a bar.
+ *
+ * @param label - The dim leading label (e.g. "cost").
+ * @param values - The value components to place after the label.
+ *
+ * @returns The row component.
+ */
+function metricRow(label: string, values: Component[]): Component {
+    const labelText = new Text(label);
+
+    labelText.setOpacity(LABEL_OPACITY);
+    labelText.setPreferredSize(LABEL_WIDTH, ROW_HEIGHT);
+    labelText.setPointerEvents("none");
+
+    return new Component({
+        layoutManager: new HBox({ spacing: 6 }),
+        preferredSize: { width: CARD_WIDTH, height: ROW_HEIGHT },
+        padding      : new Insets(0, 6, 0, 6),
+        components   : [labelText, ...values],
+    });
+}
+
+/**
+ * One fixed-height row: a dim leading label and its value text.
  *
  * @param label - The dim leading label (e.g. "cost").
  * @param value - The value text.
@@ -158,25 +192,16 @@ function detailRows(plan: ExplainPlanNode, memShare: number): Component[] {
  * @returns The row component.
  */
 function labeledRow(label: string, value: string): Component {
-    const labelText = new Text(label);
     const valueText = new Text(value);
 
-    labelText.setOpacity(LABEL_OPACITY);
-    labelText.setPreferredSize(72, ROW_HEIGHT);
-    labelText.setPointerEvents("none");
     valueText.setPointerEvents("none");
 
-    return new Component({
-        layoutManager: new HBox({ spacing: 6 }),
-        preferredSize: { width: CARD_WIDTH, height: ROW_HEIGHT },
-        padding      : new Insets(0, 6, 0, 6),
-        components   : [labelText, valueText],
-    });
+    return metricRow(label, [valueText]);
 }
 
 /**
  * A row of small chips (e.g. group-key expressions) after a dim leading label.
- * Chips overflow horizontally are clipped — the card keeps its fixed width.
+ * Chips overflowing horizontally are clipped — the card keeps its fixed width.
  *
  * @param label - The dim leading label (e.g. "group").
  * @param values - The chip texts.
@@ -184,18 +209,7 @@ function labeledRow(label: string, value: string): Component {
  * @returns The row component.
  */
 function chipRow(label: string, values: string[]): Component {
-    const labelText = new Text(label);
-
-    labelText.setOpacity(LABEL_OPACITY);
-    labelText.setPreferredSize(40, ROW_HEIGHT);
-    labelText.setPointerEvents("none");
-
-    const row = new Component({
-        layoutManager: new HBox({ spacing: 4 }),
-        preferredSize: { width: CARD_WIDTH, height: ROW_HEIGHT },
-        padding      : new Insets(0, 6, 0, 6),
-        components   : [labelText, ...values.map(chip)],
-    });
+    const row = metricRow(label, values.map(chip));
 
     row.setOverflow("hidden");
 
@@ -229,35 +243,28 @@ function chip(value: string): Component {
 }
 
 /**
- * The batches badge + memory bar row: a "batches N" badge (amber when a hash node
- * spilled past one batch) and a memory bar sized to the node's plan-relative
- * memory share with its peak-memory kB beside it. Each part appears only when its
- * source value is present.
+ * The "batches" row: a badge with the hash-batch count, amber when the hash
+ * spilled past one batch (didn't fit in work_mem).
  *
- * @param batches - The node's "Hash Batches", if any.
- * @param peakMemoryKb - The node's "Peak Memory Usage" in kB, if any.
+ * @param batches - The node's "Hash Batches".
+ *
+ * @returns The row component.
+ */
+function batchesRow(batches: number): Component {
+    return metricRow("batches", [badge(formatMetric(batches), batches > 1 ? BATCH_SPILL_BG : BATCH_OK_BG)]);
+}
+
+/**
+ * The "memory" row: a bar sized to the node's plan-relative memory share, with
+ * its peak-memory kB beside it.
+ *
+ * @param peakMemoryKb - The node's "Peak Memory Usage" in kB.
  * @param memShare - The node's plan-relative memory share (0..1) for the bar.
  *
  * @returns The row component.
  */
-function batchesMemoryRow(batches: number | undefined, peakMemoryKb: number | undefined, memShare: number): Component {
-    const parts: Component[] = [];
-
-    if (batches !== undefined) {
-        parts.push(badge(`batches ${fmt(batches)}`, batches > 1 ? BATCH_SPILL_BG : BATCH_OK_BG));
-    }
-
-    if (peakMemoryKb !== undefined) {
-        parts.push(memoryBar(memShare));
-        parts.push(memoryLabel(peakMemoryKb));
-    }
-
-    return new Component({
-        layoutManager: new HBox({ spacing: 6 }),
-        preferredSize: { width: CARD_WIDTH, height: ROW_HEIGHT },
-        padding      : new Insets(0, 6, 0, 6),
-        components   : parts,
-    });
+function memoryRow(peakMemoryKb: number, memShare: number): Component {
+    return metricRow("memory", [memoryBar(memShare), memoryLabel(peakMemoryKb)]);
 }
 
 /**
@@ -327,50 +334,13 @@ function memoryBar(share: number): Component {
  * @returns The label component.
  */
 function memoryLabel(kb: number): Component {
-    const text = new Text(`${fmt(kb)} kB`);
+    const text = new Text(`${formatMetric(kb)} kB`);
 
     text.setFontSize(11);
     text.setOpacity(LABEL_OPACITY);
     text.setPointerEvents("none");
 
     return text;
-}
-
-/**
- * Format a `min … max` range, collapsing to a single value when only one end is
- * present (and to "" when neither is).
- *
- * @param min - The low end (e.g. startup cost / time).
- * @param max - The high end (e.g. total cost / time).
- *
- * @returns The formatted range.
- */
-function range(min: number | undefined, max: number | undefined): string {
-    if (min !== undefined && max !== undefined) {
-        return `${fmt(min)} … ${fmt(max)}`;
-    }
-
-    return fmt(min ?? max);
-}
-
-/**
- * Format a number compactly: integers as-is, fractions to two decimals with
- * trailing zeros trimmed; `undefined` renders as an en dash.
- *
- * @param n - The number to format.
- *
- * @returns The formatted string.
- */
-function fmt(n: number | undefined): string {
-    if (n === undefined) {
-        return "–";
-    }
-
-    if (Number.isInteger(n)) {
-        return String(n);
-    }
-
-    return parseFloat(n.toFixed(2)).toString();
 }
 
 /**
