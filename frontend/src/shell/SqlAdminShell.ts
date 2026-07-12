@@ -19,6 +19,7 @@ import { MenuBar }                 from "@jimka/typescript-ui/component/menubar"
 import { Button }                  from "@jimka/typescript-ui/component/button";
 import { Spacer }                  from "@jimka/typescript-ui/component/container";
 import { Glyph }                   from "@jimka/typescript-ui/component/display";
+import { Dialog }                  from "@jimka/typescript-ui/overlay";
 import { database }                from "@jimka/typescript-ui/glyphs/solid/database";
 import { circle_info }             from "@jimka/typescript-ui/glyphs/solid/circle_info";
 import { users }                   from "@jimka/typescript-ui/glyphs/solid/users";
@@ -77,9 +78,10 @@ const CENTER_START_ID = "work-start";
 /** The shell container, hosting the controller's Dock and StatusBar. */
 export class SqlAdminShell extends Container {
     constructor(controller: SqlAdminController) {
-        // Signs out: drops the server-side session and reloads to the login
-        // dialog. Wired to the rail's bottom-pinned sign-out button (buildSidebar).
-        const onLogout = (): void => { void logout().then(() => window.location.reload()); };
+        // Signs out after confirmation: drops the server-side session and reloads
+        // to the login dialog. Wired to the rail's bottom-pinned sign-out button
+        // (buildSidebar).
+        const onLogout = (): void => { void confirmSignOut(); };
 
         // Locals needed by super()'s components array — `this` is unavailable
         // before super() returns (COMPONENT_CONVENTIONS.md (b)).
@@ -394,6 +396,19 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
     menuBar.addComponent(about);
 
     return menuBar;
+}
+
+/**
+ * Confirm before signing out, then drop the server-side session and reload to
+ * the login dialog. Cancelling leaves the session untouched.
+ */
+async function confirmSignOut(): Promise<void> {
+    const confirmed = await Dialog.confirm("Sign out", "Are you sure that you want to sign out?");
+
+    if (confirmed) {
+        await logout();
+        window.location.reload();
+    }
 }
 
 /**
