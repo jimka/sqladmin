@@ -3,7 +3,13 @@
 // through the proxy/store (that is the row-CRUD path; see stores.ts).
 
 import type {
+    AlterTableSpec,
     ColumnMeta,
+    ConstraintSpec,
+    CreateTableSpec,
+    DdlPreview,
+    DropTableSpec,
+    IndexSpec,
     TablePrivileges,
     ConnectionPreset,
     DbObjectKind,
@@ -267,6 +273,31 @@ export function runExplain(
  */
 export function executeDdl(connectionId: string, sql: string): Promise<QueryStatusResult> {
     return postJson<QueryStatusResult>(`/api/${connectionId}/ddl/execute`, { sql });
+}
+
+/** Preview a CREATE TABLE statement (table-ddl phase). */
+export function previewCreateTable(ref: DbObjectRef, spec: CreateTableSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/table/create`, spec);
+}
+
+/** Preview a DROP TABLE statement (table-ddl phase). */
+export function previewDropTable(ref: DbObjectRef, spec: DropTableSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/table/drop`, spec);
+}
+
+/** Preview one ALTER TABLE column/table-rename statement (table-ddl phase). */
+export function previewAlterTable(ref: DbObjectRef, spec: AlterTableSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/table/alter`, spec);
+}
+
+/** Preview one constraint add/drop statement (table-ddl phase). */
+export function previewConstraint(ref: DbObjectRef, spec: ConstraintSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/table/constraint`, spec);
+}
+
+/** Preview one index create/drop statement (table-ddl phase). */
+export function previewIndex(ref: DbObjectRef, spec: IndexSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/table/index`, spec);
 }
 
 /** The Roles view's role list (introspection one-shot). */

@@ -5,6 +5,13 @@ sites import from ``app.operations`` regardless of file layout.
 
 from .base import Command, Operation, Query
 from .ddl import DdlPreview, ExecuteDdlCommand
+from .ddl_table import (
+    PreviewAlterTable,
+    PreviewConstraint,
+    PreviewCreateTable,
+    PreviewDropTable,
+    PreviewIndex,
+)
 from .delete_row import DeleteRowCommand
 from .explain_query import ExplainQueryCommand
 from .export_rows import ExportRowsQuery
@@ -56,4 +63,9 @@ __all__ = [
     "ExplainQueryCommand",
     "DdlPreview",
     "ExecuteDdlCommand",
+    "PreviewCreateTable",
+    "PreviewDropTable",
+    "PreviewAlterTable",
+    "PreviewConstraint",
+    "PreviewIndex",
 ]

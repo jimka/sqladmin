@@ -54,6 +54,11 @@ from .operations import (
     ListRolesQuery,
     ListRowsQuery,
     ListSchemasQuery,
+    PreviewAlterTable,
+    PreviewConstraint,
+    PreviewCreateTable,
+    PreviewDropTable,
+    PreviewIndex,
     RoleAttributesQuery,
     RoleMembershipsQuery,
     RolePrivilegesQuery,
@@ -656,6 +661,122 @@ async def execute_ddl(
     """
     async with session_pool_for(session, connection_id).acquire() as c:
         op = ExecuteDdlCommand(c, body.get("sql", ""))
+        await op.apply()
+
+        return op.get_result()
+
+
+# --- Table DDL --------------------------------------------------------------
+
+
+@app.post("/api/{connection_id}/{database}/ddl/table/create")
+async def preview_create_table(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a CREATE TABLE statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/table/create``.
+
+    Args:
+        body: the ``CreateTableSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = PreviewCreateTable(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/table/drop")
+async def preview_drop_table(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a DROP TABLE statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/table/drop``.
+
+    Args:
+        body: the ``DropTableSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = PreviewDropTable(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/table/alter")
+async def preview_alter_table(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview one ALTER TABLE column/table-rename statement, dispatched on the
+    spec's ``action`` field.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/table/alter``.
+
+    Args:
+        body: the ``AlterTableSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = PreviewAlterTable(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/table/constraint")
+async def preview_constraint(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview one constraint add/drop statement, dispatched on the spec's
+    ``action`` field.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/table/constraint``.
+
+    Args:
+        body: the ``ConstraintSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = PreviewConstraint(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/table/index")
+async def preview_index(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview one index create/drop statement, dispatched on the spec's
+    ``action`` field.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/table/index``.
+
+    Args:
+        body: the ``IndexSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = PreviewIndex(c, body)
         await op.apply()
 
         return op.get_result()
