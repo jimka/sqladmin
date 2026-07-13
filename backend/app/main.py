@@ -39,6 +39,7 @@ from .contract import ColumnMeta, TableRef
 from .errors import DomainError, NotFound, ValidationError
 from .operations import (
     DeleteRowCommand,
+    ExecuteDdlCommand,
     ExplainQueryCommand,
     ExportRowsQuery,
     InsertRowCommand,
@@ -626,6 +627,35 @@ async def explain_query(
             bool(body.get("analyze", False)),
             str(body.get("format", "text")),
         )
+        await op.apply()
+
+        return op.get_result()
+
+
+# --- DDL --------------------------------------------------------------------
+
+
+@app.post("/api/{connection_id}/ddl/execute")
+async def execute_ddl(
+    connection_id: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Run one final (possibly user-edited) DDL statement and return its status.
+
+    Route: ``POST /api/{connection_id}/ddl/execute``. The single execute
+    endpoint every DDL phase's preview/confirm dialog reuses — the previewed
+    SQL string (edited or not) is authoritative; nothing is re-derived from a
+    structured spec at execute time.
+
+    Args:
+        body: ``{"sql": str}`` — exactly one DDL statement.
+
+    Returns:
+        ``{"kind": "status", "command", "rowCount"}`` — the same status
+        envelope ``RunQueryCommand`` emits for a non-row statement.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = ExecuteDdlCommand(c, body.get("sql", ""))
         await op.apply()
 
         return op.get_result()

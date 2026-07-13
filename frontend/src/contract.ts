@@ -82,6 +82,12 @@ export interface QueryStatusResult {
     rowCount: number;
 }
 
+/** A DDL preview endpoint's response: the generated SQL to show in the editable
+ *  preview before the user confirms and executes it. */
+export interface DdlPreview {
+    sql: string;
+}
+
 /** EXPLAIN output format. TEXT is the first cut; JSON is the follow-on tree source. */
 export type ExplainFormat = "text" | "json";
 

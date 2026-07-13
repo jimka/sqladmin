@@ -10,6 +10,7 @@ import type {
     DbObjectRef,
     QueryExplainResult,
     QueryResult,
+    QueryStatusResult,
     RelationEdge,
     RoleDetail,
     RoleSummary,
@@ -244,6 +245,28 @@ export function runExplain(
         analyze: opts.analyze,
         format : opts.format,
     });
+}
+
+/**
+ * Run a final (possibly user-edited) DDL statement — the single execute call
+ * every `SqlPreviewDialog` confirm reuses, regardless of which phase's form
+ * built the SQL. The previewed string is authoritative: this sends it
+ * verbatim, never a spec re-compiled at execute time.
+ *
+ * A phase adds its own preview client method alongside this one, following
+ * the pattern (no preview method ships in this infra module):
+ * ```ts
+ * export function previewCreateTable(ref: DbObjectRef, spec: CreateTableSpec): Promise<DdlPreview> {
+ *     return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/create-table`, spec);
+ * }
+ * ```
+ *
+ * @param connectionId - The target connection.
+ * @param sql - The final DDL text to execute (exactly one statement).
+ * @returns The status envelope (`{kind: "status", command, rowCount}`).
+ */
+export function executeDdl(connectionId: string, sql: string): Promise<QueryStatusResult> {
+    return postJson<QueryStatusResult>(`/api/${connectionId}/ddl/execute`, { sql });
 }
 
 /** The Roles view's role list (introspection one-shot). */

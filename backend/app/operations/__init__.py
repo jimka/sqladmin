@@ -4,6 +4,7 @@ sites import from ``app.operations`` regardless of file layout.
 """
 
 from .base import Command, Operation, Query
+from .ddl import DdlPreview, ExecuteDdlCommand
 from .delete_row import DeleteRowCommand
 from .explain_query import ExplainQueryCommand
 from .export_rows import ExportRowsQuery
@@ -53,4 +54,6 @@ __all__ = [
     "ViewDefinitionQuery",
     "ExportRowsQuery",
     "ExplainQueryCommand",
+    "DdlPreview",
+    "ExecuteDdlCommand",
 ]

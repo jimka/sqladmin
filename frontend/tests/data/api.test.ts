@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
     getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl,
-    setCsrfToken, csrfHeader,
+    setCsrfToken, csrfHeader, executeDdl,
 } from "../../src/data/api";
 import type { DbObjectRef } from "../../src/contract";
 
@@ -174,6 +174,39 @@ describe("runExplain", () => {
 
         await expect(runExplain("default", "slect 1", { analyze: true, format: "text" }))
             .rejects.toThrow("syntax error");
+    });
+});
+
+describe("executeDdl", () => {
+    it("POSTs { sql } to the connection's DDL execute endpoint and returns the envelope", async () => {
+        const envelope  = { kind: "status", command: "CREATE TABLE", rowCount: 0 };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => envelope });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const result = await executeDdl("default", "CREATE TABLE t (id int)");
+
+        expect(result).toEqual(envelope);
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/default/ddl/execute",
+            expect.objectContaining({
+                method : "POST",
+                headers: { "Content-Type": "application/json" },
+                body   : JSON.stringify({ sql: "CREATE TABLE t (id int)" }),
+            }),
+        );
+    });
+
+    it("throws the backend {detail} on a non-OK response", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok        : false,
+            status    : 400,
+            statusText: "Bad Request",
+            json      : async () => ({ detail: "syntax error at or near \"CRATE\"" }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(executeDdl("default", "CRATE TABLE t (id int)"))
+            .rejects.toThrow('syntax error at or near "CRATE"');
     });
 });
 
