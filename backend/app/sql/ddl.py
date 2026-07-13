@@ -47,6 +47,14 @@ __all__ = [
     "rename_materialized_view",
     "refresh_materialized_view",
     "replace_materialized_view",
+    "RESTART_DEFAULT",
+    "schema_create",
+    "schema_drop",
+    "schema_rename",
+    "sequence_create",
+    "sequence_alter",
+    "sequence_set_owner",
+    "sequence_drop",
 ]
 
 
@@ -823,3 +831,302 @@ def replace_materialized_view(
     create_sql = create_materialized_view(schema, name, select, with_data=with_data)
 
     return f"{drop_sql};\n{create_sql}"
+
+
+# --- Schema / sequence DDL -------------------------------------------------------
+#
+# Builders for CREATE/DROP/RENAME SCHEMA and CREATE/ALTER/OWNER/DROP SEQUENCE
+# (schema-sequence-ddl phase). Unlike the table/view builders above, every
+# required identifier here is validated *in the builder itself* (raising
+# ValidationError on a blank name), per this phase's Public API — schemas and
+# sequences have no free-form expression slots to review in a preview editor
+# (every numeric option is validated as an integer, not a raw fragment), so
+# there is no equivalent "reviewed in the editable preview" trust boundary to
+# lean on. Names are quoted via quote_ident/qualify.
+
+
+def _require_ident(value: str, label: str) -> str:
+    """
+    Validate a required identifier is non-blank.
+
+    Args:
+        value: the identifier to check.
+        label: the field name, used in the error message.
+
+    Raises:
+        ValidationError: if ``value`` is blank.
+
+    Returns:
+        ``value``, unchanged.
+    """
+    if not value or not value.strip():
+        raise ValidationError(f"'{label}' is required")
+
+    return value
+
+
+def schema_create(name: str, authorization: str | None = None) -> str:
+    """
+    Build a ``CREATE SCHEMA`` statement.
+
+    Args:
+        name: the new schema's name.
+        authorization: an optional owning role for ``AUTHORIZATION``.
+
+    Raises:
+        ValidationError: if ``name`` is blank.
+
+    Returns:
+        ``CREATE SCHEMA "name" [AUTHORIZATION "owner"]``.
+    """
+    _require_ident(name, "name")
+
+    auth_clause = f" AUTHORIZATION {quote_ident(authorization)}" if authorization else ""
+
+    return f"CREATE SCHEMA {quote_ident(name)}{auth_clause}"
+
+
+def schema_drop(name: str, *, cascade: bool = False, if_exists: bool = False) -> str:
+    """
+    Build a ``DROP SCHEMA`` statement.
+
+    Args:
+        name: the schema to drop.
+        cascade: emit ``CASCADE`` — also drops every object the schema
+            contains.
+        if_exists: emit ``IF EXISTS``.
+
+    Raises:
+        ValidationError: if ``name`` is blank.
+
+    Returns:
+        ``DROP SCHEMA [IF EXISTS] "name" [CASCADE]``.
+    """
+    _require_ident(name, "name")
+
+    exists_clause = "IF EXISTS " if if_exists else ""
+    cascade_clause = " CASCADE" if cascade else ""
+
+    return f"DROP SCHEMA {exists_clause}{quote_ident(name)}{cascade_clause}"
+
+
+def schema_rename(name: str, new_name: str) -> str:
+    """
+    Build a schema-rename ``ALTER SCHEMA ... RENAME TO`` statement.
+
+    Args:
+        name: the schema's current name.
+        new_name: the schema's new name.
+
+    Raises:
+        ValidationError: if ``name`` or ``new_name`` is blank.
+
+    Returns:
+        ``ALTER SCHEMA "name" RENAME TO "new_name"``.
+    """
+    _require_ident(name, "name")
+    _require_ident(new_name, "newName")
+
+    return f"ALTER SCHEMA {quote_ident(name)} RENAME TO {quote_ident(new_name)}"
+
+
+# A sentinel for `sequence_alter`'s `restart` parameter, distinguishing a bare
+# `RESTART` (reset to the sequence's start value) from `RESTART WITH n`.
+# Compared via `is`, never `==`, so it can never collide with a real int.
+class _RestartDefaultType:
+    """The type of the ``RESTART_DEFAULT`` sentinel (see module docstring)."""
+
+    def __repr__(self) -> str:
+        return "RESTART_DEFAULT"
+
+
+RESTART_DEFAULT = _RestartDefaultType()
+
+# The data types PostgreSQL permits for a sequence's `AS <type>` clause
+# (`sequence_alter`'s `data_type`), including its short aliases. Fixed by
+# Postgres's own sequence grammar — not project-tunable (mirrors
+# `_REFERENTIAL_ACTIONS`/`_INDEX_METHODS`'s allowlist style).
+_SEQUENCE_TYPES: frozenset[str] = frozenset(
+    {"smallint", "integer", "bigint", "int2", "int4", "int8"}
+)
+
+
+def sequence_create(
+    schema: str,
+    name: str,
+    *,
+    increment: int | None = None,
+    start: int | None = None,
+    min_value: int | None = None,
+    max_value: int | None = None,
+    cache: int | None = None,
+    cycle: bool = False,
+    owned_by: tuple[str, str, str] | None = None,
+) -> str:
+    """
+    Build a ``CREATE SEQUENCE`` statement.
+
+    Args:
+        schema: the new sequence's schema.
+        name: the new sequence's name.
+        increment: ``INCREMENT BY`` — omitted lets Postgres default to 1.
+        start: ``START WITH`` — omitted lets Postgres default to min/1.
+        min_value: ``MINVALUE`` — omitted lets Postgres pick its default.
+        max_value: ``MAXVALUE`` — omitted lets Postgres pick its default.
+        cache: ``CACHE`` — omitted lets Postgres default to 1.
+        cycle: emit ``CYCLE``; omitting it leaves Postgres's default
+            (no cycling — an exhausted sequence raises).
+        owned_by: an optional ``(schema, table, column)`` triple rendered as
+            ``OWNED BY "schema"."table"."column"``.
+
+    Raises:
+        ValidationError: if ``name`` is blank.
+
+    Returns:
+        ``CREATE SEQUENCE "schema"."name"`` with each provided option, in
+        canonical grammar order: ``INCREMENT BY``, ``MINVALUE``, ``MAXVALUE``,
+        ``START WITH``, ``CACHE``, ``CYCLE``, ``OWNED BY``.
+    """
+    _require_ident(name, "name")
+
+    parts = [f"CREATE SEQUENCE {qualify(schema, name)}"]
+
+    if increment is not None:
+        parts.append(f"INCREMENT BY {int(increment)}")
+    if min_value is not None:
+        parts.append(f"MINVALUE {int(min_value)}")
+    if max_value is not None:
+        parts.append(f"MAXVALUE {int(max_value)}")
+    if start is not None:
+        parts.append(f"START WITH {int(start)}")
+    if cache is not None:
+        parts.append(f"CACHE {int(cache)}")
+    if cycle:
+        parts.append("CYCLE")
+    if owned_by:
+        owner_schema, owner_table, owner_column = owned_by
+        parts.append(f"OWNED BY {qualify(owner_schema, owner_table)}.{quote_ident(owner_column)}")
+
+    return " ".join(parts)
+
+
+def sequence_alter(
+    schema: str,
+    name: str,
+    *,
+    data_type: str | None = None,
+    restart: int | _RestartDefaultType | None = None,
+    increment: int | None = None,
+    start: int | None = None,
+    min_value: int | None = None,
+    max_value: int | None = None,
+    cache: int | None = None,
+    cycle: bool | None = None,
+) -> str:
+    """
+    Build an ``ALTER SEQUENCE`` parameter-form statement.
+
+    Args:
+        schema: the sequence's schema.
+        name: the sequence's name.
+        data_type: ``AS <type>`` — ``None`` omits the clause; otherwise
+            validated case-insensitively against ``_SEQUENCE_TYPES``.
+        restart: ``None`` omits the clause; ``RESTART_DEFAULT`` emits a bare
+            ``RESTART`` (reset to the sequence's start value); an ``int``
+            emits ``RESTART WITH n``.
+        increment: ``INCREMENT BY`` — ``None`` omits the clause.
+        start: ``START WITH`` — ``None`` omits the clause.
+        min_value: ``MINVALUE`` — ``None`` omits the clause.
+        max_value: ``MAXVALUE`` — ``None`` omits the clause.
+        cache: ``CACHE`` — ``None`` omits the clause.
+        cycle: ``None`` omits the clause; ``True`` emits ``CYCLE``; ``False``
+            emits ``NO CYCLE``.
+
+    Raises:
+        ValidationError: if ``name`` is blank, if ``data_type`` is not a
+            recognized sequence type, or if every option is omitted (an
+            empty ``ALTER SEQUENCE`` is meaningless).
+
+    Returns:
+        ``ALTER SEQUENCE "schema"."name"`` with each provided option, in
+        canonical grammar order: ``AS``, ``INCREMENT BY``, ``MINVALUE``,
+        ``MAXVALUE``, ``START WITH``, ``RESTART``, ``CACHE``, ``CYCLE``.
+    """
+    _require_ident(name, "name")
+
+    parts = [f"ALTER SEQUENCE {qualify(schema, name)}"]
+
+    if data_type is not None:
+        if data_type.lower() not in _SEQUENCE_TYPES:
+            raise ValidationError(f"Unsupported sequence data type '{data_type}'")
+        parts.append(f"AS {data_type}")
+    if increment is not None:
+        parts.append(f"INCREMENT BY {int(increment)}")
+    if min_value is not None:
+        parts.append(f"MINVALUE {int(min_value)}")
+    if max_value is not None:
+        parts.append(f"MAXVALUE {int(max_value)}")
+    if start is not None:
+        parts.append(f"START WITH {int(start)}")
+    if restart is RESTART_DEFAULT:
+        parts.append("RESTART")
+    elif restart is not None:
+        parts.append(f"RESTART WITH {int(restart)}")  # type: ignore[arg-type]
+    if cache is not None:
+        parts.append(f"CACHE {int(cache)}")
+    if cycle is True:
+        parts.append("CYCLE")
+    elif cycle is False:
+        parts.append("NO CYCLE")
+
+    if len(parts) == 1:
+        raise ValidationError("ALTER SEQUENCE requires at least one option")
+
+    return " ".join(parts)
+
+
+def sequence_set_owner(schema: str, name: str, owner: str) -> str:
+    """
+    Build a sequence ``OWNER TO`` statement — a separate grammar variant from
+    the parameter form (see ``sequence_alter``), since Postgres cannot
+    combine them in one ``ALTER SEQUENCE`` statement.
+
+    Args:
+        schema: the sequence's schema.
+        name: the sequence's name.
+        owner: the new owning role.
+
+    Raises:
+        ValidationError: if ``name`` or ``owner`` is blank.
+
+    Returns:
+        ``ALTER SEQUENCE "schema"."name" OWNER TO "owner"``.
+    """
+    _require_ident(name, "name")
+    _require_ident(owner, "owner")
+
+    return f"ALTER SEQUENCE {qualify(schema, name)} OWNER TO {quote_ident(owner)}"
+
+
+def sequence_drop(schema: str, name: str, *, cascade: bool = False, if_exists: bool = False) -> str:
+    """
+    Build a ``DROP SEQUENCE`` statement.
+
+    Args:
+        schema: the sequence's schema.
+        name: the sequence's name.
+        cascade: emit ``CASCADE``.
+        if_exists: emit ``IF EXISTS``.
+
+    Raises:
+        ValidationError: if ``name`` is blank.
+
+    Returns:
+        ``DROP SEQUENCE [IF EXISTS] "schema"."name" [CASCADE]``.
+    """
+    _require_ident(name, "name")
+
+    exists_clause = "IF EXISTS " if if_exists else ""
+    cascade_clause = " CASCADE" if cascade else ""
+
+    return f"DROP SEQUENCE {exists_clause}{qualify(schema, name)}{cascade_clause}"
