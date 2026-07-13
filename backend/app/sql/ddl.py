@@ -39,6 +39,14 @@ __all__ = [
     "drop_constraint",
     "create_index",
     "drop_index",
+    "create_view",
+    "drop_view",
+    "rename_view",
+    "create_materialized_view",
+    "drop_materialized_view",
+    "rename_materialized_view",
+    "refresh_materialized_view",
+    "replace_materialized_view",
 ]
 
 
@@ -619,3 +627,199 @@ def drop_index(schema: str, index_name: str, *, cascade: bool = False, if_exists
     cascade_clause = " CASCADE" if cascade else ""
 
     return f"DROP INDEX {exists_clause}{qualify(schema, index_name)}{cascade_clause}"
+
+
+# --- View / matview DDL ---------------------------------------------------------
+#
+# Builders for CREATE/DROP/RENAME VIEW and MATERIALIZED VIEW, REFRESH
+# MATERIALIZED VIEW, and the DROP+CREATE matview "replace" pair a matview body
+# edit runs as one previewed, semicolon-joined statement (view-matview-ddl
+# phase). A regular view supports CREATE OR REPLACE in place; a materialized
+# view does not, so editing its body is a DROP followed by a CREATE, run
+# atomically through the shared ExecuteDdlCommand's transaction wrap (see
+# plans/implemented/view-matview-ddl.md's "Matview edit strategy" decision).
+# Names are quoted via quote_ident/qualify; the ``select`` SELECT body is a
+# raw SQL fragment, inserted verbatim and reviewed in the editable preview
+# before execute (the ddl-infrastructure trust model).
+
+
+def create_view(
+    schema: str,
+    name: str,
+    select: str,
+    *,
+    or_replace: bool = False,
+    columns: Sequence[str] | None = None,
+) -> str:
+    """
+    Build a ``CREATE [OR REPLACE] VIEW`` statement.
+
+    Args:
+        schema: the view's schema.
+        name: the view's name.
+        select: the backing ``SELECT``, raw (reviewed in the editable preview
+            before execute).
+        or_replace: emit ``OR REPLACE`` — the in-place way to edit an
+            existing view's definition without dropping it.
+        columns: optional column aliases, in order; ``None``/empty omits the
+            clause and lets Postgres name the output columns from the query.
+
+    Returns:
+        ``CREATE [OR REPLACE] VIEW "schema"."name" [("c1", "c2")] AS
+        <select>``.
+    """
+    replace_clause = "OR REPLACE " if or_replace else ""
+    columns_clause = f" ({', '.join(quote_ident(c) for c in columns)})" if columns else ""
+
+    return f"CREATE {replace_clause}VIEW {qualify(schema, name)}{columns_clause} AS\n{select}"
+
+
+def drop_view(schema: str, name: str, *, cascade: bool = False) -> str:
+    """
+    Build a ``DROP VIEW`` statement.
+
+    Args:
+        schema: the view's schema.
+        name: the view's name.
+        cascade: emit ``CASCADE``; omitting it leaves Postgres's default
+            ``RESTRICT``.
+
+    Returns:
+        ``DROP VIEW "schema"."name" [CASCADE]``.
+    """
+    cascade_clause = " CASCADE" if cascade else ""
+
+    return f"DROP VIEW {qualify(schema, name)}{cascade_clause}"
+
+
+def rename_view(schema: str, name: str, new_name: str) -> str:
+    """
+    Build a view-rename ``ALTER VIEW ... RENAME TO`` statement.
+
+    Args:
+        schema: the view's current schema.
+        name: the view's current name.
+        new_name: the new (unqualified) view name.
+
+    Returns:
+        ``ALTER VIEW "schema"."name" RENAME TO "new_name"``.
+    """
+    return f"ALTER VIEW {qualify(schema, name)} RENAME TO {quote_ident(new_name)}"
+
+
+def create_materialized_view(schema: str, name: str, select: str, *, with_data: bool = True) -> str:
+    """
+    Build a ``CREATE MATERIALIZED VIEW`` statement.
+
+    Args:
+        schema: the matview's schema.
+        name: the matview's name.
+        select: the backing ``SELECT``, raw.
+        with_data: populate the matview immediately (``WITH DATA``, the
+            default); ``False`` emits ``WITH NO DATA`` (unscannable until a
+            later ``REFRESH``).
+
+    Returns:
+        ``CREATE MATERIALIZED VIEW "schema"."name" AS
+        <select>
+        WITH [NO] DATA``.
+    """
+    data_clause = "WITH DATA" if with_data else "WITH NO DATA"
+
+    return f"CREATE MATERIALIZED VIEW {qualify(schema, name)} AS\n{select}\n{data_clause}"
+
+
+def drop_materialized_view(schema: str, name: str, *, cascade: bool = False) -> str:
+    """
+    Build a ``DROP MATERIALIZED VIEW`` statement.
+
+    Args:
+        schema: the matview's schema.
+        name: the matview's name.
+        cascade: emit ``CASCADE`` — also drops dependent objects, and (as the
+            drop half of ``replace_materialized_view``) any dependents the
+            CREATE half does not recreate.
+
+    Returns:
+        ``DROP MATERIALIZED VIEW "schema"."name" [CASCADE]``.
+    """
+    cascade_clause = " CASCADE" if cascade else ""
+
+    return f"DROP MATERIALIZED VIEW {qualify(schema, name)}{cascade_clause}"
+
+
+def rename_materialized_view(schema: str, name: str, new_name: str) -> str:
+    """
+    Build a matview-rename ``ALTER MATERIALIZED VIEW ... RENAME TO``
+    statement.
+
+    Args:
+        schema: the matview's current schema.
+        name: the matview's current name.
+        new_name: the new (unqualified) matview name.
+
+    Returns:
+        ``ALTER MATERIALIZED VIEW "schema"."name" RENAME TO "new_name"``.
+    """
+    return f"ALTER MATERIALIZED VIEW {qualify(schema, name)} RENAME TO {quote_ident(new_name)}"
+
+
+def refresh_materialized_view(
+    schema: str, name: str, *, concurrently: bool = False, with_no_data: bool = False
+) -> str:
+    """
+    Build a ``REFRESH MATERIALIZED VIEW`` statement.
+
+    ``CONCURRENTLY`` requires a unique index on the matview, and combining it
+    with ``WITH NO DATA`` is rejected by Postgres — this builder does not
+    guard either constraint (the form disables the illegal combination
+    client-side; Postgres itself is authoritative for the unique-index
+    requirement — see the view-matview-ddl plan's "Potential Challenges").
+
+    Args:
+        schema: the matview's schema.
+        name: the matview's name.
+        concurrently: emit ``CONCURRENTLY`` (refresh without locking readers
+            out; needs a unique index).
+        with_no_data: emit ``WITH NO DATA`` (clear the matview to
+            unscannable instead of repopulating it).
+
+    Returns:
+        ``REFRESH MATERIALIZED VIEW [CONCURRENTLY] "schema"."name" [WITH NO
+        DATA]``.
+    """
+    concurrently_clause = "CONCURRENTLY " if concurrently else ""
+    data_clause = " WITH NO DATA" if with_no_data else ""
+
+    return f"REFRESH MATERIALIZED VIEW {concurrently_clause}{qualify(schema, name)}{data_clause}"
+
+
+def replace_materialized_view(
+    schema: str, name: str, select: str, *, cascade: bool = False, with_data: bool = True
+) -> str:
+    """
+    Build the ``DROP; CREATE`` pair that edits a materialized view's body —
+    a matview cannot be ``CREATE OR REPLACE``d, so an edit drops it and
+    recreates it under the same name, semicolon-joined into the one
+    statement the matview-edit dialog previews and runs atomically through
+    the shared ``ExecuteDdlCommand`` (its transaction wrap rolls the DROP
+    back if the CREATE fails — see the view-matview-ddl plan's "Matview edit
+    strategy" decision).
+
+    Args:
+        schema: the matview's schema.
+        name: the matview's name (unchanged across the replace).
+        select: the new backing ``SELECT``, raw.
+        cascade: emit ``CASCADE`` on the DROP half — also drops dependent
+            objects, which the CREATE half does not recreate.
+        with_data: populate the recreated matview immediately (the CREATE
+            half's ``WITH [NO] DATA``).
+
+    Returns:
+        ``drop_materialized_view(...) + ";\\n" + create_materialized_view(...)``
+        — the single ``;``-joined statement.
+    """
+    drop_sql = drop_materialized_view(schema, name, cascade=cascade)
+    create_sql = create_materialized_view(schema, name, select, with_data=with_data)
+
+    return f"{drop_sql};\n{create_sql}"

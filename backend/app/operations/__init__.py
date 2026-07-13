@@ -12,6 +12,14 @@ from .ddl_table import (
     PreviewDropTable,
     PreviewIndex,
 )
+from .ddl_view import (
+    CreateMaterializedViewPreview,
+    CreateViewPreview,
+    DropMaterializedViewPreview,
+    DropViewPreview,
+    RefreshMaterializedViewPreview,
+    ReplaceMaterializedViewPreview,
+)
 from .delete_row import DeleteRowCommand
 from .explain_query import ExplainQueryCommand
 from .export_rows import ExportRowsQuery
@@ -68,4 +76,10 @@ __all__ = [
     "PreviewAlterTable",
     "PreviewConstraint",
     "PreviewIndex",
+    "CreateViewPreview",
+    "DropViewPreview",
+    "CreateMaterializedViewPreview",
+    "DropMaterializedViewPreview",
+    "RefreshMaterializedViewPreview",
+    "ReplaceMaterializedViewPreview",
 ]

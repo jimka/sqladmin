@@ -38,7 +38,11 @@ from .connections import (
 from .contract import ColumnMeta, TableRef
 from .errors import DomainError, NotFound, ValidationError
 from .operations import (
+    CreateMaterializedViewPreview,
+    CreateViewPreview,
     DeleteRowCommand,
+    DropMaterializedViewPreview,
+    DropViewPreview,
     ExecuteDdlCommand,
     ExplainQueryCommand,
     ExportRowsQuery,
@@ -59,6 +63,8 @@ from .operations import (
     PreviewCreateTable,
     PreviewDropTable,
     PreviewIndex,
+    RefreshMaterializedViewPreview,
+    ReplaceMaterializedViewPreview,
     RoleAttributesQuery,
     RoleMembershipsQuery,
     RolePrivilegesQuery,
@@ -777,6 +783,142 @@ async def preview_index(
     """
     async with session_pool_for(session, connection_id).acquire() as c:
         op = PreviewIndex(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+# --- View / matview DDL -------------------------------------------------------
+
+
+@app.post("/api/{connection_id}/{database}/ddl/create-view")
+async def preview_create_view(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a CREATE [OR REPLACE] VIEW statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/create-view``.
+
+    Args:
+        body: the ``CreateViewSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = CreateViewPreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/drop-view")
+async def preview_drop_view(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a DROP VIEW statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/drop-view``.
+
+    Args:
+        body: the ``DropSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = DropViewPreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/create-matview")
+async def preview_create_matview(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a CREATE MATERIALIZED VIEW statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/create-matview``.
+
+    Args:
+        body: the ``CreateMatviewSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = CreateMaterializedViewPreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/drop-matview")
+async def preview_drop_matview(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a DROP MATERIALIZED VIEW statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/drop-matview``.
+
+    Args:
+        body: the ``DropSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = DropMaterializedViewPreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/refresh-matview")
+async def preview_refresh_matview(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a REFRESH MATERIALIZED VIEW statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/refresh-matview``.
+
+    Args:
+        body: the ``RefreshMatviewSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = RefreshMaterializedViewPreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/replace-matview")
+async def preview_replace_matview(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview the DROP; CREATE pair that edits a materialized view's body.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/replace-matview``.
+
+    Args:
+        body: the ``ReplaceMatviewSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated ``;``-joined statement, for the
+        editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = ReplaceMaterializedViewPreview(c, body)
         await op.apply()
 
         return op.get_result()
