@@ -1,42 +1,112 @@
 // The table structure inspector, opened as its own Dock tab from the
-// navigator's right-click "Open structure" menu. Presents a table's structure
-// as a vertical stack of four labelled read-only grids — Columns, Indexes,
-// Constraints, and Foreign Keys — in one scrollable panel, so a reader can
-// cross-reference every facet at once (e.g. "is customer_id indexed, and what
-// does its FK reference?"). Clicking the referenced-table link in the Foreign
-// Keys grid opens that table via `onOpenReferenced`. Every grid is the existing
-// read-only Table over a MemoryStore; array fields are pre-joined to
-// comma-separated display strings because the library Table has no array cell
-// renderer.
+// navigator's right-click "Show ▸ Structure" menu. Presents a table's
+// structure as a four-section accordion — Columns, Indexes, Constraints, and
+// Foreign Keys — each with a leading glyph in its header. Only Columns opens by
+// default (the facet reached for first); the other three start collapsed and
+// expand on demand. Clicking the referenced-table link in the Foreign Keys grid
+// opens that table via `onOpenReferenced`. Every grid is the existing read-only
+// Table over a MemoryStore; array fields are pre-joined to comma-separated
+// display strings because the library Table has no array cell renderer.
+//
+// Layout follows the library's Accordion demo: the accordion is hosted in an
+// `autoScroll` VBox with `weight: 1`, runs in `fillHeight` mode, and each grid
+// declares a per-section height (SECTION_HEIGHT). So a lone/last open section
+// grows to fill a tall tab, but when the open sections together exceed the tab
+// the whole stack SCROLLS rather than clipping — the Accordion never scrolls
+// itself vertically (it shrink-to-fits by design), so the surrounding scroll
+// pane is what keeps every section reachable.
+//
+// When `actions` (table-ddl phase) is passed, each editable section carries its
+// add/alter/drop launchers as glyph-only header tools: Add is always enabled,
+// Alter/Drop enable only once the section's grid has a selected row. The grids
+// themselves stay read-only cells (rowReadOnly) either way — structure edits
+// are tool-launched dialogs, never inline cell edits (the library Table has no
+// per-row context-menu event to hang inline editing off; see the table-ddl
+// plan's "Read-only cells stay read-only" decision). Omitting `actions` gives
+// every section a plain, tool-less header.
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the panel `extends Panel`
-// directly, so the instance itself is the mountable component.
+// (the scroll host) and holds the AccordionPanel as its sole weighted child.
 
-import { Component, Panel }    from "@jimka/typescript-ui/core";
-import { Border, VBox }        from "@jimka/typescript-ui/layout";
-import { Placement }           from "@jimka/typescript-ui/primitive";
-import { Text }                from "@jimka/typescript-ui/component/input";
+// Each section's natural content height, declared on its grid — the accordion
+// demo sizes section contents this way. It gives the accordion a definite
+// preferred height (so the host VBox's autoScroll knows when the open sections
+// overflow the tab and must scroll), while `fillHeight` lets the last open
+// section grow past it to fill a tall tab.
+const SECTION_HEIGHT = 200;
+
+import { Panel }               from "@jimka/typescript-ui/core";
+import { VBox, LayoutConstraints } from "@jimka/typescript-ui/layout";
+import { AccordionPanel }      from "@jimka/typescript-ui/component/container";
+import { Button }              from "@jimka/typescript-ui/component/button";
+import { Glyph }               from "@jimka/typescript-ui/component/display";
+import { Menu }                from "@jimka/typescript-ui/overlay";
 import { Table, LinkCellRenderer } from "@jimka/typescript-ui/component/table";
 import type { CellClickEvent } from "@jimka/typescript-ui/component/table";
 import { MemoryStore, Model }  from "@jimka/typescript-ui/data";
+import { table_columns }       from "@jimka/typescript-ui/glyphs/solid/table_columns";
+import { list }                from "@jimka/typescript-ui/glyphs/solid/list";
+import { shield_halved }       from "@jimka/typescript-ui/glyphs/solid/shield_halved";
+import { link }                from "@jimka/typescript-ui/glyphs/solid/link";
+import { plus }                from "@jimka/typescript-ui/glyphs/solid/plus";
+import { pencil }              from "@jimka/typescript-ui/glyphs/solid/pencil";
+import { trash }               from "@jimka/typescript-ui/glyphs/solid/trash";
 import type {
+    AlterColumnAction,
     ColumnMeta,
+    ConstraintKind,
     ConstraintMeta,
     ForeignKeyMeta,
     IndexMeta,
     TableStructure,
 } from "../contract";
+import { buildColumnsGrid, readOnlyTable } from "./columnsGrid";
+import { glyphButton }        from "./glyphButton";
+import { CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR, PRIMARY_COLOR } from "../theme";
 
-// Fixed height each labelled section occupies in the scrolling stack. Pinned so
-// every section is co-visible at a consistent size and the whole structure
-// scrolls when the four overflow the tab (the "show everything, scroll if
-// needed" inspector model). Each grid scrolls internally past this height, so a
-// long facet is never truncated — only the section's viewport is bounded.
-const SECTION_HEIGHT = 200;
+// Section-header glyphs (Columns / Indexes / Constraints / Foreign Keys) and
+// the header tools' add/alter/drop glyphs (plus / pencil / trash).
+Glyph.register(table_columns, list, shield_halved, link, plus, pencil, trash);
 
 /**
- * The structure inspector panel for one table: a scrolling stack of the four
- * labelled read-only grids.
+ * The edit-action callbacks a table-ddl-aware caller wires into the panel's
+ * section toolbars. Optional on the constructor — omitting it keeps every
+ * section exactly as read-only as before this phase.
+ */
+export interface StructureActions {
+    onAddColumn(): void;
+    onAlterColumn(column: ColumnMeta, action: AlterColumnAction): void;
+    onDropColumn(column: ColumnMeta): void;
+    onAddConstraint(kind: ConstraintKind): void;
+    onDropConstraint(constraintName: string): void;
+    onCreateIndex(): void;
+    onDropIndex(indexName: string): void;
+}
+
+// The "Alter column" submenu's actions, in menu order.
+const ALTER_COLUMN_ACTIONS: ReadonlyArray<{ label: string; action: AlterColumnAction }> = [
+    { label: "Rename column…", action: "renameColumn" },
+    { label: "Change type…", action: "changeType" },
+    { label: "Set NOT NULL", action: "setNotNull" },
+    { label: "Drop NOT NULL", action: "dropNotNull" },
+    { label: "Set default…", action: "setDefault" },
+    { label: "Drop default", action: "dropDefault" },
+];
+
+// The "Add constraint" submenu's kinds, in menu order. Foreign key lives here
+// (not as its own Foreign Keys toolbar button) so every constraint kind —
+// including FK — has exactly one add affordance.
+const ADD_CONSTRAINT_KINDS: ReadonlyArray<{ label: string; kind: ConstraintKind }> = [
+    { label: "Primary key…", kind: "primaryKey" },
+    { label: "Unique…", kind: "unique" },
+    { label: "Check…", kind: "check" },
+    { label: "Foreign key…", kind: "foreignKey" },
+];
+
+/**
+ * The structure inspector panel for one table: a four-section accordion, one
+ * facet per section, each editable section's launchers hung as its header
+ * tools.
  */
 export class StructurePanel extends Panel {
     /**
@@ -45,69 +115,235 @@ export class StructurePanel extends Panel {
      * @param onOpenReferenced - Invoked with a foreign key's referenced schema
      *   and table when its row is selected, so the controller can open that
      *   table.
+     * @param actions - The edit-action callbacks for each section's header
+     *   tools (table-ddl phase). Omitted keeps every section header tool-less.
      */
     constructor(
         columns: ColumnMeta[],
         structure: TableStructure,
         onOpenReferenced: (refSchema: string, refTable: string) => void,
+        actions?: StructureActions,
     ) {
-        // The four sections are built as locals — `this` is unavailable until
-        // super() returns, and none of them need it.
-        const s1 = section("Columns", buildColumnsGrid(columns));
-        const s2 = section("Indexes", buildIndexesGrid(structure.indexes));
-        const s3 = section("Constraints", buildConstraintsGrid(structure.constraints));
-        const s4 = section("Foreign Keys", buildForeignKeysGrid(structure.foreignKeys, onOpenReferenced));
+        // The scroll host: an autoScroll VBox holding the accordion at weight 1,
+        // so the accordion fills the tab when the sections fit and the whole
+        // stack scrolls when they overflow — the Accordion never scrolls itself
+        // (it shrink-to-fits by design; see the class doc). Toggling a section
+        // now re-lays-out this host on its own: the Accordion signals its
+        // intrinsic-size change up to the scroll host (typescript-ui
+        // Component.notifyIntrinsicSizeChanged), so no onSectionToggle relay is
+        // needed here.
+        super({ layoutManager: new VBox({ stretching: true }), autoScroll: "auto" });
 
-        super({
-            layoutManager: new VBox({ stretching: true }),
-            autoScroll   : "auto",
-            components   : [s1, s2, s3, s4],
+        const columnsGrid     = buildColumnsGrid(columns).grid;
+        const indexesGrid     = buildIndexesGrid(structure.indexes);
+        const constraintsGrid = buildConstraintsGrid(structure.constraints);
+        const foreignKeysGrid = buildForeignKeysGrid(structure.foreignKeys, onOpenReferenced);
+
+        // Declare each section's natural height (see SECTION_HEIGHT) so the
+        // accordion has a definite preferred size for the scroll host — the
+        // accordion demo sizes section contents this way.
+        for (const grid of [columnsGrid, indexesGrid, constraintsGrid, foreignKeysGrid]) {
+            grid.setPreferredSize(0, SECTION_HEIGHT);
+        }
+
+        // Only Columns opens by default — the facet a reader reaches for first;
+        // the other three start collapsed to their header row and expand on demand.
+        const accordion: AccordionPanel = new AccordionPanel({
+            sections: [
+                { label: "Columns",      component: columnsGrid,     glyph: "table-columns", initiallyOpen: true,  tools: actions && buildColumnsTools(columns, columnsGrid, actions) },
+                { label: "Indexes",      component: indexesGrid,     glyph: "list",          initiallyOpen: false, tools: actions && buildIndexesTools(indexesGrid, actions) },
+                { label: "Constraints",  component: constraintsGrid, glyph: "shield-halved", initiallyOpen: false, tools: actions && buildConstraintsTools(constraintsGrid, actions) },
+                { label: "Foreign Keys", component: foreignKeysGrid, glyph: "link",          initiallyOpen: false, tools: actions && buildForeignKeysTools(foreignKeysGrid, actions) },
+            ],
         });
+
+        // fillHeight: the last open section grows to fill leftover height when
+        // the sections underflow the tab (IDE/dock-panel style). Tools always
+        // visible so the glyph launchers show without hovering the header.
+        accordion.getAccordion().setFillHeight(true).setCompact(true).setToolsVisibility("always");
+
+        const constraints = new LayoutConstraints();
+        constraints.weight = 1;
+        this.addComponent(accordion, constraints);
     }
 }
 
 /**
- * Wrap one facet's grid under a caption in a fixed-height section, so an empty
- * facet still shows its labelled (empty) grid rather than vanishing — the
- * structure's shape stays legible at a glance.
+ * Enable `buttons` only while `grid` has a selected row, and set their
+ * initial (disabled) state immediately — every section opens with no
+ * selection.
  *
- * @param caption - The section heading, e.g. "Foreign Keys".
- * @param grid - The facet's read-only grid.
- *
- * @returns A bordered panel with the caption pinned north above the grid.
+ * @param grid - The section's grid to watch.
+ * @param buttons - The toolbar buttons to gate (Alter/Drop; Add stays
+ *   always-enabled and is never passed here).
  */
-function section(caption: string, grid: Component): Panel {
-    return Panel({
-        layoutManager: new Border(),
-        preferredSize: { width: 0, height: SECTION_HEIGHT },
-        minSize      : { width: 0, height: SECTION_HEIGHT },
-        components   : [
-            { component: new Text(caption), constraints: { placement: Placement.NORTH } },
-            { component: grid,              constraints: { placement: Placement.CENTER } },
-        ],
-    });
+function gateOnSelection(grid: Table, buttons: Button[]): void {
+    const sync = (): void => {
+        const hasSelection = grid.getSelectedRecord() !== null;
+
+        for (const button of buttons) {
+            button.setEnabled(hasSelection);
+        }
+    };
+
+    grid.on("selection", sync);
+    sync();
 }
 
-/** The read-only Columns grid — the original StructurePanel content. */
-function buildColumnsGrid(columns: ColumnMeta[]): Component {
-    const model = new Model({
-        fields: [
-            { name: "name", type: "string", description: "Column", order: 1 },
-            { name: "dataType", type: "string", description: "Type", order: 2 },
-            { name: "nullable", type: "boolean", description: "Nullable", order: 3 },
-            { name: "isPrimaryKey", type: "boolean", description: "PK", order: 4 },
-            { name: "isGenerated", type: "boolean", description: "Generated", order: 5 },
-            { name: "wireType", type: "string", description: "Wire type", order: 6 },
-        ],
-    });
-
-    const store = new MemoryStore({ model, data: columns, autoLoad: true });
-
-    return readOnlyTable(store);
+/**
+ * Look up a column's full metadata by name — the grid's selection only
+ * carries the row's display fields, so the toolbar re-resolves the selected
+ * name against the table's own introspected columns to hand the launcher a
+ * complete `ColumnMeta`.
+ *
+ * @param columns - The table's introspected columns.
+ * @param name - The selected row's column name.
+ *
+ * @returns The matching column, or undefined if it somehow isn't found.
+ */
+function findColumn(columns: ColumnMeta[], name: string): ColumnMeta | undefined {
+    return columns.find(c => c.name === name);
 }
 
-/** The read-only Indexes grid (name / definition / unique / primary). */
-function buildIndexesGrid(indexes: IndexMeta[]): Component {
+/**
+ * Build the Columns section's header tools: Add (always enabled), Alter (a
+ * submenu of {@link ALTER_COLUMN_ACTIONS}), and Drop (both gated on a
+ * selected row).
+ *
+ * @param columns - The table's introspected columns, to resolve the
+ *   selected row back to a full `ColumnMeta`.
+ * @param grid - The Columns grid to read the selection from.
+ * @param actions - The launcher callbacks to invoke.
+ *
+ * @returns The wired header tool buttons, in display order.
+ */
+function buildColumnsTools(columns: ColumnMeta[], grid: Table, actions: StructureActions): Button[] {
+    const alterMenu = Menu();
+
+    const addButton = glyphButton("plus", CONSTRUCTIVE_COLOR, "Add column", () => actions.onAddColumn());
+    const alterButton = glyphButton("pencil", PRIMARY_COLOR, "Alter column", event => {
+        const column = selectedColumn(columns, grid);
+
+        if (!column) {
+            return;
+        }
+
+        alterMenu.show(event.clientX, event.clientY, ALTER_COLUMN_ACTIONS.map(a => ({
+            text: a.label,
+            action: () => actions.onAlterColumn(column, a.action),
+        })));
+    });
+    const dropButton = glyphButton("trash", DESTRUCTIVE_COLOR, "Drop column", () => {
+        const column = selectedColumn(columns, grid);
+
+        if (column) {
+            actions.onDropColumn(column);
+        }
+    });
+
+    gateOnSelection(grid, [alterButton, dropButton]);
+
+    return [addButton, alterButton, dropButton];
+}
+
+/**
+ * Resolve the Columns grid's currently selected row to its full `ColumnMeta`.
+ *
+ * @param columns - The table's introspected columns.
+ * @param grid - The Columns grid.
+ *
+ * @returns The selected column, or undefined when nothing is selected.
+ */
+function selectedColumn(columns: ColumnMeta[], grid: Table): ColumnMeta | undefined {
+    const record = grid.getSelectedRecord();
+
+    return record ? findColumn(columns, String(record.get("name"))) : undefined;
+}
+
+/**
+ * Build the Indexes section's header tools: Create (always enabled) and Drop
+ * (gated on a selected row).
+ *
+ * @param grid - The Indexes grid to read the selection from.
+ * @param actions - The launcher callbacks to invoke.
+ *
+ * @returns The wired header tool buttons, in display order.
+ */
+function buildIndexesTools(grid: Table, actions: StructureActions): Button[] {
+    const createButton = glyphButton("plus", CONSTRUCTIVE_COLOR, "Create index", () => actions.onCreateIndex());
+    const dropButton = glyphButton("trash", DESTRUCTIVE_COLOR, "Drop index", () => {
+        const record = grid.getSelectedRecord();
+
+        if (record) {
+            actions.onDropIndex(String(record.get("name")));
+        }
+    });
+
+    gateOnSelection(grid, [dropButton]);
+
+    return [createButton, dropButton];
+}
+
+/**
+ * Build the Constraints section's header tools: Add (a submenu of
+ * {@link ADD_CONSTRAINT_KINDS}, always enabled) and Drop (gated on a
+ * selected row).
+ *
+ * @param grid - The Constraints grid to read the selection from.
+ * @param actions - The launcher callbacks to invoke.
+ *
+ * @returns The wired header tool buttons, in display order.
+ */
+function buildConstraintsTools(grid: Table, actions: StructureActions): Button[] {
+    const addMenu = Menu();
+
+    const addButton = glyphButton("plus", CONSTRUCTIVE_COLOR, "Add constraint", event => {
+        addMenu.show(event.clientX, event.clientY, ADD_CONSTRAINT_KINDS.map(k => ({
+            text: k.label,
+            action: () => actions.onAddConstraint(k.kind),
+        })));
+    });
+    const dropButton = glyphButton("trash", DESTRUCTIVE_COLOR, "Drop constraint", () => {
+        const record = grid.getSelectedRecord();
+
+        if (record) {
+            actions.onDropConstraint(String(record.get("name")));
+        }
+    });
+
+    gateOnSelection(grid, [dropButton]);
+
+    return [addButton, dropButton];
+}
+
+/**
+ * Build the Foreign Keys section's header tools: Drop only (gated on a
+ * selected row) — adding a foreign key is offered from the Constraints
+ * section's Add submenu instead, so every constraint kind has exactly one add
+ * affordance.
+ *
+ * @param grid - The Foreign Keys grid to read the selection from.
+ * @param actions - The launcher callbacks to invoke (foreign keys drop
+ *   through the same `onDropConstraint` as any other named constraint).
+ *
+ * @returns The wired header tool button.
+ */
+function buildForeignKeysTools(grid: Table, actions: StructureActions): Button[] {
+    const dropButton = glyphButton("trash", DESTRUCTIVE_COLOR, "Drop constraint", () => {
+        const record = grid.getSelectedRecord();
+
+        if (record) {
+            actions.onDropConstraint(String(record.get("name")));
+        }
+    });
+
+    gateOnSelection(grid, [dropButton]);
+
+    return [dropButton];
+}
+
+/** The Indexes grid (name / definition / unique / primary). */
+function buildIndexesGrid(indexes: IndexMeta[]): Table {
     const model = new Model({
         fields: [
             { name: "name", type: "string", description: "Name", order: 1 },
@@ -122,8 +358,8 @@ function buildIndexesGrid(indexes: IndexMeta[]): Component {
     return readOnlyTable(store);
 }
 
-/** The read-only Constraints grid; the constrained columns are comma-joined. */
-function buildConstraintsGrid(constraints: ConstraintMeta[]): Component {
+/** The Constraints grid; the constrained columns are comma-joined. */
+function buildConstraintsGrid(constraints: ConstraintMeta[]): Table {
     const model = new Model({
         fields: [
             { name: "name", type: "string", description: "Name", order: 1 },
@@ -146,8 +382,8 @@ function buildConstraintsGrid(constraints: ConstraintMeta[]): Component {
 }
 
 /**
- * The read-only Foreign Keys grid, wired so clicking the referenced-table link
- * opens that table. The referenced-table cell renders as a link via
+ * The Foreign Keys grid, wired so clicking the referenced-table link opens
+ * that table. The referenced-table cell renders as a link via
  * `ColumnConfig.renderer`; the grid's `"cellclick"` event carries the clicked
  * field and record, so the handler acts only on the `refTable` column and reads
  * the referenced schema/table straight off the clicked record.
@@ -156,12 +392,12 @@ function buildConstraintsGrid(constraints: ConstraintMeta[]): Component {
  * @param onOpenReferenced - Invoked with the clicked FK's referenced schema and
  *   table.
  *
- * @returns The wired read-only grid.
+ * @returns The wired grid.
  */
 function buildForeignKeysGrid(
     foreignKeys: ForeignKeyMeta[],
     onOpenReferenced: (refSchema: string, refTable: string) => void,
-): Component {
+): Table {
     const model = new Model({
         fields: [
             { name: "name", type: "string", description: "Name", order: 1 },
@@ -187,7 +423,7 @@ function buildForeignKeysGrid(
     const store = new MemoryStore({ model, data: rows, autoLoad: true });
     // Columns listed explicitly to keep display order while giving refTable a
     // link renderer; the rest stay read-only text. rowReadOnly locks every cell
-    // (structure edits need DDL the backend does not have yet).
+    // (structure edits are toolbar-launched dialogs, not inline cell edits).
     const grid  = Table(store, {
         columns: [
             { field: "name" },
@@ -213,16 +449,4 @@ function buildForeignKeysGrid(
     });
 
     return grid;
-}
-
-/**
- * Build a read-only grid over a store. Editing structure metadata would need
- * DDL the backend does not have yet, so every auto-appended column is locked.
- *
- * @param store - The facet's in-memory store.
- *
- * @returns A read-only Table over the store.
- */
-function readOnlyTable(store: MemoryStore): Table {
-    return Table(store, { columns: [], rowReadOnly: () => true });
 }

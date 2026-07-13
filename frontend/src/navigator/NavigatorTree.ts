@@ -13,10 +13,17 @@ import { Tree, IconLabelTreeNodeRenderer }      from "@jimka/typescript-ui/compo
 import type { TreeNode }                        from "@jimka/typescript-ui/component/tree";
 import { Menu }                                 from "@jimka/typescript-ui/overlay";
 import type { MenuItemConfig }                  from "@jimka/typescript-ui/component/container";
+import { Glyph }                                from "@jimka/typescript-ui/component/display";
+import { plus }                                 from "@jimka/typescript-ui/glyphs/solid/plus";
+import { pencil }                               from "@jimka/typescript-ui/glyphs/solid/pencil";
+import { trash }                                from "@jimka/typescript-ui/glyphs/solid/trash";
 import type { DbObjectKind, DbObjectRef }       from "../contract";
 import { getObjects, getSchemas }               from "../data/api";
 import { KIND_GLYPH }                           from "./objectGlyphs";
 import type { SqlAdminController }              from "../SqlAdminController";
+
+// The table-ddl launcher items' glyphs (create/rename/drop table).
+Glyph.register(plus, pencil, trash);
 
 /** One object leaf as returned by the objects endpoint. */
 interface DbObject {
@@ -120,6 +127,11 @@ export class NavigatorTree extends Tree implements ExplorerTree {
             // guard below (a schema is not a relation).
             if (ref && ref.kind === "schema") {
                 this.contextMenu.show(event.clientX, event.clientY, [
+                    // The structural launcher (table-ddl phase): opens the CREATE TABLE
+                    // dialog for this schema. Listed first, above a separator, since it's
+                    // a mutating action distinct from the read-only diagram views below.
+                    { text: "Create table…", glyph: "plus", action: () => this.controller.createTable(ref) },
+                    { separator: true },
                     { text: "Show schema diagram", glyph: "diagram-project", action: () => void this.controller.openSchemaDiagram(ref, node) },
                     { text: "Show dependency graph", glyph: "diagram-project", action: () => void this.controller.openSchemaDependencyGraph(ref, node) },
                     { text: "Show inheritance graph", glyph: "diagram-project", action: () => void this.controller.openSchemaInheritanceGraph(ref, node) },
@@ -141,28 +153,41 @@ export class NavigatorTree extends Tree implements ExplorerTree {
                 { text: ref.kind === "table" ? "Open data" : "Show data", glyph: "table", action: () => void this.controller.openTable(ref, node) },
                 { text: "Open as query", glyph: "terminal", action: () => this.controller.openQueryFor(ref) },
                 { separator: true },
-                { text: "Show structure", glyph: "table-columns", action: () => void this.controller.openStructure(ref, node) },
-                // The relation-rooted ER diagram is table-only: PostgreSQL foreign keys
-                // are table-only, so a view/matview root has no FK edges and would render
-                // as a lone, edgeless node. Views/matviews are covered by "Show
-                // dependencies" below instead.
-                ...(ref.kind === "table"
-                    ? [{ text: "Show relations", glyph: "diagram-project", action: () => void this.controller.openRelationDiagram(ref, node) } as MenuItemConfig]
-                    : []),
-                // The relation-rooted dependency graph: this relation's connected
-                // dependency component (any relation kind can depend or be depended on).
-                { text: "Show dependencies", glyph: "diagram-project", action: () => void this.controller.openRelationDependencyGraph(ref, node) },
             ];
 
-            // Only a (materialized) view has a definition; a table has none.
-            if (ref.kind === "view" || ref.kind === "materializedView") {
+            if (ref.kind === "table") {
+                // Every read-only "Show …" view for a table grouped into one submenu,
+                // the "Show" prefix stripped and the items alphabetized — mirrors the
+                // schema context menu's Show submenu. Structure is the Columns +
+                // Indexes + Constraints + Foreign Keys inspector; Relations is the
+                // relation-rooted ER diagram (table-only — a view/matview root has no
+                // FK edges and would render as a lone node); Dependencies is the
+                // connected dependency component; Inheritance is the pg_inherits
+                // partitioning/inheritance graph (also table-only).
+                items.push({ text: "Show", glyph: "diagram-project", submenu: { label: "Show", items: [
+                    { text: "Dependencies", glyph: "diagram-project", action: () => void this.controller.openRelationDependencyGraph(ref, node) },
+                    { text: "Inheritance",  glyph: "diagram-project", action: () => void this.controller.openRelationInheritanceGraph(ref, node) },
+                    { text: "Relations",    glyph: "diagram-project", action: () => void this.controller.openRelationDiagram(ref, node) },
+                    { text: "Structure",    glyph: "table-columns",   action: () => void this.controller.openStructure(ref, node) },
+                ] } });
+            } else {
+                // A view/matview has fewer facets — no structure/relations/inheritance
+                // (its only columns facet lives in the editable definition tab) — so
+                // its two Show items stay flat rather than in a one-or-two-item
+                // submenu: its connected dependency component and, since only a
+                // (materialized) view has one, its editable SQL definition.
+                items.push({ text: "Show dependencies", glyph: "diagram-project", action: () => void this.controller.openRelationDependencyGraph(ref, node) });
                 items.push({ text: "Show definition", glyph: "file-code", action: () => void this.controller.openDefinition(ref, node) });
             }
 
-            // Only a table participates in inheritance/partitioning (pg_inherits is
-            // table-only); views/matviews don't offer this item.
+            // Structural launchers (table-ddl phase): rename/drop this table. Only a
+            // table offers them — views/matviews have no table-DDL counterpart here
+            // (that's the view-matview-ddl phase). Grouped in their own separated
+            // section since they mutate, unlike everything above.
             if (ref.kind === "table") {
-                items.push({ text: "Show inheritance", glyph: "diagram-project", action: () => void this.controller.openRelationInheritanceGraph(ref, node) });
+                items.push({ separator: true });
+                items.push({ text: "Rename", glyph: "pencil", action: () => this.controller.renameTable(ref, node) });
+                items.push({ text: "Drop", glyph: "trash", action: () => this.controller.dropTable(ref, node) });
             }
 
             // Export streams the full relation server-side (not the loaded page), so a

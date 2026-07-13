@@ -88,6 +88,90 @@ export interface DdlPreview {
     sql: string;
 }
 
+/** One column definition collected by a create-table/add-column form. */
+export interface ColumnSpec {
+    name: string;
+    type: string;
+    nullable: boolean;
+    default: string | null;
+    primaryKey: boolean;
+}
+
+/** The spec a CREATE TABLE preview/execute call sends. */
+export interface CreateTableSpec {
+    schema: string;
+    name: string;
+    columns: ColumnSpec[];
+    ifNotExists?: boolean;
+}
+
+/** The spec a DROP TABLE preview/execute call sends. */
+export interface DropTableSpec {
+    schema: string;
+    name: string;
+    cascade?: boolean;
+    ifExists?: boolean;
+}
+
+/** The ALTER-column actions the StructurePanel's "Alter column" menu offers. */
+export type AlterColumnAction =
+    | "renameColumn"
+    | "changeType"
+    | "setNotNull"
+    | "dropNotNull"
+    | "setDefault"
+    | "dropDefault";
+
+/**
+ * An action-tagged ALTER TABLE spec; which of the optional fields are set
+ * depends on `action` (see the table-ddl plan's PreviewAlterTable dispatch).
+ */
+export interface AlterTableSpec {
+    schema: string;
+    name: string;
+    action: AlterColumnAction | "addColumn" | "dropColumn" | "renameTable";
+    column?: string;
+    newName?: string;
+    newType?: string;
+    using?: string;
+    default?: string;
+    cascade?: boolean;
+    columnDef?: ColumnSpec;
+}
+
+/** The constraint kinds the "Add constraint" launcher offers. */
+export type ConstraintKind = "primaryKey" | "unique" | "check" | "foreignKey";
+
+/** An action-tagged constraint add/drop spec; fields present depend on `action`. */
+export interface ConstraintSpec {
+    schema: string;
+    name: string;
+    action: "addPrimaryKey" | "addUnique" | "addCheck" | "addForeignKey" | "drop";
+    columns?: string[];
+    expression?: string;
+    constraintName?: string;
+    refSchema?: string;
+    refTable?: string;
+    refColumns?: string[];
+    onUpdate?: string;
+    onDelete?: string;
+    cascade?: boolean;
+}
+
+/** An action-tagged index create/drop spec; fields present depend on `action`. */
+export interface IndexSpec {
+    schema: string;
+    action: "create" | "drop";
+    table?: string;
+    name?: string;
+    columns?: string[];
+    unique?: boolean;
+    method?: string;
+    indexName?: string;
+    cascade?: boolean;
+    ifExists?: boolean;
+}
+
 /** EXPLAIN output format. TEXT is the first cut; JSON is the follow-on tree source. */
 export type ExplainFormat = "text" | "json";
 

@@ -16,10 +16,11 @@ import { key }                                                                  
 import { diagram_project }                                                                                                                                                                         from "@jimka/typescript-ui/glyphs/solid/diagram_project";
 import { file_lines }                                                                                                                                                                              from "@jimka/typescript-ui/glyphs/solid/file_lines";
 import { user }                                                                                                                                                                                    from "@jimka/typescript-ui/glyphs/solid/user";
-import type { Tree, TreeNode }                                                                                                                                                                     from "@jimka/typescript-ui/component/tree";
+import type { TreeNode }                                                                                                                                                                           from "@jimka/typescript-ui/component/tree";
+import type { ExplorerTree }                                                                                                                                                                       from "./navigator/NavigatorTree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                                                                                                                                     from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TablePrivileges, TableStructure }                                                                  from "./contract";
-import { getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl } from "./data/api";
+import type { AlterColumnAction, ColumnMeta, ConstraintKind, DbObjectRef, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TablePrivileges, TableStructure }                              from "./contract";
+import { executeDdl, getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getViewDefinition, getStructure, previewAlterTable, previewConstraint, previewCreateTable, previewDropTable, previewIndex, runExplain, runQuery, tableExportUrl } from "./data/api";
 import { exportQueryResult }                                                                                                                                                                       from "./dock/exportQueryResult";
 import { exportExplainPlan }                                                                                                                                                                       from "./dock/exportExplainResult";
 import type { ActiveExport }                                                                                                                                                                       from "./data/explain";
@@ -35,6 +36,15 @@ import { buildStore }                                                           
 import { TableWorkPanel }                                                                                                                                                                          from "./dock/TableWorkPanel";
 import { ViewWorkPanel }                                                                                                                                                                           from "./dock/ViewWorkPanel";
 import { StructurePanel }                                                                                                                                                                          from "./dock/StructurePanel";
+import type { StructureActions }                                                                                                                                                                  from "./dock/StructurePanel";
+import { openSqlPreviewDialog }                                                                                                                                                                    from "./dock/SqlPreviewDialog";
+import { CreateTableForm }                                                                                                                                                                         from "./dock/CreateTableForm";
+import { RenameTableForm }                                                                                                                                                                         from "./dock/RenameTableForm";
+import { ColumnForm }                                                                                                                                                                              from "./dock/ColumnForm";
+import { AlterColumnForm }                                                                                                                                                                         from "./dock/AlterColumnForm";
+import { ConstraintForm }                                                                                                                                                                          from "./dock/ConstraintForm";
+import { IndexForm }                                                                                                                                                                               from "./dock/IndexForm";
+import { ConfirmCascadeForm }                                                                                                                                                                      from "./dock/ConfirmCascadeForm";
 import { DefinitionPanel }                                                                                                                                                                         from "./dock/DefinitionPanel";
 import { DocumentationPanel }                                                                                                                                                                      from "./dock/DocumentationPanel";
 import { QueryPanel }                                                                                                                                                                              from "./dock/QueryPanel";
@@ -137,7 +147,7 @@ export class SqlAdminController {
     // dispose, so the controller owns invoking it (see the "close" handler
     // below).
     private readonly _panelDisposers: Map<string, () => void> = new Map();
-    private _navigator            : Tree | null = null;
+    private _navigator            : ExplorerTree | null = null;
 
     // The per-connection localStorage stores backing the Queries view, the start
     // page, and the panel's Ctrl+↑/↓ recall.
@@ -256,8 +266,11 @@ export class SqlAdminController {
         return this._database;
     }
 
-    /** Register the navigator tree so the focused tab can drive its selection. */
-    setNavigator(tree: Tree): void {
+    /**
+     * Register the navigator tree so the focused tab can drive its
+     * selection and table-DDL launchers can trigger its top-level `refresh`.
+     */
+    setNavigator(tree: ExplorerTree): void {
         this._navigator = tree;
     }
 
@@ -407,9 +420,321 @@ export class SqlAdminController {
                     schema      : refSchema,
                     name        : refTable,
                     kind        : "table",
-                })),
+                }), this.structureActionsFor(ref)),
         });
         this.syncToPanel(id);
+    }
+
+    /**
+     * Build the StructureActions the structure tab's section toolbars call
+     * into — one closure per action, each fixed to this tab's own table ref.
+     * A table (not a view/matview) is required for any of these to ever be
+     * invoked (the navigator only offers table-DDL launchers on a table
+     * node), but the type accepts any relation ref uniformly with the rest
+     * of the panel.
+     *
+     * @param ref - The structure tab's own table.
+     */
+    private structureActionsFor(ref: DbObjectRef): StructureActions {
+        return {
+            onAddColumn:      () => this.addColumn(ref),
+            onAlterColumn:    (column, action) => this.alterColumn(ref, column, action),
+            onDropColumn:     column => this.dropColumn(ref, column),
+            onAddConstraint:  kind => void this.addConstraint(ref, kind),
+            onDropConstraint: constraintName => this.dropConstraint(ref, constraintName),
+            onCreateIndex:    () => this.createIndex(ref),
+            onDropIndex:      indexName => this.dropIndex(ref, indexName),
+        };
+    }
+
+    /**
+     * Open the CREATE TABLE dialog for a schema (the navigator's schema
+     * context-menu launcher). Success refreshes the navigator, since a new
+     * table changes the schema's object list.
+     *
+     * @param ref - The target schema (kind "schema"; database + schema set).
+     */
+    createTable(ref: DbObjectRef): void {
+        const form = new CreateTableForm(ref.schema!);
+
+        openSqlPreviewDialog({
+            title:       "Create table",
+            form,
+            generateSql: async () => (await previewCreateTable(ref, form.readSpec())).sql,
+            execute:     sql => executeDdl(this._connectionId, sql),
+            onSuccess:   () => this._navigator?.refresh?.(),
+            onError:     msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the DROP TABLE dialog for a table (the navigator's table
+     * context-menu launcher). Success refreshes the navigator and closes any
+     * open data/structure/definition tabs for the now-gone table.
+     *
+     * @param ref - The table to drop.
+     * @param _node - The table's navigator node; accepted for call-site
+     *   parity with the other table launchers but unused — the tabs closed
+     *   on success are looked up by panel id, not by node.
+     */
+    dropTable(ref: DbObjectRef, _node?: TreeNode): void {
+        const form = new ConfirmCascadeForm(`Drop table "${ref.schema}"."${ref.name}"?`);
+
+        openSqlPreviewDialog({
+            title:       "Drop table",
+            form,
+            generateSql: async () =>
+                (await previewDropTable(ref, { schema: ref.schema!, name: ref.name!, ...form.readSpec() })).sql,
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => {
+                this._navigator?.refresh?.();
+                this.dock.removePanel(this.panelId(ref));
+                this.dock.removePanel(this.structurePanelId(ref));
+            },
+            onError: msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the RENAME TABLE dialog for a table (the navigator's table
+     * context-menu launcher). Success refreshes the navigator (the object
+     * list's display name changed) and closes any open data/structure tabs
+     * for the table's old identity, since they are keyed by name.
+     *
+     * @param ref - The table to rename.
+     * @param _node - The table's navigator node; accepted for call-site
+     *   parity with the other table launchers but unused (see {@link dropTable}).
+     */
+    renameTable(ref: DbObjectRef, _node?: TreeNode): void {
+        const form = new RenameTableForm(ref.schema!, ref.name!);
+
+        openSqlPreviewDialog({
+            title:       "Rename table",
+            form,
+            generateSql: async () => (await previewAlterTable(ref, form.readSpec())).sql,
+            execute:     sql => executeDdl(this._connectionId, sql),
+            onSuccess:   () => {
+                this._navigator?.refresh?.();
+                this.dock.removePanel(this.panelId(ref));
+                this.dock.removePanel(this.structurePanelId(ref));
+            },
+            onError: msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the ADD COLUMN dialog for a table (the Columns section toolbar).
+     * Success rebuilds the structure tab and closes the data tab (its Model
+     * is now stale — see the table-ddl plan's "Stale open data grid" note).
+     *
+     * @param ref - The table to add a column to.
+     */
+    addColumn(ref: DbObjectRef): void {
+        const form = new ColumnForm();
+
+        openSqlPreviewDialog({
+            title:       "Add column",
+            form,
+            generateSql: async () =>
+                (await previewAlterTable(ref, { schema: ref.schema!, name: ref.name!, action: "addColumn", columnDef: form.readColumn() })).sql,
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => this.onColumnsChanged(ref),
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the ALTER COLUMN dialog for one action on a column (the Columns
+     * section toolbar's "Alter column" submenu). A rename or type change
+     * also closes the data tab (its Model's column set/shape is now stale);
+     * the toggle-only actions (NOT NULL, default) don't change the column
+     * set, so only the structure tab rebuilds.
+     *
+     * @param ref - The table the column belongs to.
+     * @param column - The column being altered.
+     * @param action - Which ALTER action to run.
+     */
+    alterColumn(ref: DbObjectRef, column: ColumnMeta, action: AlterColumnAction): void {
+        const form = new AlterColumnForm(ref.schema!, ref.name!, column, action);
+        const columnSetChanges = action === "renameColumn" || action === "changeType";
+
+        openSqlPreviewDialog({
+            title:       "Alter column",
+            form,
+            generateSql: async () => (await previewAlterTable(ref, form.readSpec())).sql,
+            execute:     sql => executeDdl(this._connectionId, sql),
+            onSuccess:   () => columnSetChanges ? this.onColumnsChanged(ref) : this.refreshStructure(ref),
+            onError:     msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the DROP COLUMN dialog for a column (the Columns section
+     * toolbar). Success rebuilds the structure tab and closes the data tab.
+     *
+     * @param ref - The table the column belongs to.
+     * @param column - The column to drop.
+     */
+    dropColumn(ref: DbObjectRef, column: ColumnMeta): void {
+        const form = new ConfirmCascadeForm(`Drop column "${column.name}" from "${ref.schema}"."${ref.name}"?`);
+
+        openSqlPreviewDialog({
+            title:       "Drop column",
+            form,
+            generateSql: async () => (await previewAlterTable(ref, {
+                schema: ref.schema!, name: ref.name!, action: "dropColumn", column: column.name, ...form.readSpec(),
+            })).sql,
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => this.onColumnsChanged(ref),
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the "Add constraint" dialog for one kind (the Constraints section
+     * toolbar). A foreign key's form needs the connection's schema list for
+     * its referenced-schema combo, fetched up front; the other kinds need no
+     * extra fetch. Success rebuilds the structure tab only — a constraint
+     * doesn't change the data tab's column set.
+     *
+     * @param ref - The table to constrain.
+     * @param kind - Which constraint kind to add.
+     */
+    async addConstraint(ref: DbObjectRef, kind: ConstraintKind): Promise<void> {
+        const columns = this.structureColumns(ref).map(c => c.name);
+        let schemas: string[] = [];
+
+        if (kind === "foreignKey") {
+            try {
+                schemas = (await getSchemas(ref.connectionId, ref.database!)).map(s => s.name);
+            } catch (err) {
+                this.notifyError(err, ref);
+
+                return;
+            }
+        }
+
+        const form = new ConstraintForm(ref.schema!, ref.name!, kind, columns, schemas);
+
+        openSqlPreviewDialog({
+            title:       "Add constraint",
+            form,
+            generateSql: async () => (await previewConstraint(ref, form.readSpec())).sql,
+            execute:     sql => executeDdl(this._connectionId, sql),
+            onSuccess:   () => this.refreshStructure(ref),
+            onError:     msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the DROP CONSTRAINT dialog for a named constraint — primary key,
+     * unique, check, or foreign key alike, dropped uniformly by name (the
+     * Constraints and Foreign Keys section toolbars).
+     *
+     * @param ref - The table the constraint belongs to.
+     * @param constraintName - The constraint to drop.
+     */
+    dropConstraint(ref: DbObjectRef, constraintName: string): void {
+        const form = new ConfirmCascadeForm(`Drop constraint "${constraintName}" on "${ref.schema}"."${ref.name}"?`);
+
+        openSqlPreviewDialog({
+            title:       "Drop constraint",
+            form,
+            generateSql: async () => (await previewConstraint(ref, {
+                schema: ref.schema!, name: ref.name!, action: "drop", constraintName, ...form.readSpec(),
+            })).sql,
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => this.refreshStructure(ref),
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the CREATE INDEX dialog for a table (the Indexes section
+     * toolbar). Success rebuilds the structure tab only.
+     *
+     * @param ref - The table to index.
+     */
+    createIndex(ref: DbObjectRef): void {
+        const columns = this.structureColumns(ref).map(c => c.name);
+        const form    = new IndexForm(ref.schema!, ref.name!, columns);
+
+        openSqlPreviewDialog({
+            title:       "Create index",
+            form,
+            generateSql: async () => (await previewIndex(ref, form.readSpec())).sql,
+            execute:     sql => executeDdl(this._connectionId, sql),
+            onSuccess:   () => this.refreshStructure(ref),
+            onError:     msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the DROP INDEX dialog for a named index (the Indexes section
+     * toolbar). Success rebuilds the structure tab only.
+     *
+     * @param ref - The table the index belongs to.
+     * @param indexName - The index to drop.
+     */
+    dropIndex(ref: DbObjectRef, indexName: string): void {
+        const form = new ConfirmCascadeForm(`Drop index "${indexName}"?`);
+
+        openSqlPreviewDialog({
+            title:       "Drop index",
+            form,
+            generateSql: async () => (await previewIndex(ref, {
+                schema: ref.schema!, action: "drop", indexName, ...form.readSpec(),
+            })).sql,
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => this.refreshStructure(ref),
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * The structure tab's own columns for a table, from the open-panel
+     * registry (populated by `openStructure`) — the source the Constraints/
+     * Indexes forms build their column checklists from. Empty when the
+     * structure tab isn't open (a toolbar action can't run without it, so
+     * this is defensive, not an expected path).
+     *
+     * @param ref - The table whose structure tab to read.
+     */
+    private structureColumns(ref: DbObjectRef): ColumnMeta[] {
+        return this._openPanels.get(this.structurePanelId(ref))?.columns ?? [];
+    }
+
+    /**
+     * Rebuild the structure tab (remove then reopen) after a structure-only
+     * change (a constraint or index add/drop, or a NOT-NULL/default toggle)
+     * — the data tab's column set is unaffected, so it's left open. A no-op
+     * if the structure tab isn't open or was opened without a navigator node
+     * (should not happen in practice — the navigator always supplies one).
+     *
+     * @param ref - The table whose structure tab to rebuild.
+     */
+    private refreshStructure(ref: DbObjectRef): void {
+        const id   = this.structurePanelId(ref);
+        const node = this._openPanels.get(id)?.node;
+
+        this.dock.removePanel(id);
+
+        if (node) {
+            void this.openStructure(ref, node);
+        }
+    }
+
+    /**
+     * Rebuild the structure tab and close the data tab after a change that
+     * alters the table's column set (add/drop/rename a column, or change a
+     * column's type) — the data tab's Model is now stale (see the table-ddl
+     * plan's "Stale open data grid" note); the user reopens it fresh.
+     *
+     * @param ref - The table whose column set changed.
+     */
+    private onColumnsChanged(ref: DbObjectRef): void {
+        this.refreshStructure(ref);
+        this.dock.removePanel(this.panelId(ref));
     }
 
     /**
