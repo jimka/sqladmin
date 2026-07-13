@@ -1,7 +1,8 @@
 // The lazy object navigator: a Tree rooted at the logged-in database's schemas,
-// whose levels (schemas -> Tables/Views/Materialized Views category groups ->
-// object leaves) are fetched on first expansion via the introspection api. The
-// app connects to one database per session, so there is no database level. Each
+// whose levels (schemas -> Tables/Views/Materialized Views/Sequences/Functions/
+// Types category groups -> object leaves) are fetched on first expansion via
+// the introspection api. The app connects to one database per session, so
+// there is no database level. Each
 // object leaf carries its
 // DbObjectRef on node.data; selecting one shows its metadata in the Properties
 // inspector, and double-clicking a relation (or its "Show data" context item)
@@ -18,22 +19,33 @@ import { plus }                                 from "@jimka/typescript-ui/glyph
 import { pencil }                               from "@jimka/typescript-ui/glyphs/solid/pencil";
 import { trash }                                from "@jimka/typescript-ui/glyphs/solid/trash";
 import { arrows_rotate }                        from "@jimka/typescript-ui/glyphs/solid/arrows_rotate";
+import { play }                                 from "@jimka/typescript-ui/glyphs/solid/play";
 import type { DbObjectKind, DbObjectRef }       from "../contract";
-import { getObjects, getSchemas }               from "../data/api";
+import { getFunctions, getObjects, getSchemas, getTypes } from "../data/api";
 import { KIND_GLYPH }                           from "./objectGlyphs";
 import { isRelationKind, objectCategories }     from "./objectKinds";
 import type { SqlAdminController }              from "../SqlAdminController";
 
 // The table-ddl launcher items' glyphs (create/rename/drop table), plus the
 // view-matview-ddl phase's refresh glyph (Edit/Drop reuse "pencil"/"trash").
-// "arrow-up-1-9" (the sequence-leaf glyph) is registered by objectGlyphs.ts,
-// already imported above for KIND_GLYPH.
-Glyph.register(plus, pencil, trash, arrows_rotate);
+// "arrow-up-1-9"/"code"/"cube" (the sequence/function/type-leaf glyphs, also
+// reused for their "Create …" menu items above) are registered by
+// objectGlyphs.ts, already imported above for KIND_GLYPH.
+Glyph.register(plus, pencil, trash, arrows_rotate, play);
 
-/** One object leaf as returned by the objects endpoint. */
+/**
+ * One object leaf, merged from whichever endpoint supplied it: `/objects`
+ * (table/view/materializedView/sequence) or the function-type-ddl phase's
+ * dedicated `/functions`/`/types` (a function's identity signature has no
+ * home in `/objects`' flat `{name, kind}` shape — see
+ * plans/implemented/function-type-ddl.md's listing decision). Both optional
+ * fields are set only on a function leaf.
+ */
 interface DbObject {
     name: string;
     kind: DbObjectKind;
+    signature?: string;
+    isProcedure?: boolean;
 }
 
 /**
@@ -127,6 +139,16 @@ export class NavigatorTree extends Tree implements ExplorerTree {
                 return;
             }
 
+            // A function/procedure has no rows — double-click runs it (a query
+            // tab seeded with a SELECT/CALL, auto-run when it takes no
+            // arguments), the closest thing to a table's data tab. Its
+            // definition is reached from the context menu's "Show definition".
+            if (ref && ref.kind === "function") {
+                this.controller.executeFunction(ref);
+
+                return;
+            }
+
             if (ref && isRelation(ref.kind)) {
                 void this.controller.openTable(ref, node);
             }
@@ -159,6 +181,9 @@ export class NavigatorTree extends Tree implements ExplorerTree {
                     // phase's own "Create type ▸ Enum/Composite" submenu is flattened
                     // into two direct items here rather than nested inside "Create".
                     { text: "Create", glyph: "plus", submenu: { label: "Create", items: [
+                        { text: "Composite type", action: () => this.controller.createType(ref, "composite") },
+                        { text: "Enum type", action: () => this.controller.createType(ref, "enum") },
+                        { text: "Function", action: () => this.controller.createFunction(ref) },
                         { text: "Materialized view", action: () => void this.controller.createMaterializedView(ref) },
                         { text: "Sequence", action: () => this.controller.createSequence(ref) },
                         { text: "Table", action: () => this.controller.createTable(ref) },
@@ -185,6 +210,33 @@ export class NavigatorTree extends Tree implements ExplorerTree {
                 this.contextMenu.show(event.clientX, event.clientY, [
                     { text: "Show info", glyph: "arrow-up-1-9", action: () => void this.controller.openSequence(ref, node) },
                     { text: "Drop", glyph: "trash", action: () => this.controller.dropSequence(ref) },
+                ]);
+
+                return;
+            }
+
+            // A function/procedure leaf (function-type-ddl phase): also a
+            // listed-but-not-relation kind, mirroring the sequence branch above.
+            if (ref && ref.kind === "function") {
+                this.contextMenu.show(event.clientX, event.clientY, [
+                    // Running the routine is the primary action, so it leads —
+                    // above a separator from the definition/drop items below.
+                    // "Call" for a procedure, "Execute" for a function: the label
+                    // mirrors the CALL vs SELECT split executeFunction generates.
+                    { text: ref.isProcedure ? "Call" : "Execute", glyph: "play", action: () => this.controller.executeFunction(ref) },
+                    { separator: true },
+                    { text: "Show definition", glyph: "file-code", action: () => void this.controller.openFunctionDefinition(ref, node) },
+                    { text: "Drop", glyph: "trash", action: () => this.controller.dropFunction(ref) },
+                ]);
+
+                return;
+            }
+
+            // A standalone enum/composite type leaf (function-type-ddl phase).
+            if (ref && ref.kind === "type") {
+                this.contextMenu.show(event.clientX, event.clientY, [
+                    { text: "Edit", glyph: "pencil", action: () => void this.controller.editType(ref) },
+                    { text: "Drop", glyph: "trash", action: () => this.controller.dropType(ref) },
                 ]);
 
                 return;
@@ -313,11 +365,32 @@ function schemaNode(conn: string, database: string, schema: string): TreeNode {
     };
 }
 
+/**
+ * Fetch a schema's tables/views/matviews/sequences (`/objects`) and its
+ * functions/procedures and types (`/functions`/`/types`) in parallel, and
+ * merge them into one `DbObject[]` — the same combined list `categoryNode`
+ * groups by kind regardless of which endpoint supplied a given object, so a
+ * function/type leaf flows through the identical category/glyph/`isRelation`
+ * pipeline a sequence leaf already does (see the function-type-ddl plan's
+ * listing decision).
+ */
 async function loadObjects(conn: string, database: string, schema: string): Promise<TreeNode[]> {
-    const objects = await getObjects(conn, database, schema);
+    const [objects, functions, types] = await Promise.all([
+        getObjects(conn, database, schema),
+        getFunctions(conn, database, schema),
+        getTypes(conn, database, schema),
+    ]);
+
+    const combined: DbObject[] = [
+        ...objects,
+        ...functions.map(f => ({
+            name: f.name, kind: "function" as const, signature: f.signature, isProcedure: f.isProcedure,
+        })),
+        ...types.map(t => ({ name: t.name, kind: "type" as const })),
+    ];
 
     return OBJECT_CATEGORIES
-        .map(category => categoryNode(category, objects, conn, database, schema))
+        .map(category => categoryNode(category, combined, conn, database, schema))
         .filter((node): node is TreeNode => node !== null);
 }
 
@@ -345,10 +418,32 @@ function categoryNode(
     };
 }
 
-/** Build one object leaf node carrying its DbObjectRef on `data`. */
+/**
+ * Build one object leaf node carrying its DbObjectRef on `data`. A
+ * function's `signature`/`isProcedure` are carried onto the ref only when
+ * present (a function leaf) — every other kind omits them.
+ */
 function objectLeaf(o: DbObject, conn: string, database: string, schema: string): TreeNode {
     return {
-        label: o.name,
-        data : { connectionId: conn, database, schema, name: o.name, kind: o.kind } satisfies DbObjectRef,
+        label: leafLabel(o),
+        data : {
+            connectionId: conn, database, schema, name: o.name, kind: o.kind,
+            ...(o.signature !== undefined ? { signature: o.signature } : {}),
+            ...(o.isProcedure !== undefined ? { isProcedure: o.isProcedure } : {}),
+        } satisfies DbObjectRef,
     };
+}
+
+/**
+ * The tree label for an object leaf. A function/procedure shows its argument
+ * signature — `total_orders(p_customer_id integer)`, `total_orders()` — so two
+ * overloads of one name are visibly distinct in the tree; the ref still
+ * carries the bare `name`. Every other kind shows its plain name.
+ */
+function leafLabel(o: DbObject): string {
+    if (o.kind === "function") {
+        return `${o.name}(${o.signature ?? ""})`;
+    }
+
+    return o.name;
 }

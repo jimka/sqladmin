@@ -6,9 +6,11 @@ touches-shared:
   - backend/app/main.py
   - frontend/src/navigator/NavigatorTree.ts
   - frontend/src/navigator/objectGlyphs.ts
+  - frontend/src/navigator/objectKinds.ts
   - frontend/src/data/api.ts
   - frontend/src/contract.ts
   - frontend/src/SqlAdminController.ts
+  - frontend/src/properties/PropertiesPanel.ts
 ---
 
 # Function / Procedure & Custom Type DDL — Implementation Plan
@@ -23,17 +25,130 @@ The definition-query pattern is mirrored from [`backend/app/operations/view_defi
 
 ---
 
+## Drift notes (as-built, found before implementation)
+
+- **No `DropDdlForm.ts`.** Phase 4 established that drop-function/drop-type
+  reuse the existing [`ConfirmCascadeForm`](frontend/src/dock/ConfirmCascadeForm.ts)
+  (a summary line + CASCADE checkbox) exactly as drop-schema/drop-sequence/
+  drop-table/drop-index already do — none of those surface `ifExists` in the
+  UI either, even though the backend param exists. This phase follows that
+  precedent instead of introducing a new form idiom; `ifExists` is sent as
+  `false` from the drop dialogs.
+- **`FunctionForm` has create/edit modes, mirroring `ViewFormDialog`'s split**
+  (structural fields editable on create, fixed on edit) — but edit mode does
+  **not** round-trip through `previewCreateFunction` at all: per this plan's
+  own "prefer `CREATE OR REPLACE`" decision, `pg_get_functiondef` already
+  returns a complete, executable `CREATE OR REPLACE FUNCTION …` statement, so
+  `editFunction`'s dialog seeds the editor directly from that fetched text
+  (`generateSql` resolves to the constant already-fetched string) and skips
+  calling any preview endpoint. The form's create-mode fields (name/kind/
+  language/args/returns/volatility) are simply absent in edit mode, replaced
+  by a fixed "Editing …" label, matching `ViewForm`'s edit branch.
+- **Spec-assembly helpers land in the existing `frontend/src/dock/ddlSpecs.ts`**
+  (already a pure spec-assembly-helper module per `table-ddl`/`schema-sequence-ddl`),
+  not a new file — this phase's own helpers (`buildCreateFunctionSpec`,
+  `buildDropFunctionSpec`, `buildCreateEnumTypeSpec`,
+  `buildCreateCompositeTypeSpec`, `buildDropTypeSpec`,
+  `buildAlterTypeAddValueSpec`) are appended there.
+- **DbObjectRef gained `isProcedure?: boolean` (not in the original sketch).**
+  A "function"-kind navigator leaf covers both plain functions and stored
+  procedures under one category/kind, but `CREATE`/`DROP` need the real
+  `"function" | "procedure"` routine kind to emit the right keyword — so the
+  leaf's ref carries `isProcedure` (set from `ListFunctionsQuery`) alongside
+  `signature`, and `dropFunction`/`editFunction` read it.
+- **Two real bugs found only by manually driving the routes against a live
+  database** (`docker compose up -d db` + curl), neither catchable by the
+  `NO_CONN` hand-set-`_raw` unit tests since both sit in the SQL/asyncpg
+  boundary `apply()` exercises: (1) `FunctionDefinitionQuery`'s original
+  `::regprocedure` cast rejected a named-argument identity signature (e.g.
+  `"a integer, b integer"`, which `pg_get_function_identity_arguments`
+  returns whenever the routine was created with named arguments) — fixed by
+  matching schema+name+an identity-arguments string equality instead of
+  parsing a reconstructed signature text; (2) `TypeDefinitionQuery` compared
+  `pg_type.typtype` to the Python string `"e"`, but asyncpg decodes
+  Postgres's internal `"char"` pseudo-type as raw `bytes`, so every enum
+  silently fell through to the composite branch and was misreported as
+  `NotFound` — fixed by casting `typtype::text` in SQL. See the corresponding
+  backend commit for the full detail.
+- **No fetch-shape tests added for the eight new `api.ts` clients** — neither
+  `table-ddl`, `view-matview-ddl`, nor `schema-sequence-ddl` added such tests
+  (see the schema-sequence-ddl plan's own drift note); this phase follows the
+  same precedent.
+
+---
+
 ## Architecture Decisions
 
-### New navigator kinds via separate list queries, not an extended `ListObjectsQuery`
+### Reconciliation with the as-built phase-4 (`schema-sequence-ddl`) registry seam
 
-Tables/views/matviews are listed by [`ListObjectsQuery`](backend/app/operations/list_objects.py#L19) with a flat `{name, kind}` shape. Functions do **not** fit that shape: an overloaded function needs its **identity-argument signature** to be opened, edited, or dropped, and that signature has no place in `{name, kind}`. So this phase adds **separate** `ListFunctionsQuery` (from `pg_proc`) and `ListTypesQuery` (from `pg_type`) with their own routes, rather than unioning foreign catalogs into `objects`. Consequently **`list_objects.py` is not modified** and is not in `touches-shared`, even though the task suggested extending it — the separate-query decision makes touching it unnecessary and keeps the objects endpoint's contract stable.
+**This section supersedes the two decisions originally drafted here** ("New
+navigator kinds via separate list queries" and "Coordination with phase-4"),
+written before phase 4 existed. Phase 4 has since shipped and built exactly
+the kind-registry seam those two decisions anticipated needing to fold into:
+[`frontend/src/navigator/objectKinds.ts`](frontend/src/navigator/objectKinds.ts)
+exports `OBJECT_KINDS: readonly ObjectKindInfo[]` (`{kind, glyph,
+categoryLabel?, isRelation}`) plus `isRelationKind()`/`kindGlyph()`/
+`objectCategories()`; [`objectGlyphs.ts`](frontend/src/navigator/objectGlyphs.ts)'s
+`KIND_GLYPH` and [`NavigatorTree.ts`](frontend/src/navigator/NavigatorTree.ts)'s
+`OBJECT_CATEGORIES`/`isRelation` now *derive* from that registry instead of
+each hand-maintaining its own switch/Record. This phase **adopts that seam
+verbatim** rather than rolling a competing one:
 
-The shared new-kind coordination surface is instead: the frontend kind union + glyph registry ([`contract.ts` `DbObjectKind`](frontend/src/contract.ts#L4), [`objectGlyphs.ts` `KIND_GLYPH`](frontend/src/navigator/objectGlyphs.ts#L20)) and the navigator's `OBJECT_CATEGORIES` + context-menu ([`NavigatorTree.ts`](frontend/src/navigator/NavigatorTree.ts#L30)). Those files **are** flagged `touches-shared`.
+- **`frontend/src/navigator/objectKinds.ts`**: append two entries —
+  `{ kind: "function", glyph: "code", categoryLabel: "Functions", isRelation: false }`
+  and `{ kind: "type", glyph: "cube", categoryLabel: "Types", isRelation: false }`.
+  This is genuinely the one-line-per-kind change the registry's own header
+  comment promises; no derivation call-site (`KIND_GLYPH`, `OBJECT_CATEGORIES`,
+  `isRelation`) needs editing.
+- **`frontend/src/navigator/objectGlyphs.ts`**: import+register the `code`/
+  `cube` glyphs (subpath imports, per [LIBRARY_NOTES](LIBRARY_NOTES.md#L858));
+  `KIND_GLYPH` needs no other change — it is already `Object.fromEntries`-built
+  from `OBJECT_KINDS`.
+- **`frontend/src/properties/PropertiesPanel.ts`** — phase 4 added this file
+  to the exhaustiveness set (`propertyRows`'s `switch (ref.kind)` has no
+  `default`, so TypeScript itself demands a case per kind). Widening
+  `DbObjectKind` breaks this build until `"function"`/`"type"` cases are
+  added; consequently this file joins `touches-shared` (the plan's original
+  frontmatter omitted it because it predates this switch's exhaustiveness
+  dependency).
 
-### Coordination with phase-4 (`schema-sequence-ddl`) — define the seam here
+### Listing decision: dedicated `pg_proc`/`pg_type` queries, merged into the same category-node pipeline phase 4 established
 
-`plans/schema-sequence-ddl.md` does **not** exist at draft time, so there is no phase-4 "kind registry" seam to reuse. This plan therefore **defines the new-kind extension itself** (add `"function"`/`"type"` to `DbObjectKind`, two `OBJECT_CATEGORIES` entries, two `KIND_GLYPH` entries, two navigator context-menu branches). It does **not** add `depends-on: [schema-sequence-ddl]` (nothing is reused from it). If phase-4 lands first and introduces a kind registry, the implementer should fold these two kinds into it rather than duplicating the mechanism; the shared files are flagged `touches-shared` so `/implement` sequences the two safely regardless of order. Both phases extend the same additive lists (`OBJECT_CATEGORIES`, `KIND_GLYPH`, `DbObjectKind`, `operations/__init__.py`, `main.py`), so the edits compose — they append distinct entries, they do not rewrite each other's.
+Phase 4 made sequences appear by **extending `ListObjectsQuery`**: a third
+`UNION ALL` fragment reading `pg_catalog.pg_class` (`relkind = 'S'`), because
+a sequence's wire shape is the same flat `{name, kind}` every other listed
+object already has. That extension pattern is *not* reused verbatim here:
+
+- **Functions carry data `{name, kind}` cannot express.** An overloaded
+  function must be opened/edited/dropped by its exact identity-argument
+  signature (`pg_get_function_identity_arguments`), or the wrong overload is
+  targeted. That signature has no home in `ListObjectsQuery`'s flat shape
+  without widening every other object kind's row shape for one kind's sake.
+- **Functions and types live in `pg_proc`/`pg_type`, not `pg_class`.**
+  `ListObjectsQuery`'s three existing fragments all read `information_schema.tables`
+  or `pg_catalog.pg_class` — a fourth/fifth fragment reading unrelated catalogs
+  under a `UNION ALL` that already assumes a `pg_class`-shaped row set is a
+  worse fit than two small, purpose-built queries.
+
+So this phase adds **`ListFunctionsQuery`** (`pg_proc`, carrying `signature`)
+and **`ListTypesQuery`** (`pg_type`) as separate ops/routes, and
+**`list_objects.py` is not modified** (dropped from `touches-shared` — the
+original draft's inclusion was speculative). This does **not** fork the
+navigator's rendering pipeline, though: `NavigatorTree.ts`'s `loadObjects`
+fans out `Promise.all([getObjects(...), getFunctions(...), getTypes(...)])`
+and merges all three responses into one combined array before handing it to
+the **same, unmodified** `categoryNode`/`objectLeaf` machinery phase 4's
+sequences already flow through — `categoryNode` filters by `kind` and
+`OBJECT_CATEGORIES` (registry-derived) already has one entry per kind
+regardless of which endpoint supplied it, so a function/type leaf is
+structurally indistinguishable from a sequence leaf by the time it reaches
+`categoryNode`. Only the *fetch* is three-way instead of one-way; the
+category-grouping, glyph-lookup, and `isRelation` gating are the identical
+phase-4 code path. `DbObject`/`objectLeaf` widen with an optional
+`signature` field (set only for function leaves, carried onto the leaf's
+`DbObjectRef`), mirroring how phase 4 widened nothing (a sequence leaf needed
+no extra field) but the mechanism — an optional per-kind field flowing
+leaf-to-`DbObjectRef` — is the same shape `DbObjectRef.signature` uses.
 
 ### Editable preview is authoritative; builders are pure and server-side
 
@@ -451,17 +566,21 @@ Register `code` (functions) and `cube` (types) — both confirmed present in the
 | Modify | `backend/app/operations/__init__.py` (export new ops) |
 | Modify | `backend/app/main.py` (10 new routes) |
 | Create | `backend/tests/test_ddl_function_type_sql.py` |
-| Create | `backend/tests/test_ddl_function_type_ops.py` |
+| Create | `backend/tests/test_ddl_function_type_ops.py` (the six preview ops only) |
+| Create (as-built) | `backend/tests/test_function_definition.py`, `test_type_definition.py`, `test_list_functions.py`, `test_list_types.py` — one file per op module, matching the codebase's existing `test_view_definition.py`/`test_list_objects.py` convention, rather than folding all four into `test_ddl_function_type_ops.py` as originally sketched |
 | Modify | `frontend/src/contract.ts` (kinds, ref.signature, specs) |
 | Modify | `frontend/src/data/api.ts` (list/prefill/preview clients) |
+| Modify | `frontend/src/navigator/objectKinds.ts` (append `function`/`type` registry entries) |
 | Modify | `frontend/src/navigator/objectGlyphs.ts` (glyphs) |
 | Modify | `frontend/src/navigator/NavigatorTree.ts` (categories + menus + load) |
+| Modify | `frontend/src/properties/PropertiesPanel.ts` (function/type rows — exhaustiveness) |
 | Modify | `frontend/src/SqlAdminController.ts` (launch methods) |
+| Modify | `frontend/src/dock/ddlSpecs.ts` (this phase's spec-assembly helpers — see Drift notes) |
 | Create | `frontend/src/dock/FunctionForm.ts` |
 | Create | `frontend/src/dock/EnumTypeForm.ts` |
 | Create | `frontend/src/dock/CompositeTypeForm.ts` |
 | Create | `frontend/src/dock/AddEnumValueForm.ts` |
-| Create | `frontend/src/dock/DropDdlForm.ts` |
+| Not created (as-built) | `frontend/src/dock/DropDdlForm.ts` — drop-function/drop-type reuse the existing `ConfirmCascadeForm` instead; see Drift notes |
 
 ---
 

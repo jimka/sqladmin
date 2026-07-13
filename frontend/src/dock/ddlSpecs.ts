@@ -9,13 +9,20 @@ import type {
     AlterColumnAction,
     AlterSequenceSpec,
     AlterTableSpec,
+    AlterTypeAddValueSpec,
     ColumnSpec,
     ConstraintSpec,
+    CreateCompositeTypeSpec,
+    CreateEnumTypeSpec,
+    CreateFunctionSpec,
     CreateSchemaSpec,
     CreateSequenceSpec,
     CreateTableSpec,
+    DropFunctionSpec,
     DropSchemaSpec,
     DropSequenceSpec,
+    DropTypeSpec,
+    FunctionArgSpec,
     IndexSpec,
     RenameSchemaSpec,
     SequenceDetail,
@@ -563,4 +570,161 @@ export function diffSequenceSpecs(
         : undefined;
 
     return { ...(alter ? { alter } : {}), ...(owner ? { owner } : {}) };
+}
+
+/** One CREATE FUNCTION/PROCEDURE argument row collected by the FunctionForm grid. */
+export interface FunctionArgRow {
+    type: string;
+    name: string; // "" means "no name" (mapped to undefined)
+    mode: string; // "" means "no mode" (mapped to undefined)
+    default: string; // "" means "no default" (mapped to undefined)
+}
+
+/** The function-only fields a create-function form collects, alongside the
+ *  fixed schema/name/kind/language/body/args. */
+export interface CreateFunctionOptions {
+    returns?: string;
+    volatility?: string;
+    replace?: boolean;
+}
+
+/**
+ * Translate the create-function form's fields into a CreateFunctionSpec:
+ * argument rows with a blank `type` are dropped (an in-progress row), and
+ * each row's blank `name`/`mode`/`default` is carried as `undefined` (the
+ * wire contract's "omit this optional field" value).
+ *
+ * @param schema - the new routine's schema.
+ * @param name - the new routine's name.
+ * @param kind - "function" or "procedure".
+ * @param rows - the argument grid's current rows, in entry order.
+ * @param language - the routine's language (e.g. "plpgsql").
+ * @param body - the routine body text, as edited in the SQL preview (this
+ *   helper only assembles the *initial* seed spec; the body the user
+ *   actually executes is whatever they left in the preview editor).
+ * @param options - the function-only returns/volatility/replace fields.
+ * @returns the spec `previewCreateFunction` sends.
+ */
+export function buildCreateFunctionSpec(
+    schema: string,
+    name: string,
+    kind: "function" | "procedure",
+    rows: FunctionArgRow[],
+    language: string,
+    body: string,
+    options: CreateFunctionOptions,
+): CreateFunctionSpec {
+    const args: FunctionArgSpec[] = rows
+        .filter(row => row.type.trim() !== "")
+        .map(row => ({
+            type: row.type,
+            ...(row.name.trim() !== "" ? { name: row.name } : {}),
+            ...(row.mode.trim() !== "" ? { mode: row.mode } : {}),
+            ...(row.default.trim() !== "" ? { default: row.default } : {}),
+        }));
+
+    return {
+        schema,
+        name,
+        kind,
+        args,
+        language,
+        body,
+        ...(options.returns ? { returns: options.returns } : {}),
+        ...(options.volatility ? { volatility: options.volatility } : {}),
+        replace: options.replace ?? false,
+    };
+}
+
+/**
+ * Translate the drop-function form's fields into a DropFunctionSpec.
+ *
+ * @param schema - the routine's schema.
+ * @param name - the routine's name.
+ * @param kind - "function" or "procedure".
+ * @param signature - the identity-argument list, disambiguating overloads.
+ * @param cascade - whether to emit CASCADE.
+ * @param ifExists - whether to emit IF EXISTS.
+ * @returns the spec `previewDropFunction` sends.
+ */
+export function buildDropFunctionSpec(
+    schema: string,
+    name: string,
+    kind: "function" | "procedure",
+    signature: string,
+    cascade?: boolean,
+    ifExists?: boolean,
+): DropFunctionSpec {
+    return {
+        schema, name, kind, signature,
+        ...(cascade ? { cascade: true } : {}),
+        ...(ifExists ? { ifExists: true } : {}),
+    };
+}
+
+/**
+ * Translate the create-enum-type form's label rows into a
+ * CreateEnumTypeSpec, dropping blank rows (an in-progress row).
+ *
+ * @param schema - the new type's schema.
+ * @param name - the new type's name.
+ * @param labels - the label grid's current rows, in entry order.
+ * @returns the spec `previewCreateEnumType` sends.
+ */
+export function buildCreateEnumTypeSpec(schema: string, name: string, labels: string[]): CreateEnumTypeSpec {
+    return { schema, name, labels: labels.filter(label => label.trim() !== "") };
+}
+
+/**
+ * Translate the create-composite-type form's attribute rows into a
+ * CreateCompositeTypeSpec, dropping a row whose name or type is blank (an
+ * in-progress row).
+ *
+ * @param schema - the new type's schema.
+ * @param name - the new type's name.
+ * @param attributes - the attribute grid's current rows, in entry order.
+ * @returns the spec `previewCreateCompositeType` sends.
+ */
+export function buildCreateCompositeTypeSpec(
+    schema: string,
+    name: string,
+    attributes: { name: string; type: string }[],
+): CreateCompositeTypeSpec {
+    return {
+        schema,
+        name,
+        attributes: attributes.filter(a => a.name.trim() !== "" && a.type.trim() !== ""),
+    };
+}
+
+/**
+ * Translate the drop-type form's fields into a DropTypeSpec.
+ *
+ * @param schema - the type's schema.
+ * @param name - the type to drop.
+ * @param cascade - whether to emit CASCADE.
+ * @param ifExists - whether to emit IF EXISTS.
+ * @returns the spec `previewDropType` sends.
+ */
+export function buildDropTypeSpec(schema: string, name: string, cascade?: boolean, ifExists?: boolean): DropTypeSpec {
+    return { schema, name, ...(cascade ? { cascade: true } : {}), ...(ifExists ? { ifExists: true } : {}) };
+}
+
+/**
+ * Translate the add-enum-value form's fields into an AlterTypeAddValueSpec.
+ *
+ * @param schema - the enum type's schema.
+ * @param name - the enum type's name.
+ * @param value - the new label to add.
+ * @param position - an optional BEFORE/AFTER placement relative to an
+ *   existing label; omitted appends the value at the end.
+ * @returns the spec `previewAlterTypeAddValue` sends.
+ */
+export function buildAlterTypeAddValueSpec(
+    schema: string,
+    name: string,
+    value: string,
+    position?: { placement: "before" | "after"; label: string },
+): AlterTypeAddValueSpec {
+    return { schema, name, value, ...(position ? { position } : {}) };
 }

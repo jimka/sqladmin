@@ -19,8 +19,8 @@ import { user }                                                                 
 import type { TreeNode }                                                                                                                                                                           from "@jimka/typescript-ui/component/tree";
 import type { ExplorerTree }                                                                                                                                                                       from "./navigator/NavigatorTree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                                                                                                                                     from "@jimka/typescript-ui/data";
-import type { AlterColumnAction, ColumnMeta, ConstraintKind, DbObjectRef, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TablePrivileges, TableStructure }                              from "./contract";
-import { executeDdl, getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewConstraint, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema, previewReplaceMatview, previewSequenceOwner, runExplain, runQuery, tableExportUrl } from "./data/api";
+import type { AlterColumnAction, ColumnMeta, ConstraintKind, DbObjectRef, FunctionDefinition, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TablePrivileges, TableStructure, TypeDefinition } from "./contract";
+import { executeDdl, getColumns, getDependencies, getFunctionDefinition, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getTypeDefinition, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewAlterTypeAddValue, previewConstraint, previewCreateCompositeType, previewCreateEnumType, previewCreateFunction, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropFunction, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropType, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema, previewReplaceMatview, previewSequenceOwner, runExplain, runQuery, tableExportUrl } from "./data/api";
 import { getSequenceDetail }                                                                                                                                                                       from "./data/api";
 import { exportQueryResult }                                                                                                                                                                       from "./dock/exportQueryResult";
 import { exportExplainPlan }                                                                                                                                                                       from "./dock/exportExplainResult";
@@ -32,7 +32,7 @@ import { buildRoleMembershipDiagram }                                           
 import { buildRoleGrantsDiagram }                                                                                                                                                                  from "./data/buildRoleGrantsDiagram";
 import { buildRelationGraph, relationNodeId }                                                                                                                                                      from "./data/buildRelationGraph";
 import { rootedDiagram }                                                                                                                                                                           from "./data/relationDiagram";
-import { buildSelectSql }                                                                                                                                                                          from "./data/sql";
+import { buildSelectSql, buildRoutineCallSql, routineCallIsComplete }                                                                                                                              from "./data/sql";
 import { buildStore }                                                                                                                                                                              from "./data/stores";
 import { TableWorkPanel }                                                                                                                                                                          from "./dock/TableWorkPanel";
 import { ViewWorkPanel }                                                                                                                                                                           from "./dock/ViewWorkPanel";
@@ -52,7 +52,13 @@ import { openDropRelationDialog, openRefreshMatviewDialog }                     
 import { stripTrailingSemicolon }                                                                                                                                                                  from "./dock/ddlSpecs";
 import { openCreateSchemaDialog, openDropSchemaDialog, openRenameSchemaDialog }                                                                                                                    from "./dock/SchemaDdlForms";
 import { openCreateSequenceDialog, openDropSequenceDialog }                                                                                                                                        from "./dock/SequenceDdlForms";
+import { FunctionForm }                                                                                                                                                                            from "./dock/FunctionForm";
+import { EnumTypeForm }                                                                                                                                                                            from "./dock/EnumTypeForm";
+import { CompositeTypeForm }                                                                                                                                                                       from "./dock/CompositeTypeForm";
+import { AddEnumValueForm }                                                                                                                                                                        from "./dock/AddEnumValueForm";
+import { buildDropFunctionSpec, buildDropTypeSpec }                                                                                                                                                from "./dock/ddlSpecs";
 import { DefinitionPanel }                                                                                                                                                                         from "./dock/DefinitionPanel";
+import { FunctionDefinitionPanel }                                                                                                                                                                 from "./dock/FunctionDefinitionPanel";
 import { SequenceInfoPanel }                                                                                                                                                                       from "./dock/SequenceInfoPanel";
 import { DocumentationPanel }                                                                                                                                                                      from "./dock/DocumentationPanel";
 import { QueryPanel }                                                                                                                                                                              from "./dock/QueryPanel";
@@ -1021,6 +1027,280 @@ export class SqlAdminController {
             schema:    ref.schema!,
             name:      ref.name!,
             preview:   spec => previewDropSequence(ref, spec),
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => this._navigator?.refresh?.(),
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the CREATE FUNCTION/PROCEDURE dialog for a schema (the
+     * navigator's context-menu launcher). Success refreshes the navigator,
+     * since a new routine changes the schema's object list.
+     *
+     * @param ref - the target schema (kind "schema"; database + schema set).
+     */
+    createFunction(ref: DbObjectRef): void {
+        const form = new FunctionForm({ schema: ref.schema! });
+
+        openSqlPreviewDialog({
+            title:       "Create function",
+            form,
+            generateSql: async () => (await previewCreateFunction(ref, form.getSpec())).sql,
+            execute:     sql => executeDdl(this._connectionId, sql),
+            onSuccess:   () => this._navigator?.refresh?.(),
+            onError:     msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open an editable definition tab for a function/procedure — the routine
+     * counterpart to `openDefinition` (which handles views), opened by
+     * double-click or the navigator's "Show definition". Fetches the routine's
+     * `pg_get_functiondef` text — already a complete, executable
+     * `CREATE OR REPLACE FUNCTION|PROCEDURE …` statement — and seeds a
+     * FunctionDefinitionPanel with it, deduping by function-definition-panel
+     * id. The panel's Save hands the edited text straight to `executeDdl` with
+     * no preview/wrapper (the text is already the whole statement — see the
+     * function-type-ddl plan's "prefer CREATE OR REPLACE" decision: a
+     * signature-changing edit is the user's own manual escape hatch, not an
+     * auto-generated drop-recreate). On success the navigator refreshes and the
+     * tab reseeds itself in place (via `panel.reload`) rather than closing. A
+     * failed fetch surfaces through notifyError and no tab opens; a failed save
+     * surfaces through notifyError and leaves the tab (and the user's edits) open.
+     *
+     * @param ref - the function/procedure leaf to open (its `signature`
+     *   disambiguates overloads).
+     */
+    async openFunctionDefinition(ref: DbObjectRef, node: TreeNode): Promise<void> {
+        const id = this.functionDefinitionPanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const signature = ref.signature ?? "";
+
+        let definition: FunctionDefinition;
+
+        try {
+            definition = await getFunctionDefinition(ref, signature);
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return;
+        }
+
+        // Read by `onSave` only after a Save click, which always happens after
+        // this variable is assigned just below — the forward reference is safe.
+        let panel: FunctionDefinitionPanel;
+
+        const onSave = async (newDefinition: string): Promise<void> => {
+            try {
+                // No preview/builder: pg_get_functiondef is already the full
+                // CREATE OR REPLACE statement, so the user's edited text runs
+                // as-is. Editing the argument list here creates a NEW overload
+                // rather than replacing this one (the signature is part of the
+                // routine's identity) — the stated escape-hatch behaviour; the
+                // re-fetch below then fails to find the original signature and
+                // reports "saved, but failed to refresh".
+                await executeDdl(this._connectionId, newDefinition);
+            } catch (err) {
+                this.notifyError(err, ref);
+
+                return;
+            }
+
+            this._navigator?.refresh?.();
+
+            try {
+                const reloaded = await getFunctionDefinition(ref, signature);
+
+                panel.reload(reloaded.definition);
+            } catch (err) {
+                // The save itself already succeeded (executeDdl above didn't
+                // throw) — only the post-save re-fetch failed, so this is NOT a
+                // failed save. Say so explicitly, mirroring openDefinition.
+                this.notifyError(new Error(`saved, but failed to refresh the tab: ${this.errorMessage(err)}`), ref);
+
+                return;
+            }
+
+            this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: definition saved`);
+        };
+
+        panel = new FunctionDefinitionPanel(definition.definition, onSave);
+
+        this._openPanels.set(id, { ref, node, detail: "definition" });
+        this._panelDisposers.set(id, panel.dispose);
+        this.dock.addPanel({
+            id,
+            // Include the identity signature so two overloads of the same name
+            // get visibly distinct tab titles (e.g. `total_orders()` vs
+            // `total_orders(p_customer_id integer)`), matching their distinct ids.
+            title  : `${ref.name ?? id}(${signature}) (definition)`,
+            glyph  : "file-code",
+            tooltip: this.panelTooltip(ref),
+            content: panel.content,
+        });
+        this.syncToPanel(id);
+    }
+
+    /**
+     * Open a new query tab seeded with a call to this function/procedure, so
+     * the routine can actually be run (the navigator's "Execute"/"Call"
+     * launcher). A function is seeded as `SELECT * FROM …`, a procedure as
+     * `CALL …` (see buildRoutineCallSql). A zero-argument routine's call is
+     * complete, so it auto-runs; one with arguments seeds its signature as an
+     * inline comment to fill in and waits for the user to run it.
+     *
+     * @param ref - the function/procedure to call.
+     */
+    executeFunction(ref: DbObjectRef): void {
+        const verb = ref.isProcedure ? "Call" : "Run";
+
+        this.openQuery(buildRoutineCallSql(ref), routineCallIsComplete(ref), `${verb} ${ref.name}`);
+    }
+
+    /**
+     * Open the DROP FUNCTION/PROCEDURE dialog for a function/procedure leaf
+     * (the navigator's context-menu launcher). Success refreshes the
+     * navigator. Reuses `ConfirmCascadeForm`, matching every other drop
+     * dialog's idiom.
+     *
+     * @param ref - the function/procedure to drop (its `signature`
+     *   disambiguates overloads; `isProcedure` selects the DROP keyword).
+     */
+    dropFunction(ref: DbObjectRef): void {
+        const kind = ref.isProcedure ? "procedure" : "function";
+        const form = new ConfirmCascadeForm(`Drop ${kind} "${ref.schema}"."${ref.name}"(${ref.signature ?? ""})?`);
+
+        openSqlPreviewDialog({
+            title:       "Drop function",
+            form,
+            generateSql: async () => (await previewDropFunction(ref, buildDropFunctionSpec(
+                ref.schema!, ref.name!, kind, ref.signature ?? "", form.readSpec().cascade,
+            ))).sql,
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => {
+                this._navigator?.refresh?.();
+                this.dock.removePanel(this.functionDefinitionPanelId(ref));
+            },
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the CREATE TYPE dialog for a schema (the navigator's "Create
+     * type ▸ Enum | Composite" context-menu submenu). Success refreshes the
+     * navigator, since a new type changes the schema's object list.
+     *
+     * @param ref - the target schema (kind "schema"; database + schema set).
+     * @param category - which CREATE TYPE form to open.
+     */
+    createType(ref: DbObjectRef, category: "enum" | "composite"): void {
+        const onSuccess = (): void => this._navigator?.refresh?.();
+        const onError = (msg: string): void => this.notifyError(new Error(msg), ref);
+
+        if (category === "enum") {
+            const form = new EnumTypeForm({ schema: ref.schema! });
+
+            openSqlPreviewDialog({
+                title:       "Create enum type",
+                form,
+                generateSql: async () => (await previewCreateEnumType(ref, form.getSpec())).sql,
+                execute:     sql => executeDdl(this._connectionId, sql),
+                onSuccess,
+                onError,
+            });
+
+            return;
+        }
+
+        const form = new CompositeTypeForm({ schema: ref.schema! });
+
+        openSqlPreviewDialog({
+            title:       "Create composite type",
+            form,
+            generateSql: async () => (await previewCreateCompositeType(ref, form.getSpec())).sql,
+            execute:     sql => executeDdl(this._connectionId, sql),
+            onSuccess,
+            onError,
+        });
+    }
+
+    /**
+     * Open the edit dialog for an existing type (the navigator's "Edit
+     * type…" launcher). Introspects the type first, then routes on its
+     * category: an enum offers `ALTER TYPE ... ADD VALUE` (append-only —
+     * Postgres has no `CREATE OR REPLACE TYPE`); a composite offers a
+     * recreate/clone form prefilled with its current attributes (restructuring
+     * an existing composite in place is a stated Non-Goal — see the
+     * function-type-ddl plan's "enum edits are append-only" decision).
+     * Success refreshes the navigator only for the composite path (a new
+     * `CREATE TYPE` statement); an enum `ADD VALUE` does not change the
+     * object list, so it only sets a status message, mirroring
+     * `alterSequence`.
+     *
+     * @param ref - the type leaf to edit.
+     */
+    async editType(ref: DbObjectRef): Promise<void> {
+        let definition: TypeDefinition;
+
+        try {
+            definition = await getTypeDefinition(ref);
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return;
+        }
+
+        const onError = (msg: string): void => this.notifyError(new Error(msg), ref);
+
+        if (definition.category === "enum") {
+            const form = new AddEnumValueForm({
+                schema: ref.schema!, name: ref.name!, existingLabels: definition.labels,
+            });
+
+            openSqlPreviewDialog({
+                title:       "Add enum value",
+                form,
+                generateSql: async () => (await previewAlterTypeAddValue(ref, form.getSpec())).sql,
+                execute:     sql => executeDdl(this._connectionId, sql),
+                onSuccess:   () => this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: altered`),
+                onError,
+            });
+
+            return;
+        }
+
+        const form = new CompositeTypeForm({ schema: ref.schema!, prefill: definition.attributes });
+
+        openSqlPreviewDialog({
+            title:       "Edit composite type (recreate)",
+            form,
+            generateSql: async () => (await previewCreateCompositeType(ref, form.getSpec())).sql,
+            execute:     sql => executeDdl(this._connectionId, sql),
+            onSuccess:   () => this._navigator?.refresh?.(),
+            onError,
+        });
+    }
+
+    /**
+     * Open the DROP TYPE dialog for a type leaf (the navigator's
+     * context-menu launcher). Success refreshes the navigator. Reuses
+     * `ConfirmCascadeForm`, matching every other drop dialog's idiom.
+     *
+     * @param ref - the type to drop.
+     */
+    dropType(ref: DbObjectRef): void {
+        const form = new ConfirmCascadeForm(`Drop type "${ref.schema}"."${ref.name}"?`);
+
+        openSqlPreviewDialog({
+            title:       "Drop type",
+            form,
+            generateSql: async () =>
+                (await previewDropType(ref, buildDropTypeSpec(ref.schema!, ref.name!, form.readSpec().cascade))).sql,
             execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this._navigator?.refresh?.(),
             onError:   msg => this.notifyError(new Error(msg), ref),
@@ -2209,6 +2489,16 @@ export class SqlAdminController {
     /** Stable id for a sequence's info tab, distinct from any relation tab. */
     private sequenceInfoPanelId(ref: DbObjectRef): string {
         return `${this.panelId(ref)}::sequence`;
+    }
+
+    /**
+     * Stable id for a function/procedure's definition tab. Includes the
+     * identity signature so two overloads of the same name (e.g.
+     * `total_orders()` and `total_orders(integer)`) get distinct tabs rather
+     * than colliding on `schema.name`.
+     */
+    private functionDefinitionPanelId(ref: DbObjectRef): string {
+        return `${this.panelId(ref)}(${ref.signature ?? ""})::function`;
     }
 
     /** Stable id for a schema's diagram tab, distinct from any relation tab. */

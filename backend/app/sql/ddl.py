@@ -12,6 +12,7 @@ as the user typed them and reviewed in the editable preview before execute
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..errors import ValidationError
@@ -55,6 +56,16 @@ __all__ = [
     "sequence_alter",
     "sequence_set_owner",
     "sequence_drop",
+    "FunctionArg",
+    "CompositeAttr",
+    "CreateRoutineSpec",
+    "render_function_arg",
+    "create_routine",
+    "drop_routine",
+    "create_enum_type",
+    "create_composite_type",
+    "drop_type",
+    "alter_type_add_value",
 ]
 
 
@@ -1130,3 +1141,306 @@ def sequence_drop(schema: str, name: str, *, cascade: bool = False, if_exists: b
     cascade_clause = " CASCADE" if cascade else ""
 
     return f"DROP SEQUENCE {exists_clause}{qualify(schema, name)}{cascade_clause}"
+
+
+# --- Function/procedure & custom-type DDL ----------------------------------------
+#
+# Builders for CREATE [OR REPLACE] FUNCTION|PROCEDURE, DROP FUNCTION|PROCEDURE
+# (by full identity signature, disambiguating overloads), CREATE TYPE (enum and
+# composite), DROP TYPE, and ALTER TYPE ADD VALUE (function-type-ddl phase).
+# Identifiers (schema/name/arg-name/attr-name) are quoted via quote_ident/
+# qualify and validated here, same as schema/sequence DDL. Raw type strings,
+# defaults, function bodies, and enum labels are NOT identifiers — a function
+# body is inherently opaque SQL and cannot be parameterized — so they pass
+# through as the user typed them, reviewed in the editable preview before
+# execute (the ddl-infrastructure trust model). Enum labels are string
+# literals, quoted via quote_literal.
+
+# The argument modes PostgreSQL's CREATE FUNCTION/PROCEDURE grammar accepts. A
+# mode is a keyword (not a passthrough expression), so it is validated against
+# this fixed allowlist rather than inserted raw.
+_ARG_MODES: frozenset[str] = frozenset({"IN", "OUT", "INOUT", "VARIADIC"})
+
+
+@dataclass(frozen=True)
+class FunctionArg:
+    """One CREATE FUNCTION/PROCEDURE argument."""
+
+    type: str
+    name: str | None = None
+    mode: str | None = None
+    default: str | None = None
+
+
+@dataclass(frozen=True)
+class CompositeAttr:
+    """One composite-type attribute."""
+
+    name: str
+    type: str
+
+
+@dataclass(frozen=True)
+class CreateRoutineSpec:
+    """A CREATE [OR REPLACE] FUNCTION|PROCEDURE request."""
+
+    schema: str
+    name: str
+    kind: str
+    args: list[FunctionArg] = field(default_factory=list)
+    language: str = "sql"
+    body: str = ""
+    returns: str | None = None
+    volatility: str | None = None
+    replace: bool = False
+
+
+def render_function_arg(arg: FunctionArg) -> str:
+    """
+    Build one argument clause for a CREATE FUNCTION/PROCEDURE argument list.
+
+    Args:
+        arg: the argument's mode/name/type/default.
+
+    Raises:
+        ValidationError: if ``arg.mode`` is set but not one of IN/OUT/INOUT/
+            VARIADIC (case-insensitive).
+
+    Returns:
+        ``[MODE ]["name" ]type[ DEFAULT expr]`` — ``type``/``default`` are raw;
+        ``name`` is quoted.
+    """
+    tokens: list[str] = []
+
+    if arg.mode:
+        mode = arg.mode.upper()
+
+        if mode not in _ARG_MODES:
+            raise ValidationError(f"Unknown argument mode '{arg.mode}'")
+
+        tokens.append(mode)
+
+    if arg.name:
+        tokens.append(quote_ident(arg.name))
+
+    tokens.append(arg.type)
+
+    if arg.default:
+        tokens.append(f"DEFAULT {arg.default}")
+
+    return " ".join(tokens)
+
+
+def _dollar_quote(body: str) -> str:
+    """
+    Wrap a function/procedure body in a dollar-quote tag not present in it.
+
+    Tries ``$function$`` first, falling back to ``$func_1$``, ``$func_2$``, …
+    until a tag that does not collide with the body's own text is found — a
+    body that happens to contain a dollar-quote tag (rare, but not
+    impossible in hand-written SQL) would otherwise terminate the string
+    early.
+
+    Args:
+        body: the raw function/procedure body text.
+
+    Returns:
+        The body wrapped as ``<tag>\\n<body>\\n<tag>``.
+    """
+    tag = "$function$"
+    suffix = 1
+
+    while tag in body:
+        tag = f"$func_{suffix}$"
+        suffix += 1
+
+    return f"{tag}\n{body}\n{tag}"
+
+
+def create_routine(spec: CreateRoutineSpec) -> str:
+    """
+    Build a ``CREATE [OR REPLACE] FUNCTION|PROCEDURE`` statement.
+
+    Args:
+        spec: the routine's schema/name/kind/args/language/body and (for a
+            function) its optional return type/volatility.
+
+    Raises:
+        ValidationError: if ``spec.schema``/``spec.name`` is blank, or an
+            argument's mode is invalid (see ``render_function_arg``).
+
+    Returns:
+        A multi-line, human-reviewable ``CREATE [OR REPLACE]
+        FUNCTION|PROCEDURE "schema"."name"(args) [RETURNS type] LANGUAGE lang
+        [volatility] AS <dollar-quoted body>`` statement. No trailing
+        semicolon (matches ``pg_get_functiondef``).
+    """
+    _require_ident(spec.schema, "schema")
+    _require_ident(spec.name, "name")
+
+    keyword = "FUNCTION" if spec.kind == "function" else "PROCEDURE"
+    replace_clause = "OR REPLACE " if spec.replace else ""
+    args_sql = ", ".join(render_function_arg(a) for a in spec.args)
+
+    lines = [f"CREATE {replace_clause}{keyword} {qualify(spec.schema, spec.name)}({args_sql})"]
+
+    if spec.kind == "function" and spec.returns:
+        lines.append(f"RETURNS {spec.returns}")
+
+    lines.append(f" LANGUAGE {spec.language}")
+
+    if spec.kind == "function" and spec.volatility:
+        lines.append(spec.volatility)
+
+    lines.append(f"AS {_dollar_quote(spec.body)}")
+
+    return "\n".join(lines)
+
+
+def drop_routine(
+    schema: str, name: str, kind: str, signature: str, cascade: bool, if_exists: bool
+) -> str:
+    """
+    Build a ``DROP FUNCTION|PROCEDURE`` statement, disambiguating overloads by
+    the routine's full identity-argument signature.
+
+    Args:
+        schema: the routine's schema.
+        name: the routine's name.
+        kind: ``"function"`` or ``"procedure"``.
+        signature: the raw identity-argument list from introspection (e.g.
+            ``pg_get_function_identity_arguments``); may be ``""`` for a
+            zero-argument routine.
+        cascade: emit ``CASCADE``.
+        if_exists: emit ``IF EXISTS``.
+
+    Raises:
+        ValidationError: if ``schema``/``name`` is blank.
+
+    Returns:
+        ``DROP FUNCTION|PROCEDURE [IF EXISTS] "schema"."name"(signature)
+        [CASCADE]``.
+    """
+    _require_ident(schema, "schema")
+    _require_ident(name, "name")
+
+    keyword = "FUNCTION" if kind == "function" else "PROCEDURE"
+    exists_clause = "IF EXISTS " if if_exists else ""
+    cascade_clause = " CASCADE" if cascade else ""
+
+    return f"DROP {keyword} {exists_clause}{qualify(schema, name)}({signature}){cascade_clause}"
+
+
+def create_enum_type(schema: str, name: str, labels: Sequence[str]) -> str:
+    """
+    Build a ``CREATE TYPE ... AS ENUM`` statement.
+
+    Args:
+        schema: the new type's schema.
+        name: the new type's name.
+        labels: the enum's labels, in order.
+
+    Raises:
+        ValidationError: if ``schema``/``name`` is blank.
+
+    Returns:
+        ``CREATE TYPE "schema"."name" AS ENUM ('l1', 'l2', ...)`` — labels are
+        quoted via ``quote_literal``.
+    """
+    _require_ident(schema, "schema")
+    _require_ident(name, "name")
+
+    labels_sql = ", ".join(quote_literal(label) for label in labels)
+
+    return f"CREATE TYPE {qualify(schema, name)} AS ENUM ({labels_sql})"
+
+
+# Indentation for each attribute line inside a multi-line CREATE TYPE ... AS
+# (...) body — matches _CREATE_TABLE_INDENT's 4-space readable-preview width.
+_CREATE_TYPE_INDENT = _CREATE_TABLE_INDENT
+
+
+def create_composite_type(schema: str, name: str, attrs: Sequence[CompositeAttr]) -> str:
+    """
+    Build a ``CREATE TYPE ... AS (...)`` composite-type statement.
+
+    Args:
+        schema: the new type's schema.
+        name: the new type's name.
+        attrs: the composite's attributes, in order.
+
+    Raises:
+        ValidationError: if ``schema``/``name`` is blank.
+
+    Returns:
+        ``CREATE TYPE "schema"."name" AS (\\n    "a1" t1,\\n    "a2" t2\\n)`` —
+        attribute names are quoted; types are raw.
+    """
+    _require_ident(schema, "schema")
+    _require_ident(name, "name")
+
+    lines = [f"{quote_ident(a.name)} {a.type}" for a in attrs]
+    body = ",\n".join(f"{_CREATE_TYPE_INDENT}{line}" for line in lines)
+
+    return f"CREATE TYPE {qualify(schema, name)} AS (\n{body}\n)"
+
+
+def drop_type(schema: str, name: str, *, cascade: bool = False, if_exists: bool = False) -> str:
+    """
+    Build a ``DROP TYPE`` statement.
+
+    Args:
+        schema: the type's schema.
+        name: the type's name.
+        cascade: emit ``CASCADE``.
+        if_exists: emit ``IF EXISTS``.
+
+    Raises:
+        ValidationError: if ``schema``/``name`` is blank.
+
+    Returns:
+        ``DROP TYPE [IF EXISTS] "schema"."name" [CASCADE]``.
+    """
+    _require_ident(schema, "schema")
+    _require_ident(name, "name")
+
+    exists_clause = "IF EXISTS " if if_exists else ""
+    cascade_clause = " CASCADE" if cascade else ""
+
+    return f"DROP TYPE {exists_clause}{qualify(schema, name)}{cascade_clause}"
+
+
+def alter_type_add_value(
+    schema: str, name: str, value: str, position: tuple[str, str] | None = None
+) -> str:
+    """
+    Build an ``ALTER TYPE ... ADD VALUE`` statement, appending one label to an
+    existing enum type.
+
+    Args:
+        schema: the enum type's schema.
+        name: the enum type's name.
+        value: the new label to add.
+        position: ``("before"|"after", existing_label)`` to place the new
+            label relative to an existing one, or ``None`` to append it at
+            the end (Postgres's default ``ADD VALUE`` placement).
+
+    Raises:
+        ValidationError: if ``schema``/``name`` is blank.
+
+    Returns:
+        ``ALTER TYPE "schema"."name" ADD VALUE 'value' [BEFORE|AFTER
+        'existing']`` — ``value``/``existing`` are quoted via
+        ``quote_literal``.
+    """
+    _require_ident(schema, "schema")
+    _require_ident(name, "name")
+
+    position_clause = ""
+
+    if position is not None:
+        placement, existing = position
+        keyword = "BEFORE" if placement == "before" else "AFTER"
+        position_clause = f" {keyword} {quote_literal(existing)}"
+
+    return f"ALTER TYPE {qualify(schema, name)} ADD VALUE {quote_literal(value)}{position_clause}"

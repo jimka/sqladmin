@@ -38,26 +38,35 @@ from .connections import (
 from .contract import ColumnMeta, TableRef
 from .errors import DomainError, NotFound, ValidationError
 from .operations import (
+    AlterTypeAddValuePreview,
+    CreateCompositeTypePreview,
+    CreateEnumTypePreview,
+    CreateFunctionPreview,
     CreateMaterializedViewPreview,
     CreateViewPreview,
     DeleteRowCommand,
+    DropFunctionPreview,
     DropMaterializedViewPreview,
+    DropTypePreview,
     DropViewPreview,
     ExecuteDdlCommand,
     ExplainQueryCommand,
     ExportRowsQuery,
+    FunctionDefinitionQuery,
     InsertRowCommand,
     ListColumnsQuery,
     ListConstraintsQuery,
     ListDatabasesQuery,
     ListDependenciesQuery,
     ListForeignKeysQuery,
+    ListFunctionsQuery,
     ListIndexesQuery,
     ListInheritanceQuery,
     ListObjectsQuery,
     ListRolesQuery,
     ListRowsQuery,
     ListSchemasQuery,
+    ListTypesQuery,
     PreviewAlterTable,
     PreviewConstraint,
     PreviewCreateTable,
@@ -78,6 +87,7 @@ from .operations import (
     SequenceDropPreview,
     SequenceOwnerPreview,
     TablePrivilegesQuery,
+    TypeDefinitionQuery,
     UpdateRowCommand,
     ViewDefinitionQuery,
 )
@@ -261,6 +271,46 @@ async def objects(
     """
     async with session_pool_for(session, connection_id).acquire() as c:
         op = ListObjectsQuery(c, schema)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.get("/api/{connection_id}/{database}/{schema}/functions")
+async def functions(
+    connection_id: str, database: str, schema: str,
+    session: Session = Depends(require_session),
+) -> list[dict]:
+    """
+    List the functions and procedures in a schema.
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/functions``.
+
+    Returns:
+        ``[{"name": str, "signature": str, "isProcedure": bool}]``.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = ListFunctionsQuery(c, schema)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.get("/api/{connection_id}/{database}/{schema}/types")
+async def types(
+    connection_id: str, database: str, schema: str,
+    session: Session = Depends(require_session),
+) -> list[dict]:
+    """
+    List the standalone enum and composite types in a schema.
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/types``.
+
+    Returns:
+        ``[{"name": str}]``.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = ListTypesQuery(c, schema)
         await op.apply()
 
         return op.get_result()
@@ -1110,6 +1160,188 @@ async def preview_drop_sequence(
     """
     async with session_pool_for(session, connection_id).acquire() as c:
         op = SequenceDropPreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+# --- DDL: functions & types ---------------------------------------------------
+
+
+@app.post("/api/{connection_id}/{database}/ddl/function-definition")
+async def function_definition(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Fetch a function/procedure's definition SQL for the edit-prefill flow.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/function-definition``.
+    POST+CSRF for symmetry with the other DDL routes, even though this reads
+    rather than mutates — the routine's identity signature lives in the body.
+
+    Args:
+        body: ``{schema, name, signature}`` — the routine's identity-argument
+            signature disambiguates overloads.
+
+    Returns:
+        ``{"definition", "isProcedure", "signature", "language"}``.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = FunctionDefinitionQuery(c, body.get("schema", ""), body.get("name", ""), body.get("signature", ""))
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/type-definition")
+async def type_definition(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Introspect an enum or composite type for the edit-prefill flow.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/type-definition``.
+
+    Args:
+        body: ``{schema, name}``.
+
+    Returns:
+        ``{"category", "labels", "attributes"}``.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = TypeDefinitionQuery(c, body.get("schema", ""), body.get("name", ""))
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/create-function")
+async def preview_create_function(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a CREATE [OR REPLACE] FUNCTION|PROCEDURE statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/create-function``.
+
+    Args:
+        body: the ``CreateFunctionSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = CreateFunctionPreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/drop-function")
+async def preview_drop_function(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a DROP FUNCTION|PROCEDURE statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/drop-function``.
+
+    Args:
+        body: the ``DropFunctionSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = DropFunctionPreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/create-enum-type")
+async def preview_create_enum_type(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a CREATE TYPE ... AS ENUM statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/create-enum-type``.
+
+    Args:
+        body: the ``CreateEnumTypeSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = CreateEnumTypePreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/create-composite-type")
+async def preview_create_composite_type(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a CREATE TYPE ... AS (...) composite-type statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/create-composite-type``.
+
+    Args:
+        body: the ``CreateCompositeTypeSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = CreateCompositeTypePreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/drop-type")
+async def preview_drop_type(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a DROP TYPE statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/drop-type``.
+
+    Args:
+        body: the ``DropTypeSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = DropTypePreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/alter-type-add-value")
+async def preview_alter_type_add_value(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview an ALTER TYPE ... ADD VALUE statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/alter-type-add-value``.
+
+    Args:
+        body: the ``AlterTypeAddValueSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = AlterTypeAddValuePreview(c, body)
         await op.apply()
 
         return op.get_result()

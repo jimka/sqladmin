@@ -5,18 +5,26 @@
 import type {
     AlterSequenceSpec,
     AlterTableSpec,
+    AlterTypeAddValueSpec,
     ColumnMeta,
     ConstraintSpec,
+    CreateCompositeTypeSpec,
+    CreateEnumTypeSpec,
+    CreateFunctionSpec,
     CreateMatviewSpec,
     CreateSchemaSpec,
     CreateSequenceSpec,
     CreateTableSpec,
     CreateViewSpec,
     DdlPreview,
+    DropFunctionSpec,
     DropSchemaSpec,
     DropSequenceSpec,
     DropSpec,
     DropTableSpec,
+    DropTypeSpec,
+    FunctionDefinition,
+    FunctionListItem,
     IndexSpec,
     RefreshMatviewSpec,
     RenameSchemaSpec,
@@ -33,6 +41,7 @@ import type {
     RoleDetail,
     RoleSummary,
     SequenceDetail,
+    TypeDefinition,
     ViewDefinition,
     TableStructure,
 } from "../contract";
@@ -169,6 +178,24 @@ export function getObjects(
     schema      : string,
 ): Promise<{ name: string; kind: DbObjectKind }[]> {
     return getJson(`/api/${connectionId}/${database}/${schema}/objects`);
+}
+
+/** The navigator's Functions category level. */
+export function getFunctions(
+    connectionId: string,
+    database    : string,
+    schema      : string,
+): Promise<FunctionListItem[]> {
+    return getJson(`/api/${connectionId}/${database}/${schema}/functions`);
+}
+
+/** The navigator's Types category level. */
+export function getTypes(
+    connectionId: string,
+    database    : string,
+    schema      : string,
+): Promise<{ name: string }[]> {
+    return getJson(`/api/${connectionId}/${database}/${schema}/types`);
 }
 
 /** View/matview dependency edges for a schema (view -> underlying relation). */
@@ -391,6 +418,54 @@ export function previewSequenceOwner(ref: DbObjectRef, spec: SequenceOwnerSpec):
 /** Preview a DROP SEQUENCE statement (schema-sequence-ddl phase). */
 export function previewDropSequence(ref: DbObjectRef, spec: DropSequenceSpec): Promise<DdlPreview> {
     return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/drop-sequence`, spec);
+}
+
+/**
+ * Fetch a function/procedure's pg_get_functiondef definition + prefill
+ * metadata (function-type-ddl phase), located by its identity signature
+ * (disambiguates overloads).
+ */
+export function getFunctionDefinition(ref: DbObjectRef, signature: string): Promise<FunctionDefinition> {
+    return postJson<FunctionDefinition>(`/api/${ref.connectionId}/${ref.database}/ddl/function-definition`, {
+        schema: ref.schema, name: ref.name, signature,
+    });
+}
+
+/** Introspect an enum/composite type for the edit-prefill flow (function-type-ddl phase). */
+export function getTypeDefinition(ref: DbObjectRef): Promise<TypeDefinition> {
+    return postJson<TypeDefinition>(`/api/${ref.connectionId}/${ref.database}/ddl/type-definition`, {
+        schema: ref.schema, name: ref.name,
+    });
+}
+
+/** Preview a CREATE [OR REPLACE] FUNCTION|PROCEDURE statement (function-type-ddl phase). */
+export function previewCreateFunction(ref: DbObjectRef, spec: CreateFunctionSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/create-function`, spec);
+}
+
+/** Preview a DROP FUNCTION|PROCEDURE statement (function-type-ddl phase). */
+export function previewDropFunction(ref: DbObjectRef, spec: DropFunctionSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/drop-function`, spec);
+}
+
+/** Preview a CREATE TYPE ... AS ENUM statement (function-type-ddl phase). */
+export function previewCreateEnumType(ref: DbObjectRef, spec: CreateEnumTypeSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/create-enum-type`, spec);
+}
+
+/** Preview a CREATE TYPE ... AS (...) composite-type statement (function-type-ddl phase). */
+export function previewCreateCompositeType(ref: DbObjectRef, spec: CreateCompositeTypeSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/create-composite-type`, spec);
+}
+
+/** Preview a DROP TYPE statement (function-type-ddl phase). */
+export function previewDropType(ref: DbObjectRef, spec: DropTypeSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/drop-type`, spec);
+}
+
+/** Preview an ALTER TYPE ... ADD VALUE statement (function-type-ddl phase). */
+export function previewAlterTypeAddValue(ref: DbObjectRef, spec: AlterTypeAddValueSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/alter-type-add-value`, spec);
 }
 
 /** The Roles view's role list (introspection one-shot). */

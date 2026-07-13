@@ -1,7 +1,9 @@
 // The wire contract, mirrored on the TS side. Matches the backend's WireType
 // scalar set and introspection/list shapes (see backend/app/contract.py).
 
-export type DbObjectKind = "database" | "schema" | "table" | "view" | "materializedView" | "sequence";
+export type DbObjectKind =
+    | "database" | "schema" | "table" | "view" | "materializedView" | "sequence"
+    | "function" | "type";
 
 /** Identifies a database object the navigator can act on. */
 export interface DbObjectRef {
@@ -10,6 +12,15 @@ export interface DbObjectRef {
     schema?: string;
     name?: string; // table/view name
     kind: DbObjectKind;
+    /** The routine's identity-argument list (pg_get_function_identity_arguments),
+     *  set only on a function/procedure leaf — disambiguates overloads so an
+     *  edit/drop never targets the wrong sibling. */
+    signature?: string;
+    /** True when a `kind: "function"` leaf is actually a stored PROCEDURE —
+     *  both share the navigator's one "Functions" category/kind, but
+     *  CREATE/DROP need the real `"function" | "procedure"` routine kind to
+     *  emit the right keyword. Unset for every other kind. */
+    isProcedure?: boolean;
 }
 
 /**
@@ -304,6 +315,89 @@ export interface DropSequenceSpec {
     name: string;
     cascade?: boolean;
     ifExists?: boolean;
+}
+
+/** One function/procedure as returned by the navigator's functions endpoint. */
+export interface FunctionListItem {
+    name: string;
+    signature: string; // pg_get_function_identity_arguments — disambiguates overloads
+    isProcedure: boolean;
+}
+
+/** A function/procedure's pg_get_functiondef definition SQL + prefill metadata. */
+export interface FunctionDefinition {
+    definition: string; // a complete, executable CREATE OR REPLACE ... statement
+    isProcedure: boolean;
+    signature: string;
+    language: string;
+}
+
+/** One enum or composite type's introspected shape, for the edit-prefill flow. */
+export interface TypeDefinition {
+    category: "enum" | "composite";
+    labels: string[]; // enum only (ordered); empty for a composite
+    attributes: { name: string; type: string }[]; // composite only (attnum order); empty for an enum
+}
+
+/** One CREATE FUNCTION/PROCEDURE argument, as collected by the create-function form. */
+export interface FunctionArgSpec {
+    type: string; // raw type expr, e.g. "integer", "text[]", "numeric(10,2)"
+    name?: string;
+    mode?: string; // "IN" | "OUT" | "INOUT" | "VARIADIC" (case-insensitive)
+    default?: string; // raw default expr, e.g. "0", "now()"
+}
+
+/** The spec a CREATE [OR REPLACE] FUNCTION|PROCEDURE preview/execute call sends. */
+export interface CreateFunctionSpec {
+    schema: string;
+    name: string;
+    kind: "function" | "procedure";
+    args: FunctionArgSpec[];
+    language: string;
+    body: string;
+    returns?: string; // function only; ignored for a procedure
+    volatility?: string; // function only: "IMMUTABLE" | "STABLE" | "VOLATILE"
+    replace: boolean;
+}
+
+/** The spec a DROP FUNCTION|PROCEDURE preview/execute call sends. */
+export interface DropFunctionSpec {
+    schema: string;
+    name: string;
+    kind: "function" | "procedure";
+    signature: string; // the identity-argument list, disambiguating overloads
+    cascade?: boolean;
+    ifExists?: boolean;
+}
+
+/** The spec a CREATE TYPE ... AS ENUM preview/execute call sends. */
+export interface CreateEnumTypeSpec {
+    schema: string;
+    name: string;
+    labels: string[];
+}
+
+/** The spec a CREATE TYPE ... AS (...) composite-type preview/execute call sends. */
+export interface CreateCompositeTypeSpec {
+    schema: string;
+    name: string;
+    attributes: { name: string; type: string }[];
+}
+
+/** The spec a DROP TYPE preview/execute call sends. */
+export interface DropTypeSpec {
+    schema: string;
+    name: string;
+    cascade?: boolean;
+    ifExists?: boolean;
+}
+
+/** The spec an ALTER TYPE ... ADD VALUE preview/execute call sends. */
+export interface AlterTypeAddValueSpec {
+    schema: string;
+    name: string;
+    value: string;
+    position?: { placement: "before" | "after"; label: string };
 }
 
 /** EXPLAIN output format. TEXT is the first cut; JSON is the follow-on tree source. */

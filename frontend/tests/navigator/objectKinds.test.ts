@@ -10,7 +10,9 @@ describe("OBJECT_KINDS", () => {
     it("has exactly one entry per known object kind", () => {
         const kinds = OBJECT_KINDS.map(k => k.kind);
 
-        expect(kinds).toEqual(["database", "schema", "table", "view", "materializedView", "sequence"]);
+        expect(kinds).toEqual([
+            "database", "schema", "table", "view", "materializedView", "sequence", "function", "type",
+        ]);
     });
 
     it("gives every entry a non-empty glyph name", () => {
@@ -27,8 +29,8 @@ describe("OBJECT_KINDS", () => {
         expect(schema?.categoryLabel).toBeUndefined();
     });
 
-    it("gives table/view/materializedView/sequence a category label", () => {
-        for (const kind of ["table", "view", "materializedView", "sequence"] as const) {
+    it("gives table/view/materializedView/sequence/function/type a category label", () => {
+        for (const kind of ["table", "view", "materializedView", "sequence", "function", "type"] as const) {
             expect(OBJECT_KINDS.find(k => k.kind === kind)?.categoryLabel).toBeDefined();
         }
     });
@@ -41,10 +43,12 @@ describe("isRelationKind", () => {
         expect(isRelationKind("materializedView")).toBe(true);
     });
 
-    it("is false for database, schema, and sequence", () => {
+    it("is false for database, schema, sequence, function, and type", () => {
         expect(isRelationKind("database")).toBe(false);
         expect(isRelationKind("schema")).toBe(false);
         expect(isRelationKind("sequence")).toBe(false);
+        expect(isRelationKind("function")).toBe(false);
+        expect(isRelationKind("type")).toBe(false);
     });
 
     it("is false for undefined", () => {
@@ -59,6 +63,8 @@ describe("objectCategories", () => {
             { label: "Views", kind: "view" },
             { label: "Materialized Views", kind: "materializedView" },
             { label: "Sequences", kind: "sequence" },
+            { label: "Functions", kind: "function" },
+            { label: "Types", kind: "type" },
         ]);
     });
 });
