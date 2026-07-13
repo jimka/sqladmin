@@ -8,12 +8,18 @@ import { describe, expect, it } from "vitest";
 import {
     buildAlterSequenceSpec,
     buildAlterTableSpec,
+    buildAlterTypeAddValueSpec,
     buildConstraintSpec,
+    buildCreateCompositeTypeSpec,
+    buildCreateEnumTypeSpec,
+    buildCreateFunctionSpec,
     buildCreateSchemaSpec,
     buildCreateSequenceSpec,
     buildCreateTableSpec,
+    buildDropFunctionSpec,
     buildDropSchemaSpec,
     buildDropSequenceSpec,
+    buildDropTypeSpec,
     buildIndexSpec,
     buildRenameSchemaSpec,
     buildSequenceOwnerSpec,
@@ -23,7 +29,7 @@ import {
     parseOptionalInt,
     stripTrailingSemicolon,
 } from "../../src/dock/ddlSpecs";
-import type { ColumnRow, EditedSequenceValues } from "../../src/dock/ddlSpecs";
+import type { ColumnRow, EditedSequenceValues, FunctionArgRow } from "../../src/dock/ddlSpecs";
 import type { SequenceDetail } from "../../src/contract";
 
 describe("buildCreateTableSpec", () => {
@@ -444,5 +450,115 @@ describe("diffSequenceSpecs", () => {
         const reverted = { ...roundTripped, increment: original.increment };
 
         expect(diffSequenceSpecs("public", "s", original, reverted)).toEqual({});
+    });
+});
+
+describe("buildCreateFunctionSpec", () => {
+    it("drops blank-type argument rows", () => {
+        const rows: FunctionArgRow[] = [
+            { type: "integer", name: "a", mode: "IN", default: "" },
+            { type: "  ", name: "b", mode: "", default: "" },
+        ];
+
+        const spec = buildCreateFunctionSpec("public", "add", "function", rows, "plpgsql", "BEGIN END;", {});
+
+        expect(spec.args).toHaveLength(1);
+        expect(spec.args[0]).toEqual({ type: "integer", name: "a", mode: "IN" });
+    });
+
+    it("omits blank name/mode/default from an argument row", () => {
+        const rows: FunctionArgRow[] = [{ type: "integer", name: "", mode: "", default: "" }];
+
+        const spec = buildCreateFunctionSpec("public", "f", "function", rows, "sql", "SELECT 1", {});
+
+        expect(spec.args[0]).toEqual({ type: "integer" });
+    });
+
+    it("carries a non-blank default through", () => {
+        const rows: FunctionArgRow[] = [{ type: "integer", name: "a", mode: "", default: "0" }];
+
+        const spec = buildCreateFunctionSpec("public", "f", "function", rows, "sql", "SELECT 1", {});
+
+        expect(spec.args[0].default).toBe("0");
+    });
+
+    it("omits returns/volatility when unset and defaults replace to false", () => {
+        const spec = buildCreateFunctionSpec("public", "f", "function", [], "sql", "SELECT 1", {});
+
+        expect(spec.returns).toBeUndefined();
+        expect(spec.volatility).toBeUndefined();
+        expect(spec.replace).toBe(false);
+    });
+
+    it("carries returns/volatility/replace when set", () => {
+        const spec = buildCreateFunctionSpec("public", "f", "function", [], "sql", "SELECT 1", {
+            returns: "integer", volatility: "IMMUTABLE", replace: true,
+        });
+
+        expect(spec.returns).toBe("integer");
+        expect(spec.volatility).toBe("IMMUTABLE");
+        expect(spec.replace).toBe(true);
+    });
+
+    it("carries the procedure kind through", () => {
+        expect(buildCreateFunctionSpec("public", "p", "procedure", [], "sql", "", {}).kind).toBe("procedure");
+    });
+});
+
+describe("buildDropFunctionSpec", () => {
+    it("carries the signature and cascade/ifExists only when set", () => {
+        const spec = buildDropFunctionSpec("public", "add", "function", "integer, integer");
+
+        expect(spec).toEqual({ schema: "public", name: "add", kind: "function", signature: "integer, integer" });
+    });
+
+    it("carries cascade and ifExists when set", () => {
+        const spec = buildDropFunctionSpec("public", "add", "function", "integer, integer", true, true);
+
+        expect(spec.cascade).toBe(true);
+        expect(spec.ifExists).toBe(true);
+    });
+});
+
+describe("buildCreateEnumTypeSpec", () => {
+    it("drops blank label rows", () => {
+        const spec = buildCreateEnumTypeSpec("public", "mood", ["sad", "  ", "happy"]);
+
+        expect(spec.labels).toEqual(["sad", "happy"]);
+    });
+});
+
+describe("buildCreateCompositeTypeSpec", () => {
+    it("drops a row with a blank name or type", () => {
+        const spec = buildCreateCompositeTypeSpec("public", "addr", [
+            { name: "street", type: "text" },
+            { name: "  ", type: "text" },
+            { name: "zip", type: "" },
+        ]);
+
+        expect(spec.attributes).toEqual([{ name: "street", type: "text" }]);
+    });
+});
+
+describe("buildDropTypeSpec", () => {
+    it("carries cascade/ifExists only when set", () => {
+        expect(buildDropTypeSpec("public", "mood")).toEqual({ schema: "public", name: "mood" });
+        expect(buildDropTypeSpec("public", "mood", true, true)).toEqual({
+            schema: "public", name: "mood", cascade: true, ifExists: true,
+        });
+    });
+});
+
+describe("buildAlterTypeAddValueSpec", () => {
+    it("omits position when not given", () => {
+        expect(buildAlterTypeAddValueSpec("public", "mood", "great")).toEqual({
+            schema: "public", name: "mood", value: "great",
+        });
+    });
+
+    it("carries a given position through", () => {
+        const spec = buildAlterTypeAddValueSpec("public", "mood", "great", { placement: "after", label: "happy" });
+
+        expect(spec.position).toEqual({ placement: "after", label: "happy" });
     });
 });
