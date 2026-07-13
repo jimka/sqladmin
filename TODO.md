@@ -22,8 +22,9 @@ Deferred features and known issues. Implemented work lives in
   localStorage store once user support lands.
 
 ### Schema depth
-- **More navigator object types** — sequences, functions/procedures, types,
-  indexes-as-objects.
+- **More navigator object types** — functions/procedures, types,
+  indexes-as-objects. (Sequences shipped in `schema-sequence-ddl`; the
+  `function-type-ddl` plan covers functions/types.)
 
 ### Connections / platform
 - **Connection-management UI** — add/switch connections (activates the
