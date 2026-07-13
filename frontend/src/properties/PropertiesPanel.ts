@@ -44,6 +44,10 @@ function propertyRows(ref: DbObjectRef, columns?: ColumnMeta[]): PropertyValueRo
             return tableRows(ref, columns);
         case "sequence":
             return sequenceRows(ref);
+        case "function":
+            return functionRows(ref);
+        case "type":
+            return typeRows(ref);
     }
 }
 
@@ -62,6 +66,37 @@ function sequenceRows(ref: DbObjectRef): PropertyValueRow[] {
         { property: "Schema", value: ref.schema ?? "—" },
         { property: "Database", value: ref.database ?? "—" },
         { property: "Type", value: "Sequence" },
+    ];
+}
+
+/**
+ * Rows for a function/procedure: identity plus its identity-argument
+ * signature (disambiguates overloads of the same name). Not a relation
+ * (`isRelation: false` in the object-kind registry) — it has no columns.
+ */
+function functionRows(ref: DbObjectRef): PropertyValueRow[] {
+    return [
+        { property: "Name", value: ref.name ?? "—" },
+        { property: "Schema", value: ref.schema ?? "—" },
+        { property: "Database", value: ref.database ?? "—" },
+        { property: "Type", value: ref.isProcedure ? "Procedure" : "Function" },
+        { property: "Signature", value: ref.signature || "—" },
+    ];
+}
+
+/**
+ * Rows for a standalone enum/composite type: identity only. The category
+ * (enum vs. composite) and its labels/attributes are a separate
+ * introspection fetch (`getTypeDefinition`), shown in the edit dialog rather
+ * than here — the Properties inspector never round-trips per selection for
+ * a non-relation kind.
+ */
+function typeRows(ref: DbObjectRef): PropertyValueRow[] {
+    return [
+        { property: "Name", value: ref.name ?? "—" },
+        { property: "Schema", value: ref.schema ?? "—" },
+        { property: "Database", value: ref.database ?? "—" },
+        { property: "Type", value: "Type" },
     ];
 }
 

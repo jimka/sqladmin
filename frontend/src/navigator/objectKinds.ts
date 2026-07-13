@@ -41,6 +41,11 @@ export const OBJECT_KINDS: readonly ObjectKindInfo[] = [
     { kind: "view", glyph: "eye", categoryLabel: "Views", isRelation: true },
     { kind: "materializedView", glyph: "layer-group", categoryLabel: "Materialized Views", isRelation: true },
     { kind: "sequence", glyph: "arrow-up-1-9", categoryLabel: "Sequences", isRelation: false },
+    // function/type (function-type-ddl phase): listed leaves like a sequence —
+    // they open a definition/edit view, not a Dock data tab, so isRelation stays
+    // false for both.
+    { kind: "function", glyph: "code", categoryLabel: "Functions", isRelation: false },
+    { kind: "type", glyph: "cube", categoryLabel: "Types", isRelation: false },
 ];
 
 /**
