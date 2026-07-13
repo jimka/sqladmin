@@ -5,14 +5,15 @@
 
 import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import type { DbObjectKind, RelationEdge, RelationNodeRef } from "../contract";
+import { OBJECT_KINDS } from "../navigator/objectKinds";
 
-// keep in sync with KIND_GLYPH (navigator/objectGlyphs.ts); NOT imported — that
-// module runs DOM side effects on import and would crash the node vitest env.
-// Same discipline as buildSchemaDiagram.ts's TABLE_GLYPH.
-const KIND_GLYPH: Record<DbObjectKind, string> = {
-    database: "database", schema: "folder", table: "table",
-    view: "eye", materializedView: "layer-group",
-};
+// Built from the objectKinds.ts registry rather than navigator/objectGlyphs.ts's
+// own KIND_GLYPH: that module runs DOM side effects (Glyph.register) on import
+// and would crash the node vitest env, but objectKinds.ts is pure data, so this
+// stays both DOM-free and single-sourced (no hand-copied literal to keep in
+// sync). Same discipline as buildSchemaDiagram.ts's TABLE_GLYPH.
+const KIND_GLYPH: Record<DbObjectKind, string> =
+    Object.fromEntries(OBJECT_KINDS.map(k => [k.kind, k.glyph])) as Record<DbObjectKind, string>;
 
 /** Metadata stashed on each node's `data` so the panel can open the relation. */
 export interface RelationNodeData {

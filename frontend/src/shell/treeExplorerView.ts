@@ -10,6 +10,7 @@
 
 import { Component }               from "@jimka/typescript-ui/core";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
+import type { Button }             from "@jimka/typescript-ui/component/button";
 import { refreshTool, bindRefreshShortcut } from "./refreshTool";
 import type { ExplorerTree }       from "../navigator/NavigatorTree";
 
@@ -22,6 +23,9 @@ export interface TreeExplorerConfig {
     /** The tree section's header label and glyph. */
     treeLabel: string;
     treeGlyph: string;
+    /** Extra header tool buttons for the tree section, after Refresh (e.g. the
+     *  Database view's "Create schema" tool). Omitted for a rail with none. */
+    treeTools?: Button[];
     /** The read-only inspector component and its header label. */
     inspector: Component;
     inspectorLabel: string;
@@ -51,7 +55,7 @@ export class TreeExplorerView extends AccordionPanel {
         super({
             id: config.id,
             sections: [
-                { label: config.treeLabel, component: tree, initiallyOpen: true, glyph: config.treeGlyph, tools: [refreshTool(refresh)], fillWeight: 1 },
+                { label: config.treeLabel, component: tree, initiallyOpen: true, glyph: config.treeGlyph, tools: [...(config.treeTools ?? []), refreshTool(refresh)], fillWeight: 1 },
                 { label: config.inspectorLabel, component: config.inspector, initiallyOpen: true, glyph: config.inspectorGlyph ?? "circle-info" },
             ],
         });

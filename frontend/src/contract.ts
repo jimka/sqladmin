@@ -1,7 +1,7 @@
 // The wire contract, mirrored on the TS side. Matches the backend's WireType
 // scalar set and introspection/list shapes (see backend/app/contract.py).
 
-export type DbObjectKind = "database" | "schema" | "table" | "view" | "materializedView";
+export type DbObjectKind = "database" | "schema" | "table" | "view" | "materializedView" | "sequence";
 
 /** Identifies a database object the navigator can act on. */
 export interface DbObjectRef {
@@ -51,6 +51,19 @@ export interface TablePrivileges {
 /** A (materialized) view's reconstructed SELECT (pg_get_viewdef). */
 export interface ViewDefinition {
     definition: string; // the pretty-printed pg_get_viewdef(oid, true) SQL
+}
+
+/** A sequence's current state and parameters (pg_sequences). */
+export interface SequenceDetail {
+    lastValue: string | null; // last_value; null when never read or no USAGE/SELECT
+    startValue: string;
+    minValue: string;
+    maxValue: string;
+    increment: string;
+    cacheSize: string;
+    cycle: boolean;
+    dataType: string;
+    owner: string;
 }
 
 /** The list endpoint envelope the configured JsonReader parses. */
@@ -216,6 +229,81 @@ export interface ReplaceMatviewSpec {
     select: string;
     cascade: boolean;
     withData: boolean;
+}
+
+/** The spec a CREATE SCHEMA preview/execute call sends. */
+export interface CreateSchemaSpec {
+    name: string;
+    authorization?: string;
+}
+
+/** The spec a DROP SCHEMA preview/execute call sends. */
+export interface DropSchemaSpec {
+    name: string;
+    cascade?: boolean;
+    ifExists?: boolean;
+}
+
+/** The spec an ALTER SCHEMA ... RENAME TO preview/execute call sends. */
+export interface RenameSchemaSpec {
+    name: string;
+    newName: string;
+}
+
+/** A sequence's OWNED BY target, e.g. the column whose lifetime it tracks. */
+export interface SequenceOwnedBy {
+    schema: string;
+    table: string;
+    column: string;
+}
+
+/** The spec a CREATE SEQUENCE preview/execute call sends. */
+export interface CreateSequenceSpec {
+    schema: string;
+    name: string;
+    increment?: number;
+    start?: number;
+    minValue?: number;
+    maxValue?: number;
+    cache?: number;
+    cycle?: boolean;
+    ownedBy?: SequenceOwnedBy;
+}
+
+/**
+ * The spec an ALTER SEQUENCE parameter-form preview/execute call sends.
+ * `restartDefault: true` (a bare `RESTART`) takes precedence over a numeric
+ * `restart` (`RESTART WITH n`) — the form only ever sets one. See the
+ * schema-sequence-ddl plan's "ALTER SEQUENCE" decision for why the parameter
+ * form and OWNER TO (below) are separate specs/statements.
+ */
+export interface AlterSequenceSpec {
+    schema: string;
+    name: string;
+    dataType?: string;
+    restart?: string | number;
+    restartDefault?: boolean;
+    increment?: string | number;
+    start?: string | number;
+    minValue?: string | number;
+    maxValue?: string | number;
+    cache?: string | number;
+    cycle?: boolean;
+}
+
+/** The spec a sequence OWNER TO preview/execute call sends. */
+export interface SequenceOwnerSpec {
+    schema: string;
+    name: string;
+    owner: string;
+}
+
+/** The spec a DROP SEQUENCE preview/execute call sends. */
+export interface DropSequenceSpec {
+    schema: string;
+    name: string;
+    cascade?: boolean;
+    ifExists?: boolean;
 }
 
 /** EXPLAIN output format. TEXT is the first cut; JSON is the follow-on tree source. */

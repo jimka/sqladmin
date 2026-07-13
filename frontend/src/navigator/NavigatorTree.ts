@@ -21,10 +21,13 @@ import { arrows_rotate }                        from "@jimka/typescript-ui/glyph
 import type { DbObjectKind, DbObjectRef }       from "../contract";
 import { getObjects, getSchemas }               from "../data/api";
 import { KIND_GLYPH }                           from "./objectGlyphs";
+import { isRelationKind, objectCategories }     from "./objectKinds";
 import type { SqlAdminController }              from "../SqlAdminController";
 
 // The table-ddl launcher items' glyphs (create/rename/drop table), plus the
 // view-matview-ddl phase's refresh glyph (Edit/Drop reuse "pencil"/"trash").
+// "arrow-up-1-9" (the sequence-leaf glyph) is registered by objectGlyphs.ts,
+// already imported above for KIND_GLYPH.
 Glyph.register(plus, pencil, trash, arrows_rotate);
 
 /** One object leaf as returned by the objects endpoint. */
@@ -34,23 +37,26 @@ interface DbObject {
 }
 
 /**
- * The navigator's object categories, in display order. Each groups the leaves
- * of one wire kind under a synthetic, non-selectable parent node; an empty
- * category is omitted so a schema shows only the groups it actually has.
+ * The navigator's object categories, in display order — derived from the
+ * objectKinds.ts registry (the single source a new listed kind is added to)
+ * rather than a hand-maintained array. Each groups the leaves of one wire
+ * kind under a synthetic, non-selectable parent node; an empty category is
+ * omitted so a schema shows only the groups it actually has.
  */
-const OBJECT_CATEGORIES: { label: string; kind: DbObjectKind }[] = [
-    { label: "Tables", kind: "table" },
-    { label: "Views", kind: "view" },
-    { label: "Materialized Views", kind: "materializedView" },
-];
+const OBJECT_CATEGORIES: { label: string; kind: DbObjectKind }[] = objectCategories();
 
 // Category group nodes carry no data (they are non-selectable parents); show the
 // glyph of the objects they group, keyed by their synthetic label.
 const CATEGORY_GLYPH = new Map(OBJECT_CATEGORIES.map(c => [c.label, KIND_GLYPH[c.kind]]));
 
-/** True for the object kinds that open in the Dock and offer a context menu. */
+/**
+ * True for the object kinds that open in the Dock and offer the relation
+ * context-menu items — derived from the objectKinds.ts registry's
+ * `isRelation` flag. A sequence is a listed leaf (it has a category) but is
+ * NOT a relation: it has no rows, so no data tab / double-click open.
+ */
 function isRelation(kind: DbObjectKind | undefined): boolean {
-    return kind === "table" || kind === "view" || kind === "materializedView";
+    return isRelationKind(kind);
 }
 
 /**
@@ -111,6 +117,16 @@ export class NavigatorTree extends Tree implements ExplorerTree {
         this.on("dblclick", (node: TreeNode) => {
             const ref = node.data as DbObjectRef | undefined;
 
+            // A sequence has no rows (isRelation is false for it — see
+            // objectKinds.ts), so it opens the read-only info tab instead of a
+            // data tab. Checked before the isRelation guard below, mirroring
+            // the sequence branch in the contextmenu handler.
+            if (ref && ref.kind === "sequence") {
+                void this.controller.openSequence(ref, node);
+
+                return;
+            }
+
             if (ref && isRelation(ref.kind)) {
                 void this.controller.openTable(ref, node);
             }
@@ -122,25 +138,53 @@ export class NavigatorTree extends Tree implements ExplorerTree {
         this.on("contextmenu", (node: TreeNode, event: MouseEvent) => {
             const ref = node.data as DbObjectRef | undefined;
 
-            // A schema node offers its whole-schema ER diagram plus the dependency
-            // and inheritance graphs, and — since there is no database level — the
-            // whole-database ER diagram (all schemas), whose database ref is
-            // synthesized from the schema's own ref. Checked before the relation
-            // guard below (a schema is not a relation).
+            // A schema node's own launchers (rename/drop this schema) come first,
+            // above a separator, since they're this schema's identity actions.
+            // Everything else — the structural "Create …" launchers (table-ddl /
+            // view-matview-ddl / schema-sequence-ddl / function-type-ddl phases)
+            // and the read-only diagram views (whole-schema ER, dependency,
+            // inheritance, and — since there is no database level — the
+            // whole-database ER diagram synthesized from this schema's own ref) —
+            // is grouped into a "Create" and a "Show" submenu, keeping the
+            // top-level menu short. "Create schema…" is NOT offered here: it moved
+            // to the Database accordion section's header tool (DatabaseExplorerView),
+            // since it targets the database, not this schema. Checked before the
+            // relation guard below (a schema is not a relation).
             if (ref && ref.kind === "schema") {
                 this.contextMenu.show(event.clientX, event.clientY, [
-                    // The structural launchers (table-ddl / view-matview-ddl phases):
-                    // open the CREATE TABLE/VIEW/MATERIALIZED VIEW dialogs for this
-                    // schema. Listed first, above a separator, since they're mutating
-                    // actions distinct from the read-only diagram views below.
-                    { text: "Create table…", glyph: "plus", action: () => this.controller.createTable(ref) },
-                    { text: "Create view…", glyph: "plus", action: () => void this.controller.createView(ref) },
-                    { text: "Create materialized view…", glyph: "plus", action: () => void this.controller.createMaterializedView(ref) },
+                    { text: "Rename", glyph: "pencil", action: () => this.controller.renameSchema(ref) },
+                    { text: "Drop", glyph: "trash", action: () => this.controller.dropSchema(ref) },
                     { separator: true },
-                    { text: "Show schema diagram", glyph: "diagram-project", action: () => void this.controller.openSchemaDiagram(ref, node) },
-                    { text: "Show dependency graph", glyph: "diagram-project", action: () => void this.controller.openSchemaDependencyGraph(ref, node) },
-                    { text: "Show inheritance graph", glyph: "diagram-project", action: () => void this.controller.openSchemaInheritanceGraph(ref, node) },
-                    { text: "Show database diagram", glyph: "diagram-project", action: () => void this.controller.openDatabaseDiagram({ connectionId: ref.connectionId, database: ref.database, kind: "database" }) },
+                    // Nested submenu support is unverified, so the function-type-ddl
+                    // phase's own "Create type ▸ Enum/Composite" submenu is flattened
+                    // into two direct items here rather than nested inside "Create".
+                    { text: "Create", glyph: "plus", submenu: { label: "Create", items: [
+                        { text: "Materialized view", action: () => void this.controller.createMaterializedView(ref) },
+                        { text: "Sequence", action: () => this.controller.createSequence(ref) },
+                        { text: "Table", action: () => this.controller.createTable(ref) },
+                        { text: "View", action: () => void this.controller.createView(ref) },
+                    ] } },
+                    { text: "Show", glyph: "diagram-project", submenu: { label: "Show", items: [
+                        { text: "Database diagram", action: () => void this.controller.openDatabaseDiagram({ connectionId: ref.connectionId, database: ref.database, kind: "database" }) },
+                        { text: "Dependency graph", action: () => void this.controller.openSchemaDependencyGraph(ref, node) },
+                        { text: "Inheritance graph", action: () => void this.controller.openSchemaInheritanceGraph(ref, node) },
+                        { text: "Schema diagram", action: () => void this.controller.openSchemaDiagram(ref, node) },
+                    ] } },
+                ]);
+
+                return;
+            }
+
+            // A sequence leaf is a listed object (it has a "Sequences" category)
+            // but not a relation (isRelation is false for it — see objectKinds.ts):
+            // it has no rows, so no data tab / double-click open, and its own small
+            // context menu is offered here instead of falling into the relation
+            // menu below. Checked before the relation guard, mirroring the schema
+            // branch above.
+            if (ref && ref.kind === "sequence") {
+                this.contextMenu.show(event.clientX, event.clientY, [
+                    { text: "Show info", glyph: "arrow-up-1-9", action: () => void this.controller.openSequence(ref, node) },
+                    { text: "Drop", glyph: "trash", action: () => this.controller.dropSequence(ref) },
                 ]);
 
                 return;
