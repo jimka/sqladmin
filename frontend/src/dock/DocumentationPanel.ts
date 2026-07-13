@@ -26,6 +26,12 @@ export class DocumentationPanel {
         const editor = new MarkdownEditor(initial);
         editor.on("change", ({ value }) => onChange(value));
 
+        // Focus the editor so the user can type straight away on a freshly opened
+        // Notes tab (Tools → Notes…). The panel content is built before the Dock
+        // mounts it, so the contenteditable does not exist yet — onFirstLayout runs
+        // once the editor has mounted and laid out, when it can take focus.
+        editor.onFirstLayout(() => editor.focus());
+
         this.content = Container({ layoutManager: new Fit(), components: [editor] });
         this.dispose = () => editor.dispose();
     }
