@@ -154,9 +154,10 @@ export class NavigatorTree extends Tree implements ExplorerTree {
             }
         });
 
-        // Right-clicking a table/view/matview offers, in a separate tab each: "open
-        // as query" (a generated SELECT in a query panel) first, then — below a
-        // separator — its structure and, for a (materialized) view, its SQL definition.
+        // Right-clicking a table/view/matview offers, in a separate tab each: its
+        // data first (a table's editable grid, or a view's auto-run browse query),
+        // then — for a table — "Open as query", then, below a separator, its
+        // structure and, for a (materialized) view, its SQL definition.
         this.on("contextmenu", (node: TreeNode, event: MouseEvent) => {
             const ref = node.data as DbObjectRef | undefined;
 
@@ -249,12 +250,21 @@ export class NavigatorTree extends Tree implements ExplorerTree {
             const items: MenuItemConfig[] = [
                 // Mirrors the double-click: open (or focus) the relation's data tab and
                 // load it. A table's grid is editable (writes back), so it reads "Open
-                // data"; a view/matview grid is read-only, so it reads "Show data". The
-                // glyphs match the tabs each item opens.
+                // data"; a view/matview is read-only and opens as an auto-run query
+                // (SELECT * … LIMIT n) — so it reads "Show data". The glyphs match the
+                // tabs each item opens.
                 { text: ref.kind === "table" ? "Open data" : "Show data", glyph: "table", action: () => void this.controller.openTable(ref, node) },
-                { text: "Open as query", glyph: "terminal", action: () => this.controller.openQueryFor(ref) },
-                { separator: true },
             ];
+
+            // "Open as query" is a table-only affordance: a table's primary open is its
+            // editable grid, so browsing it as a generated SELECT is a distinct action.
+            // A view already opens as that query ("Show data" above), so the item would
+            // be a redundant duplicate there.
+            if (ref.kind === "table") {
+                items.push({ text: "Open as query", glyph: "terminal", action: () => this.controller.openQueryFor(ref) });
+            }
+
+            items.push({ separator: true });
 
             if (ref.kind === "table") {
                 // Every read-only "Show …" view for a table grouped into one submenu,

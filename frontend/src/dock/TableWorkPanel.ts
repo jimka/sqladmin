@@ -10,7 +10,7 @@
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the panel `extends
 // Container`, inlining its own Border frame directly (the same shape
-// ViewWorkPanel and RoleGrantsPanel now inline too). The three sync handlers
+// RoleGrantsPanel inlines too). The three sync handlers
 // are arrow-function fields — they're registered by reference on
 // `store`/`dataGrid` events, which would drop `this` if they were plain
 // methods. `buildColumnSpec`/`save_`/`missingRequiredFields`/`confirmDelete`
