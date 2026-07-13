@@ -16,12 +16,14 @@ def test_get_result_shape() -> None:
         {"name": "customers", "kind": "table"},
         {"name": "active_customers", "kind": "view"},
         {"name": "customer_totals", "kind": "materializedView"},
+        {"name": "order_id_seq", "kind": "sequence"},
     ]
 
     assert op.get_result() == [
         {"name": "customers", "kind": "table"},
         {"name": "active_customers", "kind": "view"},
         {"name": "customer_totals", "kind": "materializedView"},
+        {"name": "order_id_seq", "kind": "sequence"},
     ]
 
 
