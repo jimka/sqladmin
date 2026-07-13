@@ -172,6 +172,52 @@ export interface IndexSpec {
     ifExists?: boolean;
 }
 
+/** The spec a CREATE [OR REPLACE] VIEW preview/execute call sends. */
+export interface CreateViewSpec {
+    schema: string;
+    name: string;
+    select: string;
+    orReplace: boolean;
+    columns?: string[];
+}
+
+/** The spec a DROP VIEW / DROP MATERIALIZED VIEW preview/execute call sends. */
+export interface DropSpec {
+    schema: string;
+    name: string;
+    cascade: boolean;
+}
+
+/** The spec a CREATE MATERIALIZED VIEW preview/execute call sends. */
+export interface CreateMatviewSpec {
+    schema: string;
+    name: string;
+    select: string;
+    withData: boolean;
+}
+
+/** The spec a REFRESH MATERIALIZED VIEW preview/execute call sends. */
+export interface RefreshMatviewSpec {
+    schema: string;
+    name: string;
+    concurrently: boolean;
+    withNoData: boolean;
+}
+
+/**
+ * The spec a matview body-edit (DROP; CREATE) preview/execute call sends —
+ * the destructive but atomic alternative to CREATE OR REPLACE (which a
+ * materialized view cannot use). See the view-matview-ddl plan's "Matview
+ * edit strategy" decision.
+ */
+export interface ReplaceMatviewSpec {
+    schema: string;
+    name: string;
+    select: string;
+    cascade: boolean;
+    withData: boolean;
+}
+
 /** EXPLAIN output format. TEXT is the first cut; JSON is the follow-on tree source. */
 export type ExplainFormat = "text" | "json";
 

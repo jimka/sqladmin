@@ -231,3 +231,25 @@ export function orderColumnsBySelection(allColumns: string[], selected: Readonly
 export function parseColumnList(text: string): string[] {
     return text.split(",").map(s => s.trim()).filter(s => s.length > 0);
 }
+
+/**
+ * Strip a single trailing semicolon (and surrounding whitespace) from a
+ * fetched view/matview definition before it goes back into a `select` spec
+ * field. `getViewDefinition` (pg_get_viewdef) always terminates its output
+ * with a semicolon, but `CreateViewSpec.select` / `ReplaceMatviewSpec.select`
+ * expect a bare SELECT body with none — see ViewFormDialog's
+ * `NEW_VIEW_SELECT_SKELETON`. A CREATE VIEW harmlessly absorbs a stray
+ * trailing semicolon into its own statement terminator, but a materialized
+ * view's DROP+CREATE replace pair appends `WITH DATA` right after the select
+ * body, so a stray semicolon there breaks the generated SQL (`...WHERE x >
+ * 0; WITH DATA` is a syntax error) — this normalizes both call sites the
+ * same way regardless.
+ *
+ * @param select - the editor's current text (a definition tab's Save, or a
+ *   freshly fetched definition).
+ * @returns the text with leading/trailing whitespace and one trailing
+ *   semicolon removed.
+ */
+export function stripTrailingSemicolon(select: string): string {
+    return select.trim().replace(/;\s*$/, "");
+}

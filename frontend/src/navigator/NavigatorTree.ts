@@ -17,13 +17,15 @@ import { Glyph }                                from "@jimka/typescript-ui/compo
 import { plus }                                 from "@jimka/typescript-ui/glyphs/solid/plus";
 import { pencil }                               from "@jimka/typescript-ui/glyphs/solid/pencil";
 import { trash }                                from "@jimka/typescript-ui/glyphs/solid/trash";
+import { arrows_rotate }                        from "@jimka/typescript-ui/glyphs/solid/arrows_rotate";
 import type { DbObjectKind, DbObjectRef }       from "../contract";
 import { getObjects, getSchemas }               from "../data/api";
 import { KIND_GLYPH }                           from "./objectGlyphs";
 import type { SqlAdminController }              from "../SqlAdminController";
 
-// The table-ddl launcher items' glyphs (create/rename/drop table).
-Glyph.register(plus, pencil, trash);
+// The table-ddl launcher items' glyphs (create/rename/drop table), plus the
+// view-matview-ddl phase's refresh glyph (Edit/Drop reuse "pencil"/"trash").
+Glyph.register(plus, pencil, trash, arrows_rotate);
 
 /** One object leaf as returned by the objects endpoint. */
 interface DbObject {
@@ -127,10 +129,13 @@ export class NavigatorTree extends Tree implements ExplorerTree {
             // guard below (a schema is not a relation).
             if (ref && ref.kind === "schema") {
                 this.contextMenu.show(event.clientX, event.clientY, [
-                    // The structural launcher (table-ddl phase): opens the CREATE TABLE
-                    // dialog for this schema. Listed first, above a separator, since it's
-                    // a mutating action distinct from the read-only diagram views below.
+                    // The structural launchers (table-ddl / view-matview-ddl phases):
+                    // open the CREATE TABLE/VIEW/MATERIALIZED VIEW dialogs for this
+                    // schema. Listed first, above a separator, since they're mutating
+                    // actions distinct from the read-only diagram views below.
                     { text: "Create table…", glyph: "plus", action: () => this.controller.createTable(ref) },
+                    { text: "Create view…", glyph: "plus", action: () => void this.controller.createView(ref) },
+                    { text: "Create materialized view…", glyph: "plus", action: () => void this.controller.createMaterializedView(ref) },
                     { separator: true },
                     { text: "Show schema diagram", glyph: "diagram-project", action: () => void this.controller.openSchemaDiagram(ref, node) },
                     { text: "Show dependency graph", glyph: "diagram-project", action: () => void this.controller.openSchemaDependencyGraph(ref, node) },
@@ -181,13 +186,27 @@ export class NavigatorTree extends Tree implements ExplorerTree {
             }
 
             // Structural launchers (table-ddl phase): rename/drop this table. Only a
-            // table offers them — views/matviews have no table-DDL counterpart here
-            // (that's the view-matview-ddl phase). Grouped in their own separated
-            // section since they mutate, unlike everything above.
+            // table offers them. Grouped in their own separated section since they
+            // mutate, unlike everything above.
             if (ref.kind === "table") {
                 items.push({ separator: true });
                 items.push({ text: "Rename", glyph: "pencil", action: () => this.controller.renameTable(ref, node) });
                 items.push({ text: "Drop", glyph: "trash", action: () => this.controller.dropTable(ref, node) });
+            }
+
+            // Structural launchers (view-matview-ddl phase): drop this view or
+            // matview, plus a matview-only Refresh. Editing the definition is no
+            // longer a separate launcher — "Show definition" above now opens a
+            // directly-editable tab (DefinitionPanel) with its own Save button.
+            // Grouped in their own separated section, mirroring the table
+            // launchers above.
+            if (ref.kind === "view") {
+                items.push({ separator: true });
+                items.push({ text: "Drop", glyph: "trash", action: () => this.controller.dropRelation(ref) });
+            } else if (ref.kind === "materializedView") {
+                items.push({ separator: true });
+                items.push({ text: "Refresh", glyph: "arrows-rotate", action: () => this.controller.refreshMaterializedView(ref) });
+                items.push({ text: "Drop", glyph: "trash", action: () => this.controller.dropRelation(ref) });
             }
 
             // Export streams the full relation server-side (not the loaded page), so a
