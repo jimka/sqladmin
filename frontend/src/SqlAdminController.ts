@@ -20,7 +20,7 @@ import type { TreeNode }                                                        
 import type { ExplorerTree }                                                                                                                                                                       from "./navigator/NavigatorTree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                                                                                                                                     from "@jimka/typescript-ui/data";
 import type { AlterColumnAction, ColumnMeta, ConstraintKind, DbObjectRef, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TablePrivileges, TableStructure }                              from "./contract";
-import { executeDdl, getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getViewDefinition, getStructure, previewAlterTable, previewConstraint, previewCreateTable, previewDropTable, previewIndex, runExplain, runQuery, tableExportUrl } from "./data/api";
+import { executeDdl, getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getViewDefinition, getStructure, previewAlterTable, previewConstraint, previewCreateMatview, previewCreateTable, previewCreateView, previewDropMatview, previewDropTable, previewDropView, previewIndex, previewRefreshMatview, previewReplaceMatview, runExplain, runQuery, tableExportUrl } from "./data/api";
 import { exportQueryResult }                                                                                                                                                                       from "./dock/exportQueryResult";
 import { exportExplainPlan }                                                                                                                                                                       from "./dock/exportExplainResult";
 import type { ActiveExport }                                                                                                                                                                       from "./data/explain";
@@ -45,6 +45,10 @@ import { AlterColumnForm }                                                      
 import { ConstraintForm }                                                                                                                                                                          from "./dock/ConstraintForm";
 import { IndexForm }                                                                                                                                                                               from "./dock/IndexForm";
 import { ConfirmCascadeForm }                                                                                                                                                                      from "./dock/ConfirmCascadeForm";
+import { openViewDialog }                                                                                                                                                                          from "./dock/ViewFormDialog";
+import { openMaterializedViewDialog }                                                                                                                                                              from "./dock/MaterializedViewFormDialog";
+import { openDropRelationDialog, openRefreshMatviewDialog }                                                                                                                                        from "./dock/RelationDdlActions";
+import { stripTrailingSemicolon }                                                                                                                                                                  from "./dock/ddlSpecs";
 import { DefinitionPanel }                                                                                                                                                                         from "./dock/DefinitionPanel";
 import { DocumentationPanel }                                                                                                                                                                      from "./dock/DocumentationPanel";
 import { QueryPanel }                                                                                                                                                                              from "./dock/QueryPanel";
@@ -351,11 +355,22 @@ export class SqlAdminController {
     }
 
     /**
-     * Open a read-only definition (pg_get_viewdef SQL) tab for a view/matview,
-     * deduping by definition-panel id. The SQL is fetched up front and passed to
-     * a plain DefinitionPanel; a failed fetch surfaces through notifyError and no
-     * tab opens. Tables have no definition, so the navigator only offers this for
-     * views (see NavigatorTree).
+     * Open an editable definition tab for a view/matview — its Columns grid
+     * above its SQL definition (pg_get_viewdef, the SELECT body only),
+     * deduping by definition-panel id. The definition and columns are
+     * fetched up front and passed to a `DefinitionPanel` wired with an
+     * `onSave` that builds and executes the edit directly, with no
+     * intermediate dialog: `CREATE OR REPLACE VIEW` for a view, or the
+     * atomic DROP+CREATE replace pair for a materialized view (a
+     * materialized view cannot be CREATE OR REPLACE'd — see the
+     * view-matview-ddl plan's "Matview edit strategy" decision). On success
+     * the navigator refreshes and the tab reseeds itself in place (via
+     * `panel.reload`) rather than closing — the object list may be
+     * unaffected, but the tab's own definition/columns just changed. A
+     * failed fetch surfaces through notifyError and no tab opens; a failed
+     * save surfaces through notifyError and leaves the tab (and the user's
+     * edits) open. Tables have no definition, so the navigator only offers
+     * this for views (see NavigatorTree).
      */
     async openDefinition(ref: DbObjectRef, node: TreeNode): Promise<void> {
         const id = this.definitionPanelId(ref);
@@ -365,17 +380,81 @@ export class SqlAdminController {
         }
 
         let definition: string;
+        let columns: ColumnMeta[];
 
         try {
-            definition = (await getViewDefinition(ref)).definition;
+            [definition, columns] = await this.fetchDefinitionAndColumns(ref);
         } catch (err) {
             this.notifyError(err, ref);
 
             return;
         }
 
-        const panel = new DefinitionPanel(definition);
+        // Read by `onSave` only after a Save click, which always happens
+        // after this variable is assigned just below — the forward
+        // reference is safe.
+        let panel: DefinitionPanel;
 
+        const onSave = async (newDefinition: string): Promise<void> => {
+            // getViewDefinition's pg_get_viewdef output always ends with a
+            // semicolon; CreateViewSpec/ReplaceMatviewSpec's `select` expects
+            // a bare body with none (see stripTrailingSemicolon's doc — a
+            // stray one is harmless for CREATE OR REPLACE VIEW but breaks the
+            // matview replace's appended WITH DATA).
+            const select = stripTrailingSemicolon(newDefinition);
+
+            try {
+                // cascade is hardcoded false: this tab has no CASCADE
+                // toggle (the dialog's edit mode had one; this Save button
+                // deliberately has no dialog at all — see this method's
+                // doc). A matview with dependents therefore can't be edited
+                // here at all: the DROP half fails with a dependency error,
+                // surfaced below via notifyError, leaving the matview and
+                // the tab untouched; the user must drop the dependent(s)
+                // out-of-band (e.g. the SQL workspace) before retrying.
+                const sql = ref.kind === "materializedView"
+                    ? (await previewReplaceMatview(ref, {
+                        schema: ref.schema!, name: ref.name!, select, cascade: false, withData: true,
+                    })).sql
+                    : (await previewCreateView(ref, {
+                        schema: ref.schema!, name: ref.name!, select, orReplace: true,
+                    })).sql;
+
+                await executeDdl(this._connectionId, sql);
+            } catch (err) {
+                this.notifyError(err, ref);
+
+                return;
+            }
+
+            this._navigator?.refresh?.();
+
+            try {
+                const [reloadedDefinition, reloadedColumns] = await this.fetchDefinitionAndColumns(ref);
+
+                panel.reload(reloadedDefinition, reloadedColumns);
+            } catch (err) {
+                // The save itself already succeeded (executeDdl above didn't
+                // throw) — only the post-save re-fetch failed, so this is
+                // NOT a failed save. Say so explicitly: a bare notifyError
+                // here would read as "the save failed", inviting a retry
+                // that re-runs the (for a matview, destructive) DDL a second
+                // time for no reason.
+                this.notifyError(new Error(`saved, but failed to refresh the tab: ${this.errorMessage(err)}`), ref);
+
+                return;
+            }
+
+            this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: definition saved`);
+        };
+
+        panel = new DefinitionPanel(definition, columns, onSave);
+
+        // No `columns` field here: unlike the structure tab (keyed by
+        // structurePanelId, whose `columns` backs structureColumns()), the
+        // definition tab's columns are only ever read by the DefinitionPanel
+        // itself, which already holds its own copy — nothing looks this
+        // entry up by definitionPanelId.
         this._openPanels.set(id, { ref, node, detail: "definition" });
         this._panelDisposers.set(id, panel.dispose);
         this.dock.addPanel({
@@ -386,6 +465,19 @@ export class SqlAdminController {
             content: panel.content
         });
         this.syncToPanel(id);
+    }
+
+    /**
+     * Fetch a view/matview's definition and columns in parallel — shared by
+     * `openDefinition`'s initial load and its Save-success reload.
+     *
+     * @param ref - The view/matview to fetch.
+     * @returns A tuple of the definition SQL (the SELECT body only) and the columns.
+     */
+    private async fetchDefinitionAndColumns(ref: DbObjectRef): Promise<[string, ColumnMeta[]]> {
+        const [definitionResult, columns] = await Promise.all([getViewDefinition(ref), getColumns(ref)]);
+
+        return [definitionResult.definition, columns];
     }
 
     /** Open a read-only structure (column metadata) tab for a table/view. */
@@ -687,6 +779,104 @@ export class SqlAdminController {
             })).sql,
             execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this.refreshStructure(ref),
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the CREATE VIEW dialog for a schema (the navigator's schema
+     * context-menu launcher). Fetches the connection's schema list for the
+     * form's schema ComboBox. Success refreshes the navigator, since a new
+     * view changes the schema's object list.
+     *
+     * @param ref - The target schema (kind "schema"; database + schema set).
+     */
+    async createView(ref: DbObjectRef): Promise<void> {
+        let schemas: string[];
+
+        try {
+            schemas = (await getSchemas(ref.connectionId, ref.database!)).map(s => s.name);
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return;
+        }
+
+        openViewDialog({
+            ref,
+            schemas,
+            preview:   spec => previewCreateView(ref, spec),
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => this._navigator?.refresh?.(),
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the CREATE MATERIALIZED VIEW dialog for a schema (the
+     * navigator's schema context-menu launcher). Mirrors {@link createView}.
+     *
+     * @param ref - The target schema (kind "schema"; database + schema set).
+     */
+    async createMaterializedView(ref: DbObjectRef): Promise<void> {
+        let schemas: string[];
+
+        try {
+            schemas = (await getSchemas(ref.connectionId, ref.database!)).map(s => s.name);
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return;
+        }
+
+        openMaterializedViewDialog({
+            ref,
+            schemas,
+            createPreview:  spec => previewCreateMatview(ref, spec),
+            execute:        sql => executeDdl(this._connectionId, sql),
+            onSuccess:      () => this._navigator?.refresh?.(),
+            onError:        msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the DROP dialog for a view or materialized view (the
+     * navigator's context-menu launcher). Success refreshes the navigator
+     * and closes any open data/definition tabs for the now-gone object.
+     *
+     * @param ref - The view/matview to drop.
+     */
+    dropRelation(ref: DbObjectRef): void {
+        openDropRelationDialog({
+            kind:    ref.kind,
+            schema:  ref.schema!,
+            name:    ref.name!,
+            preview: spec => ref.kind === "materializedView" ? previewDropMatview(ref, spec) : previewDropView(ref, spec),
+            execute: sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => {
+                this._navigator?.refresh?.();
+                this.dock.removePanel(this.panelId(ref));
+                this.dock.removePanel(this.definitionPanelId(ref));
+            },
+            onError: msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the REFRESH dialog for a materialized view (the navigator's
+     * context-menu launcher). Success only sets a status message — a
+     * refresh does not change the object list or the matview's column set,
+     * so neither the navigator nor any open tab needs rebuilding.
+     *
+     * @param ref - The matview to refresh.
+     */
+    refreshMaterializedView(ref: DbObjectRef): void {
+        openRefreshMatviewDialog({
+            schema:    ref.schema!,
+            name:      ref.name!,
+            preview:   spec => previewRefreshMatview(ref, spec),
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: refreshed`),
             onError:   msg => this.notifyError(new Error(msg), ref),
         });
     }

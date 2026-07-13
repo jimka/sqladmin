@@ -12,6 +12,7 @@ import {
     buildIndexSpec,
     orderColumnsBySelection,
     parseColumnList,
+    stripTrailingSemicolon,
 } from "../../src/dock/ddlSpecs";
 import type { ColumnRow } from "../../src/dock/ddlSpecs";
 
@@ -186,5 +187,23 @@ describe("parseColumnList", () => {
 
     it("returns an empty array for blank input", () => {
         expect(parseColumnList("   ")).toEqual([]);
+    });
+});
+
+describe("stripTrailingSemicolon", () => {
+    it("removes a single trailing semicolon", () => {
+        expect(stripTrailingSemicolon("SELECT 1;")).toBe("SELECT 1");
+    });
+
+    it("removes surrounding whitespace along with the semicolon", () => {
+        expect(stripTrailingSemicolon("  SELECT id\nFROM t;\n\n")).toBe("SELECT id\nFROM t");
+    });
+
+    it("leaves text with no trailing semicolon untouched (besides trimming)", () => {
+        expect(stripTrailingSemicolon("  SELECT 1  ")).toBe("SELECT 1");
+    });
+
+    it("only strips the final semicolon, not ones embedded earlier", () => {
+        expect(stripTrailingSemicolon("SELECT ';' AS x;")).toBe("SELECT ';' AS x");
     });
 });

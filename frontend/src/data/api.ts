@@ -6,10 +6,15 @@ import type {
     AlterTableSpec,
     ColumnMeta,
     ConstraintSpec,
+    CreateMatviewSpec,
     CreateTableSpec,
+    CreateViewSpec,
     DdlPreview,
+    DropSpec,
     DropTableSpec,
     IndexSpec,
+    RefreshMatviewSpec,
+    ReplaceMatviewSpec,
     TablePrivileges,
     ConnectionPreset,
     DbObjectKind,
@@ -298,6 +303,40 @@ export function previewConstraint(ref: DbObjectRef, spec: ConstraintSpec): Promi
 /** Preview one index create/drop statement (table-ddl phase). */
 export function previewIndex(ref: DbObjectRef, spec: IndexSpec): Promise<DdlPreview> {
     return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/table/index`, spec);
+}
+
+/** Preview a CREATE [OR REPLACE] VIEW statement (view-matview-ddl phase). */
+export function previewCreateView(ref: DbObjectRef, spec: CreateViewSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/create-view`, spec);
+}
+
+/** Preview a DROP VIEW statement (view-matview-ddl phase). */
+export function previewDropView(ref: DbObjectRef, spec: DropSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/drop-view`, spec);
+}
+
+/** Preview a CREATE MATERIALIZED VIEW statement (view-matview-ddl phase). */
+export function previewCreateMatview(ref: DbObjectRef, spec: CreateMatviewSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/create-matview`, spec);
+}
+
+/** Preview a DROP MATERIALIZED VIEW statement (view-matview-ddl phase). */
+export function previewDropMatview(ref: DbObjectRef, spec: DropSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/drop-matview`, spec);
+}
+
+/** Preview a REFRESH MATERIALIZED VIEW statement (view-matview-ddl phase). */
+export function previewRefreshMatview(ref: DbObjectRef, spec: RefreshMatviewSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/refresh-matview`, spec);
+}
+
+/**
+ * Preview the DROP; CREATE pair that edits a materialized view's body
+ * (view-matview-ddl phase) — a materialized view cannot be CREATE
+ * OR REPLACE'd, so an edit runs as this semicolon-joined pair instead.
+ */
+export function previewReplaceMatview(ref: DbObjectRef, spec: ReplaceMatviewSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/replace-matview`, spec);
 }
 
 /** The Roles view's role list (introspection one-shot). */

@@ -25,7 +25,9 @@ seams. **Read the phase-1 plan first** — this plan references, never redefines
 those pieces.
 
 New builder functions go in `backend/app/sql/ddl.py`; new pure preview ops in
-`backend/app/operations/ddl.py` (the module phase-1 creates); six per-phase
+`backend/app/operations/ddl_view.py` (as-built — a new module mirroring
+phase-2's `ddl_table.py`, not an extension of phase-1's `ddl.py` base module;
+see the drift note under _Public API_); six per-phase
 preview routes in [`main.py`](backend/app/main.py); per-phase preview clients in
 [`api.ts`](frontend/src/data/api.ts); the object-specific forms as new
 components under `frontend/src/dock/`. Editing an existing view/matview prefills
@@ -166,27 +168,39 @@ Emitted-SQL notes:
 - `refresh_materialized_view`: `CONCURRENTLY` goes **before** the qualified name; `WITH NO DATA` goes after. The builder does **not** guard the `concurrently && with_no_data` combination (Postgres rejects it) — the form guards it and Postgres is authoritative (see _Potential Challenges_).
 - `replace_materialized_view` is the only builder emitting two statements.
 
-### Backend — `backend/app/operations/ddl.py` (extend the phase-1 module)
+### Backend — `backend/app/operations/ddl_view.py` (as-built: new module, not an extension of `ddl.py`)
 
-Six pure `DdlPreview` subclasses. Each validates its spec in `__init__` (raise
-`ValidationError` on a blank `schema`/`name`, and on a blank `select` for the
-create/replace previews — matching phase-1's `ExecuteDdlCommand` empty-guard),
-implements `build()` to set `self._sql` from the matching builder, and inherits
-the base pure `apply()` (build-only, no I/O) and `get_result()` (`{"sql": …}`).
+**Drift from the original draft above:** phase-2 (`table-ddl`) established the
+actual per-phase convention — object-specific preview ops get their **own**
+module (`ddl_table.py`), not an extension of the shared `ddl.py` op-base
+module. This phase follows that precedent: the six ops below live in
+**`backend/app/operations/ddl_view.py`** (mirroring `ddl_table.py`'s layout),
+not in `ddl.py` (which stays the phase-1 `DdlPreview`/`ExecuteDdlCommand`
+base). Each validates its spec in `__init__` (raise `ValidationError` on a
+blank `schema`/`name`, and on a blank `select` for the create/replace
+previews — matching phase-1's `ExecuteDdlCommand` empty-guard), implements
+`build()` to set `self._sql` from the matching builder, and inherits the base
+pure `apply()` (build-only, no I/O) and `get_result()` (`{"sql": …}`).
+
+Each constructor also takes a leading, unused `conn: asyncpg.Connection`
+parameter — **not** just `spec: dict` as originally drafted — matching the
+uniform `(conn, spec)` signature every `ddl_table.py` preview op already
+uses (kept for call-site symmetry across every DDL preview, even though this
+phase's ops are pure and never touch `conn`):
 
 ```python
 class CreateViewPreview(DdlPreview):
-    def __init__(self, spec: dict) -> None: ...   # {schema, name, select, orReplace, columns}
+    def __init__(self, conn: asyncpg.Connection, spec: Mapping[str, Any]) -> None: ...   # {schema, name, select, orReplace, columns}
 class DropViewPreview(DdlPreview):
-    def __init__(self, spec: dict) -> None: ...   # {schema, name, cascade}
+    def __init__(self, conn: asyncpg.Connection, spec: Mapping[str, Any]) -> None: ...   # {schema, name, cascade}
 class CreateMaterializedViewPreview(DdlPreview):
-    def __init__(self, spec: dict) -> None: ...   # {schema, name, select, withData}
+    def __init__(self, conn: asyncpg.Connection, spec: Mapping[str, Any]) -> None: ...   # {schema, name, select, withData}
 class DropMaterializedViewPreview(DdlPreview):
-    def __init__(self, spec: dict) -> None: ...   # {schema, name, cascade}
+    def __init__(self, conn: asyncpg.Connection, spec: Mapping[str, Any]) -> None: ...   # {schema, name, cascade}
 class RefreshMaterializedViewPreview(DdlPreview):
-    def __init__(self, spec: dict) -> None: ...   # {schema, name, concurrently, withNoData}
+    def __init__(self, conn: asyncpg.Connection, spec: Mapping[str, Any]) -> None: ...   # {schema, name, concurrently, withNoData}
 class ReplaceMaterializedViewPreview(DdlPreview):
-    def __init__(self, spec: dict) -> None: ...   # {schema, name, select, cascade, withData}
+    def __init__(self, conn: asyncpg.Connection, spec: Mapping[str, Any]) -> None: ...   # {schema, name, select, cascade, withData}
 ```
 
 All six exported from
@@ -269,8 +283,15 @@ export interface ViewDialogDeps {
 export function openViewDialog(deps: ViewDialogDeps): void;
 
 // frontend/src/dock/MaterializedViewFormDialog.ts
-export interface MatviewDialogDeps { /* like ViewDialogDeps, but preview uses
-    CreateMatviewSpec on create and ReplaceMatviewSpec on edit; adds withData */ }
+// As-built: MatviewDialogDeps carries two separate optional preview
+// callbacks (`createPreview`/`replacePreview`, one per mode) rather than a
+// single `preview` typed to CreateMatviewSpec|ReplaceMatviewSpec as
+// originally sketched — the two specs' shapes differ enough that a single
+// field would need a runtime cast; the split keeps each call site type-safe.
+export interface MatviewDialogDeps { /* like ViewDialogDeps, but with
+    createPreview?: (spec: CreateMatviewSpec) => Promise<DdlPreview> (create)
+    and replacePreview?: (spec: ReplaceMatviewSpec) => Promise<DdlPreview> (edit);
+    adds withData */ }
 export function openMaterializedViewDialog(deps: MatviewDialogDeps): void;
 
 // frontend/src/dock/RelationDdlActions.ts  (drop + refresh — form is just toggles)
@@ -322,16 +343,21 @@ DefinitionPanel** is not needed — the dialog is modal and independent of the t
 ### `generateSql` composition (per dialog)
 
 - **Create view:** read `orReplace=false`, `schema`/`name`/`columns` from the
-  form, `select` = the current preview editor text stripped of any prior
-  `CREATE … AS` prefix — simplest is to keep the whole statement in the editor and
-  seed once: on open, `generateSql()` calls `previewCreateView(ref, { schema,
-  name, select: "", orReplace: false, columns })`, seeding `CREATE VIEW "s"."n"
-  AS\nSELECT`. Thereafter the user edits the preview; a form-field change requires
-  the explicit "Regenerate SQL" (phase-1) to recompose (discarding body edits).
+  form, seeding once on open. **Drift from the original draft:** `select: ""`
+  as originally written here is unreachable — `CreateViewPreview.__init__`
+  rejects a blank `select` with `ValidationError` (per _Public API_'s
+  create/replace empty-guard), so the seed call cannot pass `""`. As-built,
+  the seed passes the literal keyword `select: "SELECT"` (a small
+  `NEW_VIEW_SELECT_SKELETON` constant in `ViewFormDialog.ts`) — a non-blank
+  starting point that still produces the intended `CREATE VIEW "s"."n"
+  AS\nSELECT` skeleton. Thereafter the user edits the preview; a form-field
+  change requires the explicit "Regenerate SQL" (phase-1) to recompose
+  (discarding body edits).
 - **Edit view:** seed with `previewCreateView(ref, { …, select: initialSelect,
   orReplace: true })` → `CREATE OR REPLACE VIEW "s"."n" AS\n<definition>`.
-- **Create matview:** `previewCreateMatview` → `CREATE MATERIALIZED VIEW … AS
-  \nSELECT\nWITH DATA`.
+- **Create matview:** `previewCreateMatview` with the same `"SELECT"` skeleton
+  (`NEW_MATVIEW_SELECT_SKELETON` in `MaterializedViewFormDialog.ts`) →
+  `CREATE MATERIALIZED VIEW … AS\nSELECT\nWITH DATA`.
 - **Edit matview:** `previewReplaceMatview(ref, { …, select: initialSelect,
   withData: true, cascade })` → `DROP MATERIALIZED VIEW "s"."n";\nCREATE
   MATERIALIZED VIEW "s"."n" AS\n<definition>\nWITH DATA`.
@@ -369,10 +395,12 @@ subtree listener_), not `addListener`.
    (`test_compiler.py`). Cover each builder's exact output incl. quoting, column
    aliases, CASCADE, WITH [NO] DATA, CONCURRENTLY, and the `;`-joined replace.
 
-3. **`backend/app/operations/ddl.py`** — add the six `DdlPreview` subclasses per
-   _Public API_. `__init__` validates the spec (blank schema/name → `ValidationError`;
-   blank select for create/replace → `ValidationError`), `build()` sets `self._sql`
-   from the matching builder.
+3. **`backend/app/operations/ddl_view.py`** — new module (as-built; see the
+   drift note in _Public API_ — mirrors `ddl_table.py`, not an extension of
+   `ddl.py`). Add the six `DdlPreview` subclasses per _Public API_. `__init__`
+   validates the spec (blank schema/name → `ValidationError`; blank select for
+   create/replace → `ValidationError`), `build()` sets `self._sql` from the
+   matching builder.
 
 4. **`backend/app/operations/__init__.py`** — import and add the six preview
    classes to `__all__` (below the phase-1 `DdlPreview`/`ExecuteDdlCommand`).
@@ -440,7 +468,7 @@ subtree listener_), not `addListener`.
 | Action | File |
 |--------|------|
 | Modify | `backend/app/sql/ddl.py` (add 8 builders) |
-| Modify | `backend/app/operations/ddl.py` (add 6 preview ops) |
+| Create | `backend/app/operations/ddl_view.py` (6 preview ops; as-built — see drift note in _Public API_) |
 | Modify | `backend/app/operations/__init__.py` (export the 6 previews) |
 | Modify | `backend/app/main.py` (add 6 preview routes) |
 | Create | `backend/tests/test_view_matview_ddl_sql.py` |
