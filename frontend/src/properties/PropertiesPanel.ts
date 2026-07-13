@@ -42,7 +42,27 @@ function propertyRows(ref: DbObjectRef, columns?: ColumnMeta[]): PropertyValueRo
         case "view":
         case "materializedView":
             return tableRows(ref, columns);
+        case "sequence":
+            return sequenceRows(ref);
     }
+}
+
+/**
+ * Rows for a sequence: identity only (Name/Schema/Database/Type). Not built
+ * via `tableRows`/`relationTypeLabel` — those helpers are relation-only (a
+ * sequence has `isRelation: false` in the object-kind registry, and
+ * `relationTypeLabel` only distinguishes table/view/materializedView). Deep
+ * sequence introspection (current value, increment) is a stated Non-Goal of
+ * the schema-sequence-ddl plan; the Alter dialog collects new values without
+ * prefilling current ones.
+ */
+function sequenceRows(ref: DbObjectRef): PropertyValueRow[] {
+    return [
+        { property: "Name", value: ref.name ?? "—" },
+        { property: "Schema", value: ref.schema ?? "—" },
+        { property: "Database", value: ref.database ?? "—" },
+        { property: "Type", value: "Sequence" },
+    ];
 }
 
 /** Human-readable Type label for a relation kind (table/view/materialized view). */
@@ -53,6 +73,13 @@ export function relationTypeLabel(kind: DbObjectRef["kind"]): string {
 
     if (kind === "materializedView") {
         return "Materialized view";
+    }
+
+    // Not a relation kind (see objectKinds.ts's isRelation), but panelTooltip
+    // calls this for every open tab including the sequence info tab, so the
+    // Type line reads "Sequence" rather than falling through to "Table".
+    if (kind === "sequence") {
+        return "Sequence";
     }
 
     return "Table";

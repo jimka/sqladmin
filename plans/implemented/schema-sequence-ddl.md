@@ -23,6 +23,64 @@ Schemas are database-scoped (create on a database node; rename/drop on a schema 
 
 ---
 
+## Drift notes (as-built, found before implementation)
+
+- **No database-level navigator node exists.** `NavigatorTree`'s top level *is*
+  the logged-in database's schemas directly (there is no database node to
+  right-click) — see its own header comment and how "Show database diagram"
+  is already offered from the **schema** node's context menu, synthesizing a
+  database ref from the schema's own ref. "Create schema…" follows that exact
+  precedent: it is added to the **schema** node's context menu (not a
+  separate database node), synthesizing `{connectionId, database, kind:
+  "database"}` the same way the existing diagram item does.
+- **Spec interfaces live in `contract.ts`, not a new `dock/ddlSpecs.ts`.**
+  Both `table-ddl` and `view-matview-ddl` put their `*Spec` wire interfaces
+  directly in `frontend/src/contract.ts` (e.g. `CreateTableSpec`,
+  `CreateViewSpec`). `frontend/src/dock/ddlSpecs.ts` already exists from
+  `table-ddl` — but as a module of **pure spec-assembly helper functions**
+  (form fields -> wire spec, e.g. `buildCreateTableSpec`), not type
+  definitions. This plan follows the established split: the seven `*Spec`
+  interfaces go in `contract.ts`; this phase's own assembly helpers
+  (`buildCreateSchemaSpec`, `buildAlterSequenceSpec`, etc.) are **added to**
+  the existing `ddlSpecs.ts` rather than a new file.
+- **No fetch-shape tests are added for the seven `preview*` clients.** Neither
+  `table-ddl` nor `view-matview-ddl` added such tests to
+  `frontend/tests/data/api.test.ts` despite that suite already testing
+  `api.ts` (only `executeDdl` and the pre-existing endpoints are covered) —
+  they're thin `postJson` wrappers whose shape is already exercised by
+  `executeDdl`'s test and the pure `ddlSpecs.test.ts` helpers. This phase
+  follows that precedent instead of introducing new coverage there.
+- **`PropertiesPanel`'s sequence rows are not built via `tableRows`/
+  `relationTypeLabel`.** Those helpers are relation-only (their `Type` label
+  logic only distinguishes table/view/materializedView) and a sequence is not
+  a relation (`isRelation: false`). The `"sequence"` case returns its own
+  small inline Name/Schema/Database/Type row-set instead of extending
+  `relationTypeLabel`'s signature.
+- **`SequenceOwnerPreview`/`previewSequenceOwner` ship with no dedicated
+  navigator menu item.** Per _Architecture Decisions_' "parameter form and
+  OWNER TO are separate statements", the Alter-sequence dialog offers a
+  Parameters/Owner mode toggle rather than a second context-menu entry; it is
+  implemented with the library's `Card` layout (one visible child by id) to
+  swap the two field groups, driven by a `ComboBox`.
+- **Drop-schema/drop-sequence reuse the existing `ConfirmCascadeForm`** (a
+  summary line + CASCADE checkbox only) exactly as drop-table/drop-index
+  already do — those dialogs never surface `ifExists` in the UI either, even
+  though the backend param exists, so this phase doesn't introduce a new UI
+  idiom for it.
+- **`api.ts` preview-client signatures are `(ref: DbObjectRef, spec)`, not
+  `(conn: string, db: string, spec)`** as originally drafted in _Public API_
+  below — every pre-existing `preview*` client (`previewCreateView`, etc.)
+  already takes a `DbObjectRef`, and the seven new clients match that real
+  convention instead of the plan's inaccurate sketch.
+- **`SchemaDdlForms.ts`/`SequenceDdlForms.ts` openers take one flattened
+  `deps` object** (`preview`/`execute`/`onSuccess`/`onError` plus the target
+  identifiers), not the plan's originally drafted `(ref, deps)` with a nested
+  `deps: { connectionId, executeDdl, onSuccess, onError }` shape — this
+  matches the pre-existing `RelationDdlActions.ts` idiom (`DropDialogDeps`/
+  `RefreshDialogDeps`) exactly.
+
+---
+
 ## Downstream / sibling coordination
 
 Phase 5 (`function-type-ddl.md`) adds kinds `"function"`/`"type"` through the **same** `touches-shared` files. This plan establishes the registry seam that phase must append to; it is ordered after phase 1 and is independent of phases 2–3 (tables, views) except for the shared files, which `/implement` serializes.
@@ -370,12 +428,15 @@ Add a `case "sequence":` to `propertyRows` returning identity rows (Name, Schema
 | Modify | `frontend/src/navigator/objectGlyphs.ts` (glyph + build KIND_GLYPH) — *shared* |
 | Modify | `frontend/src/navigator/NavigatorTree.ts` (derive from registry, menus) — *shared* |
 | Modify | `frontend/src/properties/PropertiesPanel.ts` (sequence rows) — *shared* |
-| Create | `frontend/src/dock/ddlSpecs.ts` (request spec types) |
+| Modify | `frontend/src/dock/ddlSpecs.ts` (as-built: already exists from table-ddl as a pure spec-assembly-helper module — see Drift notes; this phase adds its own helpers, not the file) |
+| Modify | `frontend/tests/dock/ddlSpecs.test.ts` (tests for the new helpers) |
 | Modify | `frontend/src/data/api.ts` (seven preview clients) — *shared* |
 | Create | `frontend/src/dock/SchemaDdlForms.ts` |
 | Create | `frontend/src/dock/SequenceDdlForms.ts` |
 | Modify | `frontend/src/SqlAdminController.ts` (six launcher methods) |
-| Modify | `frontend/tests/data/api.test.ts` (preview-client tests) |
+| Not touched (as-built) | `frontend/tests/data/api.test.ts` — no preview-client fetch-shape tests were added here; see Drift notes for why (neither table-ddl nor view-matview-ddl added them either) |
+| Modify | `frontend/src/data/buildRelationGraph.ts` (as-built, not anticipated by the original plan: its own hand-copied `KIND_GLYPH` literal also needed a `"sequence"` entry once `DbObjectKind` widened — rebuilt from `objectKinds.ts` instead of hand-editing) |
+| Create | `frontend/tests/navigator/objectKinds.test.ts` (as-built, not anticipated by the original plan: registry-logic tests for `objectKinds.ts`) |
 
 ---
 

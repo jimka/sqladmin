@@ -69,6 +69,14 @@ from .operations import (
     RoleMembershipsQuery,
     RolePrivilegesQuery,
     RunQueryCommand,
+    SchemaCreatePreview,
+    SchemaDropPreview,
+    SchemaRenamePreview,
+    SequenceAlterPreview,
+    SequenceCreatePreview,
+    SequenceDetailQuery,
+    SequenceDropPreview,
+    SequenceOwnerPreview,
     TablePrivilegesQuery,
     UpdateRowCommand,
     ViewDefinitionQuery,
@@ -400,6 +408,32 @@ async def structure(
             "constraints": constraints.get_result(),
             "foreignKeys": foreign_keys.get_result(),
         }
+
+
+@app.get("/api/{connection_id}/{database}/{schema}/{table}/sequence")
+async def sequence_detail(
+    connection_id: str, database: str, schema: str, table: str,
+    session: Session = Depends(require_session),
+) -> dict:
+    """
+    Report a sequence's current state and parameters (pg_sequences).
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/{table}/sequence``.
+    The ``{table}`` path segment carries the sequence name (the per-object
+    route namespace is generic).
+
+    Raises:
+        NotFound: if no sequence by that name exists (mapped to 404).
+
+    Returns:
+        ``{lastValue, startValue, minValue, maxValue, increment, cacheSize,
+        cycle, dataType, owner}`` — see ``SequenceDetailQuery.get_result``.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = SequenceDetailQuery(c, TableRef(database, schema, table))
+        await op.apply()
+
+        return op.get_result()
 
 
 # --- Role introspection ---------------------------------------------------
@@ -919,6 +953,163 @@ async def preview_replace_matview(
     """
     async with session_pool_for(session, connection_id).acquire() as c:
         op = ReplaceMaterializedViewPreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+# --- DDL: schemas & sequences -------------------------------------------------
+
+
+@app.post("/api/{connection_id}/{database}/ddl/create-schema")
+async def preview_create_schema(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a CREATE SCHEMA statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/create-schema``.
+
+    Args:
+        body: the ``CreateSchemaSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = SchemaCreatePreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/drop-schema")
+async def preview_drop_schema(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a DROP SCHEMA statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/drop-schema``.
+
+    Args:
+        body: the ``DropSchemaSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = SchemaDropPreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/rename-schema")
+async def preview_rename_schema(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview an ALTER SCHEMA ... RENAME TO statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/rename-schema``.
+
+    Args:
+        body: the ``RenameSchemaSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = SchemaRenamePreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/create-sequence")
+async def preview_create_sequence(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a CREATE SEQUENCE statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/create-sequence``.
+
+    Args:
+        body: the ``CreateSequenceSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = SequenceCreatePreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/alter-sequence")
+async def preview_alter_sequence(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview an ALTER SEQUENCE parameter-form statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/alter-sequence``.
+
+    Args:
+        body: the ``AlterSequenceSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = SequenceAlterPreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/sequence-owner")
+async def preview_sequence_owner(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a sequence OWNER TO statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/sequence-owner``.
+
+    Args:
+        body: the ``SequenceOwnerSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = SequenceOwnerPreview(c, body)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/ddl/drop-sequence")
+async def preview_drop_sequence(
+    connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
+) -> dict:
+    """
+    Preview a DROP SEQUENCE statement.
+
+    Route: ``POST /api/{connection_id}/{database}/ddl/drop-sequence``.
+
+    Args:
+        body: the ``DropSequenceSpec`` wire payload.
+
+    Returns:
+        ``{"sql": str}`` — the generated statement, for the editable preview.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = SequenceDropPreview(c, body)
         await op.apply()
 
         return op.get_result()

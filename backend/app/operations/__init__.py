@@ -5,6 +5,15 @@ sites import from ``app.operations`` regardless of file layout.
 
 from .base import Command, Operation, Query
 from .ddl import DdlPreview, ExecuteDdlCommand
+from .ddl_schema_sequence import (
+    SchemaCreatePreview,
+    SchemaDropPreview,
+    SchemaRenamePreview,
+    SequenceAlterPreview,
+    SequenceCreatePreview,
+    SequenceDropPreview,
+    SequenceOwnerPreview,
+)
 from .ddl_table import (
     PreviewAlterTable,
     PreviewConstraint,
@@ -34,6 +43,7 @@ from .list_schemas import ListSchemasQuery
 from .role_detail import RoleAttributesQuery, RoleMembershipsQuery, RolePrivilegesQuery
 from .roles import ListRolesQuery
 from .run_query import RunQueryCommand
+from .sequence_detail import SequenceDetailQuery
 from .table_privileges import TablePrivilegesQuery
 from .table_structure import (
     ListConstraintsQuery,
@@ -82,4 +92,12 @@ __all__ = [
     "DropMaterializedViewPreview",
     "RefreshMaterializedViewPreview",
     "ReplaceMaterializedViewPreview",
+    "SchemaCreatePreview",
+    "SchemaDropPreview",
+    "SchemaRenamePreview",
+    "SequenceCreatePreview",
+    "SequenceAlterPreview",
+    "SequenceOwnerPreview",
+    "SequenceDropPreview",
+    "SequenceDetailQuery",
 ]

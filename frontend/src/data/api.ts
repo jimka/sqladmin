@@ -3,18 +3,25 @@
 // through the proxy/store (that is the row-CRUD path; see stores.ts).
 
 import type {
+    AlterSequenceSpec,
     AlterTableSpec,
     ColumnMeta,
     ConstraintSpec,
     CreateMatviewSpec,
+    CreateSchemaSpec,
+    CreateSequenceSpec,
     CreateTableSpec,
     CreateViewSpec,
     DdlPreview,
+    DropSchemaSpec,
+    DropSequenceSpec,
     DropSpec,
     DropTableSpec,
     IndexSpec,
     RefreshMatviewSpec,
+    RenameSchemaSpec,
     ReplaceMatviewSpec,
+    SequenceOwnerSpec,
     TablePrivileges,
     ConnectionPreset,
     DbObjectKind,
@@ -25,6 +32,7 @@ import type {
     RelationEdge,
     RoleDetail,
     RoleSummary,
+    SequenceDetail,
     ViewDefinition,
     TableStructure,
 } from "../contract";
@@ -209,6 +217,13 @@ export function getStructure(ref: DbObjectRef): Promise<TableStructure> {
     return getJson<TableStructure>(url);
 }
 
+/** Fetch a sequence's current state and parameters (pg_sequences). */
+export function getSequenceDetail(ref: DbObjectRef): Promise<SequenceDetail> {
+    const url = `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/sequence`;
+
+    return getJson<SequenceDetail>(url);
+}
+
 /**
  * Run one arbitrary SQL statement — the query panel's one-shot data path. Unlike
  * row CRUD (an AjaxStore), an arbitrary result has no PK or collection URL, so it
@@ -337,6 +352,45 @@ export function previewRefreshMatview(ref: DbObjectRef, spec: RefreshMatviewSpec
  */
 export function previewReplaceMatview(ref: DbObjectRef, spec: ReplaceMatviewSpec): Promise<DdlPreview> {
     return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/replace-matview`, spec);
+}
+
+/** Preview a CREATE SCHEMA statement (schema-sequence-ddl phase). */
+export function previewCreateSchema(ref: DbObjectRef, spec: CreateSchemaSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/create-schema`, spec);
+}
+
+/** Preview a DROP SCHEMA statement (schema-sequence-ddl phase). */
+export function previewDropSchema(ref: DbObjectRef, spec: DropSchemaSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/drop-schema`, spec);
+}
+
+/** Preview an ALTER SCHEMA ... RENAME TO statement (schema-sequence-ddl phase). */
+export function previewRenameSchema(ref: DbObjectRef, spec: RenameSchemaSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/rename-schema`, spec);
+}
+
+/** Preview a CREATE SEQUENCE statement (schema-sequence-ddl phase). */
+export function previewCreateSequence(ref: DbObjectRef, spec: CreateSequenceSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/create-sequence`, spec);
+}
+
+/** Preview an ALTER SEQUENCE parameter-form statement (schema-sequence-ddl phase). */
+export function previewAlterSequence(ref: DbObjectRef, spec: AlterSequenceSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/alter-sequence`, spec);
+}
+
+/**
+ * Preview a sequence OWNER TO statement (schema-sequence-ddl phase) — the
+ * separate grammar variant the Alter-sequence dialog's Owner mode generates
+ * (see plans/implemented/schema-sequence-ddl.md's "ALTER SEQUENCE" decision).
+ */
+export function previewSequenceOwner(ref: DbObjectRef, spec: SequenceOwnerSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/sequence-owner`, spec);
+}
+
+/** Preview a DROP SEQUENCE statement (schema-sequence-ddl phase). */
+export function previewDropSequence(ref: DbObjectRef, spec: DropSequenceSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/drop-sequence`, spec);
 }
 
 /** The Roles view's role list (introspection one-shot). */

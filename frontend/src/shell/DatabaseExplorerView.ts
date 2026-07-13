@@ -7,6 +7,7 @@
 
 import { NavigatorTree }           from "../navigator/NavigatorTree";
 import { TreeExplorerView }        from "./treeExplorerView";
+import { createSchemaTool }        from "./createSchemaTool";
 import type { SqlAdminController } from "../SqlAdminController";
 
 /** The Database explorer view (Navigator + Properties accordion). */
@@ -22,6 +23,11 @@ export class DatabaseExplorerView extends TreeExplorerView {
             explorer:       new NavigatorTree(controller),
             treeLabel:      "Database",
             treeGlyph:      "database",
+            treeTools:      [createSchemaTool(() => controller.createSchema({
+                connectionId: controller.connectionId,
+                database:     controller.database,
+                kind:         "database",
+            }))],
             inspector:      controller.properties.component,
             inspectorLabel: "Properties",
         });

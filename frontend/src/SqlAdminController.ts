@@ -20,7 +20,8 @@ import type { TreeNode }                                                        
 import type { ExplorerTree }                                                                                                                                                                       from "./navigator/NavigatorTree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                                                                                                                                     from "@jimka/typescript-ui/data";
 import type { AlterColumnAction, ColumnMeta, ConstraintKind, DbObjectRef, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TablePrivileges, TableStructure }                              from "./contract";
-import { executeDdl, getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getViewDefinition, getStructure, previewAlterTable, previewConstraint, previewCreateMatview, previewCreateTable, previewCreateView, previewDropMatview, previewDropTable, previewDropView, previewIndex, previewRefreshMatview, previewReplaceMatview, runExplain, runQuery, tableExportUrl } from "./data/api";
+import { executeDdl, getColumns, getDependencies, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewConstraint, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema, previewReplaceMatview, previewSequenceOwner, runExplain, runQuery, tableExportUrl } from "./data/api";
+import { getSequenceDetail }                                                                                                                                                                       from "./data/api";
 import { exportQueryResult }                                                                                                                                                                       from "./dock/exportQueryResult";
 import { exportExplainPlan }                                                                                                                                                                       from "./dock/exportExplainResult";
 import type { ActiveExport }                                                                                                                                                                       from "./data/explain";
@@ -49,7 +50,10 @@ import { openViewDialog }                                                       
 import { openMaterializedViewDialog }                                                                                                                                                              from "./dock/MaterializedViewFormDialog";
 import { openDropRelationDialog, openRefreshMatviewDialog }                                                                                                                                        from "./dock/RelationDdlActions";
 import { stripTrailingSemicolon }                                                                                                                                                                  from "./dock/ddlSpecs";
+import { openCreateSchemaDialog, openDropSchemaDialog, openRenameSchemaDialog }                                                                                                                    from "./dock/SchemaDdlForms";
+import { openCreateSequenceDialog, openDropSequenceDialog }                                                                                                                                        from "./dock/SequenceDdlForms";
 import { DefinitionPanel }                                                                                                                                                                         from "./dock/DefinitionPanel";
+import { SequenceInfoPanel }                                                                                                                                                                       from "./dock/SequenceInfoPanel";
 import { DocumentationPanel }                                                                                                                                                                      from "./dock/DocumentationPanel";
 import { QueryPanel }                                                                                                                                                                              from "./dock/QueryPanel";
 import { RoleGrantsPanel }                                                                                                                                                                         from "./dock/RoleGrantsPanel";
@@ -480,6 +484,61 @@ export class SqlAdminController {
         return [definitionResult.definition, columns];
     }
 
+    /**
+     * Open an editable info tab for a sequence — its current value and
+     * parameters (pg_sequences), deduping by sequence-info-panel id. The
+     * detail and the connection's role names (for the form's Owner combo)
+     * are fetched in parallel and passed to a SequenceInfoPanel wired with
+     * the alter/owner preview, execute, and reload callbacks its Save flow
+     * needs. A failed detail fetch surfaces through notifyError and no tab
+     * opens; a failed roles fetch degrades gracefully instead (the tab still
+     * opens, with `roles: []` — see SequenceInfoPanelDeps.roles). A sequence
+     * has no rows, so unlike openTable this has no store to register, and
+     * unlike openDefinition the panel needs no dispose (see
+     * SequenceInfoPanel).
+     */
+    async openSequence(ref: DbObjectRef, node: TreeNode): Promise<void> {
+        const id = this.sequenceInfoPanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const [detailResult, rolesResult] = await Promise.allSettled([
+            getSequenceDetail(ref),
+            getRoles(ref.connectionId),
+        ]);
+
+        if (detailResult.status === "rejected") {
+            this.notifyError(detailResult.reason, ref);
+
+            return;
+        }
+
+        const detail = detailResult.value;
+        const roles  = rolesResult.status === "fulfilled" ? rolesResult.value.map(r => r.name) : [];
+
+        this._openPanels.set(id, { ref, node, detail: "info" });
+        this.dock.addPanel({
+            id,
+            title  : ref.name ?? id,
+            glyph  : "arrow-up-1-9",
+            tooltip: this.panelTooltip(ref),
+            content: new SequenceInfoPanel(detail, {
+                schema:       ref.schema!,
+                name:         ref.name!,
+                roles,
+                previewAlter: spec => previewAlterSequence(ref, spec),
+                previewOwner: spec => previewSequenceOwner(ref, spec),
+                execute:      sql => executeDdl(this._connectionId, sql),
+                reloadDetail: () => getSequenceDetail(ref),
+                onStatus:     m => this.statusBar.setMessage(`${this._connectionId} · ${m}`),
+                onError:      m => this.notifyError(new Error(m), ref),
+            }),
+        });
+        this.syncToPanel(id);
+    }
+
     /** Open a read-only structure (column metadata) tab for a table/view. */
     async openStructure(ref: DbObjectRef, node: TreeNode): Promise<void> {
         const id = this.structurePanelId(ref);
@@ -877,6 +936,93 @@ export class SqlAdminController {
             preview:   spec => previewRefreshMatview(ref, spec),
             execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: refreshed`),
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the CREATE SCHEMA dialog, launched from an existing schema node's
+     * context menu — the navigator has no separate database node to
+     * right-click (its top level IS the logged-in database's schemas; see
+     * NavigatorTree's header comment and
+     * plans/implemented/schema-sequence-ddl.md's drift notes). The new
+     * schema is created in `ref`'s own database. Success refreshes the
+     * navigator, since a new schema changes the database's top-level list.
+     *
+     * @param ref - the launching schema node (its database is the target).
+     */
+    createSchema(ref: DbObjectRef): void {
+        openCreateSchemaDialog({
+            preview:   spec => previewCreateSchema(ref, spec),
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => this._navigator?.refresh?.(),
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the DROP SCHEMA dialog for a schema (the navigator's context-menu
+     * launcher). Success refreshes the navigator.
+     *
+     * @param ref - the schema to drop.
+     */
+    dropSchema(ref: DbObjectRef): void {
+        openDropSchemaDialog({
+            name:      ref.schema!,
+            preview:   spec => previewDropSchema(ref, spec),
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => this._navigator?.refresh?.(),
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the RENAME SCHEMA dialog for a schema (the navigator's
+     * context-menu launcher). Success refreshes the navigator (the schema's
+     * display name changed).
+     *
+     * @param ref - the schema to rename.
+     */
+    renameSchema(ref: DbObjectRef): void {
+        openRenameSchemaDialog({
+            name:      ref.schema!,
+            preview:   spec => previewRenameSchema(ref, spec),
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => this._navigator?.refresh?.(),
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the CREATE SEQUENCE dialog for a schema (the navigator's
+     * context-menu launcher). Success refreshes the navigator, since a new
+     * sequence changes the schema's object list.
+     *
+     * @param ref - the target schema (kind "schema"; database + schema set).
+     */
+    createSequence(ref: DbObjectRef): void {
+        openCreateSequenceDialog({
+            schema:    ref.schema!,
+            preview:   spec => previewCreateSequence(ref, spec),
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => this._navigator?.refresh?.(),
+            onError:   msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
+     * Open the DROP SEQUENCE dialog for a sequence (the navigator's
+     * context-menu launcher). Success refreshes the navigator.
+     *
+     * @param ref - the sequence to drop.
+     */
+    dropSequence(ref: DbObjectRef): void {
+        openDropSequenceDialog({
+            schema:    ref.schema!,
+            name:      ref.name!,
+            preview:   spec => previewDropSequence(ref, spec),
+            execute:   sql => executeDdl(this._connectionId, sql),
+            onSuccess: () => this._navigator?.refresh?.(),
             onError:   msg => this.notifyError(new Error(msg), ref),
         });
     }
@@ -2058,6 +2204,11 @@ export class SqlAdminController {
     /** Stable id for a view's definition tab, distinct from its data/structure tabs. */
     private definitionPanelId(ref: DbObjectRef): string {
         return `${this.panelId(ref)}::definition`;
+    }
+
+    /** Stable id for a sequence's info tab, distinct from any relation tab. */
+    private sequenceInfoPanelId(ref: DbObjectRef): string {
+        return `${this.panelId(ref)}::sequence`;
     }
 
     /** Stable id for a schema's diagram tab, distinct from any relation tab. */
