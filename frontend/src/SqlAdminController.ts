@@ -35,7 +35,6 @@ import { rootedDiagram }                                                        
 import { buildSelectSql, buildRoutineCallSql, routineCallIsComplete }                                                                                                                              from "./data/sql";
 import { buildStore }                                                                                                                                                                              from "./data/stores";
 import { TableWorkPanel }                                                                                                                                                                          from "./dock/TableWorkPanel";
-import { ViewWorkPanel }                                                                                                                                                                           from "./dock/ViewWorkPanel";
 import { StructurePanel }                                                                                                                                                                          from "./dock/StructurePanel";
 import type { StructureActions }                                                                                                                                                                  from "./dock/StructurePanel";
 import { openSqlPreviewDialog }                                                                                                                                                                    from "./dock/SqlPreviewDialog";
@@ -289,27 +288,39 @@ export class SqlAdminController {
     }
 
     /**
-     * Open a table, view, or materialized view in the Dock (deduping by panel
-     * id), wiring its store errors. A table opens the editable TableWorkPanel; a
-     * view or materialized view opens the read-only ViewWorkPanel (a plain data
-     * grid — its structure and definition open as separate tabs from the
-     * navigator's right-click menu).
+     * Open a relation in the Dock. A table opens the editable TableWorkPanel
+     * (deduped by panel id, its store wired for transport errors and
+     * write-feedback). A view or materialized view is read-only and has no CRUD
+     * surface, so it instead opens as an auto-run browse query —
+     * `SELECT * FROM … LIMIT n` on the shared QueryPanel — the same surface its
+     * Explain/Export already used; its structure and definition still open as
+     * their own tabs from the navigator's right-click menu.
      *
      * The `node` is optional: an FK-referenced table may have no currently-loaded
      * navigator node, so its tab still opens but the focus-sync skips the reveal.
      */
     async openTable(ref: DbObjectRef, node?: TreeNode): Promise<void> {
+        // A view/matview has no editable data surface, so it opens as an auto-run
+        // browse query on the shared QueryPanel rather than a dedicated data panel.
+        // A query panel has no pagination, so the seed carries buildSelectSql's
+        // small preview LIMIT (the user can raise or remove it). Each open mints a
+        // fresh query tab (no dedup, like every query panel); it is still recorded
+        // in recent tables so it reopens from the start page.
+        if (ref.kind === "view" || ref.kind === "materializedView") {
+            if (node) {
+                this.rememberTable(ref, node);
+            }
+
+            this.openQuery(buildSelectSql(ref), true, ref.name);
+
+            return;
+        }
+
         const id = this.panelId(ref);
 
         if (this.dock.focusPanel(id)) {
             return;
         }
-
-        // A view/matview is read-only: it opens the ViewWorkPanel and never
-        // writes, so the 'sync' write-feedback listener is not attached and the
-        // per-user table privileges (which gate the editable panel's write
-        // actions) are not fetched.
-        const isReadOnly = ref.kind === "view" || ref.kind === "materializedView";
 
         let store: AjaxStore;
         let columns: ColumnMeta[];
@@ -317,9 +328,7 @@ export class SqlAdminController {
 
         try {
             columns = await getColumns(ref);
-            if (!isReadOnly) {
-                privileges = await getTablePrivileges(ref);
-            }
+            privileges = await getTablePrivileges(ref);
             store = buildStore(ref, buildModel(columns), columns);
         } catch (err) {
             this.notifyError(err, ref);
@@ -328,10 +337,7 @@ export class SqlAdminController {
         }
 
         store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
-
-        if (!isReadOnly) {
-            store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
-        }
+        store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
 
         this._openPanels.set(id, { ref, node: node ?? null, store, columns });
 
@@ -347,13 +353,7 @@ export class SqlAdminController {
             title  : ref.name ?? id,
             glyph  : KIND_GLYPH[ref.kind],
             tooltip: this.panelTooltip(ref),
-            content: isReadOnly
-                ? () => new ViewWorkPanel(store, columns, format => this.exportTable(ref, format),
-                    // Explain opens a query tab seeded with the view's own query
-                    // (no LIMIT — a LIMIT node would mask the plan's real cost) and
-                    // auto-runs EXPLAIN / EXPLAIN ANALYZE there.
-                    analyze => this.openQuery(buildSelectSql(ref, null), false, ref.name, analyze ? "analyze" : "plain"))
-                : () => new TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format), privileges)
+            content: () => new TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format), privileges)
         });
 
         try {
