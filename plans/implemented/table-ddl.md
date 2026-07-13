@@ -157,7 +157,7 @@ def drop_index(schema: str, index_name: str, *, cascade: bool = False,
 
 ### Backend — `backend/app/operations/ddl_table.py` (new)
 
-Five `DdlPreview` subclasses. Each `__init__(self, conn, spec: Mapping[str, Any])` stores the spec and validates required identifiers (non-blank) via a shared `_require(spec, key)` helper raising `ValidationError`; each `build()` dispatches on `spec["action"]` (where applicable) to a `ddl.py` builder and sets `self._sql`. `apply()` is inherited from `DdlPreview` (pure — calls `build()`); `get_result()` is inherited (`{"sql": self._sql}`).
+Five `DdlPreview` subclasses. Each `__init__(self, conn, spec: Mapping[str, Any])` stores the spec and validates its always-required identifiers (schema/name, non-blank) via a shared `_require(spec, key)` helper raising `ValidationError`; each `build()` dispatches on `spec["action"]` (where applicable) to a `ddl.py` builder and sets `self._sql`, reading each action's own required fields through `_require` (string identifiers) or the sibling `_field(spec, key)` guard (collection/mapping fields) so a missing field raises `ValidationError` (→ 400), never an unhandled `KeyError` (→ 500). `apply()` is inherited from `DdlPreview` (pure — calls `build()`); `get_result()` is inherited (`{"sql": self._sql}`).
 
 ```python
 class PreviewCreateTable(DdlPreview):
@@ -322,18 +322,24 @@ Structure-editing launchers set `onSuccess: () => this.refreshStructure(ref, nod
 
 ### `PreviewAlterTable.build()` dispatch (representative)
 
+Each action's required fields are read through the `_require(spec, key)` guard
+(non-blank string identifiers) or the sibling `_field(spec, key)` guard
+(collection/mapping fields like `columnDef`), so a body missing a field the
+chosen action needs raises the app's typed `ValidationError` (→ 400) rather
+than an unhandled `KeyError` (→ 500). Optional fields keep `spec.get(...)`.
+
 ```python
-action = self._spec["action"]
-s, t = self._spec["schema"], self._spec["name"]
-if action == "addColumn":     self._sql = ddl.add_column(s, t, self._spec["columnDef"])
-elif action == "dropColumn":  self._sql = ddl.drop_column(s, t, self._spec["column"], cascade=self._spec.get("cascade", False))
-elif action == "renameColumn":self._sql = ddl.rename_column(s, t, self._spec["column"], self._spec["newName"])
-elif action == "changeType":  self._sql = ddl.alter_column_type(s, t, self._spec["column"], self._spec["newType"], using=self._spec.get("using") or None)
-elif action == "setNotNull":  self._sql = ddl.set_not_null(s, t, self._spec["column"])
-elif action == "dropNotNull": self._sql = ddl.drop_not_null(s, t, self._spec["column"])
-elif action == "setDefault":  self._sql = ddl.set_default(s, t, self._spec["column"], self._spec["default"])
-elif action == "dropDefault": self._sql = ddl.drop_default(s, t, self._spec["column"])
-elif action == "renameTable": self._sql = ddl.rename_table(s, t, self._spec["newName"])
+s, t, spec = self._schema, self._name, self._spec
+action = spec.get("action")
+if action == "addColumn":     self._sql = ddl.add_column(s, t, _column_def(_field(spec, "columnDef")))
+elif action == "dropColumn":  self._sql = ddl.drop_column(s, t, _require(spec, "column"), cascade=bool(spec.get("cascade", False)))
+elif action == "renameColumn":self._sql = ddl.rename_column(s, t, _require(spec, "column"), _require(spec, "newName"))
+elif action == "changeType":  self._sql = ddl.alter_column_type(s, t, _require(spec, "column"), _require(spec, "newType"), using=spec.get("using") or None)
+elif action == "setNotNull":  self._sql = ddl.set_not_null(s, t, _require(spec, "column"))
+elif action == "dropNotNull": self._sql = ddl.drop_not_null(s, t, _require(spec, "column"))
+elif action == "setDefault":  self._sql = ddl.set_default(s, t, _require(spec, "column"), _require(spec, "default"))
+elif action == "dropDefault": self._sql = ddl.drop_default(s, t, _require(spec, "column"))
+elif action == "renameTable": self._sql = ddl.rename_table(s, t, _require(spec, "newName"))
 else: raise ValidationError(f"Unknown ALTER action '{action}'")
 ```
 
@@ -353,7 +359,7 @@ Reuse the [`FilterDialog`](frontend/src/dock/FilterDialog.ts#L206) add/remove-ro
 
 2. **`backend/tests/test_ddl_table_sql.py`** — new. Unit-test every builder's emitted SQL (see §Expected Behaviour), the quoting of names with spaces/quotes, composite PK, empty-columns/blank-expression `ValidationError`s, and unknown referential-action / index-method rejection. Follow [`test_ddl_sql.py`](backend/tests/test_ddl_sql.py) / [`test_compiler.py`](backend/tests/test_compiler.py) pure-function style.
 
-3. **`backend/app/operations/ddl_table.py`** — new. The five `DdlPreview` subclasses per §Public API, the `_require` identifier guard, and the `build()` dispatchers. Import `ddl` builders and `DdlPreview` from phase-1.
+3. **`backend/app/operations/ddl_table.py`** — new. The five `DdlPreview` subclasses per §Public API, the `_require`/`_field` field guards, and the `build()` dispatchers. Import `ddl` builders and `DdlPreview` from phase-1.
 
 4. **`backend/app/operations/__init__.py`** — import and add `PreviewCreateTable`, `PreviewDropTable`, `PreviewAlterTable`, `PreviewConstraint`, `PreviewIndex` to `__all__`.
 
