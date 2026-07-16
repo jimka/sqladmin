@@ -156,8 +156,8 @@ Verified: the symlinked `node_modules/@jimka/typescript-ui → /home/jika/typesc
 
 6. **Regression greps.**
    - `grep -rn "setPreferredSize(0, 0)" frontend/src/shell/` — expect **zero** matches (the tree call is gone; `buildList`'s zero-preferred List uses the options-bag form at `QueriesView.ts:321` and is intentionally untouched).
-   - `grep -rn "resizable" frontend/src/` — expect exactly two matches: `treeExplorerView.ts` and `QueriesView.ts`.
-   - `grep -rn "resizable" frontend/src/dock/` — expect **zero** matches (StructurePanel and ExplainDiagramPanel stay out).
+   - `grep -rn "resizable: true" frontend/src/` — expect exactly two matches: `treeExplorerView.ts` and `QueriesView.ts`. (A bare `grep -rn "resizable"` also hits pre-existing, unrelated prose already on `main` — `shell/SqlAdminShell.ts:8`, `shell/localStorageWindow.ts:1,31`, `dock/QueryPanel.ts:4,140` — describing the unrelated `Split` gutter and a floating `Window`; scope to the option spelling to avoid a false failure against those.)
+   - `grep -rn "resizable: true" frontend/src/dock/` — expect **zero** matches (StructurePanel and ExplainDiagramPanel stay out; `dock/QueryPanel.ts`'s pre-existing "resizable" prose is unrelated — see above).
 
 7. **`npm run typecheck` in `frontend/`.** Expect clean. A failure on `resizable` means step 1's build check was skipped.
 
