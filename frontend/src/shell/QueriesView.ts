@@ -41,10 +41,6 @@ import { PRIMARY_COLOR, DESTRUCTIVE_COLOR } from "../theme";
 // terminal marks every list row as a query (matching the query dock tab).
 Glyph.register(folder_open, trash, floppy_disk, clock_rotate_left, terminal);
 
-// A one-line SQL preview length. Long enough to recognise a statement in the
-// narrow sidebar column, short enough not to wrap the row.
-const SNIPPET_MAX = 60;
-
 // Each section's floor and preferred height. Under the accordion's resizable
 // mode getMinSize is the gutter drag's stop; a Fit Panel over a zero-preferred
 // List reports a min of only its 8px insets, which would let a drag reduce a
@@ -328,6 +324,10 @@ function buildList(emptyText: string): List {
     return new List({
         preferredSize:   { width: 0, height: 0 },
         emptyText,
+        // Rail-width rows can't show a whole query, and the tail of one is often
+        // the part that identifies it (the WHERE, the ORDER BY). Scroll to it
+        // rather than ellipsising it away.
+        horizontalScrolling: true,
         // Render each row as a query glyph beside its label.
         rendererFactory: () => new GlyphListItemRenderer(),
     });
@@ -364,9 +364,14 @@ function actionButton(action: RowAction, selected: () => QueryRow | undefined): 
     return button;
 }
 
-/** Collapse whitespace and truncate SQL to a one-line preview. */
+/**
+ * Collapse a query's whitespace into a one-line preview.
+ *
+ * Deliberately uncapped: the Recent list scrolls horizontally, so the row is the
+ * thing that decides how much of a query is visible. Cutting the string here
+ * would put a hard `…` in the middle of that scroll — the row would scroll to an
+ * ellipsis rather than to the rest of the query.
+ */
 function snippet(sql: string): string {
-    const oneLine = sql.replace(/\s+/g, " ").trim();
-
-    return oneLine.length > SNIPPET_MAX ? `${oneLine.slice(0, SNIPPET_MAX - 1)}…` : oneLine;
+    return sql.replace(/\s+/g, " ").trim();
 }
