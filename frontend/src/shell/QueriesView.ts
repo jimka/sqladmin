@@ -46,6 +46,15 @@ Glyph.register(folder_open, trash, floppy_disk, clock_rotate_left, terminal);
 // narrow sidebar column, short enough not to wrap the row.
 const SNIPPET_MAX = 60;
 
+// Each section's floor and preferred height. Under the accordion's resizable
+// mode getMinSize is the gutter drag's stop; a Fit Panel over a zero-preferred
+// List reports a min of only its 8px insets, which would let a drag reduce a
+// section to a sliver. 96px mirrors treeExplorerView's TREE_MIN_HEIGHT. Set as
+// preferred too so a section never reports min > preferred; the equal
+// fillWeights still split all the leftover height, so the rendered result is
+// unchanged.
+const SECTION_MIN_HEIGHT = 96;
+
 /** A list row plus whatever a section's actions need to act on it. */
 interface QueryRow {
     /** The List item key (unique within the section). */
@@ -124,6 +133,9 @@ export class QueriesView extends AccordionPanel {
 
         super({
             id,
+            // Draggable gutter between Saved and Recent, so the user apportions the
+            // height; the equal fillWeights below seed the split evenly, as before.
+            resizable: true,
             sections: [
                 // Equal fill weights split the leftover height between the two lists.
                 { label: "Saved",  component: saved.host,  initiallyOpen: true, glyph: "floppy-disk",       tools: saved.tools,  fillWeight: 1 },
@@ -180,7 +192,11 @@ interface Section {
  * @returns The section's host, tools, and refresh callback.
  */
 function buildSection(config: SectionConfig): Section {
-    const host = Panel({ layoutManager: new Fit() });
+    const host = Panel({
+        layoutManager: new Fit(),
+        preferredSize: { width: 0, height: SECTION_MIN_HEIGHT },
+        minSize      : { width: 0, height: SECTION_MIN_HEIGHT },
+    });
     const menu = new Menu();
 
     // The rows currently shown and the list rendering them — refreshed in place

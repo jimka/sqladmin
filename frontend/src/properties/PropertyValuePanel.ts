@@ -19,11 +19,19 @@ export interface PropertyValueRow {
     value: string;
 }
 
-// Fixed height the inspector occupies at the bottom of the sidebar accordion; the
-// tree/navigator above it takes the rest. Pinned as both preferred and minimum so
-// the accordion's shrink never steals from it — the tree absorbs all the flex
-// instead. The Table scrolls internally if the property list ever exceeds it.
+// The inspector's natural height at the bottom of the sidebar accordion: the
+// tree/navigator above it takes the rest, and this is what the accordion's
+// resizable mode seeds the section's stored height from (see
+// ../shell/treeExplorerView.ts). The Table scrolls internally if the property
+// list exceeds it.
 const PANEL_HEIGHT = 220;
+
+// The inspector's floor. Under the accordion's resizable mode this is the
+// gutter drag's lower stop (the drag floors each section at getMinSize) — it
+// was previously pinned to PANEL_HEIGHT, which let the user drag the inspector
+// only bigger, never smaller. 96px mirrors treeExplorerView's TREE_MIN_HEIGHT
+// so neither section can be dragged away entirely.
+const PANEL_MIN_HEIGHT = 96;
 
 /** Base for a read-only Property/Value inspector bound to a sidebar selection. */
 export class PropertyValuePanel {
@@ -43,7 +51,7 @@ export class PropertyValuePanel {
         this.component = Panel({
             layoutManager: new Fit(),
             preferredSize: { width: 0, height: PANEL_HEIGHT },
-            minSize      : { width: 0, height: PANEL_HEIGHT },
+            minSize      : { width: 0, height: PANEL_MIN_HEIGHT },
             components   : [Table(this._store, { columns: [], rowReadOnly: () => true })],
         });
     }
