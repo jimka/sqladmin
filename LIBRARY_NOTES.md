@@ -8,6 +8,40 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✅ Fixed in library: button-triggered menus were anchored to the pointer
+
+Four dock toolbar buttons (table/role-grants Export, the Structure panel's
+Alter-column and Add-constraint launchers, the query-result Export) passed
+`event.clientX`/`event.clientY` to `Menu.show(...)`, which cursor-anchors and
+clamps-but-never-flips. It looked fine only because three of the four sat in
+toolbars pinned to the top of their panel; the Structure accordion's header
+tools live in a scrolling host and can reach the bottom edge, where the menu
+would clamp upward over the button instead of flipping cleanly above it.
+
+Fixed in the library by `MenuButton` (anchors to the button's rect, flips above
+when the room below is short) plus a rect-anchored `Menu.toggleFor` (typescript-ui
+plan `menu-anchored-placement`), adopted here across all four sites (plan
+`menubutton-adoption`).
+
+Adopting it surfaced two API gaps, both raised and **fixed in the library
+before this migration landed** — logged here as resolved, not as open papercuts:
+
+- An early draft mandated a single non-overloaded `MenuButton` constructor,
+  which would have forced every options-first construction to pass a dummy
+  `undefined` text. It now mirrors `Button`'s overload pair (options-only
+  last), so `MenuButton({ … })` works exactly like `Button({ … })`.
+- A per-open item provider had no way to say "open nothing" — an empty array
+  mounted a bare, empty panel. `Menu.toggleFor` now suppresses the open (and
+  still fires `onClose`) when the resolved item list is empty, which is what
+  lets this app's two dynamic builders (`buildQueryExportItems`,
+  `buildAlterColumnItems`) return `[]` instead of inventing placeholder
+  strings for a state that has no honest explanation.
+
+Both gaps were found only by a second consumer trying to *use* the component —
+which is exactly what this app is for.
+
+---
+
 ## ✂️🩹🔎 Consumers must set `keepNames` in their own minifier
 
 The library derives every component's CSS class (via `init()` ->
