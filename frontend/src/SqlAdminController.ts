@@ -2,7 +2,7 @@
 // the open-panel registry (deduped by panel id). Components stay dumb: they emit,
 // the controller decides. All app-side errors funnel to notifyError.
 
-import { Dock, Tooltip }                                                                                                                                                                           from "@jimka/typescript-ui/overlay";
+import { Dock, Notification, NotificationHistoryButton, Tooltip }                                                                                                                                  from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent }                                                                                                                                                                     from "@jimka/typescript-ui/overlay";
 import { Component }                                                                                                                                                                               from "@jimka/typescript-ui/core";
 import { HBox }                                                                                                                                                                                    from "@jimka/typescript-ui/layout";
@@ -264,6 +264,14 @@ export class SqlAdminController {
         if (username) {
             this.statusBar.addRight(buildIdentityWidget(username, database));
         }
+
+        // The notification history sits at the FAR right — appended after the
+        // identity widget, since the right zone's HBox lays out left-to-right.
+        // flat + compact keep the library button inside the bar's fixed 22px row.
+        const historyButton = new NotificationHistoryButton({ flat: true, compact: true });
+
+        Tooltip.attach(historyButton, "Notification history");
+        this.statusBar.addRight(historyButton);
     }
 
     get connectionId(): string {
@@ -2461,10 +2469,19 @@ export class SqlAdminController {
         this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: changes saved`);
     }
 
-    /** Surface an error (AjaxError detail, or any thrown value) to the StatusBar. */
+    /**
+     * Surface an error (AjaxError detail, or any thrown value) to the StatusBar
+     * and as an error Notification. The toast is what lands the error in
+     * `Notification.getHistory()` — the status bar's line is clobbered by the
+     * next setMessage, so the history is the only place a passed-over error
+     * survives. The toast drops the "Error" prefix: its severity badge says so.
+     */
     notifyError(error: unknown, ref?: DbObjectRef): void {
-        const where = ref?.name ? ` (${ref.name})` : "";
-        this.statusBar.setMessage(`Error${where}: ${this.errorMessage(error)}`);
+        const where  = ref?.name ? ` (${ref.name})` : "";
+        const detail = this.errorMessage(error);
+
+        this.statusBar.setMessage(`Error${where}: ${detail}`);
+        Notification.show(ref?.name ? `${ref.name}: ${detail}` : detail, "error");
     }
 
     /**
