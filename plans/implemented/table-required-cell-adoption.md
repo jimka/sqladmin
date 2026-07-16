@@ -151,7 +151,7 @@ export function isRequiredColumn(column: ColumnMeta): boolean;
    ```
    grep -rn "isRequiredColumn" frontend/src/
    ```
-   → expect exactly **3** hits: the definition, the call in `buildColumnSpec`, and the `filter` reference in `missingRequiredFields`.
+   → expect exactly **4** hits: the definition, the call in `buildColumnSpec`, the `filter` reference in `missingRequiredFields`, and `missingRequiredFields`'s doc comment ("Required as per `isRequiredColumn`.", per step 3) cross-referencing the helper by name. The last hit is a prose pointer, not a second implementation of the predicate — it does not violate the single-source-of-truth invariant this step exists to check.
 
 8. **`cd frontend && npm run typecheck`** → clean. A failure naming `required` as an unknown property on `ColumnConfig` means step 1's rebuild didn't land.
 
