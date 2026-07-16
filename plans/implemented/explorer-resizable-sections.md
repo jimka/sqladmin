@@ -54,7 +54,7 @@ Nothing is written to `localStorage`, and no `onSectionToggle` relay is added. T
 
 ### `setCompact(true)` does not thin the gutter — but the gutter does overlay 6px of tree content
 
-`setCompact` only changes header height (`COMPACT_HEADER_HEIGHT = 22` vs 28), header padding, and chevron size (`Accordion.setCompact`, `Accordion.ts:394`). It never touches the gutter. `RESIZE_GUTTER_SIZE` is a fixed **6px** module constant with no setter (`Accordion.ts:56`), and `placeGutter` positions it at `upperBottom − RESIZE_GUTTER_SIZE` overlaying the **upper section's content bottom**, reserving no layout budget (`Accordion.ts:1582-1590`).
+`setCompact` only changes header height (`COMPACT_HEADER_HEIGHT = 22` vs 28), header padding, and chevron size (`Accordion.setCompact`, `Accordion.ts:394`). It never touches the gutter. `RESIZE_GUTTER_SIZE` is a fixed **6px** module constant with no setter (`Accordion.ts:57`), and `placeGutter` positions it at `upperBottom − RESIZE_GUTTER_SIZE` overlaying the **upper section's content bottom**, reserving no layout budget (`Accordion.ts:1582-1590`).
 
 So the drag target is a full 6px regardless of compact — **but** it sits on top of the bottom 6px of the tree, i.e. a quarter of the last visible 24px tree row, which stops being a row-click target. **Decision: accept it, and manual-verify it.** The app has no knob (no `setGutterSize`), the geometry matches VSCode's explorer, and 6px over the last row's lower quarter is the library's chosen trade-off. The gutter is also created with `expandedBackground: "transparent"` (`Accordion.ts:1559`), so the affordance is **cursor-only** (a `row-resize` cursor on hover) — this is expected, not a bug to chase.
 
@@ -232,7 +232,7 @@ Read before starting:
 - `/home/jika/typescript/sqladmin/frontend/src/properties/PropertyValuePanel.ts` — the shared inspector base; **`minSize` here is the drag floor**.
 - `/home/jika/typescript/sqladmin/frontend/src/shell/QueriesView.ts` — the third rail; `buildSection`'s `host` (L183) is the section component `_resizeSizes` keys on, and it is stable across `refresh()`.
 - `/home/jika/typescript/sqladmin/frontend/COMPONENT_CONVENTIONS.md` — class-first, and §(b) the super-cascade trap: `tree.setPreferredSize`/`setMinSize` must stay **before** `super()`, on the local, since `this` is unavailable until `super()` returns.
-- `/home/jika/typescript/typescript-ui/src/typescript/lib/layout/Accordion.ts` — reference only, **never edit**. `setResizable` (L563), `computeResizableHeights` + the seed (L2104-2151), `distributeWithinConstraints` (L2180), the drag's min/max reads (L1691-1700), `RESIZE_GUTTER_SIZE` (L56).
+- `/home/jika/typescript/typescript-ui/src/typescript/lib/layout/Accordion.ts` — reference only, **never edit**. `setResizable` (L563), `computeResizableHeights` + the seed (L2104-2151), `distributeWithinConstraints` (L2180), the drag's min/max reads (L1691-1700), `RESIZE_GUTTER_SIZE` (L57).
 - `/home/jika/typescript/typescript-ui/docs/layouts/Accordion.md` — the "Resizable sections" section, incl. the corrected seamless-toggle claim.
 - `/home/jika/typescript/sqladmin/frontend/src/shell/SqlAdminShell.ts:420-430` — `buildSidebar`; each view is constructed once per session, which is why the drag survives a rail switch.
 
