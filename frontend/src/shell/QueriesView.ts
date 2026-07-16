@@ -197,6 +197,7 @@ function buildSection(config: SectionConfig): Section {
         preferredSize: { width: 0, height: SECTION_MIN_HEIGHT },
         minSize      : { width: 0, height: SECTION_MIN_HEIGHT },
     });
+
     const menu = new Menu();
 
     // The rows currently shown and the list rendering them — refreshed in place
