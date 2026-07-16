@@ -194,6 +194,6 @@ class ListColumnsQuery(Query):
 
         Returns:
             One contract dict (name, dataType, nullable, isPrimaryKey,
-            isGenerated, wireType) per column.
+            isGenerated, hasDefault, wireType, sequence) per column.
         """
         return [m.to_contract() for m in self.get_columns_result()]
