@@ -45,9 +45,8 @@ import { Placement }                     from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Split } from "@jimka/typescript-ui/layout";
 import { ToolBar }                       from "@jimka/typescript-ui/component/menubar";
 import { Spacer, TabPanel }              from "@jimka/typescript-ui/component/container";
-import { glyphButton }                   from "./glyphButton";
+import { glyphButton, glyphMenuButton }  from "./glyphButton";
 import { CodeEditor }                    from "@jimka/typescript-ui/component/editor";
-import { Menu }                          from "@jimka/typescript-ui/overlay";
 import { Glyph }                         from "@jimka/typescript-ui/component/display";
 import { play }                          from "@jimka/typescript-ui/glyphs/solid/play";
 import { eraser }                        from "@jimka/typescript-ui/glyphs/solid/eraser";
@@ -71,8 +70,7 @@ import { isReadOnlyStatement }           from "../data/explain";
 import { parseExplainPlan, parseExplainSummary } from "../data/parseExplainPlan";
 import type { ExplainPlanNode, ExplainSummary }  from "../data/parseExplainPlan";
 import { ExplainDiagramPanel }           from "./ExplainDiagramPanel";
-import { exportQueryResult }             from "./exportQueryResult";
-import { exportExplainPlan }             from "./exportExplainResult";
+import { buildQueryExportItems }         from "./menuItems";
 import type { ActiveExport, RunExplain } from "../data/explain";
 import type { HistoryEntry }             from "../data/queryStore";
 import {
@@ -214,10 +212,8 @@ export class QueryPanel {
         // as a FORMAT JSON plan tree).
         const diagramButton = glyphButton("sitemap", NEUTRAL_COLOR, "Explain diagram\n\ntree + diagram of the current plan",
                                           () => void showDiagram());
-        const exportButton  = glyphButton("file-export", PRIMARY_COLOR, "Export results (CSV / JSON)", (e: MouseEvent) => openExportMenu(e));
-
-        // The CSV/JSON chooser shown under the Export button; reused across clicks.
-        const exportMenu = Menu();
+        const exportButton  = glyphMenuButton("file-export", PRIMARY_COLOR, "Export results (CSV / JSON)",
+                                              () => buildQueryExportItems(activeExport, notify));
 
         // History recall as toolbar buttons, mirroring the editor's Ctrl+↑/↓: Older
         // walks back, Newer forward. Pushed to the far right by a flexible Spacer,
@@ -245,33 +241,6 @@ export class QueryPanel {
             activeExport = active;
             onResult?.(active);
             exportButton.setEnabled(active !== null);
-        }
-
-        /**
-         * Open the export chooser at the click point, serializing whatever the panel
-         * currently shows: a rows grid as CSV / JSON, or an EXPLAIN plan as text /
-         * JSON. A no-op when there is nothing to export (the button is disabled then,
-         * so this is defensive).
-         *
-         * @param event - The Export button's click, for the menu's placement.
-         */
-        function openExportMenu(event: MouseEvent): void {
-            if (!activeExport) {
-                return;
-            }
-
-            const active = activeExport;
-            const items = active.kind === "rows"
-                ? [
-                    { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => exportQueryResult(active.result, "csv", notify) },
-                    { text: "Export JSON (.json)", glyph: "file-code", action: () => exportQueryResult(active.result, "json", notify) },
-                ]
-                : [
-                    { text: "Export text (.txt)",  glyph: "file-lines", action: () => void exportExplainPlan(active.plan, "txt", notify) },
-                    { text: "Export JSON (.json)", glyph: "file-code",  action: () => void exportExplainPlan(active.plan, "json", notify) },
-                ];
-
-            exportMenu.show(event.clientX, event.clientY, items);
         }
 
         /** Add the pane to the Split and seed the editor height once per hidden→shown transition. */

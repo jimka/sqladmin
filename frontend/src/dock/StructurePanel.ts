@@ -40,7 +40,6 @@ import { VBox, LayoutConstraints } from "@jimka/typescript-ui/layout";
 import { AccordionPanel }      from "@jimka/typescript-ui/component/container";
 import { Button }              from "@jimka/typescript-ui/component/button";
 import { Glyph }               from "@jimka/typescript-ui/component/display";
-import { Menu }                from "@jimka/typescript-ui/overlay";
 import { Table, LinkCellRenderer } from "@jimka/typescript-ui/component/table";
 import type { CellClickEvent } from "@jimka/typescript-ui/component/table";
 import { MemoryStore, Model }  from "@jimka/typescript-ui/data";
@@ -61,7 +60,8 @@ import type {
     TableStructure,
 } from "../contract";
 import { buildColumnsGrid, readOnlyTable } from "./columnsGrid";
-import { glyphButton }        from "./glyphButton";
+import { glyphButton, glyphMenuButton } from "./glyphButton";
+import { buildAlterColumnItems, buildAddConstraintItems } from "./menuItems";
 import { CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR, PRIMARY_COLOR } from "../theme";
 
 // Section-header glyphs (Columns / Indexes / Constraints / Foreign Keys) and
@@ -82,26 +82,6 @@ export interface StructureActions {
     onCreateIndex(): void;
     onDropIndex(indexName: string): void;
 }
-
-// The "Alter column" submenu's actions, in menu order.
-const ALTER_COLUMN_ACTIONS: ReadonlyArray<{ label: string; action: AlterColumnAction }> = [
-    { label: "Rename column…", action: "renameColumn" },
-    { label: "Change type…", action: "changeType" },
-    { label: "Set NOT NULL", action: "setNotNull" },
-    { label: "Drop NOT NULL", action: "dropNotNull" },
-    { label: "Set default…", action: "setDefault" },
-    { label: "Drop default", action: "dropDefault" },
-];
-
-// The "Add constraint" submenu's kinds, in menu order. Foreign key lives here
-// (not as its own Foreign Keys toolbar button) so every constraint kind —
-// including FK — has exactly one add affordance.
-const ADD_CONSTRAINT_KINDS: ReadonlyArray<{ label: string; kind: ConstraintKind }> = [
-    { label: "Primary key…", kind: "primaryKey" },
-    { label: "Unique…", kind: "unique" },
-    { label: "Check…", kind: "check" },
-    { label: "Foreign key…", kind: "foreignKey" },
-];
 
 /**
  * The structure inspector panel for one table: a four-section accordion, one
@@ -207,7 +187,7 @@ function findColumn(columns: ColumnMeta[], name: string): ColumnMeta | undefined
 
 /**
  * Build the Columns section's header tools: Add (always enabled), Alter (a
- * submenu of {@link ALTER_COLUMN_ACTIONS}), and Drop (both gated on a
+ * submenu built by {@link buildAlterColumnItems}), and Drop (both gated on a
  * selected row).
  *
  * @param columns - The table's introspected columns, to resolve the
@@ -218,21 +198,9 @@ function findColumn(columns: ColumnMeta[], name: string): ColumnMeta | undefined
  * @returns The wired header tool buttons, in display order.
  */
 function buildColumnsTools(columns: ColumnMeta[], grid: Table, actions: StructureActions): Button[] {
-    const alterMenu = Menu();
-
     const addButton = glyphButton("plus", CONSTRUCTIVE_COLOR, "Add column", () => actions.onAddColumn());
-    const alterButton = glyphButton("pencil", PRIMARY_COLOR, "Alter column", event => {
-        const column = selectedColumn(columns, grid);
-
-        if (!column) {
-            return;
-        }
-
-        alterMenu.show(event.clientX, event.clientY, ALTER_COLUMN_ACTIONS.map(a => ({
-            text: a.label,
-            action: () => actions.onAlterColumn(column, a.action),
-        })));
-    });
+    const alterButton = glyphMenuButton("pencil", PRIMARY_COLOR, "Alter column",
+                                        () => buildAlterColumnItems(selectedColumn(columns, grid), actions));
     const dropButton = glyphButton("trash", DESTRUCTIVE_COLOR, "Drop column", () => {
         const column = selectedColumn(columns, grid);
 
@@ -285,8 +253,8 @@ function buildIndexesTools(grid: Table, actions: StructureActions): Button[] {
 }
 
 /**
- * Build the Constraints section's header tools: Add (a submenu of
- * {@link ADD_CONSTRAINT_KINDS}, always enabled) and Drop (gated on a
+ * Build the Constraints section's header tools: Add (a submenu built by
+ * {@link buildAddConstraintItems}, always enabled) and Drop (gated on a
  * selected row).
  *
  * @param grid - The Constraints grid to read the selection from.
@@ -295,14 +263,7 @@ function buildIndexesTools(grid: Table, actions: StructureActions): Button[] {
  * @returns The wired header tool buttons, in display order.
  */
 function buildConstraintsTools(grid: Table, actions: StructureActions): Button[] {
-    const addMenu = Menu();
-
-    const addButton = glyphButton("plus", CONSTRUCTIVE_COLOR, "Add constraint", event => {
-        addMenu.show(event.clientX, event.clientY, ADD_CONSTRAINT_KINDS.map(k => ({
-            text: k.label,
-            action: () => actions.onAddConstraint(k.kind),
-        })));
-    });
+    const addButton = glyphMenuButton("plus", CONSTRUCTIVE_COLOR, "Add constraint", buildAddConstraintItems(actions));
     const dropButton = glyphButton("trash", DESTRUCTIVE_COLOR, "Drop constraint", () => {
         const record = grid.getSelectedRecord();
 
