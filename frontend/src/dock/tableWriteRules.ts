@@ -20,22 +20,38 @@ interface RecordSource {
 }
 
 /**
+ * Returns whether the user must supply a value for this column on insert.
+ * Required = NOT NULL, not generated, and no DB default.
+ */
+export function isRequiredColumn(column: ColumnMeta): boolean {
+    return !column.nullable && !column.isGenerated && !column.hasDefault;
+}
+
+/**
  * Build the data grid's column spec. Cells are inline-editable by default;
  * generated columns are marked read-only since the DB assigns their values
  * (the SqlAdminWriter also strips them from writes). When the user lacks UPDATE
  * on the table, every column is forced read-only so no edit can be started that
- * Save could not persist.
+ * Save could not persist. Required columns (NOT NULL, not generated, no default)
+ * get a header asterisk and an empty-cell outline from the library; read-only
+ * wins over the outline, so a grid without UPDATE shows asterisks but no outlines.
  */
 export function buildColumnSpec(columns: ColumnMeta[], canUpdate: boolean): ColumnSpec {
-    return { columns: columns.map(c => ({ field: c.name, readOnly: !canUpdate || c.isGenerated })) };
+    return {
+        columns: columns.map(c => ({
+            field: c.name,
+            readOnly: !canUpdate || c.isGenerated,
+            required: isRequiredColumn(c),
+        })),
+    };
 }
 
 /**
  * Collect the names of required fields left empty across the pending (new or
- * edited) records. Required = not nullable, not generated, no default.
+ * edited) records. Required as per `isRequiredColumn`.
  */
 export function missingRequiredFields(store: RecordSource, columns: ColumnMeta[]): string[] {
-    const required = columns.filter(c => !c.nullable && !c.isGenerated && !c.hasDefault);
+    const required = columns.filter(isRequiredColumn);
     const missing = new Set<string>();
 
     for (const record of store.getAll()) {
