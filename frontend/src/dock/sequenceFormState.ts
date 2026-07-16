@@ -7,7 +7,7 @@
 // dirty check that must also run while a numeric field holds in-progress,
 // possibly invalid text.
 
-import type { SequenceDetail } from "../contract";
+import type { SequenceDetail, SequenceOwnedBy } from "../contract";
 import type { EditedSequenceValues } from "./ddlSpecs";
 
 /**
@@ -59,6 +59,19 @@ export function isSequenceFormDirty(baseline: EditedSequenceValues, edited: Edit
         edited.dataType.trim()   !== baseline.dataType.trim()   ||
         edited.owner.trim()      !== baseline.owner.trim()
     );
+}
+
+/**
+ * The "Owned by column" row's label. Read-only: ownership is not editable
+ * through the info form (its Owner combo alters the owning ROLE, a different
+ * Postgres concept), so this is deliberately absent from
+ * `detailToEditedValues` and never seen by `isSequenceFormDirty`.
+ *
+ * @param ownedBy - the column owning the sequence, if any.
+ * @returns `"schema.table.column"`, or `""` for a standalone sequence.
+ */
+export function ownedByLabel(ownedBy: SequenceOwnedBy | null | undefined): string {
+    return ownedBy ? `${ownedBy.schema}.${ownedBy.table}.${ownedBy.column}` : "";
 }
 
 /** The Data type combo's fixed allowlist (mirrors the backend's ALTER SEQUENCE type check). */

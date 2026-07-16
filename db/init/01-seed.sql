@@ -13,6 +13,13 @@
 -- container boxes, self-referencing edges (hr.employees.manager_id), and
 -- view/materialized-view object kinds. Every base table is seeded with a
 -- handful of rows; views/materialized views derive their rows from those.
+--
+-- The seed also covers every column-to-sequence relationship the Structure
+-- tab's Sequence link and the sequence tab's "Owned by column" row can
+-- encounter — serial, identity, a shared sequence reached through a DEFAULT,
+-- a generated column with no sequence at all, a column matching both
+-- dependency arms, and a standalone sequence (public.audit_event_seq). See
+-- the sales.invoices/credit_notes block for the full case list.
 
 CREATE TABLE public.customers (
     id          serial         PRIMARY KEY,
@@ -46,6 +53,11 @@ INSERT INTO public.orders (customer_id, total, status) VALUES
     (1,  35.50, 'pending'),
     (2, 500.00, 'delivered'),
     (4,  77.25, 'pending');
+
+-- An application-managed counter: drawn with nextval() from application code,
+-- so no column defaults from it and no column owns it. It is the navigator's
+-- standalone-sequence case — its info tab must report no owning column.
+CREATE SEQUENCE public.audit_event_seq;
 
 -- A view over public, so the navigator (and diagrams) show a view object kind
 -- alongside base tables in the schema everyone starts in.
@@ -105,6 +117,64 @@ CREATE VIEW sales.order_summary AS
     JOIN public.customers c   ON c.id = o.customer_id
     JOIN sales.order_items oi ON oi.order_id = o.id
     JOIN sales.products p     ON p.id = oi.product_id;
+
+-- ---------------------------------------------------------------------------
+-- Billing (sales.invoices / sales.credit_notes) exists to make every way a
+-- column can — or cannot — be tied to a sequence reachable from the UI, since
+-- the backend's pg_depend introspection has no automated coverage (the tests
+-- are pure-logic and never touch a database). Each column below is a case the
+-- Structure tab's Sequence link and the sequence tab's "Owned by column" row
+-- must get right:
+--
+--   invoices.id           identity  -> OWNED BY only (no DEFAULT to read)
+--   invoices.document_no  DEFAULT   -> document_number_seq, which it does NOT own
+--   invoices.total        generated -> NO sequence, despite being generated
+--   credit_notes.id       both      -> DEFAULT (document_number_seq) must win
+--   products.id (above)   serial    -> both arms agree on products_id_seq
+--
+-- A shared document number across invoices and credit notes: one counter, so
+-- the two document kinds never collide. Deliberately owned by NO column —
+-- ownership would tie its lifetime to whichever table declared it.
+-- ---------------------------------------------------------------------------
+CREATE SEQUENCE sales.document_number_seq;
+
+CREATE TABLE sales.invoices (
+    -- Identity, not serial: an identity column has no column default, so the
+    -- sequence is reachable only through its OWNED BY dependency.
+    id           integer        GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- Defaults from the shared sequence without owning it.
+    document_no  integer        NOT NULL DEFAULT nextval('sales.document_number_seq'),
+    order_id     integer        NOT NULL REFERENCES public.orders (id),
+    net          numeric(12, 2) NOT NULL,
+    vat          numeric(12, 2) NOT NULL DEFAULT 0,
+    -- Generated but sequence-free: the Structure tab must show Generated = true
+    -- with an EMPTY Sequence cell.
+    total        numeric(12, 2) GENERATED ALWAYS AS (net + vat) STORED
+);
+
+INSERT INTO sales.invoices (order_id, net, vat) VALUES
+    (1, 120.00, 30.00),
+    (2,  35.50,  8.88),
+    (3, 500.00, 125.00);
+
+-- credit_notes.id was originally a serial and was later repointed at the shared
+-- document sequence. The ALTER only replaces the DEFAULT: the original
+-- credit_notes_id_seq stays OWNED BY the column, so this one column matches
+-- both dependency arms with two DIFFERENT sequences. The DEFAULT is what
+-- actually supplies the value, so document_number_seq is the truthful answer.
+CREATE TABLE sales.credit_notes (
+    id          serial         PRIMARY KEY,
+    invoice_id  integer        NOT NULL REFERENCES sales.invoices (id),
+    amount      numeric(12, 2) NOT NULL,
+    reason      text
+);
+
+ALTER TABLE sales.credit_notes
+    ALTER COLUMN id SET DEFAULT nextval('sales.document_number_seq');
+
+INSERT INTO sales.credit_notes (invoice_id, amount, reason) VALUES
+    (1, 20.00, 'Damaged in transit'),
+    (3, 99.00, 'Returned item');
 
 -- ---------------------------------------------------------------------------
 -- inventory: warehouses + per-warehouse stock. stock reaches into

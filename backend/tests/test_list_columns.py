@@ -7,13 +7,17 @@ from __future__ import annotations
 
 import pytest
 
-from app.contract import WireType
+from app.contract import SequenceRef, WireType
 from app.operations import ListColumnsQuery
 from tests.conftest import NO_CONN, TABLE
 
+# "id" is a serial: backed by a sequence. "balance" is a plain column, so its
+# sequence_schema/sequence_name arrive NULL from the query's LEFT JOIN.
 _RAW = [
-    {"name": "id", "data_type": "integer", "nullable": False, "is_primary_key": True, "is_generated": True, "has_default": True},
-    {"name": "balance", "data_type": "numeric", "nullable": False, "is_primary_key": False, "is_generated": False, "has_default": False},
+    {"name": "id", "data_type": "integer", "nullable": False, "is_primary_key": True, "is_generated": True, "has_default": True,
+     "sequence_schema": "public", "sequence_name": "customers_id_seq"},
+    {"name": "balance", "data_type": "numeric", "nullable": False, "is_primary_key": False, "is_generated": False, "has_default": False,
+     "sequence_schema": None, "sequence_name": None},
 ]
 
 
@@ -45,7 +49,32 @@ def test_get_result_contract_shape() -> None:
         "isGenerated": True,
         "hasDefault": True,
         "wireType": "number",
+        "sequence": {"schema": "public", "name": "customers_id_seq"},
     }
+
+
+def test_columns_maps_backing_sequence() -> None:
+    op = _query()
+    op._raw = _RAW
+    metas = op.get_columns_result()
+
+    assert metas[0].sequence == SequenceRef(schema="public", name="customers_id_seq")
+
+
+def test_columns_without_sequence_map_to_none() -> None:
+    op = _query()
+    op._raw = _RAW
+
+    assert op.get_columns_result()[1].sequence is None
+
+
+def test_get_result_emits_null_sequence_key_when_unbacked() -> None:
+    # The key is always present, so the frontend never has to distinguish
+    # "absent" from "no sequence".
+    op = _query()
+    op._raw = _RAW
+
+    assert op.get_result()[1]["sequence"] is None
 
 
 def test_columns_before_apply_raises() -> None:
@@ -81,6 +110,8 @@ async def test_apply_falls_back_to_catalog_for_matview() -> None:
         "is_primary_key": False,
         "is_generated": False,
         "has_default": False,
+        "sequence_schema": None,
+        "sequence_name": None,
     }
     conn = _FakeConn(responses=[[], [matview_row]])
     op = ListColumnsQuery(conn, TABLE)  # type: ignore[arg-type]
@@ -89,7 +120,13 @@ async def test_apply_falls_back_to_catalog_for_matview() -> None:
 
     assert len(conn.queries) == 2
     assert "pg_attribute" in conn.queries[1]
-    assert op.get_columns_result()[0].name == "total"
+
+    meta = op.get_columns_result()[0]
+
+    assert meta.name == "total"
+    # A matview column never has a sequence — the fallback query selects the
+    # sequence columns as constant NULLs.
+    assert meta.sequence is None
 
 
 async def test_apply_skips_fallback_when_information_schema_has_rows() -> None:

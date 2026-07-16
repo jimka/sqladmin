@@ -7,6 +7,7 @@ import {
     dataTypeItems,
     detailToEditedValues,
     isSequenceFormDirty,
+    ownedByLabel,
     ownerItems,
     SEQUENCE_DATA_TYPE_CHOICES,
 } from "../../src/dock/sequenceFormState";
@@ -103,5 +104,27 @@ describe("ownerItems", () => {
 
     it("falls back to a single-item list when the roles fetch failed (empty roles)", () => {
         expect(ownerItems([], "alice")).toEqual(["alice"]);
+    });
+});
+
+describe("ownedByLabel", () => {
+    it("renders the owning column as schema.table.column", () => {
+        expect(ownedByLabel({ schema: "sales", table: "products", column: "id" })).toBe("sales.products.id");
+    });
+
+    it("is empty for a standalone sequence", () => {
+        expect(ownedByLabel(null)).toBe("");
+        expect(ownedByLabel(undefined)).toBe("");
+    });
+});
+
+describe("ownedBy is outside the edit flow", () => {
+    it("is not dirty when only ownedBy differs — ownership is not editable through this form", () => {
+        // ALTER SEQUENCE ... OWNER TO changes the owning ROLE, not the owning
+        // COLUMN, so the Save diff must never react to ownedBy.
+        const owned: SequenceDetail = { ...detail, ownedBy: { schema: "sales", table: "products", column: "id" } };
+        const baseline = detailToEditedValues(detail);
+
+        expect(isSequenceFormDirty(baseline, detailToEditedValues(owned))).toBe(false);
     });
 });
