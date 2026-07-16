@@ -24,7 +24,6 @@
 import { Component, Panel }        from "@jimka/typescript-ui/core";
 import { Fit }                     from "@jimka/typescript-ui/layout";
 import { Event }                   from "@jimka/typescript-ui/core";
-import { Text }                    from "@jimka/typescript-ui/component/input";
 import { Button }                  from "@jimka/typescript-ui/component/button";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
 import { List, GlyphListItemRenderer } from "@jimka/typescript-ui/component/list";
@@ -37,7 +36,7 @@ import { clock_rotate_left }       from "@jimka/typescript-ui/glyphs/solid/clock
 import { terminal }                from "@jimka/typescript-ui/glyphs/solid/terminal";
 import { refreshTool, bindRefreshShortcut } from "./refreshTool";
 import type { SqlAdminController } from "../SqlAdminController";
-import { PRIMARY_COLOR, DESTRUCTIVE_COLOR, MUTED_TEXT_COLOR } from "../theme";
+import { PRIMARY_COLOR, DESTRUCTIVE_COLOR } from "../theme";
 
 // terminal marks every list row as a query (matching the query dock tab).
 Glyph.register(folder_open, trash, floppy_disk, clock_rotate_left, terminal);
@@ -84,7 +83,7 @@ interface SectionConfig {
     /** The section header label and glyph. */
     title: string;
     glyph: string;
-    /** Text shown in place of the list when there are no rows. */
+    /** Placeholder text the list shows inside its scroll area when it has no rows. */
     empty: string;
     /** Snapshot the section's current rows from the store. */
     rows: () => QueryRow[];
@@ -173,7 +172,7 @@ export class QueriesView extends AccordionPanel {
 
 /** A section's live handles: its content host, its header tools, and a refresh. */
 interface Section {
-    /** The section body — swaps between the list and the empty hint. */
+    /** The section body — holds the section's List, which shows an empty-state placeholder when it has no rows. */
     host: Panel;
     /** The header tool buttons (stable across refreshes). */
     tools: Button[];
@@ -184,8 +183,9 @@ interface Section {
 }
 
 /**
- * Build one accordion section: a content host holding the current List (or an
- * empty hint), plus its header tools bound to the current selection.
+ * Build one accordion section: a content host holding a single long-lived List
+ * (which shows an empty-state placeholder when it has no rows), plus its header
+ * tools bound to the current selection.
  *
  * @param config - The section configuration.
  *
@@ -200,31 +200,19 @@ function buildSection(config: SectionConfig): Section {
 
     const menu = new Menu();
 
-    // The rows currently shown and the list rendering them — refreshed in place
-    // so the stable header tools always act on the live selection.
-    let rows: QueryRow[]  = [];
-    let list: List | null = null;
+    // The rows currently shown. The single long-lived List renders them and
+    // shows `config.empty` as its placeholder when there are none — so the stable
+    // header tools always act on the live selection without a list rebuild.
+    let rows: QueryRow[] = [];
+
+    const list = buildList(config.empty);
+    wireRow(list, () => rows, config, menu);
+    list.on("change", syncTools);
+    host.addComponent(list);
 
     const refresh = (): void => {
         rows = config.rows();
-        host.removeAllComponents();
-
-        if (rows.length === 0) {
-            list = null;
-            host.addComponent(hintText(config.empty));
-            host.doLayout();
-            syncTools();
-
-            return;
-        }
-
-        list = buildList(rows);
-        wireRow(list, rows, config, menu);
-
-        list.on("change", syncTools);
-
-        host.addComponent(list);
-        host.doLayout();
+        list.setItems(rows.map(row => ({ key: row.key, label: row.label, glyph: "terminal", tooltip: row.sql })));
         syncTools();
     };
 
@@ -236,17 +224,17 @@ function buildSection(config: SectionConfig): Section {
 
     /** Enable the armed tools only while a row is selected. */
     function syncTools(): void {
-        const on = list !== null && list.getSelectedIndex() >= 0;
+        const on = list.getSelectedIndex() >= 0;
         armed.forEach(button => button.setEnabled(on));
     }
 
     /**
      * Focus the list (the menu's "Open Saved…" / "Query History…" landing), and
      * seed a keyboard cursor on the first row when nothing is selected so Enter
-     * acts immediately. A no-op for an empty section (no list to focus).
+     * acts immediately. A no-op for an empty section (nothing to land on).
      */
     function focusList(): void {
-        if (!list) {
+        if (rows.length === 0) {
             return;
         }
 
@@ -275,14 +263,15 @@ function buildSection(config: SectionConfig): Section {
  * Ctrl+Enter executes it, and right-click opens the Execute/Open context menu.
  *
  * @param list - The list whose rows to wire.
- * @param rows - The rows backing the list, in index order.
+ * @param getRows - Reads the section's live rows (the single list outlives any
+ *   one `rows` snapshot, so handlers must index the current array).
  * @param config - The section config supplying open/execute.
  * @param menu - The reused context menu to show on right-click.
  */
-function wireRow(list: List, rows: QueryRow[], config: SectionConfig, menu: Menu): void {
+function wireRow(list: List, getRows: () => QueryRow[], config: SectionConfig, menu: Menu): void {
     list.on("dblclick", (index: number) => {
         if (index >= 0) {
-            config.execute(rows[index]);
+            config.execute(getRows()[index]);
         }
     });
 
@@ -301,7 +290,7 @@ function wireRow(list: List, rows: QueryRow[], config: SectionConfig, menu: Menu
         }
 
         e.preventDefault();
-        (e.ctrlKey || e.metaKey ? config.execute : config.open)(rows[index]);
+        (e.ctrlKey || e.metaKey ? config.execute : config.open)(getRows()[index]);
     });
 
     list.on("contextmenu", (index: number, e: MouseEvent) => {
@@ -312,41 +301,36 @@ function wireRow(list: List, rows: QueryRow[], config: SectionConfig, menu: Menu
         // another list row (a preventDefaulted pointerdown that suppresses the
         // compat mousedown) closes it — no app-side dismissal listener needed.
         menu.show(e.clientX, e.clientY, [
-            { text: "Execute", action: () => config.execute(rows[index]) },
-            { text: "Open",    action: () => config.open(rows[index]) },
+            { text: "Execute", action: () => config.execute(getRows()[index]) },
+            { text: "Open",    action: () => config.open(getRows()[index]) },
         ]);
     });
 }
 
 /** The selected row of a section's list, or `undefined` when nothing is selected. */
-function selectedRow(list: List | null, rows: QueryRow[]): QueryRow | undefined {
-    const index = list?.getSelectedIndex() ?? -1;
+function selectedRow(list: List, rows: QueryRow[]): QueryRow | undefined {
+    const index = list.getSelectedIndex();
 
     return index >= 0 ? rows[index] : undefined;
 }
 
 /**
- * Build a selectable List for the section's rows. Carries no intrinsic height —
- * the section's fillWeight grows it into the leftover space, and it scrolls its
- * own overflow.
+ * Build the section's selectable List. Carries no intrinsic height — the
+ * section's fillWeight grows it into the leftover space, and it scrolls its own
+ * overflow. Rows are set later by the section's `refresh`; until then the list
+ * shows `emptyText` as its placeholder.
  *
- * @param rows - The section's rows.
+ * @param emptyText - Placeholder shown inside the scroll area when the list is empty.
  *
  * @returns The List component.
  */
-function buildList(rows: QueryRow[]): List {
-    const list = new List({
+function buildList(emptyText: string): List {
+    return new List({
         preferredSize:   { width: 0, height: 0 },
+        emptyText,
         // Render each row as a query glyph beside its label.
         rendererFactory: () => new GlyphListItemRenderer(),
     });
-    // setItems is the typed entry point for pre-formed {key, label} rows (the
-    // constructor's `items` option is typed for the plain-string form). Every row
-    // is a query, so each carries the terminal glyph; the full SQL rides along as
-    // the row's hover tooltip (rows are truncated).
-    list.setItems(rows.map(row => ({ key: row.key, label: row.label, glyph: "terminal", tooltip: row.sql })));
-
-    return list;
 }
 
 /**
@@ -378,14 +362,6 @@ function actionButton(action: RowAction, selected: () => QueryRow | undefined): 
     });
 
     return button;
-}
-
-/** A muted empty-state hint row. */
-function hintText(text: string): Component {
-    const hint = new Text(text);
-    hint.setForegroundColor(MUTED_TEXT_COLOR);
-
-    return hint;
 }
 
 /** Collapse whitespace and truncate SQL to a one-line preview. */
