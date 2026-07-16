@@ -254,9 +254,8 @@ export class SqlAdminController {
             }
         });
 
-        // Show the connected database in the status bar's left zone. Falls back
-        // to the connection id only for the DOM-less path that omits `database`.
-        this.statusBar.setMessage(`Database: ${database ?? connectionId}`);
+        // Show the connected database in the status bar's left zone.
+        this.statusBar.setMessage(`Database: ${this._statusScope}`);
 
         // Pin the signed-in identity to the status bar's RIGHT zone. The left
         // zone shows transient per-operation messages (setMessage), so identity
@@ -285,6 +284,15 @@ export class SqlAdminController {
      */
     get database(): string | undefined {
         return this._database;
+    }
+
+    /**
+     * What the status bar names the current connection by: the database the
+     * session is connected to. Falls back to the connection id only for the
+     * DOM-less path that omits `database`.
+     */
+    private get _statusScope(): string {
+        return this._database ?? this._connectionId;
     }
 
     /**
@@ -355,7 +363,7 @@ export class SqlAdminController {
 
         // Open lazily: the tab appears at once, and the grid UI builds on first
         // activation behind a spinner, so a wide table never blocks the tab.
-        const notify = (message: string): void => { this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: ${message}`); };
+        const notify = (message: string): void => { this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: ${message}`); };
         this.dock.addLazyPanel({
             id,
             title  : ref.name ?? id,
@@ -463,7 +471,7 @@ export class SqlAdminController {
                 return;
             }
 
-            this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: definition saved`);
+            this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: definition saved`);
         };
 
         panel = new DefinitionPanel(definition, columns, onSave);
@@ -546,7 +554,7 @@ export class SqlAdminController {
                 previewOwner: spec => previewSequenceOwner(ref, spec),
                 execute:      sql => executeDdl(this._connectionId, sql),
                 reloadDetail: () => getSequenceDetail(ref),
-                onStatus:     m => this.statusBar.setMessage(`${this._connectionId} · ${m}`),
+                onStatus:     m => this.statusBar.setMessage(`${this._statusScope} · ${m}`),
                 onError:      m => this.notifyError(new Error(m), ref),
             }),
         });
@@ -949,7 +957,7 @@ export class SqlAdminController {
             name:      ref.name!,
             preview:   spec => previewRefreshMatview(ref, spec),
             execute:   sql => executeDdl(this._connectionId, sql),
-            onSuccess: () => this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: refreshed`),
+            onSuccess: () => this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: refreshed`),
             onError:   msg => this.notifyError(new Error(msg), ref),
         });
     }
@@ -1134,7 +1142,7 @@ export class SqlAdminController {
                 return;
             }
 
-            this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: definition saved`);
+            this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: definition saved`);
         };
 
         panel = new FunctionDefinitionPanel(definition.definition, onSave);
@@ -1275,7 +1283,7 @@ export class SqlAdminController {
                 form,
                 generateSql: async () => (await previewAlterTypeAddValue(ref, form.getSpec())).sql,
                 execute:     sql => executeDdl(this._connectionId, sql),
-                onSuccess:   () => this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: altered`),
+                onSuccess:   () => this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: altered`),
                 onError,
             });
 
@@ -1418,7 +1426,7 @@ export class SqlAdminController {
                 kind        : "table",
             })),
         });
-        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}: diagram (${data.nodes.length} tables)`);
+        this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: diagram (${data.nodes.length} tables)`);
     }
 
     /**
@@ -1502,7 +1510,7 @@ export class SqlAdminController {
         });
 
         const tableCount = schemas.reduce((total, s) => total + s.tables.length, 0);
-        this.statusBar.setMessage(`${this._connectionId} · ${ref.database}: diagram (${tableCount} tables)`);
+        this.statusBar.setMessage(`${this._statusScope} · ${ref.database}: diagram (${tableCount} tables)`);
     }
 
     /**
@@ -1576,7 +1584,7 @@ export class SqlAdminController {
                 kind        : "table",
             })),
         });
-        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}.${ref.name}: relations`);
+        this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: relations`);
     }
 
     /**
@@ -1658,7 +1666,7 @@ export class SqlAdminController {
                 kind        : nd.kind,
             })),
         });
-        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}: dependencies (${data.nodes.length} relations)`);
+        this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: dependencies (${data.nodes.length} relations)`);
     }
 
     /**
@@ -1705,7 +1713,7 @@ export class SqlAdminController {
                 kind        : nd.kind,
             }), root.id),
         });
-        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}.${ref.name}: dependencies`);
+        this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: dependencies`);
     }
 
     /**
@@ -1742,7 +1750,7 @@ export class SqlAdminController {
                 kind        : nd.kind,
             })),
         });
-        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}: inheritance (${data.nodes.length} relations)`);
+        this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: inheritance (${data.nodes.length} relations)`);
     }
 
     /**
@@ -1790,7 +1798,7 @@ export class SqlAdminController {
                 kind        : nd.kind,
             }), root.id),
         });
-        this.statusBar.setMessage(`${this._connectionId} · ${ref.schema}.${ref.name}: inheritance`);
+        this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: inheritance`);
     }
 
     /**
@@ -1848,7 +1856,7 @@ export class SqlAdminController {
         const label = title ?? `Query ${n}`;
 
         const notify = (message: string): void => {
-            this.statusBar.setMessage(`${this._connectionId} · ${label}: ${message}`);
+            this.statusBar.setMessage(`${this._statusScope} · ${label}: ${message}`);
         };
 
         const panel = new QueryPanel({
@@ -1893,7 +1901,7 @@ export class SqlAdminController {
         if (id) {
             const active = this._activeQueryResult.get(id);
             const notify = (message: string): void => {
-                this.statusBar.setMessage(`${this._connectionId} · export: ${message}`);
+                this.statusBar.setMessage(`${this._statusScope} · export: ${message}`);
             };
 
             if (active?.kind === "rows") {
@@ -2075,7 +2083,7 @@ export class SqlAdminController {
         }
 
         this.saveQuery(name, sql);
-        this.statusBar.setMessage(`${this._connectionId} · Saved query as “${name}”`);
+        this.statusBar.setMessage(`${this._statusScope} · Saved query as “${name}”`);
     }
 
     /**
@@ -2367,7 +2375,7 @@ export class SqlAdminController {
             glyph  : "diagram-project",
             content: new RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName)),
         });
-        this.statusBar.setMessage(`${this._connectionId} · ${name}: membership (${full.nodes.length} roles)`);
+        this.statusBar.setMessage(`${this._statusScope} · ${name}: membership (${full.nodes.length} roles)`);
     }
 
     /**
@@ -2398,7 +2406,7 @@ export class SqlAdminController {
             glyph  : "diagram-project",
             content: new RoleGrantsDiagramPanel(data, (schema, table) => this.openGrantedTable(schema, table)),
         });
-        this.statusBar.setMessage(`${this._connectionId} · ${name}: grants graph (${data.nodes.length - 1} tables)`);
+        this.statusBar.setMessage(`${this._statusScope} · ${name}: grants graph (${data.nodes.length - 1} tables)`);
     }
 
     /**
@@ -2422,7 +2430,7 @@ export class SqlAdminController {
             })) ?? undefined;
 
             if (!node) {
-                this.statusBar.setMessage(`${this._connectionId} · ${schema}.${table}: not found in navigator`);
+                this.statusBar.setMessage(`${this._statusScope} · ${schema}.${table}: not found in navigator`);
 
                 return;
             }
@@ -2455,7 +2463,7 @@ export class SqlAdminController {
         }
 
         void entry.store.load();
-        this.statusBar.setMessage(`${this._connectionId} · ${entry.ref.name ?? ""}: refreshed`);
+        this.statusBar.setMessage(`${this._statusScope} · ${entry.ref.name ?? ""}: refreshed`);
     }
 
     /** Report a sync outcome: each failure as an error, or a success message. */
@@ -2466,7 +2474,7 @@ export class SqlAdminController {
             return;
         }
 
-        this.statusBar.setMessage(`${this._connectionId} · ${ref.name}: changes saved`);
+        this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: changes saved`);
     }
 
     /**
@@ -2611,9 +2619,9 @@ export class SqlAdminController {
     private updateStatusFor(panel: OpenPanel): void {
         if (panel.store) {
             const count = panel.store.getTotalCount() ?? panel.store.getRecords().length;
-            this.statusBar.setMessage(`${this._connectionId} · ${panel.ref.name}: ${count} rows`);
+            this.statusBar.setMessage(`${this._statusScope} · ${panel.ref.name}: ${count} rows`);
         } else {
-            this.statusBar.setMessage(`${this._connectionId} · ${panel.ref.name}: ${panel.detail ?? "structure"}`);
+            this.statusBar.setMessage(`${this._statusScope} · ${panel.ref.name}: ${panel.detail ?? "structure"}`);
         }
     }
 
