@@ -107,6 +107,29 @@ function buildIdentityWidget(username: string, database?: string): Component {
     return widget;
 }
 
+// How much of a user-supplied name a status message may spend. A saved query's
+// name is free text with no length limit of its own, and the status bar is one
+// line — past this the name crowds out the message it is there to label.
+const MAX_STATUS_NAME_CHARS = 40;
+
+/**
+ * Shorten a free-text name to fit a status message, eliding the tail so the
+ * ellipsis reads as "there is more name here" rather than a truncation the user
+ * has to guess at. The full name still shows wherever it has room to breathe —
+ * the tab title, the Queries view.
+ *
+ * @param name - The name as the user typed it.
+ * @returns The name, tail-elided when it runs past MAX_STATUS_NAME_CHARS.
+ */
+function elideName(name: string): string {
+    if (name.length <= MAX_STATUS_NAME_CHARS) {
+        return name;
+    }
+
+    // Trailing space before the ellipsis reads as a typo, so shed it.
+    return `${name.slice(0, MAX_STATUS_NAME_CHARS - 1).trimEnd()}…`;
+}
+
 /** A focusable section of the Queries view — the Saved or the Recent list. */
 export type QueriesSection = "saved" | "recent";
 
@@ -1929,8 +1952,12 @@ export class SqlAdminController {
         const id    = `query-${n}`;
         const label = title ?? `Query ${n}`;
 
+        // The tab keeps the full name; only the status line, which has to fit a
+        // scope and a message beside it, spends a bounded amount on the label.
+        const statusLabel = elideName(label);
+
         const notify = (message: string): void => {
-            this.statusBar.setMessage(`${this._statusScope} · ${label}: ${message}`);
+            this.statusBar.setMessage(`${this._statusScope} · ${statusLabel}: ${message}`);
         };
 
         const panel = new QueryPanel({
@@ -2157,7 +2184,7 @@ export class SqlAdminController {
         }
 
         this.saveQuery(name, sql);
-        this.statusBar.setMessage(`${this._statusScope} · Saved query as “${name}”`);
+        this.statusBar.setMessage(`${this._statusScope} · Saved query as “${elideName(name)}”`);
     }
 
     /**
