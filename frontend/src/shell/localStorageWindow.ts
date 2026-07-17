@@ -9,10 +9,15 @@
 // one-line Text would clip them.
 //
 // Self-contained on window.localStorage: the app's persisted state is exactly
-// the `sqladmin.*` keys (query history + saved queries, see data/queryStore.ts),
-// which are read fresh on each access, so removing them here needs no cache
-// invalidation. The Queries rail, if open, only reflects a clear on its next
-// refresh.
+// the `sqladmin.*` keys — query history + saved queries (data/queryStore.ts),
+// notes (data/notesStore.ts), and Split/Accordion layout geometry
+// (data/layoutStore.ts). History, saved queries, and notes are read fresh on
+// each access, so removing them here needs no cache invalidation; the Queries
+// rail, if open, only reflects a clear on its next refresh. Layout is
+// different: a live Split/Accordion keeps its on-screen geometry after a
+// clear (nothing here reaches into the mounted components), so the reset
+// only takes effect on the next reload — and a subsequent drag re-creates the
+// key it just cleared.
 
 import { Window }               from "@jimka/typescript-ui/overlay";
 import { Panel }                from "@jimka/typescript-ui/core";
@@ -23,9 +28,10 @@ import { Button }               from "@jimka/typescript-ui/component/button";
 import { Spacer }               from "@jimka/typescript-ui/component/container";
 import { Insets, Placement }    from "@jimka/typescript-ui/primitive";
 
-// The prefix the app namespaces its persisted keys under (data/queryStore.ts).
-// "Clear SQL Admin data" removes exactly these, leaving any unrelated origin
-// keys the inspector also lists untouched.
+// The prefix the app namespaces its persisted keys under (data/queryStore.ts,
+// data/notesStore.ts, data/layoutStore.ts). "Clear SQL Admin data" removes
+// exactly these, leaving any unrelated origin keys the inspector also lists
+// untouched.
 const APP_KEY_PREFIX = "sqladmin.";
 
 // Initial window geometry; the window is freely movable and resizable after.
