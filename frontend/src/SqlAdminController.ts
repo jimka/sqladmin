@@ -638,7 +638,7 @@ export class SqlAdminController {
                     schema      : seqSchema,
                     name        : seqName,
                     kind        : "sequence",
-                }), this.structureActionsFor(ref)),
+                }), this.layout.bindAccordion("structure"), this.structureActionsFor(ref)),
         });
         this.syncToPanel(id);
     }

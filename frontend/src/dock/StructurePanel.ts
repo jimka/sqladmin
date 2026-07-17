@@ -66,6 +66,7 @@ import type { OpenSequenceHandler } from "./columnsGrid";
 import { glyphButton, glyphMenuButton } from "./glyphButton";
 import { buildAlterColumnItems, buildAddConstraintItems } from "./menuItems";
 import { CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR, PRIMARY_COLOR } from "../theme";
+import type { AccordionLayoutBinding } from "../data/layoutStore";
 
 // Section-header glyphs (Columns / Indexes / Constraints / Foreign Keys) and
 // the header tools' add/alter/drop glyphs (plus / pencil / trash).
@@ -101,6 +102,9 @@ export class StructurePanel extends Panel {
      * @param onOpenSequence - Invoked with a column's backing sequence's schema
      *   and name when its Sequence link is clicked, so the controller can open
      *   that sequence.
+     * @param layout - The tab's saved section open flags plus the toggle save
+     *   hook (`controller.layout.bindAccordion("structure")`). This accordion
+     *   is not resizable, so only open state persists.
      * @param actions - The edit-action callbacks for each section's header
      *   tools (table-ddl phase). Omitted keeps every section header tool-less.
      */
@@ -109,6 +113,7 @@ export class StructurePanel extends Panel {
         structure: TableStructure,
         onOpenReferenced: (refSchema: string, refTable: string) => void,
         onOpenSequence: OpenSequenceHandler,
+        layout: AccordionLayoutBinding,
         actions?: StructureActions,
     ) {
         // The scroll host: an autoScroll VBox holding the accordion at weight 1,
@@ -134,14 +139,20 @@ export class StructurePanel extends Panel {
         }
 
         // Only Columns opens by default — the facet a reader reaches for first;
-        // the other three start collapsed to their header row and expand on demand.
+        // the other three start collapsed to their header row and expand on
+        // demand. The defaults live in ACCORDION_DEFAULT_OPEN (data/layoutStore.ts);
+        // `open` reads them (or a saved override) pre-super, since AccordionPanel
+        // has no post-construction initiallyOpen setter.
+        const open = layout.loadOpen();
+
         const accordion: AccordionPanel = new AccordionPanel({
             sections: [
-                { label: "Columns",      component: columnsGrid,     glyph: "table-columns", initiallyOpen: true,  tools: actions && buildColumnsTools(columns, columnsGrid, actions) },
-                { label: "Indexes",      component: indexesGrid,     glyph: "list",          initiallyOpen: false, tools: actions && buildIndexesTools(indexesGrid, actions) },
-                { label: "Constraints",  component: constraintsGrid, glyph: "shield-halved", initiallyOpen: false, tools: actions && buildConstraintsTools(constraintsGrid, actions) },
-                { label: "Foreign Keys", component: foreignKeysGrid, glyph: "link",          initiallyOpen: false, tools: actions && buildForeignKeysTools(foreignKeysGrid, actions) },
+                { label: "Columns",      component: columnsGrid,     glyph: "table-columns", initiallyOpen: open[0], tools: actions && buildColumnsTools(columns, columnsGrid, actions) },
+                { label: "Indexes",      component: indexesGrid,     glyph: "list",          initiallyOpen: open[1], tools: actions && buildIndexesTools(indexesGrid, actions) },
+                { label: "Constraints",  component: constraintsGrid, glyph: "shield-halved", initiallyOpen: open[2], tools: actions && buildConstraintsTools(constraintsGrid, actions) },
+                { label: "Foreign Keys", component: foreignKeysGrid, glyph: "link",          initiallyOpen: open[3], tools: actions && buildForeignKeysTools(foreignKeysGrid, actions) },
             ],
+            onSectionToggle: layout.onToggle,
         });
 
         // fillHeight: the last open section grows to fill leftover height when
