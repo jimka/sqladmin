@@ -185,7 +185,28 @@ function installAccelerators(controller: SqlAdminController, sidebar: ActivityBa
  * width through the Split's live min/max instead of a (now-ignored) preferred.
  */
 function buildWorkArea(sidebar: ActivityBar, controller: SqlAdminController): Component {
-    const split  = new Split({ orientation: "horizontal" });
+    const layout = controller.layout.bindSplit("shell");
+    const split  = new Split({
+        orientation: "horizontal",
+        paneSizes  : layout.loadSizes() ?? undefined,
+        // No panecollapse/collapsedPanes: the sidebar is `collapsible: false` and
+        // is the only pane the single gutter serves, so `setPaneCollapsed` can
+        // never fire here. The rail collapse is ActivityBar state (a min/max pin),
+        // not Split collapse.
+        listeners  : {
+            // Skip the save while the rail is collapsed: the pin holds the pane at
+            // SIDEBAR_RAIL_WIDTH, so a drag would persist the rail width and the
+            // next session — which restores the sidebar expanded, the rail's own
+            // collapsed state not being persisted — would open it rail-narrow.
+            // Same guard, same constant, same reason as collapse()'s lastWidth
+            // capture below.
+            paneresize: sizes => {
+                if (sizes[0].value > SIDEBAR_RAIL_WIDTH) {
+                    layout.onSizes(sizes);
+                }
+            },
+        },
+    });
     const body   = Container({ layoutManager: split });
     const pane   = sidebar;
     const center = buildCenterDeck(controller);
@@ -226,20 +247,12 @@ function buildWorkArea(sidebar: ActivityBar, controller: SqlAdminController): Co
             pane.setMaxSize(UNBOUNDED, UNBOUNDED);
             pane.setMinSize(SIDEBAR_RAIL_WIDTH, 0);
 
-            // Reopen to the remembered width and hand the remainder back to the
-            // Dock. Both panes are flexible once expanded, so the Split reconciles
-            // any Σ ≠ available by scaling the flexible panes *proportionally* —
-            // and collapse inflated the Dock to fill the freed space. Setting only
-            // the sidebar would leave Σ overshooting, and the proportional refill
-            // would shrink the sidebar below lastWidth (compounding on every
-            // collapse/expand cycle). Set the Dock explicitly to
-            // available − lastWidth so the sum stays exact and the sidebar lands
-            // precisely at lastWidth. The two stored sizes always sum to the
-            // available extent (the refill's Σ invariant), collapsed or not, so
-            // their current total is a reliable stand-in for it.
-            const total = (split.getPaneSize(pane) ?? lastWidth) + (split.getPaneSize(center) ?? 0);
+            // Reopen to the remembered width. The sidebar is weight-0, so
+            // `split-weight-pin-refill`'s refill pins it here and the flexible Dock
+            // alone reclaims the freed width — no need to set `center` too (which the
+            // pre-fix proportional refill required to stop the sidebar decaying below
+            // lastWidth). setPaneSize does not reschedule, so lay out explicitly.
             split.setPaneSize(pane, lastWidth);
-            split.setPaneSize(center, Math.max(0, total - lastWidth));
             body.doLayout();
         },
     };
