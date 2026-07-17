@@ -23,6 +23,7 @@ export class RolesExplorerView extends TreeExplorerView {
             treeGlyph:      "users",
             inspector:      controller.rolesProperties.component,
             inspectorLabel: "Details",
+            layout:         controller.layout.bindAccordion("roles"),
         });
     }
 }
