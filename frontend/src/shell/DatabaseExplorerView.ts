@@ -30,6 +30,7 @@ export class DatabaseExplorerView extends TreeExplorerView {
             }))],
             inspector:      controller.properties.component,
             inspectorLabel: "Properties",
+            layout:         controller.layout.bindAccordion("database"),
         });
     }
 }

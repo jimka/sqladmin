@@ -15,6 +15,7 @@ import { AccordionPanel }          from "@jimka/typescript-ui/component/containe
 import type { Button }             from "@jimka/typescript-ui/component/button";
 import { refreshTool, bindRefreshShortcut } from "./refreshTool";
 import type { ExplorerTree }       from "../navigator/NavigatorTree";
+import type { AccordionLayoutBinding } from "../data/layoutStore";
 
 /** One explorer view: a tree section over a read-only inspector section. */
 export interface TreeExplorerConfig {
@@ -33,6 +34,9 @@ export interface TreeExplorerConfig {
     inspectorLabel: string;
     /** The inspector section's glyph (defaults to `circle-info`). */
     inspectorGlyph?: string;
+    /** The rail's saved section open flags + sizes plus their save hooks
+     *  (`controller.layout.bindAccordion("database" | "roles")`). */
+    layout: AccordionLayoutBinding;
 }
 
 // The tree section's floor and its preferred height. Both are set to the same
@@ -42,7 +46,7 @@ export interface TreeExplorerConfig {
 // the tree, and a first layout with no leftover height would store a zero size
 // that proportional rescaling can never grow back. 96px is four rows at the
 // library Tree's fixed 24px ROW_HEIGHT. Set as preferred too so the section
-// never reports min > preferred; the fillWeight below still grows the tree
+// never reports min > preferred; the weight below still grows the tree
 // into all the leftover height, so the rendered result is unchanged.
 const TREE_MIN_HEIGHT = 96;
 
@@ -62,28 +66,46 @@ export class TreeExplorerView extends AccordionPanel {
         const tree    = config.explorer;
         const refresh = config.explorer.refresh;
 
-        // The tree's section takes all the leftover height via its fillWeight below;
+        // The tree's section takes all the leftover height via its weight below;
         // TREE_MIN_HEIGHT is its floor, not its target. Pre-super: `this` is
         // unavailable until super() returns.
         tree.setPreferredSize(0, TREE_MIN_HEIGHT);
         tree.setMinSize(0, TREE_MIN_HEIGHT);
 
+        // Also pre-super — AccordionPanel has no post-construction initiallyOpen
+        // setter (see COMPONENT_CONVENTIONS.md's super-cascade trap).
+        const open = config.layout.loadOpen();
+
         super({
             id: config.id,
             // Draggable gutter between the tree and the inspector, so the user
-            // apportions the height. The tree's fillWeight seeds the split at exactly
+            // apportions the height. The tree's weight seeds the split at exactly
             // today's geometry (tree fills, inspector at its 220px preferred); a drag
             // is authoritative from then on and survives a section toggle and a rail
-            // switch.
+            // switch. Keep the tree's weight and the inspector's absence of one exactly
+            // as-is — that asymmetry is what makes the inspector the persisted px entry
+            // (see data/layoutStore.ts). Do not add setFillHeight: it would flip the
+            // inspector to a ratio entry and silently discard every saved array.
             resizable: true,
             sections: [
-                { label: config.treeLabel, component: tree, initiallyOpen: true, glyph: config.treeGlyph, tools: [...(config.treeTools ?? []), refreshTool(refresh)], fillWeight: 1 },
-                { label: config.inspectorLabel, component: config.inspector, initiallyOpen: true, glyph: config.inspectorGlyph ?? "circle-info" },
+                { label: config.treeLabel, component: tree, initiallyOpen: open[0], glyph: config.treeGlyph, tools: [...(config.treeTools ?? []), refreshTool(refresh)], weight: 1 },
+                { label: config.inspectorLabel, component: config.inspector, initiallyOpen: open[1], glyph: config.inspectorGlyph ?? "circle-info" },
             ],
+            onSectionToggle: config.layout.onToggle,
         });
 
         this.getAccordion().setCompact(true);
         this.getAccordion().setToolsVisibility("always");
+
+        // Restore the saved gutter position, if any (a stale array is discarded by
+        // the library; the accordion falls to normal first-layout sizing instead).
+        const savedSizes = config.layout.loadSizes();
+
+        if (savedSizes !== null) {
+            this.getAccordion().applySectionSizes(savedSizes);
+        }
+
+        this.getAccordion().on("sectionresize", config.layout.onSizes);
 
         // Alt+R refreshes the tree while this rail has focus (see refreshTool).
         bindRefreshShortcut(this, refresh);

@@ -73,6 +73,7 @@ import { ExplainDiagramPanel }           from "./ExplainDiagramPanel";
 import { buildQueryExportItems }         from "./menuItems";
 import type { ActiveExport, RunExplain } from "../data/explain";
 import type { HistoryEntry }             from "../data/queryStore";
+import type { SplitLayoutBinding, AccordionLayoutBinding } from "../data/layoutStore";
 import {
     isExplainChord, isExplainAnalyzeChord,
     RUN_SHORTCUT, SAVE_SHORTCUT, CLEAR_SHORTCUT, EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT,
@@ -132,6 +133,10 @@ export interface QueryPanelOptions {
      * reference back to it.
      */
     onResult?: (active: ActiveExport | null) => void;
+    /** The saved editor/result Split geometry plus its save hooks (`controller.layout.bindSplit("query")`). */
+    splitLayout: SplitLayoutBinding;
+    /** The saved Explain-diagram info-column Accordion open state plus its save hooks (`controller.layout.bindAccordion("explainDiagram")`). */
+    explainDiagramLayout: AccordionLayoutBinding;
 }
 
 /**
@@ -145,7 +150,7 @@ export class QueryPanel {
     readonly dispose: () => void;
 
     constructor(options: QueryPanelOptions) {
-        const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult } = options;
+        const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult, splitLayout, explainDiagramLayout } = options;
 
         const editor = new CodeEditor(initialSql, { language: "sql" });
 
@@ -185,7 +190,15 @@ export class QueryPanel {
 
         // The body is a vertical Split: the editor alone (filling) until a query
         // runs, then editor over the result pane with a draggable gutter between.
-        const split = new Split({ orientation: "vertical" });
+        // No paneSizes/collapsedPanes here (deliberately absent): the split has one
+        // child (the editor) at first layout, and the library's once-only drain
+        // fires then — a 2-entry saved array fails its length check and is never
+        // retried once the result pane is later added. restoreOrSeedPanes (below)
+        // applies the saved geometry imperatively once both panes exist instead.
+        const split = new Split({
+            orientation: "vertical",
+            listeners  : { paneresize: splitLayout.onSizes, panecollapse: splitLayout.onCollapse },
+        });
         const body  = new Component();
         body.setLayoutManager(split);
         // weight 0 pins the editor's height on a vertical viewport/panel resize — the
@@ -243,12 +256,12 @@ export class QueryPanel {
             exportButton.setEnabled(active !== null);
         }
 
-        /** Add the pane to the Split and seed the editor height once per hidden→shown transition. */
+        /** Add the pane to the Split and restore/seed the editor height once per hidden→shown transition. */
         function ensureResultPaneShown(): void {
             if (!resultShown) {
                 body.addComponent(resultHost);
                 resultShown = true;
-                seedEditorHeight();
+                restoreOrSeedPanes();
             }
 
             body.doLayout();
@@ -331,6 +344,33 @@ export class QueryPanel {
             };
 
             apply();
+        }
+
+        /**
+         * Restore the saved editor/result split, else fall back to the EDITOR_HEIGHT
+         * seed. Called once per hidden->shown transition, when both panes exist —
+         * the Split's own `paneSizes`/`collapsedPanes` options cannot serve here
+         * (see the constructor's comment). `applyPaneSizes` needs no laid-out
+         * container (it falls back to a unit base and the first real layout hands
+         * the whole delta to the flexible result host), so this needs none of
+         * `seedEditorHeight`'s onFirstLayout retry. It is also strict: a stale array
+         * is discarded by the library and the panes fall to normal first-layout
+         * sizing rather than the seed — narrow, and it self-heals on the next drag.
+         */
+        function restoreOrSeedPanes(): void {
+            const sizes = splitLayout.loadSizes();
+
+            if (sizes === null) {
+                seedEditorHeight();
+
+                return;
+            }
+
+            split.applyPaneSizes(sizes);
+
+            for (const index of splitLayout.loadCollapsed()) {
+                split.setPaneCollapsedImmediate(index, true);
+            }
         }
 
         /** Drop the result pane so the editor fills the panel again. Wired to the Tab "empty" event. */
@@ -514,7 +554,7 @@ export class QueryPanel {
          * @param summary - The plan's top-level planning/execution times.
          */
         function showDiagramTab(roots: ExplainPlanNode[], summary: ExplainSummary): void {
-            const nextDiagram = new ExplainDiagramPanel(roots, summary);
+            const nextDiagram = new ExplainDiagramPanel(roots, summary, explainDiagramLayout);
 
             ensureResultPaneShown();
 

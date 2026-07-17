@@ -46,7 +46,7 @@ Glyph.register(folder_open, trash, floppy_disk, clock_rotate_left, terminal);
 // List reports a min of only its 8px insets, which would let a drag reduce a
 // section to a sliver. 96px mirrors treeExplorerView's TREE_MIN_HEIGHT. Set as
 // preferred too so a section never reports min > preferred; the equal
-// fillWeights still split all the leftover height, so the rendered result is
+// weights still split all the leftover height, so the rendered result is
 // unchanged.
 const SECTION_MIN_HEIGHT = 96;
 
@@ -104,6 +104,9 @@ export class QueriesView extends AccordionPanel {
     constructor(controller: SqlAdminController, id: string) {
         // `this` is unavailable until super() returns, so both sections are
         // built as locals first.
+        const layout = controller.layout.bindAccordion("queries");
+        const open   = layout.loadOpen();
+
         const saved = buildSection({
             title    : "Saved",
             glyph    : "floppy-disk",
@@ -129,13 +132,14 @@ export class QueriesView extends AccordionPanel {
         super({
             id,
             // Draggable gutter between Saved and Recent, so the user apportions the
-            // height; the equal fillWeights below seed the split evenly, as before.
+            // height; the equal weights below seed the split evenly, as before.
             resizable: true,
             sections: [
                 // Equal fill weights split the leftover height between the two lists.
-                { label: "Saved",  component: saved.host,  initiallyOpen: true, glyph: "floppy-disk",       tools: saved.tools,  fillWeight: 1 },
-                { label: "Recent", component: recent.host, initiallyOpen: true, glyph: "clock-rotate-left", tools: recent.tools, fillWeight: 1 },
+                { label: "Saved",  component: saved.host,  initiallyOpen: open[0], glyph: "floppy-disk",       tools: saved.tools,  weight: 1 },
+                { label: "Recent", component: recent.host, initiallyOpen: open[1], glyph: "clock-rotate-left", tools: recent.tools, weight: 1 },
             ],
+            onSectionToggle: layout.onToggle,
         });
 
         const accordion = this.getAccordion();
@@ -143,6 +147,17 @@ export class QueriesView extends AccordionPanel {
         // Keep the header tools visible (not hover-only) so the affordances are
         // always discoverable, matching the Database view's tools.
         accordion.setToolsVisibility("always");
+
+        // Restore the saved Saved/Recent proportion, if any (both sections are
+        // weighted, so both persist as ratios; a stale array is discarded by the
+        // library, falling back to the equal-weight seed above).
+        const savedSizes = layout.loadSizes();
+
+        if (savedSizes !== null) {
+            accordion.applySectionSizes(savedSizes);
+        }
+
+        accordion.on("sectionresize", layout.onSizes);
 
         // The menu's "Open Saved…" / "Query History…" land the keyboard on the
         // right list: expand its section and focus it. Saved is section 0,
@@ -312,7 +327,7 @@ function selectedRow(list: List, rows: QueryRow[]): QueryRow | undefined {
 
 /**
  * Build the section's selectable List. Carries no intrinsic height — the
- * section's fillWeight grows it into the leftover space, and it scrolls its own
+ * section's weight grows it into the leftover space, and it scrolls its own
  * overflow. Rows are set later by the section's `refresh`; until then the list
  * shows `emptyText` as its placeholder.
  *

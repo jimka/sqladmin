@@ -78,34 +78,40 @@ be told to keep names.
 
 ---
 
-## ✂️ Usage note: `Split.setPaneSize` is a raw, relative primitive — apportion *all* panes
+## ✅ Fixed in library: `Split.setPaneSize` looked like a raw primitive, but a weight-0 pane's decay was a refill bug
 
 `setPaneSize(pane, px)` just seeds/overrides that one pane's stored size; it does
-**not** rebalance the siblings. To force a pane to a specific size you must set
-the other panes too, so the stored sizes sum to the available extent — the same
-thing [`dock/QueryPanel.ts`](frontend/src/dock/QueryPanel.ts) already does when it
-splits the editor over the result grid (it sets both panes). This is by design,
-not a defect: `weight` is consulted only by the *container-resize* delta path
-(when `available` changes); a same-extent refill scales the flexible panes
-**proportionally**.
+**not** rebalance the siblings. To force a *flexible* pane to a specific size you
+must still set the other flexible panes too, so the stored sizes sum to the
+available extent — the same thing [`dock/QueryPanel.ts`](frontend/src/dock/QueryPanel.ts)
+already does when it splits the editor over the result grid (it sets both panes).
+This part is by design, not a defect: `weight` is consulted only by the
+*container-resize* delta path (when `available` changes); a same-extent refill
+scales the flexible panes **proportionally**.
 
-The shell sidebar hit this by deviating from that pattern. Collapse pins the
-sidebar `min == max == RAIL_WIDTH`, and the pin-aware refill inflates the weighted
-dock to fill the freed space. Expand then called `setPaneSize(sidebar, lastWidth)`
-**alone** — leaving the dock at its inflated width, so Σ overshot `available` and
-the proportional refill scaled the sidebar back *below* `lastWidth`, compounding
-every cycle (280 → 226 → 190 → 165 → …; confirmed offline in the library's `Split`
-TestDOM harness). Fixed in the app by setting the dock too on expand —
-`setPaneSize(dock, (paneSize(sidebar) + paneSize(dock)) − lastWidth)` — since the
-two stored sizes always sum to the available extent (the refill's Σ invariant), so
-their current total is a reliable stand-in for it (`shell/SqlAdminShell.ts`,
-`buildWorkArea`).
+The shell sidebar's collapse/expand cycle looked like it hit the same rule, but
+didn't: the sidebar is `{ weight: 0 }` — a resize-pinned pane, not a flexible
+one — and the pre-fix refill classified it flexible anyway (it tested only
+`min == max`, the *hard* collapse pin), so a same-extent refill rescaled it like
+any other flexible pane. Collapse pins the sidebar `min == max == RAIL_WIDTH`,
+inflating the weighted dock to fill the freed space; expand then called
+`setPaneSize(sidebar, lastWidth)` alone, leaving the dock at its inflated width,
+so Σ overshot `available` and the proportional refill scaled the sidebar back
+*below* `lastWidth`, compounding every cycle (280 → 226 → 190 → 165 → …;
+confirmed offline in the library's `Split` TestDOM harness). That decay **was**
+the library gap — a weight-0 pane should never be rescaled by a same-extent
+refill, resize-pinned or not — and it is fixed upstream by
+`split-weight-pin-refill`'s three-tier cascade (hard-pinned / resize-pinned /
+flexible), which now holds a weight-0 pane at its stored px regardless of
+sibling inflation.
 
-**Not a library gap.** An auto-rebalancing `setPaneSize` would be a breaking
-change for the apportion-all-panes callers above, so it isn't wanted. The only
-plausible library candidate — and only if the VSCode-rail pattern recurs in
-another consumer — is a **collapsed-size option on the existing native collapse**
-(`setPaneCollapsed` collapses a pane to 0 + a `COLLAPSE_STRIP_SIZE` strip; the
-shell instead wants collapse-to-rail-width so the icon rail stays visible, which
-is why it pins `min == max` rather than using native collapse). Deferred until a
-second consumer needs it.
+The app's apportion-both-panes `expand()` workaround —
+`setPaneSize(dock, (paneSize(sidebar) + paneSize(dock)) − lastWidth)` — **has
+been removed** as part of `plans/implemented/layout-persistence.md` (step 6b). A
+lone `split.setPaneSize(sidebar, lastWidth)` now holds: the fixed refill pins the
+weight-0 sidebar at that px and the flexible dock alone reclaims the freed width
+(`shell/SqlAdminShell.ts`, `buildWorkArea`).
+
+The surviving "apportion all panes" guidance above is unchanged for the general
+case — a caller forcing a *flexible* pane to a size still has to apportion its
+siblings; only the weight-0-pin case is now handled by the library's refill.

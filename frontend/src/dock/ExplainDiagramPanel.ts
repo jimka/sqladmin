@@ -46,6 +46,7 @@ import { buildPlanStepsRows }       from "../data/buildPlanSteps";
 import { formatMetric }             from "../data/explainFormat";
 import { ExplainNode }              from "./ExplainNode";
 import type { ExplainPlanNode, ExplainSummary } from "../data/parseExplainPlan";
+import type { AccordionLayoutBinding } from "../data/layoutStore";
 
 // Fixed width of the WEST info column: fits the Action + Cost columns of the
 // steps table and a node-type tree heading without stealing canvas width from
@@ -115,9 +116,13 @@ export class ExplainDiagramPanel extends Panel {
     /**
      * @param roots - The parsed plan roots (from `parseExplainPlan`).
      * @param summary - The top-level planning/execution times (from
-     *   `parseExplainSummary`); defaults to empty (both shown as an en dash).
+     *   `parseExplainSummary`); both shown as an en dash when absent.
+     * @param layout - The tab's saved section open flags plus the toggle save
+     *   hook (`controller.layout.bindAccordion("explainDiagram")`, threaded in
+     *   via QueryPanel). This accordion is not resizable, so only open state
+     *   persists.
      */
-    constructor(roots: ExplainPlanNode[], summary: ExplainSummary = {}) {
+    constructor(roots: ExplainPlanNode[], summary: ExplainSummary, layout: AccordionLayoutBinding) {
         // Locals before super() — they are super()'s children (this is
         // unavailable until super() returns).
         const data         = buildExplainDiagram(roots);
@@ -134,18 +139,23 @@ export class ExplainDiagramPanel extends Panel {
         // wired to cross-select the tree + diagram (below).
         const stepsTable = buildStepsTable(roots);
 
+        // The default open flags live in ACCORDION_DEFAULT_OPEN
+        // (data/layoutStore.ts); `open` reads them (or a saved override).
+        const open = layout.loadOpen();
+
         // The WEST info column: a Summary table over the plan tree over the flat
         // steps table. The tree + steps sections share the column's leftover
-        // height (fillWeight) so each scrolls internally; the summary stays pinned
+        // height (weight) so each scrolls internally; the summary stays pinned
         // at its small fixed height.
         const accordion = new AccordionPanel({
             preferredSize: { width: LEFT_WIDTH, height: 0 },
             minSize      : { width: LEFT_WIDTH, height: 0 },
             sections: [
-                { label: "Summary",    component: buildSummaryTable(summary), initiallyOpen: true },
-                { label: "Plan tree",  component: tree,                       initiallyOpen: true,  fillWeight: 1 },
-                { label: "Plan steps", component: stepsTable,                 initiallyOpen: false, fillWeight: 1 },
+                { label: "Summary",    component: buildSummaryTable(summary), initiallyOpen: open[0] },
+                { label: "Plan tree",  component: tree,                       initiallyOpen: open[1], weight: 1 },
+                { label: "Plan steps", component: stepsTable,                 initiallyOpen: open[2], weight: 1 },
             ],
+            onSectionToggle: layout.onToggle,
         });
 
         // Custom node renderer: each node is a metric card (costs, rows, actual
