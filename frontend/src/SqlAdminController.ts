@@ -76,6 +76,7 @@ import { KIND_GLYPH }                                                           
 import { QueryHistoryStore, SavedQueryStore }                                                                                                                                                      from "./data/queryStore";
 import type { HistoryEntry, SavedQuery }                                                                                                                                                           from "./data/queryStore";
 import { NotesStore }                                                                                                                                                                              from "./data/notesStore";
+import { LayoutStore }                                                                                                                                                                             from "./data/layoutStore";
 import { promptQueryName }                                                                                                                                                                         from "./promptQueryName";
 
 // The non-relation dock-tab glyphs (query / structure / definition / grants /
@@ -174,6 +175,10 @@ export class SqlAdminController {
     readonly statusBar      : StatusBar;
     readonly properties     : PropertiesPanel;
     readonly rolesProperties: RolesPropertiesPanel;
+    // Public (not private-with-delegators like `_history`): eight layout sites
+    // bind against it directly, and mirroring the whole store API onto the
+    // controller would carry no information.
+    readonly layout         : LayoutStore;
 
     private readonly _connectionId: string;
     private readonly _database    : string | undefined;
@@ -255,6 +260,10 @@ export class SqlAdminController {
         this._history = new QueryHistoryStore(connectionId, window.localStorage);
         this._saved   = new SavedQueryStore(connectionId, window.localStorage);
         this._notes   = new NotesStore(connectionId, window.localStorage);
+
+        // No connectionId — layout is global by design, unlike the three stores
+        // above it (see data/layoutStore.ts).
+        this.layout = new LayoutStore(window.localStorage);
 
         // Disposal is wired once: the dock fires "close" only on genuine
         // destruction (a tear-off fires "detach" and the panel survives). A
@@ -497,7 +506,7 @@ export class SqlAdminController {
             this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: definition saved`);
         };
 
-        panel = new DefinitionPanel(definition, columns, onSave);
+        panel = new DefinitionPanel(definition, columns, onSave, this.layout.bindSplit("definition"));
 
         // No `columns` field here: unlike the structure tab (keyed by
         // structurePanelId, whose `columns` backs structureColumns()), the

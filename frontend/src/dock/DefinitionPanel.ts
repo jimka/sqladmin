@@ -28,6 +28,7 @@ import { MemoryStore }        from "@jimka/typescript-ui/data";
 import type { ColumnMeta }    from "../contract";
 import { buildColumnsGrid }   from "./columnsGrid";
 import { DefinitionEditor }   from "./definitionEditor";
+import type { SplitLayoutBinding } from "../data/layoutStore";
 
 // The Columns pane's fixed height in the vertical Split below the toolbar —
 // compact enough that the definition editor, the tab's main content, gets
@@ -56,8 +57,13 @@ export class DefinitionPanel {
      * @param onSave - writes the editor's current text back to the database;
      *   the controller builds the CREATE OR REPLACE VIEW / matview
      *   DROP+CREATE from it (see SqlAdminController.openDefinition).
+     * @param layout - the tab's saved Split geometry plus its save hooks
+     *   (`controller.layout.bindSplit("definition")`); both panes exist from
+     *   construction, so the saved sizes/collapse apply via the Split's own
+     *   options.
      */
-    constructor(definition: string, columns: ColumnMeta[], onSave: (newDefinition: string) => void | Promise<void>) {
+    constructor(definition: string, columns: ColumnMeta[], onSave: (newDefinition: string) => void | Promise<void>,
+                layout: SplitLayoutBinding) {
         const editor = new DefinitionEditor(definition, onSave);
         const { grid: columnsGrid, store: columnsStore } = buildColumnsGrid(columns);
 
@@ -71,8 +77,16 @@ export class DefinitionPanel {
 
         // A vertical Split: the Columns section pinned at its fixed height
         // (weight 0), the definition editor absorbing the rest of the tab
-        // (weight 1) — mirrors QueryPanel's editor-over-result Split.
-        const body = Container({ layoutManager: new Split({ orientation: "vertical" }) });
+        // (weight 1) — mirrors QueryPanel's editor-over-result Split. Both
+        // panes exist from construction, so the saved layout restores via the
+        // Split's own paneSizes/collapsedPanes options (contrast QueryPanel,
+        // whose split has one pane until the first result).
+        const body = Container({ layoutManager: new Split({
+            orientation   : "vertical",
+            paneSizes     : layout.loadSizes() ?? undefined,
+            collapsedPanes: layout.loadCollapsed(),
+            listeners     : { paneresize: layout.onSizes, panecollapse: layout.onCollapse },
+        }) });
         body.addComponent(columnsSection, { weight: 0 });
         body.addComponent(editor.editor, { weight: 1 });
 
