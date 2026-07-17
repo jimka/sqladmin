@@ -1987,7 +1987,9 @@ export class SqlAdminController {
             onSave    : (sql: string) => void this.promptAndSaveQuery(sql),
             // Mirror this panel's latest exportable result (rows or plan) so
             // the menubar export can reach it while it is the active panel.
-            onResult  : (active: ActiveExport | null) => this._activeQueryResult.set(id, active)
+            onResult  : (active: ActiveExport | null) => this._activeQueryResult.set(id, active),
+            splitLayout         : this.layout.bindSplit("query"),
+            explainDiagramLayout: this.layout.bindAccordion("explainDiagram"),
         });
 
         this._panelDisposers.set(id, panel.dispose);
