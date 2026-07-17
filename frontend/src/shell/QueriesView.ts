@@ -104,6 +104,9 @@ export class QueriesView extends AccordionPanel {
     constructor(controller: SqlAdminController, id: string) {
         // `this` is unavailable until super() returns, so both sections are
         // built as locals first.
+        const layout = controller.layout.bindAccordion("queries");
+        const open   = layout.loadOpen();
+
         const saved = buildSection({
             title    : "Saved",
             glyph    : "floppy-disk",
@@ -133,9 +136,10 @@ export class QueriesView extends AccordionPanel {
             resizable: true,
             sections: [
                 // Equal fill weights split the leftover height between the two lists.
-                { label: "Saved",  component: saved.host,  initiallyOpen: true, glyph: "floppy-disk",       tools: saved.tools,  weight: 1 },
-                { label: "Recent", component: recent.host, initiallyOpen: true, glyph: "clock-rotate-left", tools: recent.tools, weight: 1 },
+                { label: "Saved",  component: saved.host,  initiallyOpen: open[0], glyph: "floppy-disk",       tools: saved.tools,  weight: 1 },
+                { label: "Recent", component: recent.host, initiallyOpen: open[1], glyph: "clock-rotate-left", tools: recent.tools, weight: 1 },
             ],
+            onSectionToggle: layout.onToggle,
         });
 
         const accordion = this.getAccordion();
@@ -143,6 +147,17 @@ export class QueriesView extends AccordionPanel {
         // Keep the header tools visible (not hover-only) so the affordances are
         // always discoverable, matching the Database view's tools.
         accordion.setToolsVisibility("always");
+
+        // Restore the saved Saved/Recent proportion, if any (both sections are
+        // weighted, so both persist as ratios; a stale array is discarded by the
+        // library, falling back to the equal-weight seed above).
+        const savedSizes = layout.loadSizes();
+
+        if (savedSizes !== null) {
+            accordion.applySectionSizes(savedSizes);
+        }
+
+        accordion.on("sectionresize", layout.onSizes);
 
         // The menu's "Open Saved…" / "Query History…" land the keyboard on the
         // right list: expand its section and focus it. Saved is section 0,
