@@ -36,6 +36,15 @@ export type WireType =
     | "base64"
     | "jsonArray";
 
+/**
+ * The sequence backing a column — one the column owns (serial/identity) or one
+ * its default calls `nextval` on (a sequence shared across columns).
+ */
+export interface SequenceRef {
+    schema: string;
+    name: string;
+}
+
 /** One column's introspected metadata (drives Model + column generation). */
 export interface ColumnMeta {
     name: string;
@@ -45,6 +54,11 @@ export interface ColumnMeta {
     isGenerated: boolean;
     hasDefault: boolean; // has a column default; not user-required on insert
     wireType: WireType;
+    // The sequence backing this column, or null when none does. Independent of
+    // isGenerated: a `GENERATED ALWAYS AS (expr) STORED` column is generated but
+    // has no sequence. Optional so the many ColumnMeta literals in tests need
+    // not spell it out.
+    sequence?: SequenceRef | null;
 }
 
 /**
@@ -74,7 +88,13 @@ export interface SequenceDetail {
     cacheSize: string;
     cycle: boolean;
     dataType: string;
-    owner: string;
+    owner: string; // the owning ROLE (OWNER TO) — distinct from ownedBy below
+    // The column that owns this sequence (OWNED BY), or null when standalone —
+    // the same relation `SequenceOwnedBy` expresses when CREATE SEQUENCE writes
+    // it, read back. Not the inverse of ColumnMeta.sequence: a sequence reached
+    // only through a column's default is owned by nobody. Optional for the same
+    // reason as ColumnMeta.sequence.
+    ownedBy?: SequenceOwnedBy | null;
 }
 
 /** The list endpoint envelope the configured JsonReader parses. */

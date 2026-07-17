@@ -40,6 +40,45 @@ class TableRef:
 
 
 @dataclass(frozen=True)
+class SequenceRef:
+    """
+    Identifies the sequence backing a column — either one OWNED BY the column
+    (``serial``/identity) or one its DEFAULT calls ``nextval`` on.
+    """
+
+    schema: str
+    name: str
+
+    def to_contract(self) -> dict:
+        """
+        Serialize to the contract JSON nested under a column's ``sequence``.
+        """
+        return {"schema": self.schema, "name": self.name}
+
+
+@dataclass(frozen=True)
+class SequenceOwnedBy:
+    """
+    Identifies the table column that owns a sequence (``ALTER SEQUENCE ...
+    OWNED BY``) — the relation ``psql``'s ``\\d`` reports as "Owned by".
+
+    Named for the frontend's ``SequenceOwnedBy``, whose ``{schema, table,
+    column}`` shape this mirrors: the CREATE SEQUENCE form already sends that
+    object to write the relation, and this reads the same relation back.
+    """
+
+    schema: str
+    table: str
+    column: str
+
+    def to_contract(self) -> dict:
+        """
+        Serialize to the contract JSON nested under a sequence's ``ownedBy``.
+        """
+        return {"schema": self.schema, "table": self.table, "column": self.column}
+
+
+@dataclass(frozen=True)
 class ColumnMeta:
     """
     One column's introspected metadata. Drives Model + ColumnSpec on the
@@ -54,13 +93,21 @@ class ColumnMeta:
     has_default: bool        # has a column default (e.g. now()) — not user-required on INSERT
     wire_type: WireType      # the contract scalar a row value of this column arrives as
 
+    # The sequence backing this column, or None when none does. Defaulted (and
+    # therefore last: dataclass requires defaulted fields after non-defaulted
+    # ones) so existing ColumnMeta construction sites need no change. Distinct
+    # from is_generated: a `GENERATED ALWAYS AS (expr) STORED` column is
+    # generated but has NO sequence.
+    sequence: SequenceRef | None = None
+
     def to_contract(self) -> dict:
         """
         Serialize to the contract JSON the ``/columns`` route returns.
 
         Returns:
             A dict with name, dataType, nullable, isPrimaryKey, isGenerated,
-            hasDefault, and wireType.
+            hasDefault, wireType, and sequence (null when no sequence backs
+            the column — the key is always present).
         """
         return {
             "name": self.name,
@@ -70,6 +117,7 @@ class ColumnMeta:
             "isGenerated": self.is_generated,
             "hasDefault": self.has_default,
             "wireType": self.wire_type.value,
+            "sequence": self.sequence.to_contract() if self.sequence else None,
         }
 
 

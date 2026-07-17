@@ -4,9 +4,11 @@
 // Foreign Keys — each with a leading glyph in its header. Only Columns opens by
 // default (the facet reached for first); the other three start collapsed and
 // expand on demand. Clicking the referenced-table link in the Foreign Keys grid
-// opens that table via `onOpenReferenced`. Every grid is the existing read-only
-// Table over a MemoryStore; array fields are pre-joined to comma-separated
-// display strings because the library Table has no array cell renderer.
+// opens that table via `onOpenReferenced`; clicking a column's Sequence link in
+// the Columns grid opens that sequence via `onOpenSequence`. Every grid is the
+// existing read-only Table over a MemoryStore; array fields are pre-joined to
+// comma-separated display strings because the library Table has no array cell
+// renderer.
 //
 // Layout follows the library's Accordion demo: the accordion is hosted in an
 // `autoScroll` VBox with `weight: 1`, runs in `fillHeight` mode, and each grid
@@ -60,6 +62,7 @@ import type {
     TableStructure,
 } from "../contract";
 import { buildColumnsGrid, readOnlyTable } from "./columnsGrid";
+import type { OpenSequenceHandler } from "./columnsGrid";
 import { glyphButton, glyphMenuButton } from "./glyphButton";
 import { buildAlterColumnItems, buildAddConstraintItems } from "./menuItems";
 import { CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR, PRIMARY_COLOR } from "../theme";
@@ -95,6 +98,9 @@ export class StructurePanel extends Panel {
      * @param onOpenReferenced - Invoked with a foreign key's referenced schema
      *   and table when its row is selected, so the controller can open that
      *   table.
+     * @param onOpenSequence - Invoked with a column's backing sequence's schema
+     *   and name when its Sequence link is clicked, so the controller can open
+     *   that sequence.
      * @param actions - The edit-action callbacks for each section's header
      *   tools (table-ddl phase). Omitted keeps every section header tool-less.
      */
@@ -102,6 +108,7 @@ export class StructurePanel extends Panel {
         columns: ColumnMeta[],
         structure: TableStructure,
         onOpenReferenced: (refSchema: string, refTable: string) => void,
+        onOpenSequence: OpenSequenceHandler,
         actions?: StructureActions,
     ) {
         // The scroll host: an autoScroll VBox holding the accordion at weight 1,
@@ -114,7 +121,7 @@ export class StructurePanel extends Panel {
         // needed here.
         super({ layoutManager: new VBox({ stretching: true }), autoScroll: "auto" });
 
-        const columnsGrid     = buildColumnsGrid(columns).grid;
+        const columnsGrid     = buildColumnsGrid(columns, onOpenSequence).grid;
         const indexesGrid     = buildIndexesGrid(structure.indexes);
         const constraintsGrid = buildConstraintsGrid(structure.constraints);
         const foreignKeysGrid = buildForeignKeysGrid(structure.foreignKeys, onOpenReferenced);

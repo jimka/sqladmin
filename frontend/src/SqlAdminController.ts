@@ -519,7 +519,7 @@ export class SqlAdminController {
      * unlike openDefinition the panel needs no dispose (see
      * SequenceInfoPanel).
      */
-    async openSequence(ref: DbObjectRef, node: TreeNode): Promise<void> {
+    async openSequence(ref: DbObjectRef, node?: TreeNode): Promise<void> {
         const id = this.sequenceInfoPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
@@ -540,7 +540,7 @@ export class SqlAdminController {
         const detail = detailResult.value;
         const roles  = rolesResult.status === "fulfilled" ? rolesResult.value.map(r => r.name) : [];
 
-        this._openPanels.set(id, { ref, node, detail: "info" });
+        this._openPanels.set(id, { ref, node: node ?? null, detail: "info" });
         this.dock.addPanel({
             id,
             title  : ref.name ?? id,
@@ -556,13 +556,20 @@ export class SqlAdminController {
                 reloadDetail: () => getSequenceDetail(ref),
                 onStatus:     m => this.statusBar.setMessage(`${this._statusScope} · ${m}`),
                 onError:      m => this.notifyError(new Error(m), ref),
+                onOpenOwner:  (schema, table) => this.openReferencedStructure({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema,
+                    name        : table,
+                    kind        : "table",
+                }),
             }),
         });
         this.syncToPanel(id);
     }
 
     /** Open a read-only structure (column metadata) tab for a table/view. */
-    async openStructure(ref: DbObjectRef, node: TreeNode): Promise<void> {
+    async openStructure(ref: DbObjectRef, node?: TreeNode): Promise<void> {
         const id = this.structurePanelId(ref);
 
         if (this.dock.focusPanel(id)) {
@@ -580,7 +587,7 @@ export class SqlAdminController {
             return;
         }
 
-        this._openPanels.set(id, { ref, node, columns, detail: "structure" });
+        this._openPanels.set(id, { ref, node: node ?? null, columns, detail: "structure" });
         this.dock.addPanel({
             id,
             title  : `${ref.name ?? id} (structure)`,
@@ -593,6 +600,12 @@ export class SqlAdminController {
                     schema      : refSchema,
                     name        : refTable,
                     kind        : "table",
+                }), (seqSchema, seqName) => this.openReferencedSequence({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : seqSchema,
+                    name        : seqName,
+                    kind        : "sequence",
                 }), this.structureActionsFor(ref)),
         });
         this.syncToPanel(id);
@@ -1825,6 +1838,67 @@ export class SqlAdminController {
                 this._navigator?.selectNode(node);
             }
         })();
+    }
+
+    /**
+     * Open a column's backing sequence's info tab and reveal it in the
+     * navigator — the Structure tab's Sequence link. Best-effort, exactly like
+     * {@link openReferencedTable}: if no node matches, the tab still opens.
+     *
+     * @param ref - The sequence to open (kind "sequence").
+     */
+    openReferencedSequence(ref: DbObjectRef): void {
+        void (async () => {
+            const node = await this.revealObject(ref);
+
+            await this.openSequence(ref, node);
+
+            if (node) {
+                this._navigator?.selectNode(node);
+            }
+        })();
+    }
+
+    /**
+     * Open a table's Structure tab and reveal the table in the navigator — the
+     * sequence info tab's "Owned by column" link. Best-effort, exactly like
+     * {@link openReferencedTable}.
+     *
+     * @param ref - The table whose structure to open (kind "table").
+     */
+    openReferencedStructure(ref: DbObjectRef): void {
+        void (async () => {
+            const node = await this.revealObject(ref);
+
+            await this.openStructure(ref, node);
+
+            if (node) {
+                this._navigator?.selectNode(node);
+            }
+        })();
+    }
+
+    /**
+     * Reveal an object's navigator node, expanding the path to it — loading
+     * lazy branches (unexpanded schemas) as needed — so the target is revealed
+     * even when the user never navigated to it.
+     *
+     * Unlike {@link openReferencedTable}'s inline predicate, this one also
+     * matches on `kind`: a sequence and a relation can share a schema+name
+     * (`products_id_seq` is unique, but nothing forbids a table of that name),
+     * and matching database/schema/name alone could reveal the wrong node.
+     *
+     * @param ref - The object to reveal.
+     *
+     * @returns The revealed node, or undefined when no node matches.
+     */
+    private async revealObject(ref: DbObjectRef): Promise<TreeNode | undefined> {
+        return (await this._navigator?.revealByPredicate((data: unknown) => {
+            const r = data as DbObjectRef | undefined;
+
+            return !!r && r.kind === ref.kind && r.database === ref.database
+                && r.schema === ref.schema && r.name === ref.name;
+        })) ?? undefined;
     }
 
     /**

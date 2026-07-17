@@ -1,7 +1,13 @@
 // The dock work panel for a sequence's current state and parameters (current
-// value, start/min/max, increment, cache size, cycle, data type, owner),
-// shown in its own tab opened from the navigator's double-click / "Show
-// info" context item. A typed form (not the old editable Property/Value
+// value, start/min/max, increment, cache size, cycle, data type, owner, and
+// the column that owns it), shown in its own tab opened from the navigator's
+// double-click / "Show info" context item.
+//
+// Every row but the last is editable and feeds the Save diff. "Owned by column"
+// is read-only: it reports the OWNED BY relation (what psql's \d shows), which
+// this form cannot change — its Owner combo alters the owning ROLE instead —
+// and links back to the owning table's Structure tab, closing the round trip
+// from that table's Sequence link. A typed form (not the old editable Property/Value
 // table): each attribute gets its own widget — integer text fields for the
 // numeric options, a Checkbox for Cycle, and a ComboBox each for Data type
 // (the ALTER SEQUENCE type allowlist) and Owner (the connection's roles) —
@@ -27,15 +33,19 @@
 // MemoryStore whose `name` field is both value and display field makes
 // getValue() return the name, which is what the Save diff needs.
 //
-// Holds only value-bearing input widgets (no CodeEditor/theme subscription),
-// so it needs no dispose.
+// Registers no disposer with the controller: it holds no CodeEditor, which is
+// the one widget this app disposes on tab close (see DefinitionPanel). Its
+// TextFields, ComboBoxes and the "Owned by column" Link/Text do each hold a
+// ThemeManager subscription, but only Text/Link expose a dispose() to release
+// one at all — disposing those two while the fields beside them cannot be
+// disposed would buy nothing.
 
 import { Container, Panel }            from "@jimka/typescript-ui/core";
 import { Border as BorderLayout, VBox } from "@jimka/typescript-ui/layout";
 import { Placement }                   from "@jimka/typescript-ui/primitive";
 import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
 import { Button }                      from "@jimka/typescript-ui/component/button";
-import { Checkbox, ComboBox, Text, TextField } from "@jimka/typescript-ui/component/input";
+import { Checkbox, ComboBox, Link, Text, TextField } from "@jimka/typescript-ui/component/input";
 import { LabeledFieldSet }             from "@jimka/typescript-ui/component/container";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
 import { MemoryStore, Model }          from "@jimka/typescript-ui/data";
@@ -43,10 +53,10 @@ import { save }                        from "@jimka/typescript-ui/glyphs/solid/s
 import type { AlterSequenceSpec, DdlPreview, QueryStatusResult, SequenceDetail, SequenceOwnerSpec } from "../contract";
 import { diffSequenceSpecs }           from "./ddlSpecs";
 import type { EditedSequenceValues, SequenceEditSpecs } from "./ddlSpecs";
-import { dataTypeItems, detailToEditedValues, isSequenceFormDirty, ownerItems } from "./sequenceFormState";
+import { dataTypeItems, detailToEditedValues, isSequenceFormDirty, ownedByLabel, ownerItems } from "./sequenceFormState";
 import { glyphButton }                 from "./glyphButton";
 import { openSqlPreviewDialog }        from "./SqlPreviewDialog";
-import { PRIMARY_COLOR }               from "../theme";
+import { MUTED_TEXT_COLOR, PRIMARY_COLOR } from "../theme";
 
 Glyph.register(save);
 
@@ -83,7 +93,17 @@ export interface SequenceInfoPanelDeps {
 
     /** Report a short status message (e.g. a no-op Save, a successful alter). */
     onStatus: (message: string) => void;
+
+    /**
+     * Open the Structure tab of the table whose column owns this sequence.
+     * Omitted (or a standalone sequence) renders the "Owned by column" row as
+     * plain text instead of a link.
+     */
+    onOpenOwner?: (schema: string, table: string) => void;
 }
+
+/** The "Owned by column" row's placeholder for a sequence no column owns. */
+const NO_OWNING_COLUMN = "—";
 
 /** A tab-filling typed form of a sequence's current state and parameters. */
 export class SequenceInfoPanel extends Container {
@@ -133,6 +153,20 @@ export class SequenceInfoPanel extends Container {
         const ownerStore    = new MemoryStore({ model: NAME_MODEL, data: [] });
         const ownerCombo    = new ComboBox({ store: ownerStore, valueField: "name", displayField: "name" });
 
+        // Read-only, and outside the edit flow entirely: the owning COLUMN
+        // (OWNED BY) is not editable through this form, whose Owner combo alters
+        // the owning ROLE. So it is never read by readEdited()/seedFields() and
+        // never reaches the Save diff. The row is always present — that a
+        // sequence is standalone is itself worth stating — and only its widget
+        // varies. Built as a local: `this` is unavailable until super() returns
+        // (COMPONENT_CONVENTIONS.md (b)).
+        const ownedBy = detail.ownedBy;
+        const ownedByWidget = ownedBy && deps.onOpenOwner
+            ? new Link(ownedByLabel(ownedBy), {
+                  listeners: { action: () => deps.onOpenOwner!(ownedBy.schema, ownedBy.table) },
+              })
+            : new Text(ownedBy ? ownedByLabel(ownedBy) : NO_OWNING_COLUMN, { foregroundColor: MUTED_TEXT_COLOR });
+
         // The legend is the sequence's schema-qualified name (the tab title
         // already shows the bare name, but the legend sits on the fieldset's
         // own border and reads fine repeated / qualified). It must be
@@ -150,6 +184,11 @@ export class SequenceInfoPanel extends Container {
                 [{ title: "Cycle",         component: cycleBox }],
                 [{ title: "Data type",     component: dataTypeCombo }],
                 [{ title: "Owner",         component: ownerCombo }],
+                // "Owned by column", not "Owned by": it sits next to "Owner",
+                // and the two are different Postgres concepts (OWNER TO <role>
+                // vs OWNED BY <table.column>). The explicit label is what keeps
+                // the adjacency readable.
+                [{ title: "Owned by column", component: ownedByWidget }],
             ],
         });
 
