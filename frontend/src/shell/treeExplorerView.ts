@@ -42,7 +42,7 @@ export interface TreeExplorerConfig {
 // the tree, and a first layout with no leftover height would store a zero size
 // that proportional rescaling can never grow back. 96px is four rows at the
 // library Tree's fixed 24px ROW_HEIGHT. Set as preferred too so the section
-// never reports min > preferred; the fillWeight below still grows the tree
+// never reports min > preferred; the weight below still grows the tree
 // into all the leftover height, so the rendered result is unchanged.
 const TREE_MIN_HEIGHT = 96;
 
@@ -62,7 +62,7 @@ export class TreeExplorerView extends AccordionPanel {
         const tree    = config.explorer;
         const refresh = config.explorer.refresh;
 
-        // The tree's section takes all the leftover height via its fillWeight below;
+        // The tree's section takes all the leftover height via its weight below;
         // TREE_MIN_HEIGHT is its floor, not its target. Pre-super: `this` is
         // unavailable until super() returns.
         tree.setPreferredSize(0, TREE_MIN_HEIGHT);
@@ -71,13 +71,13 @@ export class TreeExplorerView extends AccordionPanel {
         super({
             id: config.id,
             // Draggable gutter between the tree and the inspector, so the user
-            // apportions the height. The tree's fillWeight seeds the split at exactly
+            // apportions the height. The tree's weight seeds the split at exactly
             // today's geometry (tree fills, inspector at its 220px preferred); a drag
             // is authoritative from then on and survives a section toggle and a rail
             // switch.
             resizable: true,
             sections: [
-                { label: config.treeLabel, component: tree, initiallyOpen: true, glyph: config.treeGlyph, tools: [...(config.treeTools ?? []), refreshTool(refresh)], fillWeight: 1 },
+                { label: config.treeLabel, component: tree, initiallyOpen: true, glyph: config.treeGlyph, tools: [...(config.treeTools ?? []), refreshTool(refresh)], weight: 1 },
                 { label: config.inspectorLabel, component: config.inspector, initiallyOpen: true, glyph: config.inspectorGlyph ?? "circle-info" },
             ],
         });

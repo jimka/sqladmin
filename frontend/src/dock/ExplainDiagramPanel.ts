@@ -136,15 +136,15 @@ export class ExplainDiagramPanel extends Panel {
 
         // The WEST info column: a Summary table over the plan tree over the flat
         // steps table. The tree + steps sections share the column's leftover
-        // height (fillWeight) so each scrolls internally; the summary stays pinned
+        // height (weight) so each scrolls internally; the summary stays pinned
         // at its small fixed height.
         const accordion = new AccordionPanel({
             preferredSize: { width: LEFT_WIDTH, height: 0 },
             minSize      : { width: LEFT_WIDTH, height: 0 },
             sections: [
                 { label: "Summary",    component: buildSummaryTable(summary), initiallyOpen: true },
-                { label: "Plan tree",  component: tree,                       initiallyOpen: true,  fillWeight: 1 },
-                { label: "Plan steps", component: stepsTable,                 initiallyOpen: false, fillWeight: 1 },
+                { label: "Plan tree",  component: tree,                       initiallyOpen: true,  weight: 1 },
+                { label: "Plan steps", component: stepsTable,                 initiallyOpen: false, weight: 1 },
             ],
         });
 
