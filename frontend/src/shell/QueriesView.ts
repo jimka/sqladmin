@@ -115,7 +115,7 @@ export class QueriesView extends AccordionPanel {
             open     : row => controller.openSavedQuery(row.name!, false),
             execute  : row => controller.openSavedQuery(row.name!, true),
             secondary: { glyph: "trash", color: DESTRUCTIVE_COLOR, label: "Remove",
-                         run: row => controller.removeSavedQuery(row.name!) },
+                         run: row => void controller.removeSavedQuery(row.name!) },
         });
 
         const recent = buildSection({

@@ -2,7 +2,7 @@
 // the open-panel registry (deduped by panel id). Components stay dumb: they emit,
 // the controller decides. All app-side errors funnel to notifyError.
 
-import { Dock, Notification, NotificationHistoryButton, Tooltip }                                                                                                                                  from "@jimka/typescript-ui/overlay";
+import { Dialog, Dock, Notification, NotificationHistoryButton, Tooltip }                                                                                                                          from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent }                                                                                                                                                                     from "@jimka/typescript-ui/overlay";
 import { Component }                                                                                                                                                                               from "@jimka/typescript-ui/core";
 import { HBox }                                                                                                                                                                                    from "@jimka/typescript-ui/layout";
@@ -2199,11 +2199,21 @@ export class SqlAdminController {
     }
 
     /**
-     * Remove a saved query and refresh the workspace surfaces.
+     * Confirm (via the in-app modal), then remove a saved query and refresh the
+     * workspace surfaces. Cancelling leaves the saved query untouched.
      *
      * @param name - The saved query's name.
      */
-    removeSavedQuery(name: string): void {
+    async removeSavedQuery(name: string): Promise<void> {
+        const confirmed = await Dialog.confirm(
+            "Remove saved query",
+            `Are you sure that you want to remove the saved query “${elideName(name)}”?`,
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
         this._saved.remove(name);
         this.notifyWorkspaceChanged();
     }
