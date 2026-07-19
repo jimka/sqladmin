@@ -1,8 +1,9 @@
-// Global (not per-connection) localStorage layer for the app's `Split` gutter
+// Per-user (not per-connection) localStorage layer for the app's `Split` gutter
 // positions and `Accordion` section open/collapsed state, one key per layout
 // site. Unlike NotesStore/QueryHistoryStore/SavedQueryStore, layout is a
-// property of the user's window, not of the database being viewed, so no
-// `connectionId` segment is in the key.
+// property of the user's window, not of the database being viewed — so the key
+// carries the `<user>` segment but no `connectionId`, and one user's layout
+// never bleeds into another's on a shared browser.
 //
 // The app and the library split the restore validation: the library owns
 // *fit* (exact length, per-index unit against the live layout, finite
@@ -17,9 +18,10 @@
 import type { LayoutSize, LayoutSizeUnit } from "@jimka/typescript-ui/layout";
 import type { KeyValueStore }              from "./queryStore";
 
-// localStorage key prefix. Global (no connection segment) but still under the
-// app's sqladmin.* namespace so localStorageWindow.ts's APP_KEY_PREFIX dumps
-// and clears these keys with no code change.
+// localStorage key prefix. Per user (a `<user>` segment, no connection segment)
+// but still under the app's sqladmin.* namespace so localStorageWindow.ts's
+// APP_KEY_PREFIX dumps and clears these keys with no code change. The full key is
+// `sqladmin.layout.<user>.<site>`.
 const LAYOUT_KEY_PREFIX = "sqladmin.layout.";
 
 /** A persisted Split site. The string is the key segment under `sqladmin.layout.`. */
@@ -155,13 +157,19 @@ function readCollapsed(values: unknown): number[] {
     );
 }
 
-/** Global (not per-connection) UI layout persistence, one key per site. */
+/** Per-user (not per-connection) UI layout persistence, one key per site. */
 export class LayoutStore {
     private readonly _storage: KeyValueStore;
+    /** The site keys' shared prefix, `sqladmin.layout.<user>.`. */
+    private readonly _keyPrefix: string;
 
-    /** @param storage - The backing key-value store (localStorage or a fake). */
-    constructor(storage: KeyValueStore) {
-        this._storage = storage;
+    /**
+     * @param userId - Namespaces the site keys so users stay isolated.
+     * @param storage - The backing key-value store (localStorage or a fake).
+     */
+    constructor(userId: string, storage: KeyValueStore) {
+        this._storage   = storage;
+        this._keyPrefix = `${LAYOUT_KEY_PREFIX}${userId}.`;
     }
 
     /**
@@ -248,7 +256,7 @@ export class LayoutStore {
      * @returns The parsed blob, or `{}`.
      */
     private _read(site: string): StoredLayout {
-        const raw = this._storage.getItem(LAYOUT_KEY_PREFIX + site);
+        const raw = this._storage.getItem(this._keyPrefix + site);
 
         if (raw === null) {
             return {};
@@ -272,6 +280,6 @@ export class LayoutStore {
      * @param patch - The fields to merge in.
      */
     private _write(site: string, patch: StoredLayout): void {
-        this._storage.setItem(LAYOUT_KEY_PREFIX + site, JSON.stringify({ ...this._read(site), ...patch }));
+        this._storage.setItem(this._keyPrefix + site, JSON.stringify({ ...this._read(site), ...patch }));
     }
 }

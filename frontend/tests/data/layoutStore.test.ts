@@ -16,14 +16,14 @@ function fakeStorage(): KeyValueStore & { map: Map<string, string> } {
 
 describe("LayoutStore — bindSplit", () => {
     it("loadSizes()/loadCollapsed() on empty storage return null / []", () => {
-        const layout = new LayoutStore(fakeStorage()).bindSplit("shell");
+        const layout = new LayoutStore("u", fakeStorage()).bindSplit("shell");
 
         expect(layout.loadSizes()).toBeNull();
         expect(layout.loadCollapsed()).toEqual([]);
     });
 
     it("mixed units round-trip verbatim", () => {
-        const layout = new LayoutStore(fakeStorage()).bindSplit("shell");
+        const layout = new LayoutStore("u", fakeStorage()).bindSplit("shell");
         const sizes: LayoutSize[] = [{ unit: "px", value: 280 }, { unit: "ratio", value: 1 }];
 
         layout.onSizes(sizes);
@@ -31,30 +31,30 @@ describe("LayoutStore — bindSplit", () => {
         expect(layout.loadSizes()).toEqual(sizes);
     });
 
-    it("stores under the key sqladmin.layout.<site> with no connection segment", () => {
+    it("stores under the key sqladmin.layout.<user>.<site> — a user segment, no connection segment", () => {
         const storage = fakeStorage();
-        const layout  = new LayoutStore(storage).bindSplit("shell");
+        const layout  = new LayoutStore("u", storage).bindSplit("shell");
 
         layout.onSizes([{ unit: "px", value: 280 }]);
 
-        expect(storage.map.has("sqladmin.layout.shell")).toBe(true);
+        expect(storage.map.has("sqladmin.layout.u.shell")).toBe(true);
     });
 
     it("one JSON object per site: a second write merges rather than replaces", () => {
         const storage = fakeStorage();
-        const layout  = new LayoutStore(storage).bindSplit("shell");
+        const layout  = new LayoutStore("u", storage).bindSplit("shell");
         const sizes: LayoutSize[] = [{ unit: "px", value: 280 }, { unit: "ratio", value: 1 }];
 
         layout.onSizes(sizes);
         layout.onCollapse(0, true);
 
-        expect(JSON.parse(storage.map.get("sqladmin.layout.shell")!)).toEqual({ sizes, collapsed: [0] });
+        expect(JSON.parse(storage.map.get("sqladmin.layout.u.shell")!)).toEqual({ sizes, collapsed: [0] });
     });
 
     it("corrupt JSON is treated as absent, without throwing", () => {
         const storage = fakeStorage();
-        storage.map.set("sqladmin.layout.shell", "{not json");
-        const layout = new LayoutStore(storage).bindSplit("shell");
+        storage.map.set("sqladmin.layout.u.shell", "{not json");
+        const layout = new LayoutStore("u", storage).bindSplit("shell");
 
         expect(layout.loadSizes()).toBeNull();
         expect(layout.loadCollapsed()).toEqual([]);
@@ -63,17 +63,17 @@ describe("LayoutStore — bindSplit", () => {
     it("a top-level JSON array or string is treated as absent", () => {
         const storage = fakeStorage();
 
-        storage.map.set("sqladmin.layout.shell", "[1,2]");
-        expect(new LayoutStore(storage).bindSplit("shell").loadSizes()).toBeNull();
+        storage.map.set("sqladmin.layout.u.shell", "[1,2]");
+        expect(new LayoutStore("u", storage).bindSplit("shell").loadSizes()).toBeNull();
 
-        storage.map.set("sqladmin.layout.shell", "\"hi\"");
-        expect(new LayoutStore(storage).bindSplit("shell").loadSizes()).toBeNull();
+        storage.map.set("sqladmin.layout.u.shell", "\"hi\"");
+        expect(new LayoutStore("u", storage).bindSplit("shell").loadSizes()).toBeNull();
     });
 
     it("a write over a corrupt blob repairs it", () => {
         const storage = fakeStorage();
-        storage.map.set("sqladmin.layout.shell", "{not json");
-        const layout = new LayoutStore(storage).bindSplit("shell");
+        storage.map.set("sqladmin.layout.u.shell", "{not json");
+        const layout = new LayoutStore("u", storage).bindSplit("shell");
         const sizes: LayoutSize[] = [{ unit: "px", value: 1 }];
 
         layout.onSizes(sizes);
@@ -83,21 +83,21 @@ describe("LayoutStore — bindSplit", () => {
 
     it("a non-array sizes value is rejected", () => {
         const storage = fakeStorage();
-        const layout  = new LayoutStore(storage).bindSplit("shell");
+        const layout  = new LayoutStore("u", storage).bindSplit("shell");
 
-        storage.map.set("sqladmin.layout.shell", JSON.stringify({ sizes: "nope" }));
+        storage.map.set("sqladmin.layout.u.shell", JSON.stringify({ sizes: "nope" }));
         expect(layout.loadSizes()).toBeNull();
 
-        storage.map.set("sqladmin.layout.shell", JSON.stringify({ sizes: 5 }));
+        storage.map.set("sqladmin.layout.u.shell", JSON.stringify({ sizes: 5 }));
         expect(layout.loadSizes()).toBeNull();
 
-        storage.map.set("sqladmin.layout.shell", JSON.stringify({ sizes: {} }));
+        storage.map.set("sqladmin.layout.u.shell", JSON.stringify({ sizes: {} }));
         expect(layout.loadSizes()).toBeNull();
     });
 
     it("a malformed entry rejects the whole array", () => {
         const storage = fakeStorage();
-        const layout  = new LayoutStore(storage).bindSplit("shell");
+        const layout  = new LayoutStore("u", storage).bindSplit("shell");
         const cases: unknown[] = [
             [{ unit: "px", value: 1 }, null],
             [{ unit: "bogus", value: 1 }],
@@ -108,16 +108,16 @@ describe("LayoutStore — bindSplit", () => {
         ];
 
         for (const sizes of cases) {
-            storage.map.set("sqladmin.layout.shell", JSON.stringify({ sizes }));
+            storage.map.set("sqladmin.layout.u.shell", JSON.stringify({ sizes }));
             expect(layout.loadSizes()).toBeNull();
         }
     });
 
     it("an empty sizes array is rejected", () => {
         const storage = fakeStorage();
-        storage.map.set("sqladmin.layout.shell", JSON.stringify({ sizes: [] }));
+        storage.map.set("sqladmin.layout.u.shell", JSON.stringify({ sizes: [] }));
 
-        expect(new LayoutStore(storage).bindSplit("shell").loadSizes()).toBeNull();
+        expect(new LayoutStore("u", storage).bindSplit("shell").loadSizes()).toBeNull();
     });
 
     it("performs no length check — a 3-entry array loads from a 2-pane site", () => {
@@ -125,30 +125,30 @@ describe("LayoutStore — bindSplit", () => {
         const sizes: LayoutSize[] = [
             { unit: "px", value: 1 }, { unit: "px", value: 2 }, { unit: "px", value: 3 },
         ];
-        storage.map.set("sqladmin.layout.shell", JSON.stringify({ sizes }));
+        storage.map.set("sqladmin.layout.u.shell", JSON.stringify({ sizes }));
 
-        expect(new LayoutStore(storage).bindSplit("shell").loadSizes()).toEqual(sizes);
+        expect(new LayoutStore("u", storage).bindSplit("shell").loadSizes()).toEqual(sizes);
     });
 
     it("performs no unit expectation — an all-ratio array loads from the mixed-unit shell site", () => {
         const storage = fakeStorage();
         const sizes: LayoutSize[] = [{ unit: "ratio", value: 0.5 }, { unit: "ratio", value: 0.5 }];
-        storage.map.set("sqladmin.layout.shell", JSON.stringify({ sizes }));
+        storage.map.set("sqladmin.layout.u.shell", JSON.stringify({ sizes }));
 
-        expect(new LayoutStore(storage).bindSplit("shell").loadSizes()).toEqual(sizes);
+        expect(new LayoutStore("u", storage).bindSplit("shell").loadSizes()).toEqual(sizes);
     });
 
     it("loads an all-zero array — that discard rule belongs to the library, not the store", () => {
         const storage = fakeStorage();
         const sizes: LayoutSize[] = [{ unit: "px", value: 0 }, { unit: "ratio", value: 0 }];
-        storage.map.set("sqladmin.layout.shell", JSON.stringify({ sizes }));
+        storage.map.set("sqladmin.layout.u.shell", JSON.stringify({ sizes }));
 
-        expect(new LayoutStore(storage).bindSplit("shell").loadSizes()).toEqual(sizes);
+        expect(new LayoutStore("u", storage).bindSplit("shell").loadSizes()).toEqual(sizes);
     });
 
     it("onCollapse tracks a sorted, deduped set of indices; onCollapse(-1) is ignored; garbage entries are dropped", () => {
         const storage = fakeStorage();
-        const layout  = new LayoutStore(storage).bindSplit("shell");
+        const layout  = new LayoutStore("u", storage).bindSplit("shell");
 
         layout.onCollapse(0, true);
         layout.onCollapse(1, true);
@@ -163,12 +163,12 @@ describe("LayoutStore — bindSplit", () => {
         layout.onCollapse(-1, true);
         expect(layout.loadCollapsed()).toEqual([1]);
 
-        storage.map.set("sqladmin.layout.shell", JSON.stringify({ collapsed: [0, 1.5, "x", -2] }));
+        storage.map.set("sqladmin.layout.u.shell", JSON.stringify({ collapsed: [0, 1.5, "x", -2] }));
         expect(layout.loadCollapsed()).toEqual([0]);
     });
 
     it("sites do not cross-read, and a loader is a live read, not a construction snapshot", () => {
-        const store = new LayoutStore(fakeStorage());
+        const store = new LayoutStore("u", fakeStorage());
         const query = store.bindSplit("query");
         const shell = store.bindSplit("shell");
 
@@ -183,7 +183,7 @@ describe("LayoutStore — bindSplit", () => {
 
 describe("LayoutStore — bindAccordion", () => {
     it("loadOpen() on empty storage returns each site's defaults", () => {
-        const store = new LayoutStore(fakeStorage());
+        const store = new LayoutStore("u", fakeStorage());
 
         expect(store.bindAccordion("structure").loadOpen()).toEqual([true, false, false, false]);
         expect(store.bindAccordion("database").loadOpen()).toEqual([true, true]);
@@ -192,20 +192,20 @@ describe("LayoutStore — bindAccordion", () => {
 
     it("a wrong-length open array falls back to defaults", () => {
         const storage = fakeStorage();
-        storage.map.set("sqladmin.layout.structure", JSON.stringify({ open: [true, true] }));
+        storage.map.set("sqladmin.layout.u.structure", JSON.stringify({ open: [true, true] }));
 
-        expect(new LayoutStore(storage).bindAccordion("structure").loadOpen()).toEqual([true, false, false, false]);
+        expect(new LayoutStore("u", storage).bindAccordion("structure").loadOpen()).toEqual([true, false, false, false]);
     });
 
     it("non-boolean entries fall back to defaults", () => {
         const storage = fakeStorage();
-        storage.map.set("sqladmin.layout.structure", JSON.stringify({ open: [1, 0, 0, 0] }));
+        storage.map.set("sqladmin.layout.u.structure", JSON.stringify({ open: [1, 0, 0, 0] }));
 
-        expect(new LayoutStore(storage).bindAccordion("structure").loadOpen()).toEqual([true, false, false, false]);
+        expect(new LayoutStore("u", storage).bindAccordion("structure").loadOpen()).toEqual([true, false, false, false]);
     });
 
     it("onToggle sets one index, leaving the others untouched", () => {
-        const layout = new LayoutStore(fakeStorage()).bindAccordion("structure");
+        const layout = new LayoutStore("u", fakeStorage()).bindAccordion("structure");
 
         layout.onToggle(1, true);
 
@@ -213,7 +213,7 @@ describe("LayoutStore — bindAccordion", () => {
     });
 
     it("onToggle is index-scoped, not array-flush — two bindings for the same site compose", () => {
-        const store = new LayoutStore(fakeStorage());
+        const store = new LayoutStore("u", fakeStorage());
         const a     = store.bindAccordion("structure");
         const b     = store.bindAccordion("structure");
 
@@ -224,7 +224,7 @@ describe("LayoutStore — bindAccordion", () => {
     });
 
     it("an out-of-range onToggle index is ignored", () => {
-        const layout = new LayoutStore(fakeStorage()).bindAccordion("structure");
+        const layout = new LayoutStore("u", fakeStorage()).bindAccordion("structure");
 
         layout.onToggle(9, true);
         layout.onToggle(-1, true);

@@ -1,10 +1,12 @@
-// The per-connection localStorage layer for the query workspace: a capped ring
-// buffer of run history and a named-query store. Both are pure over an injected
-// `KeyValueStore` (production passes window.localStorage; the node vitest passes
-// an in-memory fake), so the ring-buffer/upsert logic is red-green testable
-// offline without a DOM. The `HistoryEntry`/record/list interface is the seam a
-// future backend-persisted history can back without touching the panel or the
-// controller.
+// The per-user-and-connection localStorage layer for the query workspace: a
+// capped ring buffer of run history and a named-query store. Run history and
+// saved queries belong to a specific user working against a specific connection,
+// so the key carries both segments (`<user>.<connection>`) and neither users nor
+// connections cross-read. Both are pure over an injected `KeyValueStore`
+// (production passes window.localStorage; the node vitest passes an in-memory
+// fake), so the ring-buffer/upsert logic is red-green testable offline without a
+// DOM. The `HistoryEntry`/record/list interface is the seam a future
+// backend-persisted history can back without touching the panel or the controller.
 
 /**
  * A Storage-like sink — the `getItem`/`setItem` subset the stores use. Production
@@ -42,10 +44,26 @@ export interface SavedQuery {
 // to exercise overflow).
 const MAX_HISTORY = 100;
 
-// localStorage key prefixes, namespaced per connection so two connections never
-// cross-read (the app's multi-database seam; today the id is always "default").
+// localStorage key prefixes, namespaced per user AND connection ("<user>.<conn>")
+// so neither two users nor two connections ever cross-read. History and saved
+// queries are the user's own work against a specific database, so both segments
+// matter (unlike the per-user-only layout/notes settings).
 const HISTORY_KEY_PREFIX = "sqladmin.history.";
 const SAVED_KEY_PREFIX   = "sqladmin.saved.";
+
+/**
+ * The per-user, per-connection storage-key suffix (`<user>.<connection>`) both
+ * query stores append to their prefix. Kept in one place so the two stores stay
+ * in step and the scoping rule reads once.
+ *
+ * @param userId - The signed-in user, isolating one user's work from another's.
+ * @param connectionId - The connection, isolating one database from another.
+ *
+ * @returns The `<user>.<connection>` key suffix.
+ */
+function scopeKey(userId: string, connectionId: string): string {
+    return `${userId}.${connectionId}`;
+}
 
 /**
  * Read and JSON-parse a stored array, returning `[]` on an absent or malformed
@@ -72,19 +90,20 @@ function readArray<T>(storage: KeyValueStore, key: string): T[] {
     }
 }
 
-/** Per-connection capped ring buffer of run history (stored and returned newest-first). */
+/** Per-user, per-connection capped ring buffer of run history (stored and returned newest-first). */
 export class QueryHistoryStore {
     private readonly _key: string;
     private readonly _storage: KeyValueStore;
     private readonly _max: number;
 
     /**
+     * @param userId - Namespaces the storage key so users stay isolated.
      * @param connectionId - Namespaces the storage key so connections stay isolated.
      * @param storage - The backing key-value store (localStorage or a fake).
      * @param max - The ring-buffer cap; defaults to {@link MAX_HISTORY}.
      */
-    constructor(connectionId: string, storage: KeyValueStore, max: number = MAX_HISTORY) {
-        this._key     = HISTORY_KEY_PREFIX + connectionId;
+    constructor(userId: string, connectionId: string, storage: KeyValueStore, max: number = MAX_HISTORY) {
+        this._key     = HISTORY_KEY_PREFIX + scopeKey(userId, connectionId);
         this._storage = storage;
         this._max     = max;
     }
@@ -120,23 +139,24 @@ export class QueryHistoryStore {
         return readArray<HistoryEntry>(this._storage, this._key);
     }
 
-    /** Drop all recorded history for this connection. */
+    /** Drop all recorded history for this user and connection. */
     clear(): void {
         this._storage.setItem(this._key, JSON.stringify([]));
     }
 }
 
-/** Per-connection named-query store (upsert by name). */
+/** Per-user, per-connection named-query store (upsert by name). */
 export class SavedQueryStore {
     private readonly _key: string;
     private readonly _storage: KeyValueStore;
 
     /**
+     * @param userId - Namespaces the storage key so users stay isolated.
      * @param connectionId - Namespaces the storage key so connections stay isolated.
      * @param storage - The backing key-value store (localStorage or a fake).
      */
-    constructor(connectionId: string, storage: KeyValueStore) {
-        this._key     = SAVED_KEY_PREFIX + connectionId;
+    constructor(userId: string, connectionId: string, storage: KeyValueStore) {
+        this._key     = SAVED_KEY_PREFIX + scopeKey(userId, connectionId);
         this._storage = storage;
     }
 
