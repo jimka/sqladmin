@@ -20,7 +20,7 @@ function entry(sql: string, over: Partial<HistoryEntry> = {}): HistoryEntry {
 
 describe("QueryHistoryStore", () => {
     it("prepends new entries so list() is newest-first", () => {
-        const store = new QueryHistoryStore("default", fakeStorage());
+        const store = new QueryHistoryStore("u", "default", fakeStorage());
 
         store.record(entry("select 1"));
         store.record(entry("select 2"));
@@ -29,7 +29,7 @@ describe("QueryHistoryStore", () => {
     });
 
     it("collapses a consecutive identical sql, updating the head in place", () => {
-        const store = new QueryHistoryStore("default", fakeStorage());
+        const store = new QueryHistoryStore("u", "default", fakeStorage());
 
         store.record(entry("select 1", { timestamp: 1, rowCount: 3, ok: true }));
         store.record(entry("select 1", { timestamp: 2, rowCount: 9, ok: false }));
@@ -41,7 +41,7 @@ describe("QueryHistoryStore", () => {
     });
 
     it("moves a non-consecutive repeat to the head instead of duplicating it", () => {
-        const store = new QueryHistoryStore("default", fakeStorage());
+        const store = new QueryHistoryStore("u", "default", fakeStorage());
 
         store.record(entry("select 1"));
         store.record(entry("select 2"));
@@ -56,7 +56,7 @@ describe("QueryHistoryStore", () => {
     });
 
     it("caps at max, dropping the oldest on overflow", () => {
-        const store = new QueryHistoryStore("default", fakeStorage(), 2);
+        const store = new QueryHistoryStore("u", "default", fakeStorage(), 2);
 
         store.record(entry("a"));
         store.record(entry("b"));
@@ -67,17 +67,38 @@ describe("QueryHistoryStore", () => {
 
     it("returns an empty list on malformed stored JSON (no throw)", () => {
         const storage = fakeStorage();
-        storage.map.set("sqladmin.history.default", "{not json");
+        storage.map.set("sqladmin.history.u.default", "{not json");
 
-        const store = new QueryHistoryStore("default", storage);
+        const store = new QueryHistoryStore("u", "default", storage);
 
         expect(store.list()).toEqual([]);
     });
 
+    it("stores under the key sqladmin.history.<user>.<connection>", () => {
+        const storage = fakeStorage();
+        const store   = new QueryHistoryStore("u", "default", storage);
+
+        store.record(entry("select 1"));
+
+        expect(storage.map.has("sqladmin.history.u.default")).toBe(true);
+    });
+
     it("keeps separate lists per connection (no cross-read)", () => {
         const storage = fakeStorage();
-        const a = new QueryHistoryStore("connA", storage);
-        const b = new QueryHistoryStore("connB", storage);
+        const a = new QueryHistoryStore("u", "connA", storage);
+        const b = new QueryHistoryStore("u", "connB", storage);
+
+        a.record(entry("from A"));
+        b.record(entry("from B"));
+
+        expect(a.list().map(e => e.sql)).toEqual(["from A"]);
+        expect(b.list().map(e => e.sql)).toEqual(["from B"]);
+    });
+
+    it("keeps separate lists per user on the same connection (no cross-read)", () => {
+        const storage = fakeStorage();
+        const a = new QueryHistoryStore("userA", "default", storage);
+        const b = new QueryHistoryStore("userB", "default", storage);
 
         a.record(entry("from A"));
         b.record(entry("from B"));
@@ -87,7 +108,7 @@ describe("QueryHistoryStore", () => {
     });
 
     it("clear() empties the list", () => {
-        const store = new QueryHistoryStore("default", fakeStorage());
+        const store = new QueryHistoryStore("u", "default", fakeStorage());
 
         store.record(entry("select 1"));
         store.clear();
@@ -98,7 +119,7 @@ describe("QueryHistoryStore", () => {
 
 describe("SavedQueryStore", () => {
     it("saves and lists named queries sorted by name", () => {
-        const store = new SavedQueryStore("default", fakeStorage());
+        const store = new SavedQueryStore("u", "default", fakeStorage());
 
         store.save("beta", "select 2");
         store.save("alpha", "select 1");
@@ -107,7 +128,7 @@ describe("SavedQueryStore", () => {
     });
 
     it("upserts by name — re-saving overwrites, leaving one entry", () => {
-        const store = new SavedQueryStore("default", fakeStorage());
+        const store = new SavedQueryStore("u", "default", fakeStorage());
 
         store.save("q", "select 1");
         store.save("q", "select 2");
@@ -117,7 +138,7 @@ describe("SavedQueryStore", () => {
     });
 
     it("remove() deletes and get() returns undefined for a missing name", () => {
-        const store = new SavedQueryStore("default", fakeStorage());
+        const store = new SavedQueryStore("u", "default", fakeStorage());
 
         store.save("q", "select 1");
         store.remove("q");
@@ -126,10 +147,31 @@ describe("SavedQueryStore", () => {
         expect(store.list()).toEqual([]);
     });
 
+    it("stores under the key sqladmin.saved.<user>.<connection>", () => {
+        const storage = fakeStorage();
+        const store   = new SavedQueryStore("u", "default", storage);
+
+        store.save("q", "select 1");
+
+        expect(storage.map.has("sqladmin.saved.u.default")).toBe(true);
+    });
+
     it("keeps separate stores per connection (no cross-read)", () => {
         const storage = fakeStorage();
-        const a = new SavedQueryStore("connA", storage);
-        const b = new SavedQueryStore("connB", storage);
+        const a = new SavedQueryStore("u", "connA", storage);
+        const b = new SavedQueryStore("u", "connB", storage);
+
+        a.save("q", "from A");
+        b.save("q", "from B");
+
+        expect(a.get("q")?.sql).toEqual("from A");
+        expect(b.get("q")?.sql).toEqual("from B");
+    });
+
+    it("keeps separate stores per user on the same connection (no cross-read)", () => {
+        const storage = fakeStorage();
+        const a = new SavedQueryStore("userA", "default", storage);
+        const b = new SavedQueryStore("userB", "default", storage);
 
         a.save("q", "from A");
         b.save("q", "from B");

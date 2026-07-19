@@ -255,15 +255,22 @@ export class SqlAdminController {
         this.properties      = new PropertiesPanel();
         this.rolesProperties = new RolesPropertiesPanel();
 
-        // Production storage is the DOM localStorage (persisted per connection);
-        // the pure stores keep it injected so their logic tests run DOM-less.
-        this._history = new QueryHistoryStore(connectionId, window.localStorage);
-        this._saved   = new SavedQueryStore(connectionId, window.localStorage);
-        this._notes   = new NotesStore(connectionId, window.localStorage);
+        // Every localStorage store is scoped to the signed-in user so nothing
+        // bleeds between users on a shared browser. Fall back to "default" when the
+        // username is absent (a bare test construction), keeping the key well-formed.
+        const userId = username || "default";
 
-        // No connectionId — layout is global by design, unlike the three stores
-        // above it (see data/layoutStore.ts).
-        this.layout = new LayoutStore(window.localStorage);
+        // Production storage is the DOM localStorage (persisted per user and
+        // connection); the pure stores keep it injected so their logic tests run
+        // DOM-less. History, saved queries, and notes are the user's own work
+        // against a specific database, so they carry both the user and connection.
+        this._history = new QueryHistoryStore(userId, connectionId, window.localStorage);
+        this._saved   = new SavedQueryStore(userId, connectionId, window.localStorage);
+        this._notes   = new NotesStore(userId, connectionId, window.localStorage);
+
+        // No connectionId — layout is a property of the user's window, not of the
+        // database being viewed, so it is scoped per user only (see data/layoutStore.ts).
+        this.layout = new LayoutStore(userId, window.localStorage);
 
         // Disposal is wired once: the dock fires "close" only on genuine
         // destruction (a tear-off fires "detach" and the panel survives). A
