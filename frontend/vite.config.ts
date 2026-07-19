@@ -28,6 +28,18 @@ export default defineConfig({
         dedupe: ["@jimka/typescript-ui"],
     },
     optimizeDeps: {
+        // The schema/database diagrams lazily `import("elkjs/lib/elk.bundled.js")`,
+        // which is a CommonJS/UMD bundle. Because @jimka/typescript-ui is excluded
+        // below, vite's dep scanner never looks inside it and so never discovers —
+        // or CJS→ESM pre-bundles — elkjs. Served raw, its `default` export is
+        // undefined, so `new ELK()` throws inside the library and the diagram
+        // silently renders empty (the failure is swallowed by its layout catch).
+        // Pre-bundling elkjs explicitly restores a proper default export. This only
+        // bites when the library is an installed package (a real node_modules copy,
+        // as the published ^0.1.0 resolves); with the file: symlink vite scanned the
+        // linked source and pre-bundled elkjs on its own. Production builds are
+        // unaffected — Rollup handles the CJS interop at build time.
+        include: ["elkjs/lib/elk.bundled.js"],
         exclude: ["@jimka/typescript-ui"],
     },
 });
