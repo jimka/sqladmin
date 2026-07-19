@@ -625,6 +625,16 @@ export class QueryPanel {
                 if (seq === runSeq) {
                     showResult(result);
                     onRun?.({ sql, timestamp: Date.now(), ok: true, rowCount: resultRowCount(result) });
+                    // Keep the caret in the editor after a run. showResult selects
+                    // the Data tab, and selecting a tab moves DOM focus to its strip
+                    // button (the roving tab index), so without this the keyboard
+                    // lands on the result strip — useless for the common "run, tweak,
+                    // re-run" loop. A freshly-added tab's activation is DEFERRED to the
+                    // next layout (its cell does not exist yet), so a synchronous
+                    // refocus here would be overridden by that later focus; reclaim it
+                    // after the batched layout instead. (Errors don't select a tab, so
+                    // they leave focus put.)
+                    Component.afterNextLayout(() => editor.focus());
                 }
             } catch (error) {
                 if (seq === runSeq) {
@@ -924,12 +934,17 @@ export class QueryPanel {
         diagramButton.setEnabled(false);
         exportButton.setEnabled(false);
 
-        // Focus the editor so the user can type on a fresh tab straight away. The
-        // panel content is built before the Dock mounts it, so the element may not
-        // exist yet — onFirstLayout runs once the editor has been mounted and laid
-        // out, when it can take focus (and never fires for a tab closed before it
-        // mounts).
-        editor.onFirstLayout(() => editor.focus());
+        // Focus the editor so the user can type on a fresh tab straight away, with
+        // the caret at the end of the text — so a panel opened over an existing
+        // query (the "Open query" path seeds it) lands ready to continue typing
+        // rather than at the top. The panel content is built before the Dock mounts
+        // it, so the element may not exist yet — onFirstLayout runs once the editor
+        // has been mounted and laid out, when it can take focus and place the caret
+        // (and never fires for a tab closed before it mounts).
+        editor.onFirstLayout(() => {
+            editor.focus();
+            editor.moveCursorToEnd();
+        });
 
         // Defer an auto-run/-explain (Open-as-query "Execute", the view panel's
         // Explain) to the editor's first layout. The FIRST query tab is created while
