@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jimka/typescript-ui": "file:../../typescript-ui",
+    "@jimka/typescript-ui": "file:../../typescript-ui/packages/lib",
     "elkjs": "^0.9.3"
   },
   "devDependencies": {
