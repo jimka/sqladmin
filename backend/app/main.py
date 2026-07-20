@@ -1,8 +1,8 @@
 """
 FastAPI app: lifespan (start/stop the idle-session sweep), the exception handler
-mapping the typed taxonomy to ``(status, {detail})``, credentialed CORS for the
-dev origins, the auth/config routes, and the thin per-object routes (resolve the
-session's pool -> acquire -> construct op -> apply -> get_result).
+mapping the typed taxonomy to ``(status, {detail})``, the auth/config routes, and
+the thin per-object routes (resolve the session's pool -> acquire -> construct
+op -> apply -> get_result).
 
 Authenticated routes are namespaced ``/api/{connection_id}/...``. The pool is
 resolved from the request's **session cookie** (see ``auth.py`` /
@@ -23,11 +23,10 @@ from typing import AsyncIterator
 
 import asyncpg
 from fastapi import Body, Depends, FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from .auth import login, logout, require_csrf, require_session, whoami
-from .config import app_config
+from .auth import log_dial_policy, login, logout, require_csrf, require_session, whoami
+from .config import app_config, enable_docs
 from .connections import (
     SWEEP_INTERVAL_SECONDS,
     Session,
@@ -92,9 +91,6 @@ from .operations import (
     ViewDefinitionQuery,
 )
 
-# The Vite dev server and the library gallery dev server.
-_DEV_ORIGINS = ["http://localhost:5173", "http://localhost:8015"]
-
 # Default page size when the client omits one (mirrors the proxy's own default).
 _DEFAULT_PAGE_SIZE = 100
 
@@ -121,6 +117,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pool on shutdown. The app boots with **zero** pools — they are created only
     by a successful login.
     """
+    log_dial_policy()
+
     sweep_task = asyncio.create_task(_sweep_loop())
 
     try:
@@ -134,14 +132,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await close_all_sessions()
 
 
-app = FastAPI(title="SQLAdmin", lifespan=lifespan)
+# The interactive docs publish the whole API surface with no authentication,
+# so they are off unless SQLADMIN_ENABLE_DOCS opts them back in.
+_docs_on = enable_docs()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_DEV_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+app = FastAPI(
+    title="SQLAdmin",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs_on else None,
+    redoc_url="/redoc" if _docs_on else None,
+    openapi_url="/openapi.json" if _docs_on else None,
 )
 
 # Auth routes plus the pre-auth config route (handlers live in auth.py/config.py).
@@ -157,7 +157,9 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
     """
     Map a typed domain error to its HTTP status with a ``{detail}`` body.
     """
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return JSONResponse(
+        status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers
+    )
 
 
 @app.exception_handler(asyncpg.PostgresError)
