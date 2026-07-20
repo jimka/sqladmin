@@ -1,8 +1,5 @@
-# SQLAdmin local stack.
-#
-# Phase 0 brings up the database. The backend (FastAPI + asyncpg) and frontend
-# (Vite) services are added to this same file as they are built — their stubs
-# are sketched below so the intended topology is visible.
+# SQLAdmin local stack: a seeded Postgres plus the all-in-one app image
+# (API + built frontend, see the root Dockerfile).
 services:
   db:
     image: postgres:16-alpine
@@ -25,9 +22,13 @@ services:
       timeout: 3s
       retries: 10
 
-  backend:                         # FastAPI + asyncpg
-    build: ./backend
-    container_name: sqladmin-backend
+  app:                             # all-in-one: API + built frontend
+    # `build` and `image` together: `docker compose up --build` builds from
+    # this tree and tags it; `docker compose pull` fetches the published one.
+    build:
+      context: .
+    image: ghcr.io/jimka/sqladmin:0.1.0
+    container_name: sqladmin-app
     restart: unless-stopped
     environment:
       # The backend dials the host each login supplies, guarded by a default-deny
@@ -45,20 +46,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-
-  # --- added in later Phase 0 steps ---
-  #
-  # frontend:                      # Vite dev server
-  #   build: ./frontend
-  #   ports:
-  #     - "5173:5173"
-  #   depends_on:
-  #     - backend
-  #   # NOTE: a host `npm link` to ../typescript-ui does NOT survive into a
-  #   #   container. A containerized frontend must consume the library via
-  #   #   file:../typescript-ui (with the lib's dist mounted into the build
-  #   #   context) or an `npm pack` tarball. For the tight dev loop we run the
-  #   #   frontend on the host (npm link) and containerize only db (+ backend).
 
 volumes:
   db-data:
