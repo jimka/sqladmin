@@ -43,12 +43,21 @@ It is not hardened for exposure to the public internet:
 |-------|-------|
 | Frontend | TypeScript + [Vite](https://vitejs.dev/), built on the `@jimka/typescript-ui` component library |
 | Backend  | [FastAPI](https://fastapi.tiangolo.com/) + [asyncpg](https://github.com/MagicStack/asyncpg), CQRS `Query`/`Command` handlers over per-session connection pools |
-| Database | PostgreSQL 16 |
+| Database | PostgreSQL (11 is likely the oldest compatible version, but this has not been validated) |
 
 The backend is thin and stateless-per-request: each request resolves its
 connection pool from a server-side session cookie, applies a single operation
 handler, and maps the result to a wire contract. Authorization is the Postgres
 role's own grants — there is no app-level user table.
+
+SQLAdmin connects to whatever PostgreSQL server you point it at, so its
+compatibility floor is set by the catalog features it reads, not by any one
+release. The oldest it should work against is **PostgreSQL 11** — the version
+that introduced `pg_proc.prokind`, which the function/procedure listing
+depends on. Server-side generated columns (PostgreSQL 12+) are shown when the
+target has them and simply absent otherwise. This floor is derived from the
+catalog features in use, not tested against a live pre-16 server. The demo
+stack ships PostgreSQL 16.
 
 See [`backend/README.md`](backend/README.md) for backend internals and
 [`LIBRARY_NOTES.md`](LIBRARY_NOTES.md) for notes on the UI library.
