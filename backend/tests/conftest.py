@@ -7,8 +7,10 @@ from __future__ import annotations
 from typing import cast
 
 import asyncpg
+import pytest
 
 from app.contract import ColumnMeta, TableRef, WireType
+from app.rate_limit import _failures
 
 # Stand-in connection for pure-logic tests that never touch the database. The
 # operations require a real connection only in apply(); the phases under test
@@ -46,3 +48,18 @@ ROW_COLS = [
     col("name"),
     col("balance", WireType.STRING),
 ]
+
+
+@pytest.fixture(autouse=True)
+def _reset_login_rate_limit():
+    """
+    Empty the login rate limiter's module-global state before and after every
+    test. Without this, failed-login route tests in different modules share one
+    bucket (httpx's ``ASGITransport`` reports one fixed client address) and leak
+    state into each other.
+    """
+    _failures.clear()
+
+    yield
+
+    _failures.clear()

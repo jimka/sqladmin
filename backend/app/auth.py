@@ -27,7 +27,8 @@ from .connections import (
     create_session,
     get_session,
 )
-from .errors import Forbidden, Unauthorized, ValidationError
+from .errors import DomainError, Forbidden, Unauthorized, ValidationError
+from .rate_limit import check_login_rate_limit, clear_login_failures, record_login_failure
 
 _logger = logging.getLogger(__name__)
 
@@ -223,6 +224,8 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
     Route: ``POST /api/login``.
 
     Raises:
+        TooManyRequests: if this client has too many recent failed attempts
+            (429), before any validation or dial.
         ValidationError: on a malformed body (422).
         Forbidden: if the host is not allowlisted (403), before any dial.
         Unauthorized: if Postgres rejects the credentials, the database is
@@ -232,25 +235,33 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
     Returns:
         ``{connectionId, csrfToken, username, database}`` and a ``Set-Cookie``.
     """
-    parts = _conn_parts(body)
-
-    if not is_host_allowed(parts.host, parts.port):
-        raise Forbidden(
-            f"Host not allowed: '{parts.host}:{parts.port}' is not in "
-            f"{_ALLOWED_HOSTS_ENV}"
-        )
+    check_login_rate_limit(request)
 
     try:
-        session = await create_session(parts)
-    except (
-        asyncpg.InvalidAuthorizationSpecificationError,
-        asyncpg.InvalidPasswordError,
-    ) as err:
-        raise Unauthorized("Invalid credentials") from err
-    except asyncpg.InvalidCatalogNameError as err:
-        raise Unauthorized("Cannot open target database") from err
-    except (OSError, ConnectionError, asyncpg.CannotConnectNowError, asyncio.TimeoutError) as err:
-        raise Unauthorized("Cannot reach database") from err
+        parts = _conn_parts(body)
+
+        if not is_host_allowed(parts.host, parts.port):
+            raise Forbidden(
+                f"Host not allowed: '{parts.host}:{parts.port}' is not in "
+                f"{_ALLOWED_HOSTS_ENV}"
+            )
+
+        try:
+            session = await create_session(parts)
+        except (
+            asyncpg.InvalidAuthorizationSpecificationError,
+            asyncpg.InvalidPasswordError,
+        ) as err:
+            raise Unauthorized("Invalid credentials") from err
+        except asyncpg.InvalidCatalogNameError as err:
+            raise Unauthorized("Cannot open target database") from err
+        except (OSError, ConnectionError, asyncpg.CannotConnectNowError, asyncio.TimeoutError) as err:
+            raise Unauthorized("Cannot reach database") from err
+    except DomainError:
+        record_login_failure(request)
+        raise
+
+    clear_login_failures(request)
 
     response.set_cookie(
         SESSION_COOKIE_NAME,

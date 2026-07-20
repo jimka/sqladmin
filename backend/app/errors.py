@@ -15,16 +15,18 @@ class DomainError(Exception):
 
     status_code: int = 400
 
-    def __init__(self, detail: str) -> None:
+    def __init__(self, detail: str, headers: dict[str, str] | None = None) -> None:
         """
         Store the human-readable detail used as the response body.
 
         Args:
             detail: the message returned to the client as ``{"detail": ...}``.
+            headers: extra response headers to attach (e.g. ``Retry-After``).
         """
         super().__init__(detail)
 
         self.detail: str = detail
+        self.headers: dict[str, str] | None = headers
 
 
 class ValidationError(DomainError):
@@ -67,3 +69,11 @@ class Forbidden(DomainError):
     """
 
     status_code: int = 403
+
+
+class TooManyRequests(DomainError):
+    """
+    The login rate limit was exceeded (see ``rate_limit.py``).
+    """
+
+    status_code: int = 429
