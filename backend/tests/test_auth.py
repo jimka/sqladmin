@@ -76,8 +76,8 @@ def test_session_pool_for_mismatch_raises() -> None:
 # --- routes (ASGITransport, no real Postgres) ----------------------------
 
 
-def _client() -> AsyncClient:
-    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+def _client(base_url: str = "http://test") -> AsyncClient:
+    return AsyncClient(transport=ASGITransport(app=app), base_url=base_url)
 
 
 async def test_login_host_not_allowed_is_403(monkeypatch) -> None:
@@ -92,6 +92,8 @@ async def test_login_host_not_allowed_is_403(monkeypatch) -> None:
 
     assert resp.status_code == 403
     assert "set-cookie" not in resp.headers
+    assert "evil.host:5432" in resp.json()["detail"]
+    assert "SQLADMIN_ALLOWED_HOSTS" in resp.json()["detail"]
 
 
 async def test_login_empty_allowlist_is_403(monkeypatch) -> None:
@@ -122,6 +124,7 @@ async def test_login_unreachable_host_is_401(monkeypatch) -> None:
     assert resp.status_code == 401
     assert "supersecret" not in resp.text
     assert "set-cookie" not in resp.headers
+    assert "SQLADMIN_ALLOWED_HOSTS" not in resp.json()["detail"]
 
 
 async def test_protected_route_without_cookie_is_401() -> None:
@@ -173,3 +176,89 @@ async def test_sweep_evicts_idle_session() -> None:
         assert pool.closed is True
     finally:
         connections._sessions.pop("old", None)
+
+
+# --- cookie Secure derivation ---------------------------------------------
+
+
+async def _mock_create_session(parts) -> Session:
+    """A stand-in ``create_session`` that never dials Postgres."""
+    return _fake_session()
+
+
+async def test_login_cookie_no_secure_over_http_by_default(monkeypatch) -> None:
+    monkeypatch.setenv("SQLADMIN_ALLOWED_HOSTS", "h:5432")
+    monkeypatch.delenv("SQLADMIN_COOKIE_SECURE", raising=False)
+    monkeypatch.setattr("app.auth.create_session", _mock_create_session)
+
+    async with _client() as client:
+        resp = await client.post(
+            "/api/login",
+            json={"host": "h", "port": 5432, "database": "d",
+                  "username": "u", "password": "p"},
+        )
+
+    cookie = resp.headers["set-cookie"]
+    assert "HttpOnly" in cookie
+    assert "Secure" not in cookie
+
+
+async def test_login_cookie_secure_over_https_by_default(monkeypatch) -> None:
+    monkeypatch.setenv("SQLADMIN_ALLOWED_HOSTS", "h:5432")
+    monkeypatch.delenv("SQLADMIN_COOKIE_SECURE", raising=False)
+    monkeypatch.setattr("app.auth.create_session", _mock_create_session)
+
+    async with _client(base_url="https://test") as client:
+        resp = await client.post(
+            "/api/login",
+            json={"host": "h", "port": 5432, "database": "d",
+                  "username": "u", "password": "p"},
+        )
+
+    assert "Secure" in resp.headers["set-cookie"]
+
+
+async def test_login_cookie_secure_override_true(monkeypatch) -> None:
+    monkeypatch.setenv("SQLADMIN_ALLOWED_HOSTS", "h:5432")
+    monkeypatch.setenv("SQLADMIN_COOKIE_SECURE", "true")
+    monkeypatch.setattr("app.auth.create_session", _mock_create_session)
+
+    async with _client() as client:
+        resp = await client.post(
+            "/api/login",
+            json={"host": "h", "port": 5432, "database": "d",
+                  "username": "u", "password": "p"},
+        )
+
+    assert "Secure" in resp.headers["set-cookie"]
+
+
+async def test_login_cookie_secure_override_false(monkeypatch) -> None:
+    monkeypatch.setenv("SQLADMIN_ALLOWED_HOSTS", "h:5432")
+    monkeypatch.setenv("SQLADMIN_COOKIE_SECURE", "false")
+    monkeypatch.setattr("app.auth.create_session", _mock_create_session)
+
+    async with _client(base_url="https://test") as client:
+        resp = await client.post(
+            "/api/login",
+            json={"host": "h", "port": 5432, "database": "d",
+                  "username": "u", "password": "p"},
+        )
+
+    assert "Secure" not in resp.headers["set-cookie"]
+
+
+async def test_login_cookie_secure_unrecognized_falls_back_to_auto(monkeypatch) -> None:
+    monkeypatch.setenv("SQLADMIN_ALLOWED_HOSTS", "h:5432")
+    monkeypatch.setenv("SQLADMIN_COOKIE_SECURE", "banana")
+    monkeypatch.setattr("app.auth.create_session", _mock_create_session)
+
+    async with _client() as client:
+        resp = await client.post(
+            "/api/login",
+            json={"host": "h", "port": 5432, "database": "d",
+                  "username": "u", "password": "p"},
+        )
+
+    assert resp.status_code == 200
+    assert "Secure" not in resp.headers["set-cookie"]

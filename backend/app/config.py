@@ -29,6 +29,13 @@ _ALLOW_USER_PRESETS_ENV = "ALLOW_USER_PRESETS"
 # unset) leaves it on.
 _FALSEY = frozenset({"0", "false", "no"})
 
+# Env var opting the FastAPI docs UIs (/docs, /redoc, /openapi.json) back on.
+_ENABLE_DOCS_ENV = "SQLADMIN_ENABLE_DOCS"
+
+# Recognized flag spellings, case-insensitive. Anything else is "unrecognized".
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSE_VALUES = frozenset({"0", "false", "no", "off"})
+
 
 @dataclass(frozen=True)
 class ServerPreset:
@@ -98,6 +105,43 @@ def allow_user_presets() -> bool:
         The flag.
     """
     return os.environ.get(_ALLOW_USER_PRESETS_ENV, "").strip().lower() not in _FALSEY
+
+
+def parse_bool(raw: str | None) -> bool | None:
+    """
+    Parse a recognized true/false flag spelling, case-insensitive.
+
+    Args:
+        raw: the raw environment value, or ``None`` if unset.
+
+    Returns:
+        ``True``/``False`` for a recognized spelling; ``None`` for unset or
+        unrecognized input, so the caller can decide the fallback.
+    """
+    if raw is None:
+        return None
+
+    value = raw.strip().lower()
+
+    if value in _TRUE_VALUES:
+        return True
+
+    if value in _FALSE_VALUES:
+        return False
+
+    return None
+
+
+def enable_docs() -> bool:
+    """
+    Whether to expose ``/docs``, ``/redoc`` and ``/openapi.json``.
+
+    Off by default: these publish the whole API surface with no authentication.
+
+    Returns:
+        The flag.
+    """
+    return parse_bool(os.environ.get(_ENABLE_DOCS_ENV)) is True
 
 
 async def app_config() -> dict:

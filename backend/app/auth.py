@@ -12,12 +12,14 @@ mutating requests.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 
 import asyncpg
 from fastapi import Body, Depends, Request, Response
 
+from .config import parse_bool
 from .connections import (
     ConnParts,
     Session,
@@ -26,6 +28,8 @@ from .connections import (
     get_session,
 )
 from .errors import Forbidden, Unauthorized, ValidationError
+
+_logger = logging.getLogger(__name__)
 
 # Name of the opaque server-side session cookie.
 SESSION_COOKIE_NAME = "sqladmin_session"
@@ -42,6 +46,14 @@ _REQUIRED_LOGIN_KEYS = ("host", "port", "database", "username", "password")
 
 # Default client-facing connection label when the login omits one.
 _DEFAULT_CONNECTION_ID = "default"
+
+# Env var controlling the session cookie's `Secure` attribute:
+# "auto" (default) derives it from the request scheme; an explicit
+# true/false value overrides.
+_COOKIE_SECURE_ENV = "SQLADMIN_COOKIE_SECURE"
+
+# The value meaning "derive from the request scheme".
+_COOKIE_SECURE_AUTO = "auto"
 
 
 def allowed_hosts() -> set[str]:
@@ -74,6 +86,53 @@ def is_host_allowed(host: str, port: int) -> bool:
     host_lower = host.lower()
 
     return host_lower in allowed or f"{host_lower}:{port}" in allowed
+
+
+def cookie_secure(request: Request) -> bool:
+    """
+    Whether the session cookie is set with the `Secure` attribute.
+
+    ``SQLADMIN_COOKIE_SECURE`` defaults to ``auto``, which derives the flag from
+    the request's scheme (``https`` -> secure). An explicit ``true``/``false``
+    overrides that; an unrecognized value warns once and falls back to ``auto``.
+
+    Returns:
+        The flag passed to ``Response.set_cookie``.
+    """
+    raw = os.environ.get(_COOKIE_SECURE_ENV, "").strip()
+
+    if not raw or raw.lower() == _COOKIE_SECURE_AUTO:
+        return request.url.scheme == "https"
+
+    override = parse_bool(raw)
+
+    if override is None:
+        _logger.warning(
+            "%s=%r is not auto/true/false; falling back to auto",
+            _COOKIE_SECURE_ENV,
+            raw,
+        )
+        return request.url.scheme == "https"
+
+    return override
+
+
+def log_dial_policy() -> None:
+    """
+    Log the effective host allowlist once at startup, so an unusable
+    (unset) allowlist is discoverable without a failed login first.
+    """
+    allowed = sorted(allowed_hosts())
+
+    if not allowed:
+        _logger.warning(
+            "%s is unset — every login will be rejected with 403. Set it to the "
+            "host:port of the database(s) this instance may dial.",
+            _ALLOWED_HOSTS_ENV,
+        )
+        return
+
+    _logger.info("%s allows: %s", _ALLOWED_HOSTS_ENV, ", ".join(allowed))
 
 
 async def require_session(request: Request) -> Session:
@@ -176,7 +235,10 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
     parts = _conn_parts(body)
 
     if not is_host_allowed(parts.host, parts.port):
-        raise Forbidden("Host not allowed")
+        raise Forbidden(
+            f"Host not allowed: '{parts.host}:{parts.port}' is not in "
+            f"{_ALLOWED_HOSTS_ENV}"
+        )
 
     try:
         session = await create_session(parts)
@@ -194,7 +256,7 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
         SESSION_COOKIE_NAME,
         session.id,
         httponly=True,
-        secure=True,
+        secure=cookie_secure(request),
         samesite="lax",
         path="/",
     )

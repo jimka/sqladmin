@@ -26,7 +26,7 @@ from fastapi import Body, Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from .auth import login, logout, require_csrf, require_session, whoami
+from .auth import log_dial_policy, login, logout, require_csrf, require_session, whoami
 from .config import app_config
 from .connections import (
     SWEEP_INTERVAL_SECONDS,
@@ -121,6 +121,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pool on shutdown. The app boots with **zero** pools — they are created only
     by a successful login.
     """
+    log_dial_policy()
+
     sweep_task = asyncio.create_task(_sweep_loop())
 
     try:
@@ -157,7 +159,9 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
     """
     Map a typed domain error to its HTTP status with a ``{detail}`` body.
     """
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return JSONResponse(
+        status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers
+    )
 
 
 @app.exception_handler(asyncpg.PostgresError)
