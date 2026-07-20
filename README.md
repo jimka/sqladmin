@@ -8,9 +8,18 @@ There is no application user store: you log in as a Postgres role, and what you
 can see and do is exactly what that role is granted. The backend holds no
 connection until you sign in, and drops it when your session ends.
 
-> **Note:** SQLAdmin is currently a demo application for the
-> `@jimka/typescript-ui` component library — it exists to exercise and showcase
-> that library in a real-world app, and is not yet intended for production use.
+## Status and intended use
+
+SQLAdmin 0.1.0 is a working tool, published as source-available noncommercial
+software, built to exercise `@jimka/typescript-ui`. It is intended to run on
+a workstation or a trusted network against databases you control.
+
+It is not hardened for exposure to the public internet:
+
+- No TLS of its own — terminate it at a reverse proxy.
+- A single-process session registry — do not run multiple replicas behind a
+  load balancer.
+- Login rate limiting counts failed attempts per process, not globally.
 
 ## Highlights
 
@@ -46,33 +55,29 @@ See [`backend/README.md`](backend/README.md) for backend internals and
 
 ## Quick start
 
-Bring up the database (seeded with a multi-schema demo — customers, orders,
-sales, inventory, hr, analytics — plus views and a materialized view):
+Two ways to run the published image. Both need `SQLADMIN_ALLOWED_HOSTS`: it
+is **default-deny**, so a bare `docker run` with no allowlist rejects every
+login attempt.
 
 ```bash
-docker compose up -d db
+# Demo stack — app plus a seeded Postgres.
+docker compose up -d
+# Open http://localhost:8000
+# Log in: host sqladmin-db, database sqladmin, user sqladmin, password sqladmin
 ```
-
-Run the backend:
 
 ```bash
-cd backend
-poetry install
-SQLADMIN_ALLOWED_HOSTS=localhost:5432 \
-  poetry run uvicorn app.main:app --reload --port 8000
+# Against your own Postgres running on the host machine.
+docker run --rm -p 8000:8000 \
+  -e SQLADMIN_ALLOWED_HOSTS=host.docker.internal:5432 \
+  --add-host=host.docker.internal:host-gateway \
+  ghcr.io/jimka/sqladmin:0.1.0
 ```
 
-Run the frontend (the dev loop links `@jimka/typescript-ui` from a sibling
-checkout, so the frontend runs on the host rather than in a container):
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open the printed Vite URL and log in against `localhost:5432` /
-database `sqladmin` (the seed's superuser is `sqladmin` / `sqladmin`).
+The second form needs both flags together: inside the container `localhost`
+is the container itself, not the host machine, so the target is
+`host.docker.internal` — and `--add-host` is what makes that name resolve
+(on Linux; Docker Desktop on macOS/Windows resolves it without the flag).
 
 ### Configuration
 
@@ -97,23 +102,43 @@ The backend is driven by environment variables:
   presets offered on the login screen (never credentials).
 - `ALLOW_USER_PRESETS` — set falsy to hide the "save your own preset" UI and
   suppress browser-local presets.
-
-**Reaching a database on the Docker host.** Inside the container, `localhost`
-is the container. Use `host.docker.internal`, and on Linux add
-`--add-host=host.docker.internal:host-gateway`:
-
-```bash
-docker run --rm -p 8000:8000 \
-  -e SQLADMIN_ALLOWED_HOSTS=host.docker.internal:5432 \
-  --add-host=host.docker.internal:host-gateway \
-  <image>
-```
+- `SQLADMIN_STATIC_DIR` — directory holding the built frontend
+  (`index.html` + `assets/`), default `/srv/static`. The published image sets
+  this up already; it exists as an override for a custom image layout.
 
 **Login rate limiting.** More than 10 failed logins from one address within 5
 minutes returns 429 with `Retry-After`. The limits are fixed, and the counter
 is per process — it does not protect a multi-replica deployment.
 
 ## Development
+
+Bring up just the database (seeded with a multi-schema demo — customers,
+orders, sales, inventory, hr, analytics — plus views and a materialized
+view):
+
+```bash
+docker compose up -d db
+```
+
+Run the backend on the host:
+
+```bash
+cd backend
+poetry install
+SQLADMIN_ALLOWED_HOSTS=localhost:5432 \
+  poetry run uvicorn app.main:app --reload --port 8000
+```
+
+Run the frontend on the host:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open the printed Vite URL and log in against `localhost:5432` /
+database `sqladmin` (the seed's superuser is `sqladmin` / `sqladmin`).
 
 ```bash
 # Backend tests
@@ -125,3 +150,12 @@ cd frontend && npm run typecheck && npm test
 
 Deferred features, known issues, and the backlog live in [`TODO.md`](TODO.md);
 in-flight designs live in [`plans/`](plans/).
+
+## Licensing
+
+SQLAdmin is licensed under the [PolyForm Noncommercial License
+1.0.0](LICENSE.md) — source-available, not OSI-approved, noncommercial use
+only. Third-party attribution is in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). `@jimka/typescript-ui`, the
+component library SQLAdmin is built to showcase, is published by the same
+author under the same license.
