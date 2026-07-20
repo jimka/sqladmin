@@ -54,8 +54,9 @@ SQLAdmin connects to whatever PostgreSQL server you point it at, so its
 compatibility floor is set by the catalog features it reads, not by any one
 release. The oldest it should work against is **PostgreSQL 11** — the version
 that introduced `pg_proc.prokind`, which the function/procedure listing
-depends on. Server-side generated columns (PostgreSQL 12+) are shown when the
-target has them and simply absent otherwise. This floor is derived from the
+depends on. Stored generated columns — a PostgreSQL 12 feature — are read
+through `information_schema`, so a server predating them reports none rather
+than erroring, and never raises the floor. This floor is derived from the
 catalog features in use, not tested against a live pre-16 server. The demo
 stack ships PostgreSQL 16.
 

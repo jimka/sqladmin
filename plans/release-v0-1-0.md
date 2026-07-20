@@ -50,7 +50,7 @@ Run after step 4, from a machine (or shell) not logged in to GHCR.
    docker run --rm -d --name sqladmin-pub -p 8000:8000 \
      -e SQLADMIN_ALLOWED_HOSTS=<host>:5432 \
      ghcr.io/jimka/sqladmin:0.1.0
-   curl -sI http://localhost:8000/ | head -1        # 200
+   curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8000/   # 200
    curl -s  http://localhost:8000/api/config        # presets JSON
    docker rm -f sqladmin-pub
    ```
