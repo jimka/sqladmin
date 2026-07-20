@@ -9,6 +9,8 @@ touches-shared: [backend/app/main.py, backend/Dockerfile, README.md, backend/REA
 
 SQLAdmin has never been published. This plan turns the repo into something a stranger can run: it adds a license, third-party attribution, a single all-in-one Docker image that serves both the API and the built frontend, a GitHub Actions workflow that pushes that image to GHCR on a version tag, and a README rewritten around `docker run`.
 
+It builds and proves the release machinery without firing it. Nothing here is published: no tag is pushed, no image reaches GHCR, and every check runs against a locally built image. The irreversible steps live in [`release-v0-1-0.md`](release-v0-1-0.md), which depends on this plan.
+
 Three code changes carry the work. A new `backend/app/static.py` mounts the built frontend and adds a fallback route so any non-API path returns `index.html`; it is wired from the bottom of [`backend/app/main.py`](backend/app/main.py#L1410). A new root `Dockerfile` builds `frontend/dist` in a Node stage and copies it into the Python stage, replacing [`backend/Dockerfile`](backend/Dockerfile#L1) — whose `./backend` build context cannot see `frontend/`. A new `scripts/generate_third_party_notices.py` regenerates the dependency inventory in `THIRD-PARTY-NOTICES.md` from the two lockfiles.
 
 Everything else is metainformation and documentation: `LICENSE.md`, license fields in [`frontend/package.json`](frontend/package.json#L1) and [`backend/pyproject.toml`](backend/pyproject.toml#L1), a rewritten [`docker-compose.yml`](docker-compose.yml#L1), and a rewritten quick start in [`README.md`](README.md#L54).
@@ -406,15 +408,7 @@ The script exits non-zero if any package resolves to `UNKNOWN`, so a new depende
 
 18. **Update `backend/README.md`.** Add a short paragraph after the "Run locally" section noting that `SQLADMIN_STATIC_DIR` (default `/srv/static`) makes the backend serve a built frontend, and that when the directory is absent the backend serves the API only — the development arrangement.
 
-### Phase 6 — Release (irreversible; run only after `## Verification` is fully green)
-
-19. **Regenerate the notices** one final time (`python3 scripts/generate_third_party_notices.py`) and confirm the file is unchanged, per `## Verification` step 4. If it did change, commit the regenerated file before tagging.
-
-20. **Tag and push:** `git tag v0.1.0 && git push origin v0.1.0`. Watch the workflow to completion.
-
-21. **Make the GHCR package public.** A package pushed under a user account is **private by default** — `docker pull` fails for everyone else until this is changed. In GitHub: the `sqladmin` package page → Package settings → Change visibility → Public. Also confirm the package is linked to the repo (the `org.opencontainers.image.source` label from `metadata-action` does this automatically).
-
-22. **Confirm the published image** from a machine that is not logged in to GHCR: `docker pull ghcr.io/jimka/sqladmin:0.1.0`, then `docker manifest inspect ghcr.io/jimka/sqladmin:0.1.0` shows both `linux/amd64` and `linux/arm64`.
+This plan stops here. Tagging, pushing, and making the GHCR package public are irreversible, and live in [`release-v0-1-0.md`](release-v0-1-0.md).
 
 ---
 
@@ -466,7 +460,7 @@ The script exits non-zero if any package resolves to `UNKNOWN`, so a new depende
 
 ## Verification
 
-Run in order. Steps 1–7 must all pass **before** Phase 6 tags the release.
+Run in order. All seven must pass before [`release-v0-1-0.md`](release-v0-1-0.md) tags the release. Every check here runs against a locally built image — nothing in this plan is published.
 
 1. **Backend suite:** `cd backend && poetry run pytest` — green, `test_static.py` included.
 2. **Manifest checks:** `cd backend && poetry check` → `All set!`; `cd frontend && npm pkg get license` → `"PolyForm-Noncommercial-1.0.0"`; `npm pkg get private` → `true`.
@@ -486,8 +480,7 @@ Run in order. Steps 1–7 must all pass **before** Phase 6 tags the release.
    ```
 
 7. **Compose stack against the seeded database:** `docker compose up -d --build`, then open `http://localhost:8000`, log in per Expected Behaviour case 12, expand a schema in the navigator, and open a table to confirm rows render. Refresh the page on a deep path to confirm case 13. Tear down with `docker compose down`.
-8. **Multi-arch (post-tag):** `docker manifest inspect ghcr.io/jimka/sqladmin:0.1.0` lists `linux/amd64` and `linux/arm64`.
-9. **Anonymous pull (post-tag, after the visibility flip):** `docker logout ghcr.io && docker pull ghcr.io/jimka/sqladmin:0.1.0` succeeds.
+Multi-arch manifest and anonymous-pull checks can only run after a tag exists; they are `## Verification` in [`release-v0-1-0.md`](release-v0-1-0.md).
 
 ---
 
@@ -531,7 +524,7 @@ Move the existing host-run instructions (poetry, `npm run dev`) into the **Devel
 - **`StaticFiles` raises on a missing directory.** `mount_static` only reaches the `app.mount("/assets", …)` line once `index.html` was found, and a Vite build always emits `index.html` alongside `assets/`. A test fixture must create both, or `mount_static` raises `RuntimeError` before registering anything.
 - **`npm ci` needs a lockfile in the build context.** If `.dockerignore` grows a `*lock*` pattern the Node stage fails immediately. The `.dockerignore` in step 12 lists only directories for exactly this reason.
 - **GHCR packages are private by default.** Step 21 is not optional; skipping it means `docker pull` fails for everyone but the author, with a misleading "not found" error.
-- **The Dockerfile is only exercised at tag time.** The release workflow has no non-tag trigger, so a broken Dockerfile is discovered after an immutable tag exists. Verification step 5 building locally before Phase 6 is the guard.
+- **The Dockerfile is only exercised at tag time.** The release workflow has no non-tag trigger, so a broken Dockerfile is discovered after an immutable tag exists. Verification step 5, which builds locally before any tag is pushed, is the guard.
 - **QEMU still runs the Python stage for arm64.** If the arm64 build times out, the fix is to drop `linux/arm64` from `platforms` and re-tag as `v0.1.1` — not to move the Node stage back under emulation.
 
 ---
@@ -556,6 +549,7 @@ Move the existing host-run instructions (poetry, `npm run dev`) into the **Devel
 - **Publishing the frontend to npm.** It stays `private: true` — it is an application, not a library.
 - **Docker Hub.** GHCR only; the `jimka` name is taken on Docker Hub.
 - **A CI job that builds the image on pull requests.** The release workflow is tag-triggered only.
+- **Performing the release.** Tagging, pushing, and flipping GHCR visibility to public are irreversible and belong to [`release-v0-1-0.md`](release-v0-1-0.md). This plan must not push a tag.
 - **Updating the stale symlink comments** in `frontend/vite.config.ts:3` and `.claude/skills/verify/SKILL.md`. Both describe the removed `npm link` arrangement and are now wrong, but neither is touched by this plan.
 - **A CHANGELOG or release-notes automation.** The git tag is the release marker, matching the sibling project.
 
@@ -595,6 +589,6 @@ Everything below was present in the code when this plan was written. Publishing 
 
 [^generator]: Three approaches were considered. A hand-curated list (what the sibling library does) drifts silently — nothing fails when a transitive dependency changes. A dedicated tool (`license-checker` for npm, `pip-licenses` for Python) means two new dev dependencies and, for npm, an unmaintained package. The chosen approach uses what is already installed: `npm query ":not(.dev)"` returns the whole production tree with a `license` field per entry, and `poetry -C backend show --only main` plus `importlib.metadata` covers the Python side. Both were run against this repo during planning: 71 npm packages and 21 Python packages, zero unresolved licenses. Marker-delimited blocks are what let a generator coexist with the hand-written bundled-asset notices, which no tool can produce because they require reading the upstream license texts.
 
-[^no-ci-notices]: Checking the notices file in CI would mean installing Node, npm, Python, and poetry in a workflow whose only other job is `docker build`, roughly doubling its setup for a file that changes when dependencies change. The release is already a deliberate, manual `git tag`, so a manual regenerate-and-diff immediately before it (Phase 6 step 19) catches the same drift at the same moment.
+[^no-ci-notices]: Checking the notices file in CI would mean installing Node, npm, Python, and poetry in a workflow whose only other job is `docker build`, roughly doubling its setup for a file that changes when dependencies change. The release is already a deliberate, manual `git tag`, so a manual regenerate-and-diff immediately before it (step 1 of [`release-v0-1-0.md`](release-v0-1-0.md)) catches the same drift at the same moment.
 
 [^framing]: The current README note — "a demo application … not yet intended for production use" — was accurate when running SQLAdmin required cloning the repo, installing poetry, and starting two dev servers. A pullable image removes every one of those filters, so the note stops being a barrier and becomes a disclaimer nobody acts on. Replacing it with concrete limits (no TLS of its own, single process, per-process rate limiting) tells an operator what to actually check before pointing it at a database, which a blanket "not for production" does not. The `@jimka/typescript-ui` showcase framing stays, but as provenance rather than as a warning.
