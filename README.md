@@ -53,6 +53,29 @@ role's own grants — there is no app-level user table.
 See [`backend/README.md`](backend/README.md) for backend internals and
 [`LIBRARY_NOTES.md`](LIBRARY_NOTES.md) for notes on the UI library.
 
+## Coming from phpMyAdmin?
+
+The mental model is the same: you log in as a database role, and that role's
+grants are the only authorization — there is no separate admin account. Three
+things differ from a phpMyAdmin setup.
+
+- **Credentials stay on the server.** phpMyAdmin's cookie auth is stateless
+  per request, so it stores your database credentials encrypted in the
+  browser cookie and reopens the connection on each request — which is why it
+  needs a `blowfish_secret`. SQLAdmin instead holds a live per-session
+  connection pool server-side, keyed by an opaque cookie that carries nothing
+  decryptable, so there is no secret passphrase to configure. The trade-off is
+  the single-replica limit noted above: that pool lives in one process's
+  memory.
+- **Configuration is environment variables, not a config file.** There is no
+  `config.inc.php`. The server presets, the host allowlist, and everything
+  else are set through the variables under [Configuration](#configuration).
+- **Connecting is default-deny, not a fixed server.** phpMyAdmin points at a
+  configured `PMA_HOST` and hides ad-hoc connections behind
+  `AllowArbitraryServer`. SQLAdmin starts by denying every host; you open
+  specific ones with `SQLADMIN_ALLOWED_HOSTS` — closer to phpMyAdmin *with*
+  `AllowArbitraryServer` on, but gated by the allowlist.
+
 ## Quick start
 
 **`SQLADMIN_ALLOWED_HOSTS` is always required**, remote or local: it is
