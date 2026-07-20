@@ -79,12 +79,39 @@ database `sqladmin` (the seed's superuser is `sqladmin` / `sqladmin`).
 The backend is driven by environment variables:
 
 - `SQLADMIN_ALLOWED_HOSTS` — comma-separated `host` / `host:port` allowlist of
-  targets the backend may dial. **Default-deny**: an unset allowlist rejects
-  every login.
+  targets the backend may dial. **Required**: an unset allowlist rejects every
+  login (default-deny).
+- `SQLADMIN_COOKIE_SECURE` — `auto` (default), `true`, or `false`. Under `auto`,
+  the session cookie is marked `Secure` when the request arrived over https.
+  This is what makes reaching SQLAdmin over plain http on a LAN address work,
+  where before the cookie was silently dropped by the browser.
+- `SQLADMIN_ENABLE_DOCS` — off by default; set truthy to expose `/docs`,
+  `/redoc`, and `/openapi.json`, which publish the whole API surface without
+  authentication.
+- `FORWARDED_ALLOW_IPS` — uvicorn's own variable. Behind a reverse proxy, set
+  it to the proxy's address so SQLAdmin sees the real scheme and the real
+  client address. Left unset, the session cookie is never marked `Secure`
+  even when the browser is on https, and every client shares one login
+  rate-limit bucket.
 - `SERVER_PRESETS` — JSON array of `{name, host, port, database}` connection
   presets offered on the login screen (never credentials).
 - `ALLOW_USER_PRESETS` — set falsy to hide the "save your own preset" UI and
   suppress browser-local presets.
+
+**Reaching a database on the Docker host.** Inside the container, `localhost`
+is the container. Use `host.docker.internal`, and on Linux add
+`--add-host=host.docker.internal:host-gateway`:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e SQLADMIN_ALLOWED_HOSTS=host.docker.internal:5432 \
+  --add-host=host.docker.internal:host-gateway \
+  <image>
+```
+
+**Login rate limiting.** More than 10 failed logins from one address within 5
+minutes returns 429 with `Retry-After`. The limits are fixed, and the counter
+is per process — it does not protect a multi-replica deployment.
 
 ## Development
 

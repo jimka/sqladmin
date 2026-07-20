@@ -20,6 +20,13 @@ SQLADMIN_ALLOWED_HOSTS=localhost:5432 \
 targets the backend may dial (default-deny — an unset allowlist rejects every
 login). Optional:
 
+- `SQLADMIN_COOKIE_SECURE` — `auto` (default), `true`, or `false`. See the
+  root [`README.md`](../README.md#configuration) for the reverse-proxy
+  explanation.
+- `SQLADMIN_ENABLE_DOCS` — off by default; set truthy to expose `/docs`,
+  `/redoc`, and `/openapi.json`.
+- `FORWARDED_ALLOW_IPS` — uvicorn's own variable; see the root
+  [`README.md`](../README.md#configuration) for what it's for.
 - `SERVER_PRESETS` — a JSON array of `{name, host, port, database}` connection
   presets offered on the login screen (never credentials), e.g.
   `SERVER_PRESETS='[{"name":"Local","host":"localhost","port":5432,"database":"sqladmin"}]'`.
@@ -43,3 +50,4 @@ poetry run pytest
 - `app/sql/compiler.py` — pure `FilterCompiler`/`OrderCompiler` + `quote_ident`
 - `app/wire.py` — Postgres/asyncpg -> wire-contract value mapping
 - `app/connections.py` — per-session pool store; `app/errors.py` — exception taxonomy
+- `app/rate_limit.py` — in-process sliding-window rate limit on failed logins
