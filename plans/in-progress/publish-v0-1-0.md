@@ -579,6 +579,25 @@ Everything below was present in the code when this plan was written. Publishing 
 
 ---
 
+## Implementation Notes
+
+- **`curl -sI` in Verification step 6 returns 405, not 200.** `curl -I` sends a
+  `HEAD` request, and FastAPI's `@app.get(...)` decorator does not
+  auto-register `HEAD` the way plain Starlette routes do — confirmed by
+  inspecting `app.routes` directly: only FastAPI's own `/docs`/`/openapi.json`
+  routes carry `{'GET', 'HEAD'}`, every `@app.get` route in this codebase,
+  including the new catch-all, carries only `{'GET'}`. This is not a defect
+  introduced by `mount_static`: no route anywhere in the app supports `HEAD`,
+  and nothing in `## Expected Behaviour` (or a browser navigating the page)
+  ever issues one. The equivalent `GET` checks
+  (`curl -s -o /dev/null -w '%{http_code}'`) against the locally built image
+  all returned the documented codes: `/` → 200 with the title present,
+  `/deep/link` → 200 (SPA fallback), `/api/config` → 200 JSON, `/api/nope` →
+  404 with `{"detail": "No such API route: /api/nope"}`. Adding `HEAD`
+  support to only the new catch-all, to satisfy the letter of one `curl`
+  invocation, would be an unplanned, inconsistent special case — out of scope
+  here.
+
 ## Notes
 
 [^same-license]: The installed package at `frontend/node_modules/@jimka/typescript-ui/package.json` declares `"license": "PolyForm-Noncommercial-1.0.0"` and ships `LICENSE`, `LICENSE-FONTAWESOME.md`, and `THIRD-PARTY-NOTICES.md`. That installed copy — not the source checkout at `/home/jika/typescript/typescript-ui` — is the authoritative artifact, because it is what `npm ci` fetches and what `vite build` bundles into `frontend/dist` and therefore into the image. The source checkout may run ahead of the published tarball, so citing it could describe a license that no consumer actually receives.
