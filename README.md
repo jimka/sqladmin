@@ -55,16 +55,29 @@ See [`backend/README.md`](backend/README.md) for backend internals and
 
 ## Quick start
 
-Both ways need `SQLADMIN_ALLOWED_HOSTS`: it is **default-deny**, so an
-allowlist that names no targets rejects every login attempt.
+**`SQLADMIN_ALLOWED_HOSTS` is always required**, remote or local: it is
+**default-deny**, so a target you don't list is rejected at login with a
+403. It answers "which databases may the app dial?" — every example below
+sets it.
 
-Point the published image at a database you already run — nothing to clone.
-Inside the container `localhost` is the container itself, not the host
-machine, so a database on the host is reached as `host.docker.internal`. How
-that name resolves differs by platform, so pick the block for yours.
+The `host.docker.internal` / `--add-host` part is separate, and answers a
+different question: "can the container reach a database on **localhost**?"
+Inside the container `localhost` is the container itself, not your machine,
+so a database on your own machine is reached as `host.docker.internal` —
+and how that name resolves differs by platform. A remote database has no
+such wrinkle; it resolves by normal DNS and needs only the allowlist.
 
-**Docker Desktop (macOS / Windows)** — `host.docker.internal` resolves on its
-own:
+**A remote database** — a real hostname or IP, any platform:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e SQLADMIN_ALLOWED_HOSTS=db.example.com:5432 \
+  ghcr.io/jimka/sqladmin:0.1.0
+# Open http://localhost:8000
+```
+
+**A database on localhost, Docker Desktop (macOS / Windows)** —
+`host.docker.internal` resolves on its own:
 
 ```bash
 docker run --rm -p 8000:8000 \
@@ -73,8 +86,9 @@ docker run --rm -p 8000:8000 \
 # Open http://localhost:8000
 ```
 
-**Docker Engine on Linux** — the same name needs `--add-host` to resolve at
-all; without it the login fails with "Cannot reach database":
+**A database on localhost, Docker Engine on Linux** — the same name needs
+`--add-host` to resolve at all; without it the login fails with "Cannot
+reach database":
 
 ```bash
 docker run --rm -p 8000:8000 \
@@ -83,10 +97,6 @@ docker run --rm -p 8000:8000 \
   ghcr.io/jimka/sqladmin:0.1.0
 # Open http://localhost:8000
 ```
-
-(Targeting a database that already resolves — a real hostname or IP, not the
-host machine — needs neither `host.docker.internal` nor `--add-host` on any
-platform; allowlist that address and run the first form.)
 
 Or try the demo stack — the app plus a seeded Postgres, with the allowlist
 and a login preset already wired up. This one needs the repository cloned,
