@@ -58,10 +58,25 @@ See [`backend/README.md`](backend/README.md) for backend internals and
 Both ways need `SQLADMIN_ALLOWED_HOSTS`: it is **default-deny**, so an
 allowlist that names no targets rejects every login attempt.
 
-Point the published image at a database you already run — nothing to clone:
+Point the published image at a database you already run — nothing to clone.
+Inside the container `localhost` is the container itself, not the host
+machine, so a database on the host is reached as `host.docker.internal`. How
+that name resolves differs by platform, so pick the block for yours.
+
+**Docker Desktop (macOS / Windows)** — `host.docker.internal` resolves on its
+own:
 
 ```bash
-# Against your own Postgres running on the host machine.
+docker run --rm -p 8000:8000 \
+  -e SQLADMIN_ALLOWED_HOSTS=host.docker.internal:5432 \
+  ghcr.io/jimka/sqladmin:0.1.0
+# Open http://localhost:8000
+```
+
+**Docker Engine on Linux** — the same name needs `--add-host` to resolve at
+all; without it the login fails with "Cannot reach database":
+
+```bash
 docker run --rm -p 8000:8000 \
   -e SQLADMIN_ALLOWED_HOSTS=host.docker.internal:5432 \
   --add-host=host.docker.internal:host-gateway \
@@ -69,10 +84,9 @@ docker run --rm -p 8000:8000 \
 # Open http://localhost:8000
 ```
 
-Both flags are needed together: inside the container `localhost` is the
-container itself, not the host machine, so the target is
-`host.docker.internal` — and `--add-host` is what makes that name resolve
-(on Linux; Docker Desktop on macOS/Windows resolves it without the flag).
+(Targeting a database that already resolves — a real hostname or IP, not the
+host machine — needs neither `host.docker.internal` nor `--add-host` on any
+platform; allowlist that address and run the first form.)
 
 Or try the demo stack — the app plus a seeded Postgres, with the allowlist
 and a login preset already wired up. This one needs the repository cloned,
