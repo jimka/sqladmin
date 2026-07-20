@@ -2,6 +2,12 @@
   "name": "sqladmin-frontend",
   "private": true,
   "version": "0.1.0",
+  "description": "A web-based PostgreSQL admin client — browse schemas, edit rows, run SQL, and visualize schema and roles.",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "Jimmy Karlsson",
+  "repository": { "type": "git", "url": "git+https://github.com/jimka/sqladmin.git", "directory": "frontend" },
+  "homepage": "https://github.com/jimka/sqladmin#readme",
+  "bugs": { "url": "https://github.com/jimka/sqladmin/issues" },
   "type": "module",
   "scripts": {
     "dev": "vite",

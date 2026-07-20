@@ -90,6 +90,7 @@ from .operations import (
     UpdateRowCommand,
     ViewDefinitionQuery,
 )
+from .static import mount_static
 
 # Default page size when the client omits one (mirrors the proxy's own default).
 _DEFAULT_PAGE_SIZE = 100
@@ -1410,3 +1411,9 @@ async def export_rows(
         media_type=media,
         headers={"Content-Disposition": f'attachment; filename="{schema}.{table}.{ext}"'},
     )
+
+
+# Must stay the last statement in this file: it registers a catch-all
+# `GET /{full_path:path}` route, and FastAPI matches routes in registration
+# order. Any @app.get(...) added below this line would be unreachable.
+mount_static(app)

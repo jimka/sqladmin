@@ -35,6 +35,12 @@ login). Optional:
 
 (Bring the database up first from the repo root: `docker compose up -d db`.)
 
+`SQLADMIN_STATIC_DIR` (default `/srv/static`) makes the backend also serve a
+built frontend: if that directory holds an `index.html`, the app mounts it
+and falls back to it for any non-API path. Running locally as above, the
+directory is absent, so the backend serves the API only — the Vite dev
+server (`npm run dev`) is what serves the frontend during development.
+
 ## Test
 
 ```bash

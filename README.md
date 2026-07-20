@@ -8,9 +8,18 @@ There is no application user store: you log in as a Postgres role, and what you
 can see and do is exactly what that role is granted. The backend holds no
 connection until you sign in, and drops it when your session ends.
 
-> **Note:** SQLAdmin is currently a demo application for the
-> `@jimka/typescript-ui` component library — it exists to exercise and showcase
-> that library in a real-world app, and is not yet intended for production use.
+## Status and intended use
+
+SQLAdmin 0.1.0 is a working tool, published as source-available noncommercial
+software, built to exercise `@jimka/typescript-ui`. It is intended to run on
+a workstation or a trusted network against databases you control.
+
+It is not hardened for exposure to the public internet:
+
+- No TLS of its own — terminate it at a reverse proxy.
+- A single-process session registry — do not run multiple replicas behind a
+  load balancer.
+- Login rate limiting counts failed attempts per process, not globally.
 
 ## Highlights
 
@@ -34,45 +43,106 @@ connection until you sign in, and drops it when your session ends.
 |-------|-------|
 | Frontend | TypeScript + [Vite](https://vitejs.dev/), built on the `@jimka/typescript-ui` component library |
 | Backend  | [FastAPI](https://fastapi.tiangolo.com/) + [asyncpg](https://github.com/MagicStack/asyncpg), CQRS `Query`/`Command` handlers over per-session connection pools |
-| Database | PostgreSQL 16 |
+| Database | PostgreSQL (11 is likely the oldest compatible version, but this has not been validated) |
 
 The backend is thin and stateless-per-request: each request resolves its
 connection pool from a server-side session cookie, applies a single operation
 handler, and maps the result to a wire contract. Authorization is the Postgres
 role's own grants — there is no app-level user table.
 
+SQLAdmin connects to whatever PostgreSQL server you point it at, so its
+compatibility floor is set by the catalog features it reads, not by any one
+release. The oldest it should work against is **PostgreSQL 11** — the version
+that introduced `pg_proc.prokind`, which the function/procedure listing
+depends on. Server-side generated columns (PostgreSQL 12+) are shown when the
+target has them and simply absent otherwise. This floor is derived from the
+catalog features in use, not tested against a live pre-16 server. The demo
+stack ships PostgreSQL 16.
+
 See [`backend/README.md`](backend/README.md) for backend internals and
 [`LIBRARY_NOTES.md`](LIBRARY_NOTES.md) for notes on the UI library.
 
+## Coming from phpMyAdmin?
+
+The mental model is the same: you log in as a database role, and that role's
+grants are the only authorization — there is no separate admin account. Three
+things differ from a phpMyAdmin setup.
+
+- **Credentials stay on the server.** phpMyAdmin's cookie auth is stateless
+  per request, so it stores your database credentials encrypted in the
+  browser cookie and reopens the connection on each request — which is why it
+  needs a `blowfish_secret`. SQLAdmin instead holds a live per-session
+  connection pool server-side, keyed by an opaque cookie that carries nothing
+  decryptable, so there is no secret passphrase to configure. The trade-off is
+  the single-replica limit noted above: that pool lives in one process's
+  memory.
+- **Configuration is environment variables, not a config file.** There is no
+  `config.inc.php`. The server presets, the host allowlist, and everything
+  else are set through the variables under [Configuration](#configuration).
+- **Connecting is default-deny, not a fixed server.** phpMyAdmin points at a
+  configured `PMA_HOST` and hides ad-hoc connections behind
+  `AllowArbitraryServer`. SQLAdmin starts by denying every host; you open
+  specific ones with `SQLADMIN_ALLOWED_HOSTS` — closer to phpMyAdmin *with*
+  `AllowArbitraryServer` on, but gated by the allowlist.
+
 ## Quick start
 
-Bring up the database (seeded with a multi-schema demo — customers, orders,
-sales, inventory, hr, analytics — plus views and a materialized view):
+**`SQLADMIN_ALLOWED_HOSTS` is always required**, remote or local: it is
+**default-deny**, so a target you don't list is rejected at login with a
+403. It answers "which databases may the app dial?" — every example below
+sets it.
+
+The `host.docker.internal` / `--add-host` part is separate, and answers a
+different question: "can the container reach a database on **localhost**?"
+Inside the container `localhost` is the container itself, not your machine,
+so a database on your own machine is reached as `host.docker.internal` —
+and how that name resolves differs by platform. A remote database has no
+such wrinkle; it resolves by normal DNS and needs only the allowlist.
+
+**A remote database** — a real hostname or IP, any platform:
 
 ```bash
-docker compose up -d db
+docker run --rm -p 8000:8000 \
+  -e SQLADMIN_ALLOWED_HOSTS=db.example.com:5432 \
+  ghcr.io/jimka/sqladmin:0.1.0
+# Open http://localhost:8000
 ```
 
-Run the backend:
+**A database on localhost, Docker Desktop (macOS / Windows)** —
+`host.docker.internal` resolves on its own:
 
 ```bash
-cd backend
-poetry install
-SQLADMIN_ALLOWED_HOSTS=localhost:5432 \
-  poetry run uvicorn app.main:app --reload --port 8000
+docker run --rm -p 8000:8000 \
+  -e SQLADMIN_ALLOWED_HOSTS=host.docker.internal:5432 \
+  ghcr.io/jimka/sqladmin:0.1.0
+# Open http://localhost:8000
 ```
 
-Run the frontend (the dev loop links `@jimka/typescript-ui` from a sibling
-checkout, so the frontend runs on the host rather than in a container):
+**A database on localhost, Docker Engine on Linux** — the same name needs
+`--add-host` to resolve at all; without it the login fails with "Cannot
+reach database":
 
 ```bash
-cd frontend
-npm install
-npm run dev
+docker run --rm -p 8000:8000 \
+  -e SQLADMIN_ALLOWED_HOSTS=host.docker.internal:5432 \
+  --add-host=host.docker.internal:host-gateway \
+  ghcr.io/jimka/sqladmin:0.1.0
+# Open http://localhost:8000
 ```
 
-Open the printed Vite URL and log in against `localhost:5432` /
-database `sqladmin` (the seed's superuser is `sqladmin` / `sqladmin`).
+Or try the demo stack — the app plus a seeded Postgres, with the allowlist
+and a login preset already wired up. This one needs the repository cloned,
+for `docker-compose.yml` and the seed scripts:
+
+```bash
+docker compose up -d
+# Open http://localhost:8000
+# Log in: host sqladmin-db, database sqladmin, user sqladmin, password sqladmin
+```
+
+Compose declares both `build` and `image`, so `docker compose up` builds the
+image from this tree when it isn't already in the local cache. To run the
+published image instead of building it, `docker compose pull` first.
 
 ### Configuration
 
@@ -88,32 +158,56 @@ The backend is driven by environment variables:
 - `SQLADMIN_ENABLE_DOCS` — off by default; set truthy to expose `/docs`,
   `/redoc`, and `/openapi.json`, which publish the whole API surface without
   authentication.
-- `FORWARDED_ALLOW_IPS` — uvicorn's own variable. Behind a reverse proxy, set
-  it to the proxy's address so SQLAdmin sees the real scheme and the real
-  client address. Left unset, the session cookie is never marked `Secure`
-  even when the browser is on https, and every client shares one login
-  rate-limit bucket.
+- `FORWARDED_ALLOW_IPS` — uvicorn's own variable, defaulting to `127.0.0.1`.
+  Behind a reverse proxy, set it to the proxy's address so SQLAdmin sees the
+  real scheme and the real client address. A proxy at any other address is
+  not trusted until you do: its `X-Forwarded-*` headers are ignored, so the
+  session cookie stays unmarked even when the browser is on https, and every
+  client shares one login rate-limit bucket keyed on the proxy's address.
+  Running SQLAdmin in a container puts it on its own network, so a proxy on
+  the host does not reach it from `127.0.0.1` and the default does not
+  cover it.
 - `SERVER_PRESETS` — JSON array of `{name, host, port, database}` connection
   presets offered on the login screen (never credentials).
 - `ALLOW_USER_PRESETS` — set falsy to hide the "save your own preset" UI and
   suppress browser-local presets.
-
-**Reaching a database on the Docker host.** Inside the container, `localhost`
-is the container. Use `host.docker.internal`, and on Linux add
-`--add-host=host.docker.internal:host-gateway`:
-
-```bash
-docker run --rm -p 8000:8000 \
-  -e SQLADMIN_ALLOWED_HOSTS=host.docker.internal:5432 \
-  --add-host=host.docker.internal:host-gateway \
-  <image>
-```
+- `SQLADMIN_STATIC_DIR` — directory holding the built frontend
+  (`index.html` + `assets/`), default `/srv/static`. The published image sets
+  this up already; it exists as an override for a custom image layout.
 
 **Login rate limiting.** More than 10 failed logins from one address within 5
 minutes returns 429 with `Retry-After`. The limits are fixed, and the counter
 is per process — it does not protect a multi-replica deployment.
 
 ## Development
+
+Bring up just the database (seeded with a multi-schema demo — customers,
+orders, sales, inventory, hr, analytics — plus views and a materialized
+view):
+
+```bash
+docker compose up -d db
+```
+
+Run the backend on the host:
+
+```bash
+cd backend
+poetry install
+SQLADMIN_ALLOWED_HOSTS=localhost:5432 \
+  poetry run uvicorn app.main:app --reload --port 8000
+```
+
+Run the frontend on the host:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open the printed Vite URL and log in against `localhost:5432` /
+database `sqladmin` (the seed's superuser is `sqladmin` / `sqladmin`).
 
 ```bash
 # Backend tests
@@ -125,3 +219,12 @@ cd frontend && npm run typecheck && npm test
 
 Deferred features, known issues, and the backlog live in [`TODO.md`](TODO.md);
 in-flight designs live in [`plans/`](plans/).
+
+## Licensing
+
+SQLAdmin is licensed under the [PolyForm Noncommercial License
+1.0.0](LICENSE.md) — source-available, not OSI-approved, noncommercial use
+only. Third-party attribution is in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). `@jimka/typescript-ui`, the
+component library SQLAdmin is built to showcase, is published by the same
+author under the same license.

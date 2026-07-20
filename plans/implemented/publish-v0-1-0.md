@@ -579,6 +579,49 @@ Everything below was present in the code when this plan was written. Publishing 
 
 ---
 
+## Implementation Notes
+
+- **`curl -sI` in Verification step 6 returns 405, not 200.** `curl -I` sends a
+  `HEAD` request, and FastAPI's `@app.get(...)` decorator does not
+  auto-register `HEAD` the way plain Starlette routes do — confirmed by
+  inspecting `app.routes` directly: only FastAPI's own `/docs`/`/openapi.json`
+  routes carry `{'GET', 'HEAD'}`, every `@app.get` route in this codebase,
+  including the new catch-all, carries only `{'GET'}`. This is not a defect
+  introduced by `mount_static`: no route anywhere in the app supports `HEAD`,
+  and nothing in `## Expected Behaviour` (or a browser navigating the page)
+  ever issues one. The equivalent `GET` checks
+  (`curl -s -o /dev/null -w '%{http_code}'`) against the locally built image
+  all returned the documented codes: `/` → 200 with the title present,
+  `/deep/link` → 200 (SPA fallback), `/api/config` → 200 JSON, `/api/nope` →
+  404 with `{"detail": "No such API route: /api/nope"}`. Adding `HEAD`
+  support to only the new catch-all, to satisfy the letter of one `curl`
+  invocation, would be an unplanned, inconsistent special case — out of scope
+  here.
+
+- **Step 6's Section 1 list was incomplete; two more pass-through notices were
+  added.** The plan named three Section 1 entries (Font Awesome, Manrope,
+  elkjs), but its own cited Critical File —
+  `frontend/node_modules/@jimka/typescript-ui/THIRD-PARTY-NOTICES.md` — states
+  that d3 is inlined into the library's `dist/lib/component/chart.es.js`
+  (lines 133–136 there), which is the same "embedded, not merely installed"
+  category as the three named entries, since SQLAdmin's own Vite build then
+  bundles that inlined code into `frontend/dist`. The same reasoning applies
+  to the library's `dependencies` — CodeMirror, Lexical, `marked`, `prettier`,
+  `sql-formatter` — which the library's own notices describe as *not* bundled
+  (each ships its own license text in the consumer's `node_modules`), but
+  which are true for an npm package's consumers, not for SQLAdmin: Vite
+  bundles anything imported into `frontend/dist`, so these are embedded here
+  too. Added both to `THIRD-PARTY-NOTICES.md` Section 1, each with the license
+  text its terms require verbatim (ISC for d3, MIT for the second group),
+  copied from the same precedent file. Also reworded the file's preamble and
+  the Section 2/3 headers, which originally said runtime dependencies are
+  "installed separately... rather than embedded into the shipped artifact" —
+  true of an npm *package*'s consumers, false for a Docker *image*, where the
+  entire npm production tree ends up bundled into `frontend/dist` and the
+  entire Python main group is installed into the image. Section 2/3 are now
+  framed as the complete inventory (deliberately overlapping Section 1's
+  fuller entries), not a "not bundled" claim.
+
 ## Notes
 
 [^same-license]: The installed package at `frontend/node_modules/@jimka/typescript-ui/package.json` declares `"license": "PolyForm-Noncommercial-1.0.0"` and ships `LICENSE`, `LICENSE-FONTAWESOME.md`, and `THIRD-PARTY-NOTICES.md`. That installed copy — not the source checkout at `/home/jika/typescript/typescript-ui` — is the authoritative artifact, because it is what `npm ci` fetches and what `vite build` bundles into `frontend/dist` and therefore into the image. The source checkout may run ahead of the published tarball, so citing it could describe a license that no consumer actually receives.
