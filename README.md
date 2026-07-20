@@ -55,16 +55,10 @@ See [`backend/README.md`](backend/README.md) for backend internals and
 
 ## Quick start
 
-Two ways to run the published image. Both need `SQLADMIN_ALLOWED_HOSTS`: it
-is **default-deny**, so a bare `docker run` with no allowlist rejects every
-login attempt.
+Both ways need `SQLADMIN_ALLOWED_HOSTS`: it is **default-deny**, so an
+allowlist that names no targets rejects every login attempt.
 
-```bash
-# Demo stack — app plus a seeded Postgres.
-docker compose up -d
-# Open http://localhost:8000
-# Log in: host sqladmin-db, database sqladmin, user sqladmin, password sqladmin
-```
+Point the published image at a database you already run — nothing to clone:
 
 ```bash
 # Against your own Postgres running on the host machine.
@@ -72,12 +66,27 @@ docker run --rm -p 8000:8000 \
   -e SQLADMIN_ALLOWED_HOSTS=host.docker.internal:5432 \
   --add-host=host.docker.internal:host-gateway \
   ghcr.io/jimka/sqladmin:0.1.0
+# Open http://localhost:8000
 ```
 
-The second form needs both flags together: inside the container `localhost`
-is the container itself, not the host machine, so the target is
+Both flags are needed together: inside the container `localhost` is the
+container itself, not the host machine, so the target is
 `host.docker.internal` — and `--add-host` is what makes that name resolve
 (on Linux; Docker Desktop on macOS/Windows resolves it without the flag).
+
+Or try the demo stack — the app plus a seeded Postgres, with the allowlist
+and a login preset already wired up. This one needs the repository cloned,
+for `docker-compose.yml` and the seed scripts:
+
+```bash
+docker compose up -d
+# Open http://localhost:8000
+# Log in: host sqladmin-db, database sqladmin, user sqladmin, password sqladmin
+```
+
+Compose declares both `build` and `image`, so `docker compose up` builds the
+image from this tree when it isn't already in the local cache. To run the
+published image instead of building it, `docker compose pull` first.
 
 ### Configuration
 
@@ -93,11 +102,15 @@ The backend is driven by environment variables:
 - `SQLADMIN_ENABLE_DOCS` — off by default; set truthy to expose `/docs`,
   `/redoc`, and `/openapi.json`, which publish the whole API surface without
   authentication.
-- `FORWARDED_ALLOW_IPS` — uvicorn's own variable. Behind a reverse proxy, set
-  it to the proxy's address so SQLAdmin sees the real scheme and the real
-  client address. Left unset, the session cookie is never marked `Secure`
-  even when the browser is on https, and every client shares one login
-  rate-limit bucket.
+- `FORWARDED_ALLOW_IPS` — uvicorn's own variable, defaulting to `127.0.0.1`.
+  Behind a reverse proxy, set it to the proxy's address so SQLAdmin sees the
+  real scheme and the real client address. A proxy at any other address is
+  not trusted until you do: its `X-Forwarded-*` headers are ignored, so the
+  session cookie stays unmarked even when the browser is on https, and every
+  client shares one login rate-limit bucket keyed on the proxy's address.
+  Running SQLAdmin in a container puts it on its own network, so a proxy on
+  the host does not reach it from `127.0.0.1` and the default does not
+  cover it.
 - `SERVER_PRESETS` — JSON array of `{name, host, port, database}` connection
   presets offered on the login screen (never credentials).
 - `ALLOW_USER_PRESETS` — set falsy to hide the "save your own preset" UI and
