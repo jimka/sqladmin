@@ -1,5 +1,22 @@
 # SQLAdmin local stack: a seeded Postgres plus the all-in-one app image
 # (API + built frontend, see the root Dockerfile).
+#
+# This is a demo and development stack, not a deployment template. It bundles
+# a throwaway database seeded from db/init/, with credentials written in plain
+# text below and port 5432 published to the host. Do not point it at data you
+# care about, and do not adapt it by swapping the image tag alone.
+#
+# Deploying SQLAdmin for real means, at minimum:
+#   - Drop the `db` service. Run your own database, and do not publish its port.
+#   - Set SQLADMIN_ALLOWED_HOSTS to that database instead of the demo one.
+#   - Supply credentials from a secret store, not from this file.
+#   - Terminate TLS at a reverse proxy in front of the app, and set
+#     FORWARDED_ALLOW_IPS to the proxy's address so the session cookie is
+#     marked Secure and rate limiting keys on the real client.
+#   - Run one replica. The session registry and the login rate limiter are
+#     both per process, so a second replica silently weakens each.
+#
+# See the "Status and intended use" and "Configuration" sections of README.md.
 services:
   db:
     image: postgres:16-alpine
