@@ -225,7 +225,19 @@ in-flight designs live in [`plans/`](plans/).
 
 SQLAdmin is licensed under the [PolyForm Noncommercial License
 1.0.0](LICENSE.md) — source-available, not OSI-approved, noncommercial use
-only. Third-party attribution is in
+only.
+
+**Commercial use is not permitted by default, and "commercial" is read
+broadly.** The license covers any purpose related to running a business —
+including pointing SQLAdmin at a company's own database as an internal tool,
+whatever that company sells — not just redistributing or reselling it.
+
+**Commercial licenses are available on request.** If you want to use SQLAdmin
+commercially, or you are not sure whether your use qualifies, open an issue at
+[github.com/jimka/sqladmin/issues](https://github.com/jimka/sqladmin/issues) —
+I would rather answer the question than have you guess.
+
+Third-party attribution is in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). `@jimka/typescript-ui`, the
 component library SQLAdmin is built to showcase, is published by the same
 author under the same license.
