@@ -135,7 +135,7 @@ export class StructurePanel extends Panel {
         // accordion has a definite preferred size for the scroll host — the
         // accordion demo sizes section contents this way.
         for (const grid of [columnsGrid, indexesGrid, constraintsGrid, foreignKeysGrid]) {
-            grid.setPreferredSize(0, SECTION_HEIGHT);
+            grid.setPreferredSize({ width: 0, height: SECTION_HEIGHT });
         }
 
         // Only Columns opens by default — the facet a reader reaches for first;

@@ -69,8 +69,8 @@ export class TreeExplorerView extends AccordionPanel {
         // The tree's section takes all the leftover height via its weight below;
         // TREE_MIN_HEIGHT is its floor, not its target. Pre-super: `this` is
         // unavailable until super() returns.
-        tree.setPreferredSize(0, TREE_MIN_HEIGHT);
-        tree.setMinSize(0, TREE_MIN_HEIGHT);
+        tree.setPreferredSize({ width: 0, height: TREE_MIN_HEIGHT });
+        tree.setMinSize({ width: 0, height: TREE_MIN_HEIGHT });
 
         // Also pre-super — AccordionPanel has no post-construction initiallyOpen
         // setter (see COMPONENT_CONVENTIONS.md's super-cascade trap).

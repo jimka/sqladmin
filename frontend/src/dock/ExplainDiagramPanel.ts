@@ -278,8 +278,8 @@ function buildSummaryTable(summary: ExplainSummary): Component {
     });
     const table = Table(store);
 
-    table.setMinSize(0, 0);
-    table.setPreferredSize(LEFT_WIDTH, SUMMARY_HEIGHT);
+    table.setMinSize({ width: 0, height: 0 });
+    table.setPreferredSize({ width: LEFT_WIDTH, height: SUMMARY_HEIGHT });
 
     return table;
 }
@@ -301,7 +301,7 @@ function buildStepsTable(roots: ExplainPlanNode[]): Table {
 
     // Relax the Table's default 100×100 floor so the accordion can size the
     // section to the column's height rather than the Table's minimum.
-    table.setMinSize(0, 0);
+    table.setMinSize({ width: 0, height: 0 });
 
     return table;
 }
