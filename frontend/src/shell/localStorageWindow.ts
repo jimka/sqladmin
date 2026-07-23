@@ -1,6 +1,6 @@
 // The localStorage inspector: a floating, resizable Window (reached from the
 // Tools menu) that lists every key currently in the browser's localStorage
-// beside its value, and offers a one-click "Clear SQL Admin data" that removes
+// beside its value, and offers a one-click "Clear SQLAdmin data" that removes
 // the app's own keys. A non-modal Window (not a Dialog) so it can stay open
 // beside the app while you inspect or clear stored state.
 //
@@ -36,9 +36,10 @@ import { CodeEditor }           from "@jimka/typescript-ui/component/editor";
 import { Button }               from "@jimka/typescript-ui/component/button";
 import { Spacer }               from "@jimka/typescript-ui/component/container";
 import { Insets, Placement }    from "@jimka/typescript-ui/primitive";
+import { APP_NAME }             from "../appIdentity";
 
 // The prefix the app namespaces its persisted keys under (data/queryStore.ts,
-// data/notesStore.ts, data/layoutStore.ts). "Clear SQL Admin data" removes
+// data/notesStore.ts, data/layoutStore.ts). "Clear SQLAdmin data" removes
 // exactly these, leaving any unrelated origin keys the inspector also lists
 // untouched. The prefix is also trimmed from the key list's row labels.
 const APP_KEY_PREFIX = "sqladmin.";
@@ -264,7 +265,7 @@ function buildContent(win: Window): Component {
     body.addComponent(tree,   { weight: 0 });
     body.addComponent(editor, { weight: VALUE_WEIGHT });
 
-    const clearButton = Button({ text: "Clear SQL Admin data", showText: true, compact: true });
+    const clearButton = Button({ text: `Clear ${APP_NAME} data`, showText: true, compact: true });
     clearButton.on("action", () => {
         clearAppKeys();
         refresh();

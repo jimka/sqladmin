@@ -369,6 +369,75 @@ from `@jimka/typescript-ui/component/input`, `Glyph` from
 
 ---
 
+## Implementation Notes
+
+- **`getAria().setRole("presentation")` was rerouted through `attributes`,
+  not dropped.** The plan's "Internal Structure" and "Potential Challenges"
+  call for setting the header's ARIA role to `presentation` to keep
+  assistive tech from announcing the block as a menu item. The installed
+  library version (`@jimka/typescript-ui@0.2.0`, confirmed via
+  `node_modules/@jimka/typescript-ui/dist/lib/types/core/Aria.d.ts`) types
+  `Aria.setRole` as `(role: AriaRole) => this`, and `AriaRole` is a closed
+  union of concrete widget roles (`menubar`, `menuitem`, `button`, `group`,
+  …) with no `presentation` or `none` member, so `getAria().setRole(...)`
+  does not compile. `AppHeader` instead passes
+  `attributes: { role: "presentation" }` in its `super({...})` call —
+  `Component`'s documented raw-HTML-attribute escape hatch (see
+  `attributes` on `ComponentOptions` in the library's `Component.ts`),
+  which writes the literal attribute untyped. `getAria()` is never called on
+  this instance, so `Aria`'s own `applyToElement` (which runs after
+  `attributes` during `init()` and would otherwise contest the `role`
+  attribute) never runs, and the explicit `role="presentation"` the plan
+  asked for lands on the element exactly as intended. Confirmed live: the
+  mounted `.AppHeader` element carries `role="presentation"`, and case 9
+  (Query/Tools/View still open correctly, Arrow-Left/Right still cycles
+  between them) is unaffected.
+
+- **The block was moved out of the menu bar into its own strip above it, and
+  the connected database was removed — a post-implementation design change on
+  user feedback.** As shipped per the plan, the header sat inside the menu bar
+  (`insertComponent(new AppHeader(database), 0)`), which made it the tallest
+  child of the menu bar's baseline-aligned `HBox`: it stretched the button row
+  (~31px) and sat top-aligned against the menu items — poor UX. On review the
+  user asked for it as its own row above the menu bar and for the database name
+  to be dropped (the status bar's identity badge already pins it). `SqlAdminShell`
+  now stacks `AppHeader` and the menu bar in a `VBox` filling the NORTH band, so
+  the strip sizes to its own content and the menu bar keeps its natural button
+  height. `buildMenuBar` no longer takes or inserts the header, and
+  `appHeaderText` drops its `database` argument and field (the block is now the
+  glyph, the app name, and the version). This reverses the plan's "header is a
+  child of the existing MenuBar" decision and the separate-NORTH-row rejection
+  in its footnote[^why-menubar], and drops the database the "shows the connected
+  database" decision[^which-half] had added. The "No connection host or port in
+  the header" non-goal is untouched — the header never showed host or port, and
+  still doesn't. The glyph, the one-name-source `appIdentity.ts`, and the
+  token-based colours are unchanged. Confirmed live: the strip renders
+  `⛁ SQLAdmin v0.1.0` above the Query/Tools/View row, the menu bar is no longer
+  stretched, and the database shows only in the status bar.
+
+- **`AppHeader` and `ActivityBar` were converted to the library's `callable()`
+  construction — a post-implementation convention change on user feedback.** Both
+  are now unexported `class`es re-exported through `callable()` so call sites
+  construct them without `new` (`AppHeader()`, `ActivityBar(views)`), matching the
+  library's own callable bases; `frontend/COMPONENT_CONVENTIONS.md` (d) was
+  rewritten to make this the class-first standard (other components are
+  not-yet-migrated holdovers). The DOM-less vitest harness cannot exercise runtime
+  construction, so this was manually verified live: the app loads with no console
+  error, and the mounted elements still carry their `constructor.name`-derived CSS
+  classes (`.AppHeader`, `.ActivityBar`) and `role="presentation"` — so the Proxy
+  preserves construction identity (convention (e)).
+
+- **The version label was shrunk to 10px via `setFontSize()`, working around a
+  library bug — a post-implementation refinement on user feedback.** A numeric
+  `fontSize` passed to `Text`'s constructor is silently reverted to the theme
+  default by `Text`'s field initializers, so the size is applied with a
+  post-construction `version.setFontSize(VERSION_FONT_SIZE)` call instead (bug
+  logged in `LIBRARY_NOTES.md`). The size is not automatable in the DOM-less
+  harness, so it was manually verified live: the version computes to `10px` beside
+  the name's `14px`, in the quieter secondary colour.
+
+---
+
 ## Notes
 
 [^why-menubar]: A separate NORTH bar above the menu bar was the obvious

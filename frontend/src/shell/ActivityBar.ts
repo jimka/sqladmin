@@ -22,7 +22,7 @@
 // SqlAdminShell.ts), which would silently drop `this` if they were plain
 // methods.
 
-import { Component, Container }             from "@jimka/typescript-ui/core";
+import { Component, Container, callable }   from "@jimka/typescript-ui/core";
 import { Placement }                    from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Card } from "@jimka/typescript-ui/layout";
 import { ToolBar }                      from "@jimka/typescript-ui/component/menubar";
@@ -86,7 +86,7 @@ export interface SidebarSizer {
  * collapsible view deck. The instance itself is the mountable component
  * (`extends Container`) — callers place it directly, no handle object.
  */
-export class ActivityBar extends Container {
+class ActivityBar extends Container {
     private readonly card:       Card;
     private readonly deck:       Container;
     private readonly rail:       ToolBar;
@@ -226,3 +226,12 @@ export class ActivityBar extends Container {
         this.showView(id);
     };
 }
+
+// Callable-class export (COMPONENT_CONVENTIONS.md (d)): consumers construct
+// `ActivityBar(views)` without `new`, mirroring the library's own callable
+// bases. The Proxy forwards construction via `Reflect.construct`, so
+// `this.constructor.name` stays "ActivityBar" and the CSS-class convention (e)
+// is preserved.
+const ActivityBarCallable = callable(ActivityBar);
+type ActivityBarCallable = ActivityBar;
+export { ActivityBarCallable as ActivityBar };

@@ -29,6 +29,7 @@ import { buildShortcutLegend }      from "./shortcutLegend";
 import type { SavedQuery }          from "../data/queryStore";
 import type { SqlAdminController }  from "../SqlAdminController";
 import { MUTED_TEXT_COLOR }         from "../theme";
+import { APP_NAME }                 from "../appIdentity";
 
 Glyph.register(plus);
 
@@ -46,7 +47,7 @@ const BUTTON_HEIGHT = 30;
 // The empty-workspace welcome blurb, shown above the quick actions only when
 // there are no recent tables and no saved queries (see shouldShowWelcome). It
 // opens with a `##`-level heading, not another `#` app title, so it doesn't
-// stutter against the "SQL Admin" heading already on the page.
+// stutter against the "SQLAdmin" heading already on the page.
 const GETTING_STARTED_MARKDOWN = `## Getting started
 
 Your workspace is empty. Open a new query or pick a table from the sidebar
@@ -106,7 +107,7 @@ export class StartPage extends Panel {
 
             // Full-width header above the columns: the app heading, and — only
             // on an empty workspace — the transient welcome blurb.
-            this.addComponent(heading("SQL Admin", "600"));
+            this.addComponent(heading(APP_NAME, "600"));
 
             if (shouldShowWelcome(controller)) {
                 welcome = Markdown(GETTING_STARTED_MARKDOWN);

@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import pkg from "./package.json";
 
 // The library is consumed as a symlinked local dependency (file:../../typescript-ui),
 // so a few dev-server accommodations are needed:
@@ -16,6 +17,12 @@ export default defineConfig({
     // library's own Vite build already sets.
     esbuild: {
         keepNames: true,
+    },
+    // Bakes the released package.json version into the bundle as a compile-time
+    // constant (declared in src/env.d.ts), so appIdentity.ts's APP_VERSION can
+    // never drift from what actually shipped.
+    define: {
+        __APP_VERSION__: JSON.stringify(pkg.version),
     },
     server: {
         port: 5173,

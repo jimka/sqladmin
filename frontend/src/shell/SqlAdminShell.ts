@@ -14,7 +14,7 @@
 
 import { Component, Container }        from "@jimka/typescript-ui/core";
 import { Placement, UNBOUNDED }    from "@jimka/typescript-ui/primitive";
-import { Border as BorderLayout, Split, Card } from "@jimka/typescript-ui/layout";
+import { Border as BorderLayout, Split, Card, VBox } from "@jimka/typescript-ui/layout";
 import { MenuBar }                 from "@jimka/typescript-ui/component/menubar";
 import { Button }                  from "@jimka/typescript-ui/component/button";
 import { Spacer }                  from "@jimka/typescript-ui/component/container";
@@ -51,6 +51,7 @@ import {
     isHelpChord,
 } from "./queryShortcuts";
 import { openAboutDialog }         from "./aboutDialog";
+import { AppHeader }               from "./AppHeader";
 import { logout }                  from "../data/api";
 import { openShortcutsDialog }     from "./shortcutsDialog";
 import { openLocalStorageWindow }  from "./localStorageWindow";
@@ -105,10 +106,22 @@ export class SqlAdminShell extends Container {
             onRefresh          : () => controller.refreshActive(),
         });
 
+        // The brand strip rides directly above the menu bar as its own row: the
+        // two stack in a VBox that occupies the shell's NORTH band together, so
+        // the strip sizes to its own content instead of stretching the menu
+        // bar's baseline-aligned button row. `stretching: true` fills each row to
+        // the full shell width — the menu bar needs it so its trailing
+        // `Spacer.flex()` can push Shortcuts/About to the right edge, as it did
+        // when the bar sat directly in the BorderLayout's stretched NORTH slot.
+        const topChrome = new Container({
+            layoutManager: new VBox({ spacing: 0, stretching: true }),
+            components   : [AppHeader(), menuBar],
+        });
+
         super({
             layoutManager: new BorderLayout({ spacing: 0 }),
             components: [
-                { component: menuBar,              constraints: { placement: Placement.NORTH } },
+                { component: topChrome,            constraints: { placement: Placement.NORTH } },
                 { component: workArea,             constraints: { placement: Placement.CENTER } },
                 { component: controller.statusBar, constraints: { placement: Placement.SOUTH } },
             ],
@@ -435,7 +448,7 @@ function buildSidebar(controller: SqlAdminController, onLogout: () => void): Act
     const roles    = new RolesExplorerView(controller, ROLES_VIEW_ID);
     const queries  = new QueriesView(controller, QUERIES_VIEW_ID);
 
-    return new ActivityBar([
+    return ActivityBar([
         { id: DATABASE_VIEW_ID, label: "Database", shortcut: DATABASES_RAIL_SHORTCUT, glyph: "database", component: explorer },
         { id: ROLES_VIEW_ID,    label: "Roles",    shortcut: ROLES_RAIL_SHORTCUT,     glyph: "users",    component: roles },
         { id: QUERIES_VIEW_ID,  label: "Queries",  shortcut: QUERIES_RAIL_SHORTCUT,   glyph: "terminal", component: queries },
