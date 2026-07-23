@@ -145,7 +145,7 @@ export class ActivityBar extends Container {
             this.rail.addComponent(signOut);
         }
 
-        this.rail.setPreferredSize(RAIL_WIDTH, 0);
+        this.rail.setPreferredSize({ width: RAIL_WIDTH, height: 0 });
         this.card.setVisibleComponentId(this.activeId);
 
         // The bar is a Container (not a Panel) so it carries zero content insets: a
@@ -154,7 +154,7 @@ export class ActivityBar extends Container {
         // the icon column — width across toggles. Zero insets keep it constant.
         this.addComponent(this.rail, { placement: Placement.WEST });
         this.addComponent(this.deck, { placement: Placement.CENTER });
-        this.setPreferredSize(RAIL_WIDTH + DECK_WIDTH, 0);
+        this.setPreferredSize({ width: RAIL_WIDTH + DECK_WIDTH, height: 0 });
     }
 
     // Collapse hides the deck and asks the shell's Split to pin the sidebar to

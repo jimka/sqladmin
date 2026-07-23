@@ -221,7 +221,7 @@ function buildWorkArea(sidebar: ActivityBar, controller: SqlAdminController): Co
 
     // A rail-width floor so a gutter drag can't shrink the sidebar below the rail
     // (max stays unbounded, so it is draggable, not pinned — pinning is collapse).
-    pane.setMinSize(SIDEBAR_RAIL_WIDTH, 0);
+    pane.setMinSize({ width: SIDEBAR_RAIL_WIDTH, height: 0 });
 
     // The width to reopen to on expand: the user's last dragged width, else the
     // natural default. Session-scoped closure state, not persisted across reloads.
@@ -239,13 +239,13 @@ function buildWorkArea(sidebar: ActivityBar, controller: SqlAdminController): Co
             // Pin the pane to the rail width (min == max). The constraint change
             // reschedules the Split's layout, whose pin-aware refill holds the
             // sidebar here and lets the weighted work area reclaim the freed width.
-            pane.setMinSize(SIDEBAR_RAIL_WIDTH, 0);
-            pane.setMaxSize(SIDEBAR_RAIL_WIDTH, UNBOUNDED);
+            pane.setMinSize({ width: SIDEBAR_RAIL_WIDTH, height: 0 });
+            pane.setMaxSize({ width: SIDEBAR_RAIL_WIDTH, height: UNBOUNDED });
         },
         expand(): void {
             // Unpin (max unbounded → draggable again), keep the rail floor.
-            pane.setMaxSize(UNBOUNDED, UNBOUNDED);
-            pane.setMinSize(SIDEBAR_RAIL_WIDTH, 0);
+            pane.setMaxSize({ width: UNBOUNDED, height: UNBOUNDED });
+            pane.setMinSize({ width: SIDEBAR_RAIL_WIDTH, height: 0 });
 
             // Reopen to the remembered width. The sidebar is weight-0, so
             // `split-weight-pin-refill`'s refill pins it here and the flexible Dock

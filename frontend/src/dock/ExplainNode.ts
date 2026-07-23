@@ -109,7 +109,7 @@ export class ExplainNode extends Panel {
         const header = new Text(node.label ?? node.id);
 
         header.setFontWeight("bold");
-        header.setPreferredSize(CARD_WIDTH, HEADER_HEIGHT);
+        header.setPreferredSize({ width: CARD_WIDTH, height: HEADER_HEIGHT });
         header.setPadding(new Insets(0, CARD_INSET, 0, CARD_INSET));
         header.setPointerEvents("none");
 
@@ -363,7 +363,7 @@ function memoryBar(share: number): Component {
 
     const fill = new Component({ layoutManager: new HBox({ spacing: 0 }) });
 
-    fill.setPreferredSize(Math.round(MEM_BAR_WIDTH * clamped), MEM_BAR_HEIGHT);
+    fill.setPreferredSize({ width: Math.round(MEM_BAR_WIDTH * clamped), height: MEM_BAR_HEIGHT });
     fill.setBackgroundColor(MEM_FILL_BG);
     fill.setBorderRadius("2px");
     fill.setPointerEvents("none");

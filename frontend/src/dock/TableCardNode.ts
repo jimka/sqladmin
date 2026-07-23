@@ -75,7 +75,7 @@ export class TableCardNode extends Panel {
         const header = new Text(node.label ?? node.id);
 
         header.setFontWeight("bold");
-        header.setPreferredSize(CARD_WIDTH, CARD_HEADER_HEIGHT);
+        header.setPreferredSize({ width: CARD_WIDTH, height: CARD_HEADER_HEIGHT });
         header.setPointerEvents("none");
 
         super({
@@ -121,7 +121,7 @@ function columnRow(column: ColumnRowData): Component {
     const flag = new Text(column.pk ? "PK" : column.fk ? "FK" : "");
 
     flag.setFontWeight("bold");
-    flag.setPreferredSize(FLAG_COL_WIDTH, CARD_ROW_HEIGHT);
+    flag.setPreferredSize({ width: FLAG_COL_WIDTH, height: CARD_ROW_HEIGHT });
 
     // The three labels are pointer-transparent (individually, not via the row):
     // hover/click then land on the row itself, so its cursor governs (no
