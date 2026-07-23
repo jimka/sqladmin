@@ -456,3 +456,64 @@ Cases 1–8 need a *slow* source. Use the database diagram on a wide database (c
 [^guard-removed]: An earlier draft kept a `_loadingTabs` map from panel id to the pending shell, plus an identity check that discarded a result whose tab had been closed mid-flight. All of it is now redundant, for three separate reasons. The app never receives the built component — the factory returns it to the library — so there is nothing for the app to discard. The library's `isStale` check drops a resolved component whose entry is gone, and its `closeEntry` now removes a live spinner, so the phantom-tab failure the guard insured against is fixed at the source. And gap C above extends the same staleness check to the rejection path, which is the only remaining way a closed tab could still produce a user-visible effect. Keeping the map "belt and braces" would mean the app maintaining bookkeeping whose only reader is a condition that can no longer be true — and it would re-introduce the id-keyed lifetime problem described in the wrapper footnote. Nothing of it survives.
 
 [^no-error-state]: An error surface inside the tab, carrying the message and a Retry button, is better UX and was considered. It is out of scope twice over: the library ships no error UI and no retry contract by design, so the app would be building the whole affordance itself; and it needs a decision about whether the in-tab error also notifies (double-reporting) or replaces the notification (losing the history entry that `notifyError`'s toast provides). Closing the tab keeps the observable end state identical to today's, so the change stays confined to the ordering and the loading state — the two things that were actually asked for.
+
+---
+
+## Implementation Notes
+
+**Deviation from `## Library Dependency and Sequencing`, pre-cleared with the user before this run started.**
+
+The plan calls for a strict four-step sequence before any code here could be
+written: (1) implement the companion library plan `tab-lazy-layout-constraint`
+in the typescript-ui repo, (2) close the three additional `Dock` gaps (A/B/C)
+that plan didn't originally cover, (3) version-bump and **publish** the
+library to npm (expected `0.2.0`), and (4) bump `frontend/package.json` to
+`^0.2.0` and run `npm install` so `package-lock.json` and `node_modules`
+carry the published release.
+
+What actually happened:
+
+- Steps 1–2 were done: `tab-lazy-layout-constraint` is implemented on
+  typescript-ui's local `master` (`packages/lib/package.json` at `0.2.0`),
+  and its built `dist/lib` carries the widened
+  `DockPanelSpec.content: Component | ComponentFactory` and the Dock
+  `"exception"` event — confirmed directly against
+  `frontend/node_modules/@jimka/typescript-ui/dist/lib/types/overlay/Dock.d.ts`.
+- Step 3 (**publish to npm**) was explicitly **not done**. `npm view
+  @jimka/typescript-ui version` still returns `0.1.1` on the real registry.
+  Publishing was intentionally skipped for this run — it is a real,
+  user-visible, hard-to-reverse action (a released package version), and
+  the user chose not to take it just to unblock this plan.
+- Step 4 was done differently than written: `frontend/package.json`'s
+  `"@jimka/typescript-ui"` range was hand-edited from `"^0.1.0"` to
+  `"^0.2.0"` to reflect what the converted code actually requires, but
+  **`npm install`/`npm ci` was deliberately not run**, and
+  `frontend/package-lock.json` was left completely untouched. A real
+  install would either fail outright (the registry has no `0.2.0` to
+  satisfy the new range) or silently disturb the pre-existing local dev
+  symlink at `frontend/node_modules/@jimka/typescript-ui` (which points at
+  `/home/jika/typescript/typescript-ui/packages/lib`, not an npm-resolved
+  install, and predates this run). `frontend/package-lock.json` is
+  therefore **not** a modified file for this plan, contrary to the
+  `## Files to Create / Modify / Delete` table below.
+
+Why: the user was asked, before implementation began, to choose between (a)
+actually publishing typescript-ui to npm first, (b) skipping this plan
+entirely until a real publish happens, or (c) proceeding on the pre-existing
+local dev symlink alone, without publishing. The user chose (c). Step 1 of
+`## Ordered Implementation Steps` (confirm the library release is in place)
+was re-run and treated as satisfied by the symlinked local build rather than
+a registry-resolved install — the three `grep` checks against
+`frontend/package.json` and the installed `.d.ts` all pass because the
+symlink already exposes the `0.2.0` surface.
+
+**Consequence for anyone building this branch:** because npm has not
+actually published `0.2.0`, `frontend/node_modules/@jimka/typescript-ui`
+only resolves to the widened Dock surface this code needs because of the
+pre-existing local symlink to `/home/jika/typescript/typescript-ui/packages/lib`
+on this machine. This branch is only buildable/typecheckable on a machine
+that has that same local dev symlink in place (or after typescript-ui
+0.2.0 is genuinely published and `frontend/package.json`/`package-lock.json`
+are regenerated against it with a real `npm install`). A fresh `npm ci`/
+`npm install` against the public registry, as it stands today, would fail
+to resolve `^0.2.0`.

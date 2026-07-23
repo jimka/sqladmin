@@ -3,7 +3,7 @@
 // the controller decides. All app-side errors funnel to notifyError.
 
 import { Dialog, Dock, Notification, NotificationHistoryButton, Tooltip }                                                                                                                          from "@jimka/typescript-ui/overlay";
-import type { DockPanelEvent }                                                                                                                                                                     from "@jimka/typescript-ui/overlay";
+import type { DockPanelEvent, DockExceptionEvent }                                                                                                                                                 from "@jimka/typescript-ui/overlay";
 import { Component }                                                                                                                                                                               from "@jimka/typescript-ui/core";
 import { HBox }                                                                                                                                                                                    from "@jimka/typescript-ui/layout";
 import { StatusBar }                                                                                                                                                                               from "@jimka/typescript-ui/component/container";
@@ -19,7 +19,7 @@ import { user }                                                                 
 import type { TreeNode }                                                                                                                                                                           from "@jimka/typescript-ui/component/tree";
 import type { ExplorerTree }                                                                                                                                                                       from "./navigator/NavigatorTree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                                                                                                                                     from "@jimka/typescript-ui/data";
-import type { AlterColumnAction, ColumnMeta, ConstraintKind, DbObjectRef, FunctionDefinition, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TablePrivileges, TableStructure, TypeDefinition } from "./contract";
+import type { AlterColumnAction, ColumnMeta, ConstraintKind, DbObjectRef, FunctionDefinition, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TypeDefinition } from "./contract";
 import { executeDdl, getColumns, getDependencies, getFunctionDefinition, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getTypeDefinition, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewAlterTypeAddValue, previewConstraint, previewCreateCompositeType, previewCreateEnumType, previewCreateFunction, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropFunction, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropType, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema, previewReplaceMatview, previewSequenceOwner, runExplain, runQuery, tableExportUrl } from "./data/api";
 import { getSequenceDetail }                                                                                                                                                                       from "./data/api";
 import { exportQueryResult }                                                                                                                                                                       from "./dock/exportQueryResult";
@@ -158,17 +158,27 @@ interface RecentTable {
 // glanceable "jump back in" strip, not a full history.
 const MAX_RECENT_TABLES = 8;
 
-// The write-nothing default carried down the read-only (view/matview) path,
-// where TableWorkPanel is never built and the value is unused — it only keeps
-// the editable-table privileges variable definitely-assigned.
-const NO_TABLE_PRIVILEGES: TablePrivileges = { select: false, insert: false, update: false, delete: false };
-
 // Dependency graph reads left-to-right as a dependency flow (view -> underlying),
 // matching the FK schema diagram's RIGHT layered layout.
 const DEPENDENCY_LAYOUT = { "elk.algorithm": "layered", "elk.direction": "RIGHT" };
 
 // Inheritance reads top-to-bottom as a containment tree (parent above children).
 const INHERITANCE_LAYOUT = { "elk.algorithm": "layered", "elk.direction": "DOWN" };
+
+/**
+ * A panel-load failure, carrying the object being opened so the Dock's
+ * "exception" handler can name it, and whether the error was already
+ * surfaced by the fetch helper that produced it.
+ */
+class PanelLoadError extends Error {
+    constructor(
+        readonly reason: unknown,
+        readonly ref?: DbObjectRef,
+        readonly reported: boolean = false,
+    ) {
+        super("panel load failed");
+    }
+}
 
 export class SqlAdminController {
     readonly dock           : Dock;
@@ -283,6 +293,21 @@ export class SqlAdminController {
             this._panelDisposers.delete(e.id);
         });
 
+        // A deferred panel whose fetch rejected: the Dock has already closed the tab,
+        // so all that is left is reporting. A PanelLoadError raised by a helper that
+        // already called notifyError is swallowed, to avoid a second notification.
+        this.dock.on("exception", (e: DockExceptionEvent) => {
+            if (e.error instanceof PanelLoadError) {
+                if (!e.error.reported) {
+                    this.notifyError(e.error.reason, e.error.ref);
+                }
+
+                return;
+            }
+
+            this.notifyError(e.error);
+        });
+
         // Switching tabs syncs the navigator selection and the status bar to the
         // now-active panel, and records the active panel id so the Query-menu
         // export targets it. A null payload means no panel is focused.
@@ -377,62 +402,54 @@ export class SqlAdminController {
             return;
         }
 
-        let store: AjaxStore;
-        let columns: ColumnMeta[];
-        let privileges: TablePrivileges = NO_TABLE_PRIVILEGES;
-
-        try {
-            columns = await getColumns(ref);
-            privileges = await getTablePrivileges(ref);
-            store = buildStore(ref, buildModel(columns), columns);
-        } catch (err) {
-            this.notifyError(err, ref);
-
-            return;
-        }
-
-        store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
-        store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
-
-        this._openPanels.set(id, { ref, node: node ?? null, store, columns });
-
-        if (node) {
-            this.rememberTable(ref, node);
-        }
-
-        // Open lazily: the tab appears at once, and the grid UI builds on first
-        // activation behind a spinner, so a wide table never blocks the tab.
-        const notify = (message: string): void => { this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: ${message}`); };
-        this.dock.addLazyPanel({
+        this.openAsyncPanel({
             id,
             title  : ref.name ?? id,
             glyph  : KIND_GLYPH[ref.kind],
             tooltip: this.panelTooltip(ref),
-            content: () => new TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format), privileges)
-        });
+            ref,
+        }, async () => {
+            // The fetch now runs behind the library's spinner. A throw here closes
+            // the tab and reaches the "exception" handler — so no local catch.
+            const columns = await getColumns(ref);
+            const privileges = await getTablePrivileges(ref);
+            const store = buildStore(ref, buildModel(columns), columns);
 
-        try {
-            await store.load();
-            this.syncToPanel(id);
-        } catch {
-            // load() rethrows, but the 'exception' listener already surfaced it.
-        }
+            store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
+            store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
+
+            this._openPanels.set(id, { ref, node: node ?? null, store, columns });
+
+            if (node) {
+                this.rememberTable(ref, node);
+            }
+
+            const notify = (message: string): void => { this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: ${message}`); };
+            const panel = new TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format), privileges);
+
+            // Not awaited: the panel already exists, so TablePanel's own store-driven
+            // spinner covers the row load, and load()'s rejection is already surfaced by
+            // the "exception" listener wired above.
+            void store.load().then(() => this.syncToPanel(id)).catch(() => {});
+
+            return panel;
+        });
     }
 
     /**
      * Open an editable definition tab for a view/matview — its Columns grid
      * above its SQL definition (pg_get_viewdef, the SELECT body only),
-     * deduping by definition-panel id. The definition and columns are
-     * fetched up front and passed to a `DefinitionPanel` wired with an
-     * `onSave` that builds and executes the edit directly, with no
-     * intermediate dialog: `CREATE OR REPLACE VIEW` for a view, or the
-     * atomic DROP+CREATE replace pair for a materialized view (a
-     * materialized view cannot be CREATE OR REPLACE'd — see the
-     * view-matview-ddl plan's "Matview edit strategy" decision). On success
-     * the navigator refreshes and the tab reseeds itself in place (via
+     * deduping by definition-panel id. The tab opens at once behind the
+     * library's spinner; the definition and columns are fetched behind it and
+     * passed to a `DefinitionPanel` wired with an `onSave` that builds and
+     * executes the edit directly, with no intermediate dialog: `CREATE OR
+     * REPLACE VIEW` for a view, or the atomic DROP+CREATE replace pair for a
+     * materialized view (a materialized view cannot be CREATE OR REPLACE'd —
+     * see the view-matview-ddl plan's "Matview edit strategy" decision). On
+     * success the navigator refreshes and the tab reseeds itself in place (via
      * `panel.reload`) rather than closing — the object list may be
-     * unaffected, but the tab's own definition/columns just changed. A
-     * failed fetch surfaces through notifyError and no tab opens; a failed
+     * unaffected, but the tab's own definition/columns just changed. A failed
+     * fetch closes the tab it opened, reported through notifyError; a failed
      * save surfaces through notifyError and leaves the tab (and the user's
      * edits) open. Tables have no definition, so the navigator only offers
      * this for views (see NavigatorTree).
@@ -444,92 +461,88 @@ export class SqlAdminController {
             return;
         }
 
-        let definition: string;
-        let columns: ColumnMeta[];
-
-        try {
-            [definition, columns] = await this.fetchDefinitionAndColumns(ref);
-        } catch (err) {
-            this.notifyError(err, ref);
-
-            return;
-        }
-
-        // Read by `onSave` only after a Save click, which always happens
-        // after this variable is assigned just below — the forward
-        // reference is safe.
-        let panel: DefinitionPanel;
-
-        const onSave = async (newDefinition: string): Promise<void> => {
-            // getViewDefinition's pg_get_viewdef output always ends with a
-            // semicolon; CreateViewSpec/ReplaceMatviewSpec's `select` expects
-            // a bare body with none (see stripTrailingSemicolon's doc — a
-            // stray one is harmless for CREATE OR REPLACE VIEW but breaks the
-            // matview replace's appended WITH DATA).
-            const select = stripTrailingSemicolon(newDefinition);
-
-            try {
-                // cascade is hardcoded false: this tab has no CASCADE
-                // toggle (the dialog's edit mode had one; this Save button
-                // deliberately has no dialog at all — see this method's
-                // doc). A matview with dependents therefore can't be edited
-                // here at all: the DROP half fails with a dependency error,
-                // surfaced below via notifyError, leaving the matview and
-                // the tab untouched; the user must drop the dependent(s)
-                // out-of-band (e.g. the SQL workspace) before retrying.
-                const sql = ref.kind === "materializedView"
-                    ? (await previewReplaceMatview(ref, {
-                        schema: ref.schema!, name: ref.name!, select, cascade: false, withData: true,
-                    })).sql
-                    : (await previewCreateView(ref, {
-                        schema: ref.schema!, name: ref.name!, select, orReplace: true,
-                    })).sql;
-
-                await executeDdl(this._connectionId, sql);
-            } catch (err) {
-                this.notifyError(err, ref);
-
-                return;
-            }
-
-            this._navigator?.refresh?.();
-
-            try {
-                const [reloadedDefinition, reloadedColumns] = await this.fetchDefinitionAndColumns(ref);
-
-                panel.reload(reloadedDefinition, reloadedColumns);
-            } catch (err) {
-                // The save itself already succeeded (executeDdl above didn't
-                // throw) — only the post-save re-fetch failed, so this is
-                // NOT a failed save. Say so explicitly: a bare notifyError
-                // here would read as "the save failed", inviting a retry
-                // that re-runs the (for a matview, destructive) DDL a second
-                // time for no reason.
-                this.notifyError(new Error(`saved, but failed to refresh the tab: ${this.errorMessage(err)}`), ref);
-
-                return;
-            }
-
-            this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: definition saved`);
-        };
-
-        panel = new DefinitionPanel(definition, columns, onSave, this.layout.bindSplit("definition"));
-
-        // No `columns` field here: unlike the structure tab (keyed by
-        // structurePanelId, whose `columns` backs structureColumns()), the
-        // definition tab's columns are only ever read by the DefinitionPanel
-        // itself, which already holds its own copy — nothing looks this
-        // entry up by definitionPanelId.
-        this._openPanels.set(id, { ref, node, detail: "definition" });
-        this._panelDisposers.set(id, panel.dispose);
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
             title  : `${ref.name ?? id} (definition)`,
             glyph  : "file-code",
             tooltip: this.panelTooltip(ref),
-            content: panel.content
+            ref,
+        }, async () => {
+            // The fetch now runs behind the library's spinner. A throw here closes
+            // the tab and reaches the "exception" handler — so no local catch.
+            const [definition, columns] = await this.fetchDefinitionAndColumns(ref);
+
+            // Read by `onSave` only after a Save click, which always happens
+            // after this variable is assigned just below — the forward
+            // reference is safe.
+            let panel: DefinitionPanel;
+
+            const onSave = async (newDefinition: string): Promise<void> => {
+                // getViewDefinition's pg_get_viewdef output always ends with a
+                // semicolon; CreateViewSpec/ReplaceMatviewSpec's `select` expects
+                // a bare body with none (see stripTrailingSemicolon's doc — a
+                // stray one is harmless for CREATE OR REPLACE VIEW but breaks the
+                // matview replace's appended WITH DATA).
+                const select = stripTrailingSemicolon(newDefinition);
+
+                try {
+                    // cascade is hardcoded false: this tab has no CASCADE
+                    // toggle (the dialog's edit mode had one; this Save button
+                    // deliberately has no dialog at all — see this method's
+                    // doc). A matview with dependents therefore can't be edited
+                    // here at all: the DROP half fails with a dependency error,
+                    // surfaced below via notifyError, leaving the matview and
+                    // the tab untouched; the user must drop the dependent(s)
+                    // out-of-band (e.g. the SQL workspace) before retrying.
+                    const sql = ref.kind === "materializedView"
+                        ? (await previewReplaceMatview(ref, {
+                            schema: ref.schema!, name: ref.name!, select, cascade: false, withData: true,
+                        })).sql
+                        : (await previewCreateView(ref, {
+                            schema: ref.schema!, name: ref.name!, select, orReplace: true,
+                        })).sql;
+
+                    await executeDdl(this._connectionId, sql);
+                } catch (err) {
+                    this.notifyError(err, ref);
+
+                    return;
+                }
+
+                this._navigator?.refresh?.();
+
+                try {
+                    const [reloadedDefinition, reloadedColumns] = await this.fetchDefinitionAndColumns(ref);
+
+                    panel.reload(reloadedDefinition, reloadedColumns);
+                } catch (err) {
+                    // The save itself already succeeded (executeDdl above didn't
+                    // throw) — only the post-save re-fetch failed, so this is
+                    // NOT a failed save. Say so explicitly: a bare notifyError
+                    // here would read as "the save failed", inviting a retry
+                    // that re-runs the (for a matview, destructive) DDL a second
+                    // time for no reason.
+                    this.notifyError(new Error(`saved, but failed to refresh the tab: ${this.errorMessage(err)}`), ref);
+
+                    return;
+                }
+
+                this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: definition saved`);
+            };
+
+            panel = new DefinitionPanel(definition, columns, onSave, this.layout.bindSplit("definition"));
+
+            // No `columns` field here: unlike the structure tab (keyed by
+            // structurePanelId, whose `columns` backs structureColumns()), the
+            // definition tab's columns are only ever read by the DefinitionPanel
+            // itself, which already holds its own copy — nothing looks this
+            // entry up by definitionPanelId.
+            this._openPanels.set(id, { ref, node, detail: "definition" });
+            this._panelDisposers.set(id, panel.dispose);
+            this.syncToPanel(id);
+
+            return panel.content;
         });
-        this.syncToPanel(id);
     }
 
     /**
@@ -547,16 +560,16 @@ export class SqlAdminController {
 
     /**
      * Open an editable info tab for a sequence — its current value and
-     * parameters (pg_sequences), deduping by sequence-info-panel id. The
-     * detail and the connection's role names (for the form's Owner combo)
-     * are fetched in parallel and passed to a SequenceInfoPanel wired with
-     * the alter/owner preview, execute, and reload callbacks its Save flow
-     * needs. A failed detail fetch surfaces through notifyError and no tab
-     * opens; a failed roles fetch degrades gracefully instead (the tab still
-     * opens, with `roles: []` — see SequenceInfoPanelDeps.roles). A sequence
-     * has no rows, so unlike openTable this has no store to register, and
-     * unlike openDefinition the panel needs no dispose (see
-     * SequenceInfoPanel).
+     * parameters (pg_sequences), deduping by sequence-info-panel id. The tab
+     * opens at once behind the library's spinner; behind it, the detail and
+     * the connection's role names (for the form's Owner combo) are fetched in
+     * parallel and passed to a SequenceInfoPanel wired with the alter/owner
+     * preview, execute, and reload callbacks its Save flow needs. A failed
+     * detail fetch closes the tab it opened, reported through notifyError; a
+     * failed roles fetch degrades gracefully instead (the tab still opens,
+     * with `roles: []` — see SequenceInfoPanelDeps.roles). A sequence has no
+     * rows, so unlike openTable this has no store to register, and unlike
+     * openDefinition the panel needs no dispose (see SequenceInfoPanel).
      */
     async openSequence(ref: DbObjectRef, node?: TreeNode): Promise<void> {
         const id = this.sequenceInfoPanelId(ref);
@@ -565,27 +578,29 @@ export class SqlAdminController {
             return;
         }
 
-        const [detailResult, rolesResult] = await Promise.allSettled([
-            getSequenceDetail(ref),
-            getRoles(ref.connectionId),
-        ]);
-
-        if (detailResult.status === "rejected") {
-            this.notifyError(detailResult.reason, ref);
-
-            return;
-        }
-
-        const detail = detailResult.value;
-        const roles  = rolesResult.status === "fulfilled" ? rolesResult.value.map(r => r.name) : [];
-
-        this._openPanels.set(id, { ref, node: node ?? null, detail: "info" });
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
             title  : ref.name ?? id,
             glyph  : "arrow-up-1-9",
             tooltip: this.panelTooltip(ref),
-            content: new SequenceInfoPanel(detail, {
+            ref,
+        }, async () => {
+            const [detailResult, rolesResult] = await Promise.allSettled([
+                getSequenceDetail(ref),
+                getRoles(ref.connectionId),
+            ]);
+
+            if (detailResult.status === "rejected") {
+                throw detailResult.reason;
+            }
+
+            const detail = detailResult.value;
+            const roles  = rolesResult.status === "fulfilled" ? rolesResult.value.map(r => r.name) : [];
+
+            this._openPanels.set(id, { ref, node: node ?? null, detail: "info" });
+            this.syncToPanel(id);
+
+            return new SequenceInfoPanel(detail, {
                 schema:       ref.schema!,
                 name:         ref.name!,
                 roles,
@@ -602,9 +617,8 @@ export class SqlAdminController {
                     name        : table,
                     kind        : "table",
                 }),
-            }),
+            });
         });
-        this.syncToPanel(id);
     }
 
     /** Open a read-only structure (column metadata) tab for a table/view. */
@@ -615,24 +629,21 @@ export class SqlAdminController {
             return;
         }
 
-        let columns: ColumnMeta[];
-        let structure: TableStructure;
-
-        try {
-            [columns, structure] = await Promise.all([getColumns(ref), getStructure(ref)]);
-        } catch (err) {
-            this.notifyError(err, ref);
-
-            return;
-        }
-
-        this._openPanels.set(id, { ref, node: node ?? null, columns, detail: "structure" });
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
             title  : `${ref.name ?? id} (structure)`,
             glyph  : "table-columns",
             tooltip: this.panelTooltip(ref),
-            content: new StructurePanel(columns, structure, (refSchema, refTable) =>
+            ref,
+        }, async () => {
+            // The fetch now runs behind the library's spinner. A throw here closes
+            // the tab and reaches the "exception" handler — so no local catch.
+            const [columns, structure] = await Promise.all([getColumns(ref), getStructure(ref)]);
+
+            this._openPanels.set(id, { ref, node: node ?? null, columns, detail: "structure" });
+            this.syncToPanel(id);
+
+            return new StructurePanel(columns, structure, (refSchema, refTable) =>
                 this.openReferencedTable({
                     connectionId: ref.connectionId,
                     database    : ref.database,
@@ -645,9 +656,8 @@ export class SqlAdminController {
                     schema      : seqSchema,
                     name        : seqName,
                     kind        : "sequence",
-                }), this.layout.bindAccordion("structure"), this.structureActionsFor(ref)),
+                }), this.layout.bindAccordion("structure"), this.structureActionsFor(ref));
         });
-        this.syncToPanel(id);
     }
 
     /**
@@ -1124,7 +1134,8 @@ export class SqlAdminController {
     /**
      * Open an editable definition tab for a function/procedure — the routine
      * counterpart to `openDefinition` (which handles views), opened by
-     * double-click or the navigator's "Show definition". Fetches the routine's
+     * double-click or the navigator's "Show definition". The tab opens at once
+     * behind the library's spinner; behind it, fetches the routine's
      * `pg_get_functiondef` text — already a complete, executable
      * `CREATE OR REPLACE FUNCTION|PROCEDURE …` statement — and seeds a
      * FunctionDefinitionPanel with it, deduping by function-definition-panel
@@ -1134,8 +1145,9 @@ export class SqlAdminController {
      * signature-changing edit is the user's own manual escape hatch, not an
      * auto-generated drop-recreate). On success the navigator refreshes and the
      * tab reseeds itself in place (via `panel.reload`) rather than closing. A
-     * failed fetch surfaces through notifyError and no tab opens; a failed save
-     * surfaces through notifyError and leaves the tab (and the user's edits) open.
+     * failed fetch closes the tab it opened, reported through notifyError; a
+     * failed save surfaces through notifyError and leaves the tab (and the
+     * user's edits) open.
      *
      * @param ref - the function/procedure leaf to open (its `signature`
      *   disambiguates overloads).
@@ -1149,59 +1161,7 @@ export class SqlAdminController {
 
         const signature = ref.signature ?? "";
 
-        let definition: FunctionDefinition;
-
-        try {
-            definition = await getFunctionDefinition(ref, signature);
-        } catch (err) {
-            this.notifyError(err, ref);
-
-            return;
-        }
-
-        // Read by `onSave` only after a Save click, which always happens after
-        // this variable is assigned just below — the forward reference is safe.
-        let panel: FunctionDefinitionPanel;
-
-        const onSave = async (newDefinition: string): Promise<void> => {
-            try {
-                // No preview/builder: pg_get_functiondef is already the full
-                // CREATE OR REPLACE statement, so the user's edited text runs
-                // as-is. Editing the argument list here creates a NEW overload
-                // rather than replacing this one (the signature is part of the
-                // routine's identity) — the stated escape-hatch behaviour; the
-                // re-fetch below then fails to find the original signature and
-                // reports "saved, but failed to refresh".
-                await executeDdl(this._connectionId, newDefinition);
-            } catch (err) {
-                this.notifyError(err, ref);
-
-                return;
-            }
-
-            this._navigator?.refresh?.();
-
-            try {
-                const reloaded = await getFunctionDefinition(ref, signature);
-
-                panel.reload(reloaded.definition);
-            } catch (err) {
-                // The save itself already succeeded (executeDdl above didn't
-                // throw) — only the post-save re-fetch failed, so this is NOT a
-                // failed save. Say so explicitly, mirroring openDefinition.
-                this.notifyError(new Error(`saved, but failed to refresh the tab: ${this.errorMessage(err)}`), ref);
-
-                return;
-            }
-
-            this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: definition saved`);
-        };
-
-        panel = new FunctionDefinitionPanel(definition.definition, onSave);
-
-        this._openPanels.set(id, { ref, node, detail: "definition" });
-        this._panelDisposers.set(id, panel.dispose);
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
             // Include the identity signature so two overloads of the same name
             // get visibly distinct tab titles (e.g. `total_orders()` vs
@@ -1209,9 +1169,58 @@ export class SqlAdminController {
             title  : `${ref.name ?? id}(${signature}) (definition)`,
             glyph  : "file-code",
             tooltip: this.panelTooltip(ref),
-            content: panel.content,
+            ref,
+        }, async () => {
+            // The fetch now runs behind the library's spinner. A throw here closes
+            // the tab and reaches the "exception" handler — so no local catch.
+            const definition: FunctionDefinition = await getFunctionDefinition(ref, signature);
+
+            // Read by `onSave` only after a Save click, which always happens after
+            // this variable is assigned just below — the forward reference is safe.
+            let panel: FunctionDefinitionPanel;
+
+            const onSave = async (newDefinition: string): Promise<void> => {
+                try {
+                    // No preview/builder: pg_get_functiondef is already the full
+                    // CREATE OR REPLACE statement, so the user's edited text runs
+                    // as-is. Editing the argument list here creates a NEW overload
+                    // rather than replacing this one (the signature is part of the
+                    // routine's identity) — the stated escape-hatch behaviour; the
+                    // re-fetch below then fails to find the original signature and
+                    // reports "saved, but failed to refresh".
+                    await executeDdl(this._connectionId, newDefinition);
+                } catch (err) {
+                    this.notifyError(err, ref);
+
+                    return;
+                }
+
+                this._navigator?.refresh?.();
+
+                try {
+                    const reloaded = await getFunctionDefinition(ref, signature);
+
+                    panel.reload(reloaded.definition);
+                } catch (err) {
+                    // The save itself already succeeded (executeDdl above didn't
+                    // throw) — only the post-save re-fetch failed, so this is NOT a
+                    // failed save. Say so explicitly, mirroring openDefinition.
+                    this.notifyError(new Error(`saved, but failed to refresh the tab: ${this.errorMessage(err)}`), ref);
+
+                    return;
+                }
+
+                this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: definition saved`);
+            };
+
+            panel = new FunctionDefinitionPanel(definition.definition, onSave);
+
+            this._openPanels.set(id, { ref, node, detail: "definition" });
+            this._panelDisposers.set(id, panel.dispose);
+            this.syncToPanel(id);
+
+            return panel.content;
         });
-        this.syncToPanel(id);
     }
 
     /**
@@ -1460,25 +1469,29 @@ export class SqlAdminController {
             return;
         }
 
-        const data = await this.buildSchemaGraphData(ref);
-
-        if (!data) {
-            return;
-        }
-
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
-            title  : `${ref.schema} (diagram)`,
-            glyph  : "diagram-project",
-            content: new SchemaDiagramPanel(data, table => this.openReferencedTable({
+            title: `${ref.schema} (diagram)`,
+            glyph: "diagram-project",
+            ref,
+        }, async () => {
+            const data = await this.buildSchemaGraphData(ref);
+
+            if (!data) {
+                // The helper already reported. Throwing closes the tab without a second toast.
+                throw new PanelLoadError(null, ref, true);
+            }
+
+            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: diagram (${data.nodes.length} tables)`);
+
+            return new SchemaDiagramPanel(data, table => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : ref.schema,
                 name        : table,
                 kind        : "table",
-            })),
+            }));
         });
-        this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: diagram (${data.nodes.length} tables)`);
     }
 
     /**
@@ -1542,27 +1555,31 @@ export class SqlAdminController {
             return;
         }
 
-        const schemas = await this.buildDatabaseGraphData(ref);
-
-        if (!schemas) {
-            return;
-        }
-
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
-            title  : `${ref.database} (diagram)`,
-            glyph  : "diagram-project",
-            content: new DatabaseDiagramPanel(schemas, (schema, table) => this.openReferencedTable({
+            title: `${ref.database} (diagram)`,
+            glyph: "diagram-project",
+            ref,
+        }, async () => {
+            const schemas = await this.buildDatabaseGraphData(ref);
+
+            if (!schemas) {
+                // The helper already reported. Throwing closes the tab without a second toast.
+                throw new PanelLoadError(null, ref, true);
+            }
+
+            const tableCount = schemas.reduce((total, s) => total + s.tables.length, 0);
+
+            this.statusBar.setMessage(`${this._statusScope} · ${ref.database}: diagram (${tableCount} tables)`);
+
+            return new DatabaseDiagramPanel(schemas, (schema, table) => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema,
                 name        : table,
                 kind        : "table",
-            })),
+            }));
         });
-
-        const tableCount = schemas.reduce((total, s) => total + s.tables.length, 0);
-        this.statusBar.setMessage(`${this._statusScope} · ${ref.database}: diagram (${tableCount} tables)`);
     }
 
     /**
@@ -1615,28 +1632,32 @@ export class SqlAdminController {
             return;
         }
 
-        const full = await this.buildSchemaGraphData(ref, { withColumns: true });
-
-        if (!full) {
-            return;
-        }
-
-        const root: DiagramNodeData = { id: ref.name!, label: ref.name!, glyph: KIND_GLYPH[ref.kind] };
-
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
             title  : `${ref.name} (relations)`,
             glyph  : "diagram-project",
             tooltip: this.panelTooltip(ref),
-            content: new RelationDiagramPanel(full, root, table => this.openReferencedTable({
+            ref,
+        }, async () => {
+            const full = await this.buildSchemaGraphData(ref, { withColumns: true });
+
+            if (!full) {
+                // The helper already reported. Throwing closes the tab without a second toast.
+                throw new PanelLoadError(null, ref, true);
+            }
+
+            const root: DiagramNodeData = { id: ref.name!, label: ref.name!, glyph: KIND_GLYPH[ref.kind] };
+
+            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: relations`);
+
+            return new RelationDiagramPanel(full, root, table => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : ref.schema,
                 name        : table,
                 kind        : "table",
-            })),
+            }));
         });
-        this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: relations`);
     }
 
     /**
@@ -1700,25 +1721,29 @@ export class SqlAdminController {
             return;
         }
 
-        const data = await this.fetchDependencyGraph(ref);
-
-        if (!data) {
-            return;
-        }
-
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
-            title  : `${ref.schema} (dependencies)`,
-            glyph  : "diagram-project",
-            content: new RelationGraphPanel(data, nd => this.openReferencedTable({
+            title: `${ref.schema} (dependencies)`,
+            glyph: "diagram-project",
+            ref,
+        }, async () => {
+            const data = await this.fetchDependencyGraph(ref);
+
+            if (!data) {
+                // The helper already reported. Throwing closes the tab without a second toast.
+                throw new PanelLoadError(null, ref, true);
+            }
+
+            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: dependencies (${data.nodes.length} relations)`);
+
+            return new RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
                 name        : nd.name,
                 kind        : nd.kind,
-            })),
+            }));
         });
-        this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: dependencies (${data.nodes.length} relations)`);
     }
 
     /**
@@ -1738,34 +1763,38 @@ export class SqlAdminController {
             return;
         }
 
-        const full = await this.fetchDependencyGraph(ref);
-
-        if (!full) {
-            return;
-        }
-
-        const root: DiagramNodeData = {
-            id   : relationNodeId(ref as RelationNodeRef),
-            label: ref.name!,
-            glyph: KIND_GLYPH[ref.kind],
-            data : { schema: ref.schema!, name: ref.name!, kind: ref.kind },
-        };
-        const data = rootedDiagram(full, root, "both", Number.POSITIVE_INFINITY);
-
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
             title  : `${ref.name} (dependencies)`,
             glyph  : "diagram-project",
             tooltip: this.panelTooltip(ref),
-            content: new RelationGraphPanel(data, nd => this.openReferencedTable({
+            ref,
+        }, async () => {
+            const full = await this.fetchDependencyGraph(ref);
+
+            if (!full) {
+                // The helper already reported. Throwing closes the tab without a second toast.
+                throw new PanelLoadError(null, ref, true);
+            }
+
+            const root: DiagramNodeData = {
+                id   : relationNodeId(ref as RelationNodeRef),
+                label: ref.name!,
+                glyph: KIND_GLYPH[ref.kind],
+                data : { schema: ref.schema!, name: ref.name!, kind: ref.kind },
+            };
+            const data = rootedDiagram(full, root, "both", Number.POSITIVE_INFINITY);
+
+            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: dependencies`);
+
+            return new RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
                 name        : nd.name,
                 kind        : nd.kind,
-            }), root.id),
+            }), root.id);
         });
-        this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: dependencies`);
     }
 
     /**
@@ -1784,25 +1813,29 @@ export class SqlAdminController {
             return;
         }
 
-        const data = await this.fetchInheritanceGraph(ref);
-
-        if (!data) {
-            return;
-        }
-
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
-            title  : `${ref.schema} (inheritance)`,
-            glyph  : "diagram-project",
-            content: new RelationGraphPanel(data, nd => this.openReferencedTable({
+            title: `${ref.schema} (inheritance)`,
+            glyph: "diagram-project",
+            ref,
+        }, async () => {
+            const data = await this.fetchInheritanceGraph(ref);
+
+            if (!data) {
+                // The helper already reported. Throwing closes the tab without a second toast.
+                throw new PanelLoadError(null, ref, true);
+            }
+
+            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: inheritance (${data.nodes.length} relations)`);
+
+            return new RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
                 name        : nd.name,
                 kind        : nd.kind,
-            })),
+            }));
         });
-        this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: inheritance (${data.nodes.length} relations)`);
     }
 
     /**
@@ -1823,34 +1856,38 @@ export class SqlAdminController {
             return;
         }
 
-        const full = await this.fetchInheritanceGraph(ref);
-
-        if (!full) {
-            return;
-        }
-
-        const root: DiagramNodeData = {
-            id   : relationNodeId(ref as RelationNodeRef),
-            label: ref.name!,
-            glyph: KIND_GLYPH[ref.kind],
-            data : { schema: ref.schema!, name: ref.name!, kind: ref.kind },
-        };
-        const data = rootedDiagram(full, root, "both", Number.POSITIVE_INFINITY);
-
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
             title  : `${ref.name} (inheritance)`,
             glyph  : "diagram-project",
             tooltip: this.panelTooltip(ref),
-            content: new RelationGraphPanel(data, nd => this.openReferencedTable({
+            ref,
+        }, async () => {
+            const full = await this.fetchInheritanceGraph(ref);
+
+            if (!full) {
+                // The helper already reported. Throwing closes the tab without a second toast.
+                throw new PanelLoadError(null, ref, true);
+            }
+
+            const root: DiagramNodeData = {
+                id   : relationNodeId(ref as RelationNodeRef),
+                label: ref.name!,
+                glyph: KIND_GLYPH[ref.kind],
+                data : { schema: ref.schema!, name: ref.name!, kind: ref.kind },
+            };
+            const data = rootedDiagram(full, root, "both", Number.POSITIVE_INFINITY);
+
+            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: inheritance`);
+
+            return new RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
                 name        : nd.name,
                 kind        : nd.kind,
-            }), root.id),
+            }), root.id);
         });
-        this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: inheritance`);
     }
 
     /**
@@ -2484,27 +2521,23 @@ export class SqlAdminController {
             return;
         }
 
-        let details: RoleDetail[];
-
-        try {
-            const roles = await this.loadRoles();
-            details = await Promise.all(roles.map(r => getRoleDetail(this._connectionId, r.name)));
-        } catch (err) {
-            this.notifyError(err);
-
-            return;
-        }
-
-        const full = buildRoleMembershipDiagram(details);
-        const root: DiagramNodeData = { id: name, label: name, glyph: ROLE_GLYPH };
-
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
-            title  : `${name} (membership)`,
-            glyph  : "diagram-project",
-            content: new RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName)),
+            title: `${name} (membership)`,
+            glyph: "diagram-project",
+        }, async () => {
+            // The fetch now runs behind the library's spinner. A throw here closes
+            // the tab and reaches the "exception" handler — so no local catch.
+            const roles   = await this.loadRoles();
+            const details = await Promise.all(roles.map(r => getRoleDetail(this._connectionId, r.name)));
+
+            const full = buildRoleMembershipDiagram(details);
+            const root: DiagramNodeData = { id: name, label: name, glyph: ROLE_GLYPH };
+
+            this.statusBar.setMessage(`${this._statusScope} · ${name}: membership (${full.nodes.length} roles)`);
+
+            return new RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName));
         });
-        this.statusBar.setMessage(`${this._statusScope} · ${name}: membership (${full.nodes.length} roles)`);
     }
 
     /**
@@ -2521,21 +2554,24 @@ export class SqlAdminController {
             return;
         }
 
-        const detail = await this.fetchRoleDetail(name);
-
-        if (!detail) {
-            return;
-        }
-
-        const data = buildRoleGrantsDiagram(name, detail.privileges);
-
-        this.dock.addPanel({
+        this.openAsyncPanel({
             id,
-            title  : `${name} (grants graph)`,
-            glyph  : "diagram-project",
-            content: new RoleGrantsDiagramPanel(data, (schema, table) => this.openGrantedTable(schema, table)),
+            title: `${name} (grants graph)`,
+            glyph: "diagram-project",
+        }, async () => {
+            const detail = await this.fetchRoleDetail(name);
+
+            if (!detail) {
+                // The helper already reported. Throwing closes the tab without a second toast.
+                throw new PanelLoadError(null, undefined, true);
+            }
+
+            const data = buildRoleGrantsDiagram(name, detail.privileges);
+
+            this.statusBar.setMessage(`${this._statusScope} · ${name}: grants graph (${data.nodes.length - 1} tables)`);
+
+            return new RoleGrantsDiagramPanel(data, (schema, table) => this.openGrantedTable(schema, table));
         });
-        this.statusBar.setMessage(`${this._statusScope} · ${name}: grants graph (${data.nodes.length - 1} tables)`);
     }
 
     /**
@@ -2726,6 +2762,41 @@ export class SqlAdminController {
     /** Drop a closed panel's store from the registry (the dock drives the start page). */
     private disposePanel(id: string): void {
         this._openPanels.delete(id);
+    }
+
+    /**
+     * Register a work-area tab whose content is fetched: the tab appears at once
+     * with the library's spinner, `build` runs behind it, and the built panel
+     * replaces the spinner. A rejection closes the tab and reaches the Dock
+     * "exception" handler, which reports it through notifyError.
+     */
+    private openAsyncPanel(
+        spec: { id: string; title: string; glyph: string; tooltip?: string; ref?: DbObjectRef },
+        build: () => Promise<Component>,
+    ): void {
+        this.dock.addLazyPanel({
+            id     : spec.id,
+            title  : spec.title,
+            glyph  : spec.glyph,
+            tooltip: spec.tooltip,
+            content: async () => {
+                try {
+                    return await build();
+                } catch (error) {
+                    // Already wrapped (a helper that reported and returned null):
+                    // pass it through so `reported` is not lost.
+                    if (error instanceof PanelLoadError) {
+                        throw error;
+                    }
+
+                    // Re-thrown so the library tears the tab down; the wrapper
+                    // carries the ref so the "exception" handler can name it.
+                    throw new PanelLoadError(error, spec.ref);
+                }
+            },
+        });
+
+        this.statusBar.setMessage(`${this._statusScope} · ${spec.title}: loading…`);
     }
 
     /** Select the panel's navigator node and refresh the status bar to match. */
