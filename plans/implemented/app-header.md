@@ -393,6 +393,26 @@ from `@jimka/typescript-ui/component/input`, `Glyph` from
   (Query/Tools/View still open correctly, Arrow-Left/Right still cycles
   between them) is unaffected.
 
+- **The block was moved out of the menu bar into its own strip above it, and
+  the connected database was removed — a post-implementation design change on
+  user feedback.** As shipped per the plan, the header sat inside the menu bar
+  (`insertComponent(new AppHeader(database), 0)`), which made it the tallest
+  child of the menu bar's baseline-aligned `HBox`: it stretched the button row
+  (~31px) and sat top-aligned against the menu items — poor UX. On review the
+  user asked for it as its own row above the menu bar and for the database name
+  to be dropped (the status bar's identity badge already pins it). `SqlAdminShell`
+  now stacks `AppHeader` and the menu bar in a `VBox` filling the NORTH band, so
+  the strip sizes to its own content and the menu bar keeps its natural button
+  height. `buildMenuBar` no longer takes or inserts the header, and
+  `appHeaderText` drops its `database` argument and field (the block is now the
+  glyph, the app name, and the version). This reverses the plan's "header is a
+  child of the existing MenuBar" decision[^why-menubar] and its "No connection
+  host or port in the header / no separate NORTH row" non-goals; the glyph, the
+  one-name-source `appIdentity.ts`, and the token-based colours are unchanged.
+  Confirmed live: the strip renders `⛁ SQLAdmin v0.1.0` above the Query/Tools/View
+  row, the menu bar is no longer stretched, and the database shows only in the
+  status bar.
+
 ---
 
 ## Notes
