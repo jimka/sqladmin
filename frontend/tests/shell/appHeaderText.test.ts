@@ -6,34 +6,24 @@ const VERSION = "0.1.0";
 const TAGLINE = "A browser-based PostgreSQL administration & query tool.";
 
 describe("appHeaderText", () => {
-    it("carries the name, v-prefixed version, and database through unchanged", () => {
-        const text = appHeaderText(NAME, VERSION, TAGLINE, "sqladmin");
+    it("carries the name and the v-prefixed version through unchanged", () => {
+        const text = appHeaderText(NAME, VERSION, TAGLINE);
 
         expect(text.name).toBe("SQLAdmin");
         expect(text.version).toBe("v0.1.0");
-        expect(text.database).toBe("sqladmin");
     });
 
-    it("includes the name, version, tagline, and database in the tooltip", () => {
-        const text = appHeaderText(NAME, VERSION, TAGLINE, "sqladmin");
+    it("includes the name, version, and tagline in the tooltip", () => {
+        const text = appHeaderText(NAME, VERSION, TAGLINE);
 
         expect(text.tooltip).toContain(NAME);
         expect(text.tooltip).toContain("v0.1.0");
         expect(text.tooltip).toContain(TAGLINE);
-        expect(text.tooltip).toContain("sqladmin");
     });
 
-    it("drops the database and the tooltip's connection clause when undefined", () => {
-        const text = appHeaderText(NAME, VERSION, TAGLINE, undefined);
+    it("never mentions a connected database in the tooltip", () => {
+        const text = appHeaderText(NAME, VERSION, TAGLINE);
 
-        expect(text.database).toBeNull();
-        expect(text.tooltip).not.toContain("Connected to");
-    });
-
-    it("treats an empty-string database the same as undefined", () => {
-        const text = appHeaderText(NAME, VERSION, TAGLINE, "");
-
-        expect(text.database).toBeNull();
         expect(text.tooltip).not.toContain("Connected to");
     });
 

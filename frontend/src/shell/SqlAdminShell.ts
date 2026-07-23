@@ -14,7 +14,7 @@
 
 import { Component, Container }        from "@jimka/typescript-ui/core";
 import { Placement, UNBOUNDED }    from "@jimka/typescript-ui/primitive";
-import { Border as BorderLayout, Split, Card } from "@jimka/typescript-ui/layout";
+import { Border as BorderLayout, Split, Card, VBox } from "@jimka/typescript-ui/layout";
 import { MenuBar }                 from "@jimka/typescript-ui/component/menubar";
 import { Button }                  from "@jimka/typescript-ui/component/button";
 import { Spacer }                  from "@jimka/typescript-ui/component/container";
@@ -104,12 +104,21 @@ export class SqlAdminShell extends Container {
             onShowRoles        : () => sidebar.selectView(ROLES_VIEW_ID),
             onShowQueries      : () => sidebar.selectView(QUERIES_VIEW_ID),
             onRefresh          : () => controller.refreshActive(),
-        }, controller.database);
+        });
+
+        // The brand strip rides directly above the menu bar as its own row: the
+        // two stack in a VBox that occupies the shell's NORTH band together, so
+        // the strip sizes to its own content instead of stretching the menu
+        // bar's baseline-aligned button row.
+        const topChrome = new Container({
+            layoutManager: new VBox({ spacing: 0 }),
+            components   : [new AppHeader(), menuBar],
+        });
 
         super({
             layoutManager: new BorderLayout({ spacing: 0 }),
             components: [
-                { component: menuBar,              constraints: { placement: Placement.NORTH } },
+                { component: topChrome,            constraints: { placement: Placement.NORTH } },
                 { component: workArea,             constraints: { placement: Placement.CENTER } },
                 { component: controller.statusBar, constraints: { placement: Placement.SOUTH } },
             ],
@@ -342,12 +351,10 @@ interface MenuBarActions {
  * bar's collapse.
  *
  * @param actions - The menu action callbacks.
- * @param database - The connected database, shown in the AppHeader pinned to
- *   the menu bar's leading edge. Omitted only by DOM-less callers.
  *
  * @returns The composed menu bar.
  */
-function buildMenuBar(actions: MenuBarActions, database?: string): MenuBar {
+function buildMenuBar(actions: MenuBarActions): MenuBar {
     const menuBar = MenuBar({
         menus: [
             { label: "Query", glyph: "terminal", items: [
@@ -410,11 +417,6 @@ function buildMenuBar(actions: MenuBarActions, database?: string): MenuBar {
     menuBar.addComponent(Spacer.flex());
     menuBar.addComponent(shortcuts);
     menuBar.addComponent(about);
-
-    // Pin the app-identity brand block to the leading edge, ahead of the
-    // "Query" menu — see AppHeader.ts and the plan's "header is a child of the
-    // existing MenuBar" decision.
-    menuBar.insertComponent(new AppHeader(database), 0);
 
     return menuBar;
 }
