@@ -109,24 +109,44 @@ save_(store, columns, notify)`), never registered by reference themselves.
 
 A class-first component doesn't return a `{ component, ...api }` handle —
 the instance itself is the mountable component (since it `extends`
-`Container`/`Panel`/…), and its public methods/fields **are** the API. Call
-sites construct with `new` and use the instance directly:
+`Container`/`Panel`/…), and its public methods/fields **are** the API.
+
+Export the class through the library's `callable()` wrapper so call sites
+construct it **without `new`**, matching how the library's own bases
+(`Container`, `Panel`, …) are invoked. Keep the `class` declaration unexported
+and re-export the wrapped value under the class name:
 
 ```ts
-// Before (builder + handle):
-const sidebar = ActivityBar(views);
-body.addComponent(sidebar.component);
-sidebar.toggleCollapsed();
+import { Container, callable } from "@jimka/typescript-ui/core";
 
-// After (class-first):
-const sidebar = new ActivityBar(views);
-body.addComponent(sidebar);
-sidebar.toggleCollapsed();
+class ActivityBar extends Container {
+    // ...
+}
+
+// Callable-class export: consumers write `ActivityBar(views)`, no `new`.
+const ActivityBarCallable = callable(ActivityBar);
+type ActivityBarCallable = ActivityBar;   // so `ActivityBar` still names the type
+export { ActivityBarCallable as ActivityBar };
 ```
 
-Delete the handle interface (`ActivityBarHandle` and friends) once nothing
-references it — its members move directly onto the class as public
-fields/methods.
+Call sites then read like the library's own factories:
+
+```ts
+const sidebar = ActivityBar(views);   // no `new`
+body.addComponent(sidebar);           // the instance IS the component
+sidebar.toggleCollapsed();            // its methods ARE the API
+```
+
+`new ActivityBar(views)` still works and `instanceof` still holds — `callable()`
+is a Proxy that forwards both call and construct — but the no-`new` form is the
+house style. `this.constructor.name` stays the class's own name (the Proxy
+constructs via `Reflect.construct`), so convention (e) is unaffected. Delete the
+handle interface (`ActivityBarHandle` and friends) once nothing references it —
+its members move directly onto the class as public fields/methods.
+
+Migration is incremental: `AppHeader` and `ActivityBar` are the converted
+examples; components still exported as a bare `export class` (and constructed
+with `new`) are not-yet-migrated holdovers, not a second sanctioned style.
 
 ## (e) `constructor.name` becomes the CSS class name
 
