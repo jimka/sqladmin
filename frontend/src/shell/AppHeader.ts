@@ -44,6 +44,14 @@ const PAD = 10;
 // rather than crowding the menu bar beneath it.
 const V_PAD = 5;
 
+// The version sits well below the 14px body default (`--ts-ui-font-size`) so it
+// reads as quiet secondary text beside the app name. A literal px, not a token,
+// because the library exposes no smaller font-size token to bind to. Applied
+// via setFontSize() after construction, not the constructor `fontSize` option:
+// a numeric fontSize passed at construction is clobbered back to the theme
+// default by Text's field initializers (see LIBRARY_NOTES.md).
+const VERSION_FONT_SIZE = 10;
+
 /** The app-identity brand strip pinned above the shell's menu bar. */
 class AppHeader extends Container {
     constructor() {
@@ -55,6 +63,7 @@ class AppHeader extends Container {
         name.setForegroundColor("var(--ts-ui-text-color, rgb(33, 33, 33))");
 
         const version = new Text(text.version);
+        version.setFontSize(VERSION_FONT_SIZE);
         version.setForegroundColor("var(--ts-ui-menu-bar-item-shortcut-color, rgb(140, 140, 140))");
 
         const components: Component[] = [glyph, name, version];
