@@ -15,7 +15,7 @@
 // setForegroundColor (the form ExplainNode.ts already uses), so the block
 // tracks the library's own light/dark theme rather than pinning a fixed grey.
 
-import { Component, Container } from "@jimka/typescript-ui/core";
+import { Component, Container, callable } from "@jimka/typescript-ui/core";
 import { Insets }              from "@jimka/typescript-ui/primitive";
 import { HBox }                from "@jimka/typescript-ui/layout";
 import { Text }                from "@jimka/typescript-ui/component/input";
@@ -45,7 +45,7 @@ const PAD = 10;
 const V_PAD = 5;
 
 /** The app-identity brand strip pinned above the shell's menu bar. */
-export class AppHeader extends Container {
+class AppHeader extends Container {
     constructor() {
         const text = appHeaderText(APP_NAME, APP_VERSION, APP_TAGLINE);
 
@@ -79,3 +79,11 @@ export class AppHeader extends Container {
         Tooltip.attach(this, text.tooltip);
     }
 }
+
+// Callable-class export (COMPONENT_CONVENTIONS.md (d)): consumers construct
+// `AppHeader()` without `new`, mirroring the library's own callable bases. The
+// Proxy forwards construction via `Reflect.construct`, so `this.constructor.name`
+// stays "AppHeader" and the CSS-class convention (e) is preserved.
+const AppHeaderCallable = callable(AppHeader);
+type AppHeaderCallable = AppHeader;
+export { AppHeaderCallable as AppHeader };

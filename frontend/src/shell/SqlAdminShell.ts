@@ -115,7 +115,7 @@ export class SqlAdminShell extends Container {
         // when the bar sat directly in the BorderLayout's stretched NORTH slot.
         const topChrome = new Container({
             layoutManager: new VBox({ spacing: 0, stretching: true }),
-            components   : [new AppHeader(), menuBar],
+            components   : [AppHeader(), menuBar],
         });
 
         super({
@@ -448,7 +448,7 @@ function buildSidebar(controller: SqlAdminController, onLogout: () => void): Act
     const roles    = new RolesExplorerView(controller, ROLES_VIEW_ID);
     const queries  = new QueriesView(controller, QUERIES_VIEW_ID);
 
-    return new ActivityBar([
+    return ActivityBar([
         { id: DATABASE_VIEW_ID, label: "Database", shortcut: DATABASES_RAIL_SHORTCUT, glyph: "database", component: explorer },
         { id: ROLES_VIEW_ID,    label: "Roles",    shortcut: ROLES_RAIL_SHORTCUT,     glyph: "users",    component: roles },
         { id: QUERIES_VIEW_ID,  label: "Queries",  shortcut: QUERIES_RAIL_SHORTCUT,   glyph: "terminal", component: queries },
