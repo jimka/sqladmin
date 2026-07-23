@@ -111,10 +111,10 @@ A class-first component doesn't return a `{ component, ...api }` handle —
 the instance itself is the mountable component (since it `extends`
 `Container`/`Panel`/…), and its public methods/fields **are** the API.
 
-Export the class through the library's `callable()` wrapper so call sites
-construct it **without `new`**, matching how the library's own bases
-(`Container`, `Panel`, …) are invoked. Keep the `class` declaration unexported
-and re-export the wrapped value under the class name:
+Export the class through the library's `callable()` wrapper so call sites *can*
+construct it without `new`, matching how the library's own bases (`Container`,
+`Panel`, …) are invoked. Keep the `class` declaration unexported and re-export
+the wrapped value under the class name:
 
 ```ts
 import { Container, callable } from "@jimka/typescript-ui/core";
@@ -123,30 +123,42 @@ class ActivityBar extends Container {
     // ...
 }
 
-// Callable-class export: consumers write `ActivityBar(views)`, no `new`.
+// Callable-class export: consumers may write `ActivityBar(views)`, no `new`.
 const ActivityBarCallable = callable(ActivityBar);
 type ActivityBarCallable = ActivityBar;   // so `ActivityBar` still names the type
 export { ActivityBarCallable as ActivityBar };
 ```
 
-Call sites then read like the library's own factories:
+Prefer the no-`new` form where the component is constructed **inline as a
+value** — an element of a `components:` array, a call argument, a `return`
+expression — so it reads like the library's own factories and doesn't bury a
+`new` inside another options bag:
 
 ```ts
-const sidebar = ActivityBar(views);   // no `new`
-body.addComponent(sidebar);           // the instance IS the component
-sidebar.toggleCollapsed();            // its methods ARE the API
+super({ components: [AppHeader(), menuBar] });   // inline value → no `new`
+return ActivityBar(views);                       // returned value → no `new`
 ```
 
-`new ActivityBar(views)` still works and `instanceof` still holds — `callable()`
-is a Proxy that forwards both call and construct — but the no-`new` form is the
-house style. `this.constructor.name` stays the class's own name (the Proxy
-constructs via `Reflect.construct`), so convention (e) is unaffected. Delete the
-handle interface (`ActivityBarHandle` and friends) once nothing references it —
-its members move directly onto the class as public fields/methods.
+Binding the instance to a **variable** is the exception — `new` is fine (and
+reads clearly) there, because the construction isn't nested inside an options
+bag:
+
+```ts
+const topChrome = new Container({ layoutManager: vbox, components });  // `new` ok
+body.addComponent(topChrome);   // the instance IS the component
+```
+
+Both forms work identically: `callable()` is a Proxy that forwards call and
+construct, so `new` and `instanceof` both still hold and `this.constructor.name`
+stays the class's own name (convention (e) unaffected). Delete the handle
+interface (`ActivityBarHandle` and friends) once nothing references it — its
+members move directly onto the class as public fields/methods.
 
 Migration is incremental: `AppHeader` and `ActivityBar` are the converted
-examples; components still exported as a bare `export class` (and constructed
-with `new`) are not-yet-migrated holdovers, not a second sanctioned style.
+examples; components still exported as a bare `export class` are not-yet-migrated
+holdovers, not a second sanctioned style — but note that's about *wrapping the
+class definition* with `callable()`, independent of the per-call-site `new`
+choice above.
 
 ## (e) `constructor.name` becomes the CSS class name
 
