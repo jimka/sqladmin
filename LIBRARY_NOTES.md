@@ -32,6 +32,32 @@ supplied, or move the restore ahead of the option cascade.
 
 ---
 
+## ✅ Fixed in library: no way to register a Dock tab whose content arrives later
+
+Every async "open" in this app fetched its data **before** creating a tab —
+`dock.addPanel`/`addLazyPanel` both required the panel's `Component` (or a
+synchronous factory returning one) up front. Against a real database that
+meant the user clicked, nothing appeared for seconds, and then a finished tab
+popped in. There was no library-level way to say "register the tab now, build
+its content once this fetch resolves" — a consumer that fetches before it can
+build had to hand-roll its own placeholder panel and swap logic to get a tab
+to appear first.
+
+Fixed in the library (typescript-ui plan `tab-lazy-layout-constraint`):
+`DockPanelSpec.content` widens to accept a `ComponentFactory` that may return
+`Component | Promise<Component>`, and `dock.addLazyPanel` runs an async
+factory behind its own spinner, swapping the built panel in on success. A
+rejection tears the tab down and reaches a new Dock `"exception"` event
+(`{ id, error }`) instead of leaving an empty tab behind. This app adopted
+both across all fourteen of its async opens (plan
+`lazy-tab-loading-sequence`): each `open*` method now registers its tab first
+via a shared `openAsyncPanel` helper and hands the Dock an async factory,
+with a single `dock.on("exception", …)` subscription routing failures to the
+existing `notifyError`. SQLAdmin ships no spinner code, no placeholder
+component, and no in-flight bookkeeping of its own.
+
+---
+
 ## ✅ Fixed in library: button-triggered menus were anchored to the pointer
 
 Four dock toolbar buttons (table/role-grants Export, the Structure panel's
