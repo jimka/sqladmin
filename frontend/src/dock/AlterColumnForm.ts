@@ -6,7 +6,7 @@
 // line with nothing to fill in. Used by the controller's alterColumn
 // launcher, embedded as a SqlPreviewDialog's `form`.
 
-import { Component, Panel } from "@jimka/typescript-ui/core";
+import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
 import { Text, TextField } from "@jimka/typescript-ui/component/input";
 import type { AlterColumnAction, AlterTableSpec, ColumnMeta } from "../contract";
@@ -62,7 +62,7 @@ function buildActionFields(action: AlterColumnAction, column: ColumnMeta): Actio
 }
 
 /** The ALTER COLUMN form: the one/two fields (or summary) `action` needs. */
-export class AlterColumnForm extends Panel {
+class AlterColumnForm extends Panel {
     private readonly _schema: string;
     private readonly _table: string;
     private readonly _action: AlterColumnAction;
@@ -99,3 +99,7 @@ export class AlterColumnForm extends Panel {
         });
     }
 }
+
+const AlterColumnFormCallable = callable(AlterColumnForm);
+type AlterColumnFormCallable = AlterColumnForm;
+export { AlterColumnFormCallable as AlterColumnForm };

@@ -1,14 +1,14 @@
 // The RENAME TABLE dialog form: a single new-name field. Used by the
 // controller's renameTable launcher, embedded as a SqlPreviewDialog's `form`.
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
 import { TextField } from "@jimka/typescript-ui/component/input";
 import type { AlterTableSpec } from "../contract";
 import { buildAlterTableSpec } from "./ddlSpecs";
 
 /** The RENAME TABLE form: a single new-name field. */
-export class RenameTableForm extends Panel {
+class RenameTableForm extends Panel {
     private readonly _schema: string;
     private readonly _name: string;
     private readonly _newNameField: TextField;
@@ -32,3 +32,7 @@ export class RenameTableForm extends Panel {
         return buildAlterTableSpec(this._schema, this._name, "renameTable", { newName: this._newNameField.getValue() });
     }
 }
+
+const RenameTableFormCallable = callable(RenameTableForm);
+type RenameTableFormCallable = RenameTableForm;
+export { RenameTableFormCallable as RenameTableForm };

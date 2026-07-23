@@ -10,6 +10,7 @@
 // data, so selecting them is a no-op. The Tree caches loaded children, so a
 // collapse/re-expand does not refetch.
 
+import { callable } from "@jimka/typescript-ui/core";
 import { Tree, IconLabelTreeNodeRenderer }      from "@jimka/typescript-ui/component/tree";
 import type { TreeNode }                        from "@jimka/typescript-ui/component/tree";
 import { Menu }                                 from "@jimka/typescript-ui/overlay";
@@ -91,7 +92,7 @@ export interface ExplorerTree extends Tree {
 }
 
 /** Build the navigator Tree, wired to open tables and report load errors. */
-export class NavigatorTree extends Tree implements ExplorerTree {
+class NavigatorTree extends Tree implements ExplorerTree {
     private readonly controller: SqlAdminController;
     private readonly conn:       string;
     // The logged-in database, whose schemas are the tree's top level. `?? ""`
@@ -457,3 +458,7 @@ function leafLabel(o: DbObject): string {
 
     return o.name;
 }
+
+const NavigatorTreeCallable = callable(NavigatorTree);
+type NavigatorTreeCallable = NavigatorTree;
+export { NavigatorTreeCallable as NavigatorTree };

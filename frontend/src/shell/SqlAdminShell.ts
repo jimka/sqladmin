@@ -12,7 +12,7 @@
 // pane's preferred size after its one-time seed, so preferred can no longer
 // drive collapse.
 
-import { Component, Container }        from "@jimka/typescript-ui/core";
+import { Component, Container, callable } from "@jimka/typescript-ui/core";
 import { Placement, UNBOUNDED }    from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Split, Card, VBox } from "@jimka/typescript-ui/layout";
 import { MenuBar }                 from "@jimka/typescript-ui/component/menubar";
@@ -77,7 +77,7 @@ const CENTER_DOCK_ID  = "work-dock";
 const CENTER_START_ID = "work-start";
 
 /** The shell container, hosting the controller's Dock and StatusBar. */
-export class SqlAdminShell extends Container {
+class SqlAdminShell extends Container {
     constructor(controller: SqlAdminController) {
         // Signs out after confirmation: drops the server-side session and reloads
         // to the login dialog. Wired to the rail's bottom-pinned sign-out button
@@ -454,3 +454,7 @@ function buildSidebar(controller: SqlAdminController, onLogout: () => void): Act
         { id: QUERIES_VIEW_ID,  label: "Queries",  shortcut: QUERIES_RAIL_SHORTCUT,   glyph: "terminal", component: queries },
     ], { onSignOut: onLogout });
 }
+
+const SqlAdminShellCallable = callable(SqlAdminShell);
+type SqlAdminShellCallable = SqlAdminShell;
+export { SqlAdminShellCallable as SqlAdminShell };

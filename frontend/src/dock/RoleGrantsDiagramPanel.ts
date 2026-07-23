@@ -11,6 +11,7 @@
 // constructor's `onOpenTable` parameter, never handed off by reference, so it
 // needs no arrow-function field.
 
+import { callable } from "@jimka/typescript-ui/core";
 import { DiagramView }              from "@jimka/typescript-ui/component/diagram";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import { Glyph }                    from "@jimka/typescript-ui/component/display";
@@ -30,7 +31,7 @@ Glyph.register(user, table);
  * table. Double-clicking the role node (or a node with no `data`) is a no-op —
  * there is nothing further to open.
  */
-export class RoleGrantsDiagramPanel extends DiagramView {
+class RoleGrantsDiagramPanel extends DiagramView {
     /**
      * @param data - The graph (from buildRoleGrantsDiagram).
      * @param onOpenTable - Invoked with a table node's schema and table on activate.
@@ -47,3 +48,7 @@ export class RoleGrantsDiagramPanel extends DiagramView {
         });
     }
 }
+
+const RoleGrantsDiagramPanelCallable = callable(RoleGrantsDiagramPanel);
+type RoleGrantsDiagramPanelCallable = RoleGrantsDiagramPanel;
+export { RoleGrantsDiagramPanelCallable as RoleGrantsDiagramPanel };

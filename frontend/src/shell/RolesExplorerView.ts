@@ -5,12 +5,13 @@
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): a thin subclass of
 // TreeExplorerView that just fixes the config for the Roles tree.
 
+import { callable } from "@jimka/typescript-ui/core";
 import { RolesTree }               from "../roles/RolesTree";
 import { TreeExplorerView }        from "./treeExplorerView";
 import type { SqlAdminController } from "../SqlAdminController";
 
 /** The Roles explorer view (roles tree + read-only inspector accordion). */
-export class RolesExplorerView extends TreeExplorerView {
+class RolesExplorerView extends TreeExplorerView {
     /**
      * @param controller - The mediator owning the role data and the inspector.
      * @param id - The Card-page key the activity-bar rail selects this view by.
@@ -18,7 +19,7 @@ export class RolesExplorerView extends TreeExplorerView {
     constructor(controller: SqlAdminController, id: string) {
         super({
             id,
-            explorer:       new RolesTree(controller),
+            explorer:       RolesTree(controller),
             treeLabel:      "Roles",
             treeGlyph:      "users",
             inspector:      controller.rolesProperties.component,
@@ -27,3 +28,7 @@ export class RolesExplorerView extends TreeExplorerView {
         });
     }
 }
+
+const RolesExplorerViewCallable = callable(RolesExplorerView);
+type RolesExplorerViewCallable = RolesExplorerView;
+export { RolesExplorerViewCallable as RolesExplorerView };

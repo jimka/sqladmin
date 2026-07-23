@@ -21,7 +21,7 @@
 // plan's Architecture Decisions) — nothing here is a plain method registered
 // by reference, so no instance fields are needed.
 
-import { Component, Panel }        from "@jimka/typescript-ui/core";
+import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { Fit }                     from "@jimka/typescript-ui/layout";
 import { Event }                   from "@jimka/typescript-ui/core";
 import { Button }                  from "@jimka/typescript-ui/component/button";
@@ -95,7 +95,7 @@ interface SectionConfig {
  * The Queries view: an Accordion of the Saved and Recent sections over the
  * controller's stores.
  */
-export class QueriesView extends AccordionPanel {
+class QueriesView extends AccordionPanel {
     /**
      * @param controller - The mediator owning the query stores and open actions.
      * @param id - The Card-page key the activity-bar rail selects this view by; it
@@ -390,3 +390,7 @@ function actionButton(action: RowAction, selected: () => QueryRow | undefined): 
 function snippet(sql: string): string {
     return sql.replace(/\s+/g, " ").trim();
 }
+
+const QueriesViewCallable = callable(QueriesView);
+type QueriesViewCallable = QueriesView;
+export { QueriesViewCallable as QueriesView };

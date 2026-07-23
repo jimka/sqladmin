@@ -3,7 +3,7 @@
 // drop-index — every drop launcher builds one with its own summary text and
 // embeds it as a SqlPreviewDialog's `form`.
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
 import { Checkbox } from "@jimka/typescript-ui/component/input";
 import { Text } from "@jimka/typescript-ui/component/input";
@@ -12,7 +12,7 @@ import { Text } from "@jimka/typescript-ui/component/input";
 const ROW_SPACING = 6;
 
 /** The drop-confirmation form: a summary line plus an optional CASCADE checkbox. */
-export class ConfirmCascadeForm extends Panel {
+class ConfirmCascadeForm extends Panel {
     private readonly _cascadeBox: Checkbox;
 
     /**
@@ -35,3 +35,7 @@ export class ConfirmCascadeForm extends Panel {
         return { cascade: this._cascadeBox.getValue() };
     }
 }
+
+const ConfirmCascadeFormCallable = callable(ConfirmCascadeForm);
+type ConfirmCascadeFormCallable = ConfirmCascadeForm;
+export { ConfirmCascadeFormCallable as ConfirmCascadeForm };

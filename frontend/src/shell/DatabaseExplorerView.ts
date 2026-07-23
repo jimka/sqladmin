@@ -5,13 +5,14 @@
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): a thin subclass of
 // TreeExplorerView that just fixes the config for the Database tree.
 
+import { callable } from "@jimka/typescript-ui/core";
 import { NavigatorTree }           from "../navigator/NavigatorTree";
 import { TreeExplorerView }        from "./treeExplorerView";
 import { createSchemaTool }        from "./createSchemaTool";
 import type { SqlAdminController } from "../SqlAdminController";
 
 /** The Database explorer view (Navigator + Properties accordion). */
-export class DatabaseExplorerView extends TreeExplorerView {
+class DatabaseExplorerView extends TreeExplorerView {
     /**
      * @param controller - The mediator owning the navigator's data and the
      *   Properties inspector.
@@ -20,7 +21,7 @@ export class DatabaseExplorerView extends TreeExplorerView {
     constructor(controller: SqlAdminController, id: string) {
         super({
             id,
-            explorer:       new NavigatorTree(controller),
+            explorer:       NavigatorTree(controller),
             treeLabel:      "Database",
             treeGlyph:      "database",
             treeTools:      [createSchemaTool(() => controller.createSchema({
@@ -34,3 +35,7 @@ export class DatabaseExplorerView extends TreeExplorerView {
         });
     }
 }
+
+const DatabaseExplorerViewCallable = callable(DatabaseExplorerView);
+type DatabaseExplorerViewCallable = DatabaseExplorerView;
+export { DatabaseExplorerViewCallable as DatabaseExplorerView };

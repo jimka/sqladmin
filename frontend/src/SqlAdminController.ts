@@ -228,6 +228,11 @@ export class SqlAdminController {
     // has since moved on is discarded instead of clobbering the current view.
     private _propsSeq: number = 0;
 
+    // In-flight `getColumns` requests, keyed by panel id, so the several column
+    // fetches a single navigator double-click triggers collapse into one request
+    // (see fetchColumns).
+    private readonly _columnsInFlight = new Map<string, Promise<ColumnMeta[]>>();
+
     // The latest exportable result each query panel displayed — a rows grid or an
     // EXPLAIN plan — keyed by panel id (set via the panel's injected onResult),
     // plus the currently focused panel id. Together they let the menubar "Export
@@ -410,9 +415,10 @@ export class SqlAdminController {
             ref,
         }, async () => {
             // The fetch now runs behind the library's spinner. A throw here closes
-            // the tab and reaches the "exception" handler — so no local catch.
-            const columns = await getColumns(ref);
-            const privileges = await getTablePrivileges(ref);
+            // the tab and reaches the "exception" handler — so no local catch. The
+            // two requests are independent, so they run concurrently; getColumns
+            // is shared with the selection-driven Properties fetch via fetchColumns.
+            const [columns, privileges] = await Promise.all([this.fetchColumns(ref), getTablePrivileges(ref)]);
             const store = buildStore(ref, buildModel(columns), columns);
 
             store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
@@ -600,7 +606,7 @@ export class SqlAdminController {
             this._openPanels.set(id, { ref, node: node ?? null, detail: "info" });
             this.syncToPanel(id);
 
-            return new SequenceInfoPanel(detail, {
+            return SequenceInfoPanel(detail, {
                 schema:       ref.schema!,
                 name:         ref.name!,
                 roles,
@@ -643,7 +649,7 @@ export class SqlAdminController {
             this._openPanels.set(id, { ref, node: node ?? null, columns, detail: "structure" });
             this.syncToPanel(id);
 
-            return new StructurePanel(columns, structure, (refSchema, refTable) =>
+            return StructurePanel(columns, structure, (refSchema, refTable) =>
                 this.openReferencedTable({
                     connectionId: ref.connectionId,
                     database    : ref.database,
@@ -1484,7 +1490,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: diagram (${data.nodes.length} tables)`);
 
-            return new SchemaDiagramPanel(data, table => this.openReferencedTable({
+            return SchemaDiagramPanel(data, table => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : ref.schema,
@@ -1572,7 +1578,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.database}: diagram (${tableCount} tables)`);
 
-            return new DatabaseDiagramPanel(schemas, (schema, table) => this.openReferencedTable({
+            return DatabaseDiagramPanel(schemas, (schema, table) => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema,
@@ -1650,7 +1656,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: relations`);
 
-            return new RelationDiagramPanel(full, root, table => this.openReferencedTable({
+            return RelationDiagramPanel(full, root, table => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : ref.schema,
@@ -1736,7 +1742,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: dependencies (${data.nodes.length} relations)`);
 
-            return new RelationGraphPanel(data, nd => this.openReferencedTable({
+            return RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -1787,7 +1793,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: dependencies`);
 
-            return new RelationGraphPanel(data, nd => this.openReferencedTable({
+            return RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -1828,7 +1834,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: inheritance (${data.nodes.length} relations)`);
 
-            return new RelationGraphPanel(data, nd => this.openReferencedTable({
+            return RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -1880,7 +1886,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: inheritance`);
 
-            return new RelationGraphPanel(data, nd => this.openReferencedTable({
+            return RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -2388,6 +2394,36 @@ export class SqlAdminController {
      * whose selection has since changed, so rapid clicks never render the wrong
      * object.
      */
+    /**
+     * Fetch a relation's columns, coalescing concurrent requests for the same
+     * object. A navigator double-click fires two selection events (each showing
+     * Properties) and then opens the object — three column fetches for one
+     * gesture. Sharing the in-flight promise collapses them into a single
+     * request. The entry is removed as soon as the fetch settles, so a later
+     * fetch (e.g. after a structure change) always goes to the server rather
+     * than serving stale columns from a cache.
+     */
+    private fetchColumns(ref: DbObjectRef): Promise<ColumnMeta[]> {
+        const key = this.panelId(ref);
+        const inFlight = this._columnsInFlight.get(key);
+
+        if (inFlight) {
+            return inFlight;
+        }
+
+        const request = getColumns(ref);
+
+        this._columnsInFlight.set(key, request);
+        void request.finally(() => {
+            // Guard against clearing a newer request that reused the key.
+            if (this._columnsInFlight.get(key) === request) {
+                this._columnsInFlight.delete(key);
+            }
+        });
+
+        return request;
+    }
+
     async showProperties(ref: DbObjectRef): Promise<void> {
         const seq = ++this._propsSeq;
 
@@ -2407,7 +2443,7 @@ export class SqlAdminController {
         }
 
         try {
-            const columns = await getColumns(ref);
+            const columns = await this.fetchColumns(ref);
 
             if (seq === this._propsSeq) {
                 this.properties.show(ref, columns);
@@ -2495,7 +2531,7 @@ export class SqlAdminController {
             id,
             title  : `Grants: ${role}`,
             glyph  : "key",
-            content: new RoleGrantsPanel(role, privileges),
+            content: RoleGrantsPanel(role, privileges),
         });
 
         // Track the grant set so the active-tab export (Tools menu) can reach it
@@ -2536,7 +2572,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${name}: membership (${full.nodes.length} roles)`);
 
-            return new RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName));
+            return RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName));
         });
     }
 
@@ -2570,7 +2606,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${name}: grants graph (${data.nodes.length - 1} tables)`);
 
-            return new RoleGrantsDiagramPanel(data, (schema, table) => this.openGrantedTable(schema, table));
+            return RoleGrantsDiagramPanel(data, (schema, table) => this.openGrantedTable(schema, table));
         });
     }
 

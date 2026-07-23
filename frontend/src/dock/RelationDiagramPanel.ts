@@ -23,7 +23,7 @@
 // …)` rather than the construction-time `listeners:` bag, so `this` is
 // available. `legendRow`/`labelledRow` stay module-level functions.
 
-import { Component, Panel }         from "@jimka/typescript-ui/core";
+import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border, HBox, VBox }       from "@jimka/typescript-ui/layout";
 import { Placement }                from "@jimka/typescript-ui/primitive";
 import { Checkbox, ComboBox, Text } from "@jimka/typescript-ui/component/input";
@@ -51,7 +51,7 @@ const LEGEND_WIDTH = 220;
  * depth + legend side panel and a CENTER DiagramView. The root node is
  * emphasized; double-clicking any node invokes `onSelectTable` with its id.
  */
-export class RelationDiagramPanel extends Panel {
+class RelationDiagramPanel extends Panel {
     private readonly full: DiagramData;
     private readonly root: DiagramNodeData;
 
@@ -87,7 +87,7 @@ export class RelationDiagramPanel extends Panel {
         // it. `full` already carries card `data`/`ports` from the controller
         // (card mode), so this single renderer covers every node without a mode
         // flag.
-        const nodeRenderer = (n: DiagramNodeData): Component => new TableCardNode(n, n.id === root.id);
+        const nodeRenderer = (n: DiagramNodeData): Component => TableCardNode(n, n.id === root.id);
 
         const view   = DiagramView({ data: base, nodeRenderer });
         const legend = Panel({ layoutManager: new VBox({ spacing: 2 }), autoScroll: "auto" });
@@ -233,3 +233,7 @@ function legendRow(
         components   : [checkbox, new Text(n.label ?? n.id)],
     });
 }
+
+const RelationDiagramPanelCallable = callable(RelationDiagramPanel);
+type RelationDiagramPanelCallable = RelationDiagramPanel;
+export { RelationDiagramPanelCallable as RelationDiagramPanel };

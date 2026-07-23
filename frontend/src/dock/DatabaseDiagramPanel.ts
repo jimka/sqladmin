@@ -20,7 +20,7 @@
 // `rootControl`, `tablesControls`, and `legend` are fields (not just locals)
 // because `focusSchema` and the mode listener mutate them after construction.
 
-import { Component, Panel }         from "@jimka/typescript-ui/core";
+import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border, HBox, VBox }       from "@jimka/typescript-ui/layout";
 import { Placement }                from "@jimka/typescript-ui/primitive";
 import { Checkbox, ComboBox, Text } from "@jimka/typescript-ui/component/input";
@@ -55,7 +55,7 @@ type DiagramMode = "overview" | "tables";
  * (Tables-mode-only) root/direction/depth/prune controls + per-schema legend,
  * and a CENTER DiagramView.
  */
-export class DatabaseDiagramPanel extends Panel {
+class DatabaseDiagramPanel extends Panel {
     // Assembled once from the fetched schemas; both modes derive from these
     // without re-fetching. `full` is the flat, ungrouped table graph the
     // rooted/prune traversal runs on (grouping happens last, only for display).
@@ -321,3 +321,7 @@ function schemaLegendRow(
         components   : [checkbox, new Text(schema)],
     });
 }
+
+const DatabaseDiagramPanelCallable = callable(DatabaseDiagramPanel);
+type DatabaseDiagramPanelCallable = DatabaseDiagramPanel;
+export { DatabaseDiagramPanelCallable as DatabaseDiagramPanel };

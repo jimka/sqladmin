@@ -1,7 +1,7 @@
 // The CREATE TYPE ... AS ENUM dialog form: a name field plus an add/remove-row
 // label grid, mirroring CreateTableForm's Grid idiom.
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import type { Component } from "@jimka/typescript-ui/core";
 import { Grid, VBox } from "@jimka/typescript-ui/layout";
 import { TextField } from "@jimka/typescript-ui/component/input";
@@ -33,7 +33,7 @@ interface RowHandle {
  * label grid. Embedded as the `form` of a `SqlPreviewDialog` by the
  * controller's `createType` launcher (enum category).
  */
-export class EnumTypeForm extends Panel {
+class EnumTypeForm extends Panel {
     private readonly _schema: string;
     private readonly _nameField: TextField;
     private readonly _grid: Grid;
@@ -144,3 +144,7 @@ function buildLabelRow(onRemove: () => void): RowHandle {
         removeButton,
     };
 }
+
+const EnumTypeFormCallable = callable(EnumTypeForm);
+type EnumTypeFormCallable = EnumTypeForm;
+export { EnumTypeFormCallable as EnumTypeForm };

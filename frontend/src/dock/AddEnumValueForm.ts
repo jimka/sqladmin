@@ -4,7 +4,7 @@
 // edits are append-only" decision), a new-label field, and an optional
 // BEFORE/AFTER placement relative to an existing label.
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
 import { ComboBox, Text, TextField } from "@jimka/typescript-ui/component/input";
 import type { AlterTypeAddValueSpec } from "../contract";
@@ -23,7 +23,7 @@ const ROW_SPACING = 6;
  * label field, and a BEFORE/AFTER placement combo + existing-label combo
  * (disabled/ignored when placement is "none" — appended at the end).
  */
-export class AddEnumValueForm extends Panel {
+class AddEnumValueForm extends Panel {
     private readonly _schema: string;
     private readonly _name: string;
     private readonly _valueField: TextField;
@@ -81,3 +81,7 @@ export class AddEnumValueForm extends Panel {
         });
     }
 }
+
+const AddEnumValueFormCallable = callable(AddEnumValueForm);
+type AddEnumValueFormCallable = AddEnumValueForm;
+export { AddEnumValueFormCallable as AddEnumValueForm };

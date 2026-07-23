@@ -17,7 +17,7 @@
 // the constructor doc below). `rebuild` and the `welcome` mutable state stay
 // constructor-local closures, same as the original factory.
 
-import { Component, Panel }         from "@jimka/typescript-ui/core";
+import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox, HBox }               from "@jimka/typescript-ui/layout";
 import { Insets }                   from "@jimka/typescript-ui/primitive";
 import { Text }                     from "@jimka/typescript-ui/component/input";
@@ -61,7 +61,7 @@ work.
 /**
  * The start page shown when the workspace has no open panels.
  */
-export class StartPage extends Panel {
+class StartPage extends Panel {
     /**
      * @param controller - The mediator supplying the quick actions and stored lists.
      * @param id - The CENTER Card-deck page id. It MUST be set here, in the
@@ -239,3 +239,7 @@ function actionButton(text: string, handler: () => void, glyph?: string): Compon
 
     return button;
 }
+
+const StartPageCallable = callable(StartPage);
+type StartPageCallable = StartPage;
+export { StartPageCallable as StartPage };

@@ -6,12 +6,13 @@
 // The panel/store scaffolding lives in the shared PropertyValuePanel base; this
 // class adds only the role→rows mapping and the empty state.
 
+import { callable } from "@jimka/typescript-ui/core";
 import type { RoleDetail }      from "../contract";
 import { roleBaseInfoRows }     from "./roleBaseInfoRows";
 import { PropertyValuePanel }   from "../properties/PropertyValuePanel";
 
 /** The selected role's base info, shown as a read-only Property/Value grid. */
-export class RolesPropertiesPanel extends PropertyValuePanel {
+class RolesPropertiesPanel extends PropertyValuePanel {
     constructor() {
         super();
         this.clear();
@@ -27,3 +28,7 @@ export class RolesPropertiesPanel extends PropertyValuePanel {
         this.setRows([{ property: "Role", value: "Select a role to view its details." }]);
     }
 }
+
+const RolesPropertiesPanelCallable = callable(RolesPropertiesPanel);
+type RolesPropertiesPanelCallable = RolesPropertiesPanel;
+export { RolesPropertiesPanelCallable as RolesPropertiesPanel };

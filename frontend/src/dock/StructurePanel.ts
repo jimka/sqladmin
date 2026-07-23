@@ -37,7 +37,7 @@
 // section grow past it to fill a tall tab.
 const SECTION_HEIGHT = 200;
 
-import { Panel }               from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox, LayoutConstraints } from "@jimka/typescript-ui/layout";
 import { AccordionPanel }      from "@jimka/typescript-ui/component/container";
 import { Button }              from "@jimka/typescript-ui/component/button";
@@ -92,7 +92,7 @@ export interface StructureActions {
  * facet per section, each editable section's launchers hung as its header
  * tools.
  */
-export class StructurePanel extends Panel {
+class StructurePanel extends Panel {
     /**
      * @param columns - The table's introspected columns (the Columns grid).
      * @param structure - The table's indexes, constraints, and foreign keys.
@@ -429,3 +429,7 @@ function buildForeignKeysGrid(
 
     return grid;
 }
+
+const StructurePanelCallable = callable(StructurePanel);
+type StructurePanelCallable = StructurePanel;
+export { StructurePanelCallable as StructurePanel };

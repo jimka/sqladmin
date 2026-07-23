@@ -2,7 +2,7 @@
 // (name/type/nullable/default). Used by the controller's addColumn
 // launcher, embedded as a SqlPreviewDialog's `form`.
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
 import { Checkbox, TextField } from "@jimka/typescript-ui/component/input";
 import type { ColumnSpec } from "../contract";
@@ -11,7 +11,7 @@ import type { ColumnSpec } from "../contract";
 const ROW_SPACING = 6;
 
 /** The ADD COLUMN form: name, type, nullable, and default fields. */
-export class ColumnForm extends Panel {
+class ColumnForm extends Panel {
     private readonly _nameField:    TextField;
     private readonly _typeField:    TextField;
     private readonly _nullableBox:  Checkbox;
@@ -50,3 +50,7 @@ export class ColumnForm extends Panel {
         };
     }
 }
+
+const ColumnFormCallable = callable(ColumnForm);
+type ColumnFormCallable = ColumnForm;
+export { ColumnFormCallable as ColumnForm };
