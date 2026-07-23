@@ -29,6 +29,7 @@ import { buildShortcutLegend }      from "./shortcutLegend";
 import type { SavedQuery }          from "../data/queryStore";
 import type { SqlAdminController }  from "../SqlAdminController";
 import { MUTED_TEXT_COLOR }         from "../theme";
+import { APP_NAME }                 from "../appIdentity";
 
 Glyph.register(plus);
 
@@ -106,7 +107,7 @@ export class StartPage extends Panel {
 
             // Full-width header above the columns: the app heading, and — only
             // on an empty workspace — the transient welcome blurb.
-            this.addComponent(heading("SQL Admin", "600"));
+            this.addComponent(heading(APP_NAME, "600"));
 
             if (shouldShowWelcome(controller)) {
                 welcome = Markdown(GETTING_STARTED_MARKDOWN);

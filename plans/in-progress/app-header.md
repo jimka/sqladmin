@@ -369,6 +369,28 @@ from `@jimka/typescript-ui/component/input`, `Glyph` from
 
 ---
 
+## Implementation Notes
+
+- **`getAria().setRole("presentation")` was dropped.** The plan's "Internal
+  Structure" and "Potential Challenges" call for setting the header's ARIA
+  role to `presentation` to keep assistive tech from announcing the block as
+  a menu item. The installed library version (`@jimka/typescript-ui@0.2.0`,
+  confirmed via `node_modules/@jimka/typescript-ui/dist/lib/types/core/Aria.d.ts`)
+  types `Aria.setRole` as `(role: AriaRole) => this`, and `AriaRole` is a
+  closed union of concrete widget roles (`menubar`, `menuitem`, `button`,
+  `group`, …) with no `presentation` or `none` member, so the call does not
+  compile. `AppHeader` therefore sets no ARIA role at all. This does not
+  reintroduce the risk the plan was guarding against: the library only
+  assigns an implicit ARIA role to specific interactive component kinds
+  (buttons, menu items, …), not to a plain `Container`, so a roleless
+  `AppHeader` mounted inside `role="menubar"` is not announced as a menu item
+  either way — the explicit `presentation` role would have been redundant
+  defense-in-depth, not the only thing preventing misannouncement. Case 9
+  (menu open/close and Left/Right-arrow cycling unaffected by the inserted
+  child) is still the manual check that this holds in practice.
+
+---
+
 ## Notes
 
 [^why-menubar]: A separate NORTH bar above the menu bar was the obvious

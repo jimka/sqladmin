@@ -51,6 +51,7 @@ import {
     isHelpChord,
 } from "./queryShortcuts";
 import { openAboutDialog }         from "./aboutDialog";
+import { AppHeader }               from "./AppHeader";
 import { logout }                  from "../data/api";
 import { openShortcutsDialog }     from "./shortcutsDialog";
 import { openLocalStorageWindow }  from "./localStorageWindow";
@@ -103,7 +104,7 @@ export class SqlAdminShell extends Container {
             onShowRoles        : () => sidebar.selectView(ROLES_VIEW_ID),
             onShowQueries      : () => sidebar.selectView(QUERIES_VIEW_ID),
             onRefresh          : () => controller.refreshActive(),
-        });
+        }, controller.database);
 
         super({
             layoutManager: new BorderLayout({ spacing: 0 }),
@@ -341,10 +342,12 @@ interface MenuBarActions {
  * bar's collapse.
  *
  * @param actions - The menu action callbacks.
+ * @param database - The connected database, shown in the AppHeader pinned to
+ *   the menu bar's leading edge. Omitted only by DOM-less callers.
  *
  * @returns The composed menu bar.
  */
-function buildMenuBar(actions: MenuBarActions): MenuBar {
+function buildMenuBar(actions: MenuBarActions, database?: string): MenuBar {
     const menuBar = MenuBar({
         menus: [
             { label: "Query", glyph: "terminal", items: [
@@ -407,6 +410,11 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
     menuBar.addComponent(Spacer.flex());
     menuBar.addComponent(shortcuts);
     menuBar.addComponent(about);
+
+    // Pin the app-identity brand block to the leading edge, ahead of the
+    // "Query" menu — see AppHeader.ts and the plan's "header is a child of the
+    // existing MenuBar" decision.
+    menuBar.insertComponent(new AppHeader(database), 0);
 
     return menuBar;
 }

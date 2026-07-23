@@ -36,6 +36,7 @@ import { CodeEditor }           from "@jimka/typescript-ui/component/editor";
 import { Button }               from "@jimka/typescript-ui/component/button";
 import { Spacer }               from "@jimka/typescript-ui/component/container";
 import { Insets, Placement }    from "@jimka/typescript-ui/primitive";
+import { APP_NAME }             from "../appIdentity";
 
 // The prefix the app namespaces its persisted keys under (data/queryStore.ts,
 // data/notesStore.ts, data/layoutStore.ts). "Clear SQL Admin data" removes
@@ -264,7 +265,7 @@ function buildContent(win: Window): Component {
     body.addComponent(tree,   { weight: 0 });
     body.addComponent(editor, { weight: VALUE_WEIGHT });
 
-    const clearButton = Button({ text: "Clear SQL Admin data", showText: true, compact: true });
+    const clearButton = Button({ text: `Clear ${APP_NAME} data`, showText: true, compact: true });
     clearButton.on("action", () => {
         clearAppKeys();
         refresh();
