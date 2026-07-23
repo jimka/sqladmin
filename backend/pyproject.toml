@@ -1,6 +1,6 @@
 [project]
 name = "sqladmin-backend"
-version = "0.1.0"
+version = "0.2.0"
 description = "SQLAdmin backend — FastAPI + asyncpg PostgreSQL admin API"
 authors = [{ name = "Jimmy Karlsson", email = "jimmy.karlsson@gmail.com" }]
 readme = "README.md"

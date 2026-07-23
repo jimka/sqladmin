@@ -1,7 +1,7 @@
 {
   "name": "sqladmin-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A web-based PostgreSQL admin client — browse schemas, edit rows, run SQL, and visualize schema and roles.",
   "license": "PolyForm-Noncommercial-1.0.0",
   "author": "Jimmy Karlsson",
