@@ -16,7 +16,7 @@
 // background swap, because the background carries the heat tint. The cell-building
 // helpers are stateless module-level functions.
 
-import { Component, Panel }                  from "@jimka/typescript-ui/core";
+import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox, HBox, Grid, FillType, AnchorType } from "@jimka/typescript-ui/layout";
 import { Insets }                            from "@jimka/typescript-ui/primitive";
 import { Text }                              from "@jimka/typescript-ui/component/input";
@@ -98,7 +98,7 @@ interface CardRow {
  * metric grid; `setSelected` swaps the border to the accent frame. A node whose
  * `data` is absent renders header-only.
  */
-export class ExplainNode extends Panel {
+class ExplainNode extends Panel {
     /**
      * @param node - The diagram node data; its `data` is the {@link ExplainNodeData}.
      */
@@ -413,3 +413,7 @@ function heatTint(heat: number): string {
 
     return `rgb(${mix(0)}, ${mix(1)}, ${mix(2)})`;
 }
+
+const ExplainNodeCallable = callable(ExplainNode);
+type ExplainNodeCallable = ExplainNode;
+export { ExplainNodeCallable as ExplainNode };

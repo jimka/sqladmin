@@ -14,7 +14,7 @@
 // is bound correctly and no arrow-function field is needed. `columnRow` stays a
 // stateless module-level function.
 
-import { Component, Panel }  from "@jimka/typescript-ui/core";
+import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox, HBox }        from "@jimka/typescript-ui/layout";
 import { Text }              from "@jimka/typescript-ui/component/input";
 import { Tooltip }           from "@jimka/typescript-ui/overlay";
@@ -64,7 +64,7 @@ const CARD_SELECTED_BG = "var(--ts-ui-diagram-node-selected-bg, var(--ts-ui-tabl
  * wiring keeps working; `setSelected` is the selection highlight DiagramView
  * drives via its duck-typed `component.setSelected?.(value)`.
  */
-export class TableCardNode extends Panel {
+class TableCardNode extends Panel {
     /**
      * @param node - The node's data, including its card `data.columns` when present.
      * @param isRoot - Whether this card is the diagram's rooted relation (accent border).
@@ -152,3 +152,7 @@ function columnRow(column: ColumnRowData): Component {
 
     return row;
 }
+
+const TableCardNodeCallable = callable(TableCardNode);
+type TableCardNodeCallable = TableCardNode;
+export { TableCardNodeCallable as TableCardNode };

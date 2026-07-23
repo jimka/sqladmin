@@ -9,7 +9,7 @@
 // CREATE OR REPLACE statement — in an editable definition tab instead (see
 // SqlAdminController.openFunctionDefinition), so this form is create-only.
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import type { Component } from "@jimka/typescript-ui/core";
 import { Grid, VBox } from "@jimka/typescript-ui/layout";
 import { Checkbox, ComboBox, TextField } from "@jimka/typescript-ui/component/input";
@@ -57,7 +57,7 @@ interface ArgRowHandle {
  * argument grid. The body is authored in the shared SQL preview editor, seeded
  * with a stub.
  */
-export class FunctionForm extends Panel {
+class FunctionForm extends Panel {
     private readonly _schema: string;
     private readonly _nameField: TextField;
     private readonly _kindCombo: ComboBox;
@@ -215,3 +215,7 @@ function buildArgRow(onRemove: () => void): ArgRowHandle {
         removeButton,
     };
 }
+
+const FunctionFormCallable = callable(FunctionForm);
+type FunctionFormCallable = FunctionForm;
+export { FunctionFormCallable as FunctionForm };

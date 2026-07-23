@@ -40,7 +40,7 @@
 // one at all — disposing those two while the fields beside them cannot be
 // disposed would buy nothing.
 
-import { Container, Panel }            from "@jimka/typescript-ui/core";
+import { Container, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border as BorderLayout, VBox } from "@jimka/typescript-ui/layout";
 import { Placement }                   from "@jimka/typescript-ui/primitive";
 import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
@@ -106,7 +106,7 @@ export interface SequenceInfoPanelDeps {
 const NO_OWNING_COLUMN = "—";
 
 /** A tab-filling typed form of a sequence's current state and parameters. */
-export class SequenceInfoPanel extends Container {
+class SequenceInfoPanel extends Container {
     private readonly _deps:              SequenceInfoPanelDeps;
     private readonly _currentValueField: TextField;
     private readonly _startValueField:   TextField;
@@ -391,3 +391,7 @@ function summaryPanel(specs: SequenceEditSpecs, detail: SequenceDetail): Panel {
         components:    lines.map(line => new Text(line)),
     });
 }
+
+const SequenceInfoPanelCallable = callable(SequenceInfoPanel);
+type SequenceInfoPanelCallable = SequenceInfoPanel;
+export { SequenceInfoPanelCallable as SequenceInfoPanel };

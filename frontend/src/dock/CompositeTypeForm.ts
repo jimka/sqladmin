@@ -6,7 +6,7 @@
 // into a fresh CREATE TYPE for the user to reconcile with the original) seeds
 // the grid instead of one empty row.
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import type { Component } from "@jimka/typescript-ui/core";
 import { Grid, VBox } from "@jimka/typescript-ui/layout";
 import { TextField } from "@jimka/typescript-ui/component/input";
@@ -40,7 +40,7 @@ interface RowHandle {
  * controller's `createType` launcher (composite category) and `editType`
  * (composite recreate/clone).
  */
-export class CompositeTypeForm extends Panel {
+class CompositeTypeForm extends Panel {
     private readonly _schema: string;
     private readonly _nameField: TextField;
     private readonly _grid: Grid;
@@ -166,3 +166,7 @@ function buildAttrRow(onRemove: () => void, prefill?: { name: string; type: stri
         removeButton,
     };
 }
+
+const CompositeTypeFormCallable = callable(CompositeTypeForm);
+type CompositeTypeFormCallable = CompositeTypeForm;
+export { CompositeTypeFormCallable as CompositeTypeForm };

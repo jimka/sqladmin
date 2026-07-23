@@ -13,6 +13,7 @@
 // an inline arrow closing over `onSelect`, never handed off by reference, so it
 // needs no arrow-function field.
 
+import { callable } from "@jimka/typescript-ui/core";
 import { DiagramNode, DiagramView }          from "@jimka/typescript-ui/component/diagram";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import type { Component }                    from "@jimka/typescript-ui/core";
@@ -28,7 +29,7 @@ const ROOT_BORDER = "2px solid var(--ts-ui-accent-color, rgb(30, 100, 200))";
  * that node is emphasized with an accent border. Double-clicking a node
  * invokes `onSelect` with that node's RelationNodeData.
  */
-export class RelationGraphPanel extends DiagramView {
+class RelationGraphPanel extends DiagramView {
     /**
      * @param data - The graph model (from buildRelationGraph).
      * @param onSelect - Invoked with the activated node's RelationNodeData.
@@ -50,3 +51,7 @@ export class RelationGraphPanel extends DiagramView {
         this.on("activate", (n: DiagramNodeData) => onSelect(n.data as RelationNodeData));
     }
 }
+
+const RelationGraphPanelCallable = callable(RelationGraphPanel);
+type RelationGraphPanelCallable = RelationGraphPanel;
+export { RelationGraphPanelCallable as RelationGraphPanel };

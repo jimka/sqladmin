@@ -8,6 +8,7 @@
 // handlers skip them and the glyph resolver can pick each parent's icon. Mirrors
 // NavigatorTree's click→controller wiring.
 
+import { callable } from "@jimka/typescript-ui/core";
 import { Tree, IconLabelTreeNodeRenderer } from "@jimka/typescript-ui/component/tree";
 import type { TreeNode }             from "@jimka/typescript-ui/component/tree";
 import { Menu }                      from "@jimka/typescript-ui/overlay";
@@ -37,7 +38,7 @@ function roleRowGlyph(node: TreeNode): string {
 }
 
 /** Build the roles Tree, wired to show a role's detail and report load errors. */
-export class RolesTree extends Tree implements ExplorerTree {
+class RolesTree extends Tree implements ExplorerTree {
     private readonly controller: SqlAdminController;
     private readonly contextMenu = Menu();
 
@@ -119,3 +120,7 @@ export class RolesTree extends Tree implements ExplorerTree {
             .catch(error => this.controller.notifyError(error));
     };
 }
+
+const RolesTreeCallable = callable(RolesTree);
+type RolesTreeCallable = RolesTree;
+export { RolesTreeCallable as RolesTree };

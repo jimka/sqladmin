@@ -7,12 +7,13 @@
 // The panel/store scaffolding lives in the shared PropertyValuePanel base; this
 // class adds only the selection→rows mapping.
 
+import { callable } from "@jimka/typescript-ui/core";
 import type { ColumnMeta, DbObjectRef } from "../contract";
 import { PropertyValuePanel }           from "./PropertyValuePanel";
 import type { PropertyValueRow }        from "./PropertyValuePanel";
 
 /** The selected object's metadata, shown as a read-only Property/Value grid. */
-export class PropertiesPanel extends PropertyValuePanel {
+class PropertiesPanel extends PropertyValuePanel {
     /**
      * Replace the displayed metadata with that of `ref`. For a table, view, or
      * materialized view, pass its `columns` so the column count and primary key
@@ -141,3 +142,7 @@ function tableRows(ref: DbObjectRef, columns?: ColumnMeta[]): PropertyValueRow[]
 
     return rows;
 }
+
+const PropertiesPanelCallable = callable(PropertiesPanel);
+type PropertiesPanelCallable = PropertiesPanel;
+export { PropertiesPanelCallable as PropertiesPanel };

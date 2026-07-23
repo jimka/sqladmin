@@ -6,7 +6,7 @@
 // Postgres (see plans/implemented/table-ddl.md's "Composite-key column
 // ordering" mitigation).
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
 import { Checkbox } from "@jimka/typescript-ui/component/input";
 import { orderColumnsBySelection } from "./ddlSpecs";
@@ -16,7 +16,7 @@ import { orderColumnsBySelection } from "./ddlSpecs";
 const ROW_SPACING = 2;
 
 /** A `VBox` of one `Checkbox` per column, for a constraint/index form. */
-export class ColumnChecklist extends Panel {
+class ColumnChecklist extends Panel {
     private readonly _columns: string[];
     private readonly _boxes: Checkbox[];
 
@@ -43,3 +43,7 @@ export class ColumnChecklist extends Panel {
         return orderColumnsBySelection(this._columns, selected);
     }
 }
+
+const ColumnChecklistCallable = callable(ColumnChecklist);
+type ColumnChecklistCallable = ColumnChecklist;
+export { ColumnChecklistCallable as ColumnChecklist };

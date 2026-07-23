@@ -3,7 +3,7 @@
 // column rows themselves collect raw name/type/default/nullable/primaryKey
 // fields; readSpec() hands them to the pure buildCreateTableSpec helper.
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import type { Component } from "@jimka/typescript-ui/core";
 import { Grid, VBox } from "@jimka/typescript-ui/layout";
 import { Checkbox, TextField } from "@jimka/typescript-ui/component/input";
@@ -43,7 +43,7 @@ interface RowHandle {
  * grid. Embedded as the `form` of a `SqlPreviewDialog` by the controller's
  * `createTable` launcher.
  */
-export class CreateTableForm extends Panel {
+class CreateTableForm extends Panel {
     private readonly _schema: string;
     private readonly _nameField: TextField;
     private readonly _grid: Grid;
@@ -172,3 +172,7 @@ function buildColumnRow(onRemove: () => void): RowHandle {
         removeButton,
     };
 }
+
+const CreateTableFormCallable = callable(CreateTableForm);
+type CreateTableFormCallable = CreateTableForm;
+export { CreateTableFormCallable as CreateTableForm };

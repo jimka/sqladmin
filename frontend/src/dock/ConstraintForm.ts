@@ -6,7 +6,7 @@
 // constraint-name field. Used by the controller's addConstraint launcher,
 // embedded as a SqlPreviewDialog's `form`.
 
-import { Component, Panel } from "@jimka/typescript-ui/core";
+import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
 import { ComboBox, TextField } from "@jimka/typescript-ui/component/input";
 import type { ConstraintKind, ConstraintSpec } from "../contract";
@@ -72,7 +72,7 @@ function buildKindFields(kind: ConstraintKind, columns: string[], schemas: strin
 }
 
 /** The add-constraint form: the fields `kind` needs, plus an optional name. */
-export class ConstraintForm extends Panel {
+class ConstraintForm extends Panel {
     private readonly _schema: string;
     private readonly _table: string;
     private readonly _kind: ConstraintKind;
@@ -135,3 +135,7 @@ export class ConstraintForm extends Panel {
         });
     }
 }
+
+const ConstraintFormCallable = callable(ConstraintForm);
+type ConstraintFormCallable = ConstraintForm;
+export { ConstraintFormCallable as ConstraintForm };

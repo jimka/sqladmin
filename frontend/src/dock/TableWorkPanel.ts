@@ -16,7 +16,7 @@
 // methods. `buildColumnSpec`/`save_`/`missingRequiredFields`/`confirmDelete`
 // stay stateless module-level functions.
 
-import { Container, Panel }            from "@jimka/typescript-ui/core";
+import { Container, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
 import { Placement }                   from "@jimka/typescript-ui/primitive";
 import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
@@ -52,7 +52,7 @@ export type ExportTable = (format: "csv" | "json") => void;
  * every cell read-only, no INSERT disables Add, no DELETE disables Delete,
  * and Save enables only when a permitted change is pending.
  */
-export class TableWorkPanel extends Container {
+class TableWorkPanel extends Container {
     private readonly store:      AjaxStore;
     private readonly dataGrid:   Table;
     private readonly privileges: TablePrivileges;
@@ -203,3 +203,7 @@ async function confirmDelete(store: AjaxStore, dataGrid: Table): Promise<void> {
         selected.forEach((r: ModelRecord) => store.remove(r));
     }
 }
+
+const TableWorkPanelCallable = callable(TableWorkPanel);
+type TableWorkPanelCallable = TableWorkPanel;
+export { TableWorkPanelCallable as TableWorkPanel };

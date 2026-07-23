@@ -10,7 +10,7 @@
 // DatabaseExplorerView/RolesExplorerView are thin subclasses that forward a
 // config to `super(...)` (see those files).
 
-import { Component }               from "@jimka/typescript-ui/core";
+import { Component, callable } from "@jimka/typescript-ui/core";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
 import type { Button }             from "@jimka/typescript-ui/component/button";
 import { refreshTool, bindRefreshShortcut } from "./refreshTool";
@@ -60,7 +60,7 @@ const TREE_MIN_HEIGHT = 96;
  * one-off view, or subclassed (`DatabaseExplorerView`, `RolesExplorerView`) to
  * fix the config for a specific tree.
  */
-export class TreeExplorerView extends AccordionPanel {
+class TreeExplorerView extends AccordionPanel {
     /** @param config - The view's id, its tree + refresh, and the two sections' labels/glyphs. */
     constructor(config: TreeExplorerConfig) {
         const tree    = config.explorer;
@@ -111,3 +111,7 @@ export class TreeExplorerView extends AccordionPanel {
         bindRefreshShortcut(this, refresh);
     }
 }
+
+const TreeExplorerViewCallable = callable(TreeExplorerView);
+type TreeExplorerViewCallable = TreeExplorerView;
+export { TreeExplorerViewCallable as TreeExplorerView };

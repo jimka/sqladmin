@@ -2,7 +2,7 @@
 // checklist, a unique checkbox, and an access-method combo. Used by the
 // controller's createIndex launcher, embedded as a SqlPreviewDialog's `form`.
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
 import { Checkbox, ComboBox, TextField } from "@jimka/typescript-ui/component/input";
 import type { IndexSpec } from "../contract";
@@ -19,7 +19,7 @@ const METHOD_CHOICES = [METHOD_UNSET, "btree", "hash", "gin", "gist", "spgist", 
 const ROW_SPACING = 6;
 
 /** The create-index form: name, column checklist, unique, and method. */
-export class IndexForm extends Panel {
+class IndexForm extends Panel {
     private readonly _schema: string;
     private readonly _table: string;
     private readonly _nameField:   TextField;
@@ -62,3 +62,7 @@ export class IndexForm extends Panel {
         });
     }
 }
+
+const IndexFormCallable = callable(IndexForm);
+type IndexFormCallable = IndexForm;
+export { IndexFormCallable as IndexForm };

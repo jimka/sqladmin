@@ -6,7 +6,7 @@
 // host drives it without reaching into the fields. A failed attempt is reported
 // by the host in a separate error dialog, not inline here.
 
-import { Form }            from "@jimka/typescript-ui/core";
+import { Form, callable } from "@jimka/typescript-ui/core";
 import { VBox }            from "@jimka/typescript-ui/layout";
 import { LabeledFieldSet } from "@jimka/typescript-ui/component/container";
 import { PasswordField, TextField, UsernameField } from "@jimka/typescript-ui/component/input";
@@ -14,7 +14,7 @@ import type { LoginDetails }     from "../data/api";
 import type { ConnectionPreset } from "../contract";
 
 /** The connection + credential form, as a reusable `<form>` component. */
-export class LoginForm extends Form {
+class LoginForm extends Form {
     private readonly host:     TextField;
     private readonly port:     TextField;
     private readonly database: TextField;
@@ -83,3 +83,7 @@ export class LoginForm extends Form {
         this.database.setText(preset.database);
     }
 }
+
+const LoginFormCallable = callable(LoginForm);
+type LoginFormCallable = LoginForm;
+export { LoginFormCallable as LoginForm };

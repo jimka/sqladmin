@@ -10,7 +10,7 @@
 // builder. No event listeners are registered, so the panel needs no instance
 // fields at all. `buildToolBar` stays a stateless module-level function.
 
-import { Container }          from "@jimka/typescript-ui/core";
+import { Container, callable } from "@jimka/typescript-ui/core";
 import { Border as BorderLayout } from "@jimka/typescript-ui/layout";
 import { Placement }          from "@jimka/typescript-ui/primitive";
 import { ToolBar }            from "@jimka/typescript-ui/component/menubar";
@@ -25,7 +25,7 @@ import { buildExportButton }  from "./exportButton";
 import { PAGE_SIZE }          from "../data/stores";
 
 /** A Dock panel showing a role's table grants as a paginated read-only grid. */
-export class RoleGrantsPanel extends Container {
+class RoleGrantsPanel extends Container {
     constructor(role: string, privileges: RolePrivilege[]) {
         // `this` is unavailable until after `super()`, so everything is built
         // as locals first.
@@ -75,3 +75,6 @@ function buildToolBar(role: string, privileges: RolePrivilege[]): ToolBar {
     return new ToolBar({ components: [Spacer.flex(), exportButton] });
 }
 
+const RoleGrantsPanelCallable = callable(RoleGrantsPanel);
+type RoleGrantsPanelCallable = RoleGrantsPanel;
+export { RoleGrantsPanelCallable as RoleGrantsPanel };

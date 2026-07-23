@@ -29,7 +29,7 @@
 // SchemaDiagram/RelationDiagram panels and QueryResultGrid are likewise opened
 // without a _panelDisposers entry).
 
-import { Component, Panel }         from "@jimka/typescript-ui/core";
+import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border }                   from "@jimka/typescript-ui/layout";
 import { Placement }                from "@jimka/typescript-ui/primitive";
 import { Tree }                     from "@jimka/typescript-ui/component/tree";
@@ -112,7 +112,7 @@ const SUMMARY_FIELDS: { name: string; type: FieldType }[] = [
  * selection selects + reveals the diagram node; diagram selection selects +
  * reveals the tree row. Class-first: extends Panel.
  */
-export class ExplainDiagramPanel extends Panel {
+class ExplainDiagramPanel extends Panel {
     /**
      * @param roots - The parsed plan roots (from `parseExplainPlan`).
      * @param summary - The top-level planning/execution times (from
@@ -160,7 +160,7 @@ export class ExplainDiagramPanel extends Panel {
 
         // Custom node renderer: each node is a metric card (costs, rows, actual
         // timings, group key, batches, memory) heat-tinted by its plan share.
-        const diagram = new DiagramView({ data, nodeRenderer: (n: DiagramNodeData) => new ExplainNode(n) });
+        const diagram = new DiagramView({ data, nodeRenderer: (n: DiagramNodeData) => ExplainNode(n) });
 
         super({
             layoutManager: new Border(),
@@ -343,3 +343,7 @@ function toTreeNodes(roots: ExplainPlanNode[], byId: Map<string, TreeNode>): Tre
         return treeNode;
     });
 }
+
+const ExplainDiagramPanelCallable = callable(ExplainDiagramPanel);
+type ExplainDiagramPanelCallable = ExplainDiagramPanel;
+export { ExplainDiagramPanelCallable as ExplainDiagramPanel };

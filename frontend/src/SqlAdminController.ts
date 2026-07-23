@@ -606,7 +606,7 @@ export class SqlAdminController {
             this._openPanels.set(id, { ref, node: node ?? null, detail: "info" });
             this.syncToPanel(id);
 
-            return new SequenceInfoPanel(detail, {
+            return SequenceInfoPanel(detail, {
                 schema:       ref.schema!,
                 name:         ref.name!,
                 roles,
@@ -649,7 +649,7 @@ export class SqlAdminController {
             this._openPanels.set(id, { ref, node: node ?? null, columns, detail: "structure" });
             this.syncToPanel(id);
 
-            return new StructurePanel(columns, structure, (refSchema, refTable) =>
+            return StructurePanel(columns, structure, (refSchema, refTable) =>
                 this.openReferencedTable({
                     connectionId: ref.connectionId,
                     database    : ref.database,
@@ -1490,7 +1490,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: diagram (${data.nodes.length} tables)`);
 
-            return new SchemaDiagramPanel(data, table => this.openReferencedTable({
+            return SchemaDiagramPanel(data, table => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : ref.schema,
@@ -1578,7 +1578,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.database}: diagram (${tableCount} tables)`);
 
-            return new DatabaseDiagramPanel(schemas, (schema, table) => this.openReferencedTable({
+            return DatabaseDiagramPanel(schemas, (schema, table) => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema,
@@ -1656,7 +1656,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: relations`);
 
-            return new RelationDiagramPanel(full, root, table => this.openReferencedTable({
+            return RelationDiagramPanel(full, root, table => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : ref.schema,
@@ -1742,7 +1742,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: dependencies (${data.nodes.length} relations)`);
 
-            return new RelationGraphPanel(data, nd => this.openReferencedTable({
+            return RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -1793,7 +1793,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: dependencies`);
 
-            return new RelationGraphPanel(data, nd => this.openReferencedTable({
+            return RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -1834,7 +1834,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: inheritance (${data.nodes.length} relations)`);
 
-            return new RelationGraphPanel(data, nd => this.openReferencedTable({
+            return RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -1886,7 +1886,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: inheritance`);
 
-            return new RelationGraphPanel(data, nd => this.openReferencedTable({
+            return RelationGraphPanel(data, nd => this.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -2531,7 +2531,7 @@ export class SqlAdminController {
             id,
             title  : `Grants: ${role}`,
             glyph  : "key",
-            content: new RoleGrantsPanel(role, privileges),
+            content: RoleGrantsPanel(role, privileges),
         });
 
         // Track the grant set so the active-tab export (Tools menu) can reach it
@@ -2572,7 +2572,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${name}: membership (${full.nodes.length} roles)`);
 
-            return new RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName));
+            return RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName));
         });
     }
 
@@ -2606,7 +2606,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${name}: grants graph (${data.nodes.length - 1} tables)`);
 
-            return new RoleGrantsDiagramPanel(data, (schema, table) => this.openGrantedTable(schema, table));
+            return RoleGrantsDiagramPanel(data, (schema, table) => this.openGrantedTable(schema, table));
         });
     }
 

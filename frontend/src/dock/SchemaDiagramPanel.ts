@@ -12,6 +12,7 @@
 // handler is an inline arrow closing over the constructor's `onSelectTable`
 // parameter, never handed off by reference, so it needs no arrow-function field.
 
+import { callable } from "@jimka/typescript-ui/core";
 import { DiagramView } from "@jimka/typescript-ui/component/diagram";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 
@@ -19,7 +20,7 @@ import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/componen
  * The read-only schema diagram panel. Extends DiagramView over the graph;
  * double-clicking a node invokes `onSelectTable` with the node's table name.
  */
-export class SchemaDiagramPanel extends DiagramView {
+class SchemaDiagramPanel extends DiagramView {
     /**
      * @param data - The graph model (from buildSchemaDiagram).
      * @param onSelectTable - Invoked with the activated node's table name (its id).
@@ -34,3 +35,7 @@ export class SchemaDiagramPanel extends DiagramView {
         });
     }
 }
+
+const SchemaDiagramPanelCallable = callable(SchemaDiagramPanel);
+type SchemaDiagramPanelCallable = SchemaDiagramPanel;
+export { SchemaDiagramPanelCallable as SchemaDiagramPanel };
