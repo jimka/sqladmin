@@ -10,7 +10,7 @@
 import type { KeyValueStore } from "./queryStore";
 
 // localStorage key prefix, namespaced per user AND connection ("<user>.<conn>")
-// under the app's sqladmin.* namespace so "Clear SQL Admin data" removes it with
+// under the app's sqladmin.* namespace so "Clear SQLAdmin data" removes it with
 // the query keys, and the localStorage inspector already dumps it.
 const NOTES_KEY_PREFIX = "sqladmin.notes.";
 

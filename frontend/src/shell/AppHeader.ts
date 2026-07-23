@@ -19,14 +19,14 @@ import { Text }             from "@jimka/typescript-ui/component/input";
 import { Glyph }            from "@jimka/typescript-ui/component/display";
 import { ToolBarSeparator } from "@jimka/typescript-ui/component/menubar";
 import { Tooltip }          from "@jimka/typescript-ui/overlay";
-import { database }         from "@jimka/typescript-ui/glyphs/solid/database";
+import { database as databaseGlyph } from "@jimka/typescript-ui/glyphs/solid/database";
 import { APP_NAME, APP_VERSION, APP_TAGLINE } from "../appIdentity";
 import { appHeaderText } from "./appHeaderText";
 
 // Registered here even though the shell's composition root also registers
 // this glyph (SqlAdminShell.ts), mirroring how StartPage.ts registers its own
 // glyph regardless — each component owns registering what it draws.
-Glyph.register(database);
+Glyph.register(databaseGlyph);
 
 // Matches buildIdentityWidget's HBox spacing (SqlAdminController.ts), so the
 // two "glyph + text" badges the app shows (status bar identity, menu-bar

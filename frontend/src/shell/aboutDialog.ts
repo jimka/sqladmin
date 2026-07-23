@@ -1,5 +1,5 @@
 // The "About" dialog: a small, dismiss-only modal reached from the far-right of
-// the menu bar. It presents a one-line description of what SQL Admin is, who
+// the menu bar. It presents a one-line description of what SQLAdmin is, who
 // wrote it, and where the app and its UI library live on GitHub. Built on the
 // library's Dialog (an in-app, styled overlay) so it matches the rest of the
 // app's modals; the body is a single authored Markdown string rendered by the

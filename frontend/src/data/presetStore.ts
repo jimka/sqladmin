@@ -2,7 +2,7 @@
 // connection presets. Persists { name, host, port, database } ONLY — never any
 // credential (those stay per-login, handled by the browser's own password
 // manager). Backed by web storage under a single `sqladmin.*` key so the
-// shell's "Clear SQL Admin data" and the localStorage inspector cover it for
+// shell's "Clear SQLAdmin data" and the localStorage inspector cover it for
 // free. The proxy owns the normal read/write path; the raw Storage is touched
 // only to discard a corrupt blob so a write can recover (see `_withRepair`).
 
