@@ -10,7 +10,7 @@
   "bugs": { "url": "https://github.com/jimka/sqladmin/issues" },
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "tsc --noEmit && vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
