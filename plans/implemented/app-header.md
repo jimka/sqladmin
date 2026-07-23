@@ -406,12 +406,35 @@ from `@jimka/typescript-ui/component/input`, `Glyph` from
   height. `buildMenuBar` no longer takes or inserts the header, and
   `appHeaderText` drops its `database` argument and field (the block is now the
   glyph, the app name, and the version). This reverses the plan's "header is a
-  child of the existing MenuBar" decision[^why-menubar] and its "No connection
-  host or port in the header / no separate NORTH row" non-goals; the glyph, the
-  one-name-source `appIdentity.ts`, and the token-based colours are unchanged.
-  Confirmed live: the strip renders `⛁ SQLAdmin v0.1.0` above the Query/Tools/View
-  row, the menu bar is no longer stretched, and the database shows only in the
-  status bar.
+  child of the existing MenuBar" decision and the separate-NORTH-row rejection
+  in its footnote[^why-menubar], and drops the database the "shows the connected
+  database" decision[^which-half] had added. The "No connection host or port in
+  the header" non-goal is untouched — the header never showed host or port, and
+  still doesn't. The glyph, the one-name-source `appIdentity.ts`, and the
+  token-based colours are unchanged. Confirmed live: the strip renders
+  `⛁ SQLAdmin v0.1.0` above the Query/Tools/View row, the menu bar is no longer
+  stretched, and the database shows only in the status bar.
+
+- **`AppHeader` and `ActivityBar` were converted to the library's `callable()`
+  construction — a post-implementation convention change on user feedback.** Both
+  are now unexported `class`es re-exported through `callable()` so call sites
+  construct them without `new` (`AppHeader()`, `ActivityBar(views)`), matching the
+  library's own callable bases; `frontend/COMPONENT_CONVENTIONS.md` (d) was
+  rewritten to make this the class-first standard (other components are
+  not-yet-migrated holdovers). The DOM-less vitest harness cannot exercise runtime
+  construction, so this was manually verified live: the app loads with no console
+  error, and the mounted elements still carry their `constructor.name`-derived CSS
+  classes (`.AppHeader`, `.ActivityBar`) and `role="presentation"` — so the Proxy
+  preserves construction identity (convention (e)).
+
+- **The version label was shrunk to 10px via `setFontSize()`, working around a
+  library bug — a post-implementation refinement on user feedback.** A numeric
+  `fontSize` passed to `Text`'s constructor is silently reverted to the theme
+  default by `Text`'s field initializers, so the size is applied with a
+  post-construction `version.setFontSize(VERSION_FONT_SIZE)` call instead (bug
+  logged in `LIBRARY_NOTES.md`). The size is not automatable in the DOM-less
+  harness, so it was manually verified live: the version computes to `10px` beside
+  the name's `14px`, in the quieter secondary colour.
 
 ---
 
