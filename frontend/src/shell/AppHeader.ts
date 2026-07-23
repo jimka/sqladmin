@@ -73,6 +73,18 @@ export class AppHeader extends Container {
         super({
             layoutManager: new HBox({ spacing: GAP }),
             components,
+            // `role="presentation"` keeps assistive tech from announcing this
+            // block as a menu item merely because it's a child of the menu
+            // bar's `role="menubar"` container. The library's typed
+            // `Aria.setRole` doesn't accept "presentation" (its `AriaRole`
+            // union covers only concrete widget roles), so this goes through
+            // `attributes` — Component's documented raw-HTML-attribute escape
+            // hatch for exactly this kind of gap (Component.ts's `attributes`
+            // option doc). `getAria()` is never called on this instance, so
+            // Aria's own `applyToElement` — which would otherwise run after
+            // `attributes` during init and could contest the `role`
+            // attribute — never runs here.
+            attributes: { role: "presentation" },
         });
 
         this.setInsets(new Insets(0, PAD, 0, PAD));
