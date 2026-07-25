@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
-    getViewDefinition, getStructure, runExplain, runQuery, tableExportUrl,
+    getViewDefinition, getStructure, getSchemaGraph, getDatabaseGraph, runExplain, runQuery, tableExportUrl,
     setCsrfToken, csrfHeader, executeDdl,
 } from "../../src/data/api";
 import type { DbObjectRef } from "../../src/contract";
@@ -79,6 +79,87 @@ describe("getStructure", () => {
         vi.stubGlobal("fetch", fetchMock);
 
         await expect(getStructure(ref)).rejects.toThrow("boom");
+    });
+});
+
+describe("getSchemaGraph", () => {
+    const ref: DbObjectRef = {
+        connectionId: "default",
+        database    : "sqladmin",
+        schema      : "public",
+        kind        : "schema",
+    };
+
+    it("GETs the schema's /graph endpoint and returns the parsed envelope", async () => {
+        const graph = {
+            tables: [
+                {
+                    name     : "customers",
+                    structure: { indexes: [], constraints: [], foreignKeys: [] },
+                    columns  : [{
+                        name: "id", dataType: "integer", nullable: false, isPrimaryKey: true,
+                        isGenerated: true, hasDefault: true, wireType: "number", sequence: null,
+                    }],
+                },
+            ],
+        };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => graph });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const result = await getSchemaGraph(ref);
+
+        expect(result).toEqual(graph);
+        expect(fetchMock).toHaveBeenCalledWith("/api/default/sqladmin/public/graph");
+    });
+
+    it("throws the backend {detail} on a non-OK response", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok        : false,
+            status    : 500,
+            statusText: "Internal Server Error",
+            json      : async () => ({ detail: "boom" }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(getSchemaGraph(ref)).rejects.toThrow("boom");
+    });
+});
+
+describe("getDatabaseGraph", () => {
+    const ref: DbObjectRef = {
+        connectionId: "default",
+        database    : "sqladmin",
+        kind        : "database",
+    };
+
+    it("GETs the database's /graph endpoint and returns the parsed envelope", async () => {
+        const graph = {
+            schemas: [
+                {
+                    schema: "public",
+                    tables: [{ name: "customers", structure: { indexes: [], constraints: [], foreignKeys: [] } }],
+                },
+            ],
+        };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => graph });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const result = await getDatabaseGraph(ref);
+
+        expect(result).toEqual(graph);
+        expect(fetchMock).toHaveBeenCalledWith("/api/default/sqladmin/graph");
+    });
+
+    it("throws the backend {detail} on a non-OK response", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok        : false,
+            status    : 500,
+            statusText: "Internal Server Error",
+            json      : async () => ({ detail: "boom" }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(getDatabaseGraph(ref)).rejects.toThrow("boom");
     });
 });
 
