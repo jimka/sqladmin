@@ -14,6 +14,9 @@ import { table_columns }                                                        
 import { file_code }                                                                                                                                                                               from "@jimka/typescript-ui/glyphs/solid/file_code";
 import { key }                                                                                                                                                                                     from "@jimka/typescript-ui/glyphs/solid/key";
 import { diagram_project }                                                                                                                                                                         from "@jimka/typescript-ui/glyphs/solid/diagram_project";
+import { sitemap }                                                                                                                                                                                 from "@jimka/typescript-ui/glyphs/solid/sitemap";
+import { share_nodes }                                                                                                                                                                             from "@jimka/typescript-ui/glyphs/solid/share_nodes";
+import { circle_nodes }                                                                                                                                                                            from "@jimka/typescript-ui/glyphs/solid/circle_nodes";
 import { file_lines }                                                                                                                                                                              from "@jimka/typescript-ui/glyphs/solid/file_lines";
 import { user }                                                                                                                                                                                    from "@jimka/typescript-ui/glyphs/solid/user";
 import type { TreeNode }                                                                                                                                                                           from "@jimka/typescript-ui/component/tree";
@@ -80,12 +83,17 @@ import { LayoutStore }                                                          
 import { promptQueryName }                                                                                                                                                                         from "./promptQueryName";
 
 // The non-relation dock-tab glyphs (query / structure / definition / grants /
-// schema diagram / notes). The relation-kind glyphs (table / view / materialized
-// view) come from objectGlyphs via KIND_GLYPH, which registers them. `user` is
-// the membership-diagram root's glyph — also registered by RolesTree.ts, but
+// notes) plus the distinct diagram-tab glyphs: `diagram-project` is the FK
+// entity-relationship diagram (relation-rooted and whole-schema), `circle-nodes`
+// the whole-database ER diagram, `share-nodes` a view/matview dependency graph,
+// and `sitemap` a table inheritance/partitioning graph — one glyph per kind of
+// view so a tab (and its navigator "Show" menu item) reads its type at a glance.
+// The relation-kind glyphs (table / view / materialized view) come from
+// objectGlyphs via KIND_GLYPH, which registers them. `user` is the
+// membership-diagram root's glyph — also registered by RolesTree.ts, but
 // registered here too so the root node always renders regardless of whether the
 // Roles rail has mounted yet.
-Glyph.register(terminal, table_columns, file_code, key, diagram_project, file_lines, user);
+Glyph.register(terminal, table_columns, file_code, key, diagram_project, sitemap, share_nodes, circle_nodes, file_lines, user);
 
 // The registered glyph name for a role node in the diagram views (the
 // membership root, and buildRoleGrantsDiagram's/buildRoleMembershipDiagram's
@@ -1564,7 +1572,7 @@ export class SqlAdminController {
         this.openAsyncPanel({
             id,
             title: `${ref.database} (diagram)`,
-            glyph: "diagram-project",
+            glyph: "circle-nodes",
             ref,
         }, async () => {
             const schemas = await this.buildDatabaseGraphData(ref);
@@ -1730,7 +1738,7 @@ export class SqlAdminController {
         this.openAsyncPanel({
             id,
             title: `${ref.schema} (dependencies)`,
-            glyph: "diagram-project",
+            glyph: "share-nodes",
             ref,
         }, async () => {
             const data = await this.fetchDependencyGraph(ref);
@@ -1772,7 +1780,7 @@ export class SqlAdminController {
         this.openAsyncPanel({
             id,
             title  : `${ref.name} (dependencies)`,
-            glyph  : "diagram-project",
+            glyph  : "share-nodes",
             tooltip: this.panelTooltip(ref),
             ref,
         }, async () => {
@@ -1822,7 +1830,7 @@ export class SqlAdminController {
         this.openAsyncPanel({
             id,
             title: `${ref.schema} (inheritance)`,
-            glyph: "diagram-project",
+            glyph: "sitemap",
             ref,
         }, async () => {
             const data = await this.fetchInheritanceGraph(ref);
@@ -1865,7 +1873,7 @@ export class SqlAdminController {
         this.openAsyncPanel({
             id,
             title  : `${ref.name} (inheritance)`,
-            glyph  : "diagram-project",
+            glyph  : "sitemap",
             tooltip: this.panelTooltip(ref),
             ref,
         }, async () => {
