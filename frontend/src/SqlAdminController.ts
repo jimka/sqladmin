@@ -2473,18 +2473,15 @@ export class SqlAdminController {
     }
 
     /**
-     * Show the selected role's base info (attributes + memberships) in the roles
-     * inspector and open (or focus) its grants tab in the Dock work area. A
-     * monotonic guard discards a stale fetch whose selection has since changed,
-     * so rapid role clicks never render the wrong role.
+     * Open (or focus) the selected role's grants tab in the Dock work area and
+     * show its base info (attributes + memberships) in the roles inspector. The
+     * grants tab opens at once behind the library's spinner, with the role detail
+     * fetched behind it — so a slow fetch never blocks the tab from appearing
+     * (mirroring how openTable defers a table's fetch). Reached by a double-click
+     * or the roles rail's "Show data".
      */
-    async showRole(name: string): Promise<void> {
-        const detail = await this.fetchRoleDetail(name);
-
-        if (detail) {
-            this.rolesProperties.show(detail);
-            this.openRoleGrants(name, detail.privileges);
-        }
+    showRole(name: string): void {
+        this.openRoleGrants(name);
     }
 
     /**
@@ -2523,28 +2520,40 @@ export class SqlAdminController {
     }
 
     /**
-     * Open the role's table grants in a Dock tab, or focus the existing one. The
-     * tab is deduped by role (mirroring how a table opens its data tab); the
-     * grids are read-only and a role's grants do not change within a session, so
-     * a re-selection focuses the open tab without refetching its contents.
+     * Open the role's table grants in a Dock tab, or focus the existing one, and
+     * refresh the roles inspector for the selection. The tab is deduped by role
+     * (mirroring how a table opens its data tab); the grids are read-only and a
+     * role's grants do not change within a session, so a re-selection focuses the
+     * open tab and only re-previews the inspector, without rebuilding the grid.
+     *
+     * The role detail is fetched behind the tab's own spinner (not before the tab
+     * opens) so opening never blocks on the round-trip, and it feeds both the
+     * grants grid and the inspector. Unlike the transient inspector preview
+     * (fetchRoleDetail), the fetch here is unguarded: a grants tab is deduped and
+     * persistent, so there is no stale selection to discard — a failure closes
+     * the tab and reports through the Dock "exception" handler.
      */
-    private openRoleGrants(role: string, privileges: RolePrivilege[]): void {
+    private openRoleGrants(role: string): void {
         const id = `grants/${this._connectionId}/${role}`;
 
         if (this.dock.focusPanel(id)) {
+            void this.showRoleProperties(role);
+
             return;
         }
 
-        this.dock.addPanel({
-            id,
-            title  : `Grants: ${role}`,
-            glyph  : "key",
-            content: RoleGrantsPanel(role, privileges),
-        });
+        this.openAsyncPanel({ id, title: `Grants: ${role}`, glyph: "key" }, async () => {
+            const detail = await getRoleDetail(this._connectionId, role);
 
-        // Track the grant set so the active-tab export (Tools menu) can reach it
-        // while this tab is focused, mirroring _activeQueryResult for query panels.
-        this._activeRoleGrants.set(id, { role, privileges });
+            this.rolesProperties.show(detail);
+
+            // Track the grant set so the active-tab export (Tools menu) can reach
+            // it while this tab is focused, mirroring _activeQueryResult for query
+            // panels.
+            this._activeRoleGrants.set(id, { role, privileges: detail.privileges });
+
+            return RoleGrantsPanel(role, detail.privileges);
+        });
     }
 
     /**
