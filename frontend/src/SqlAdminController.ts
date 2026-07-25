@@ -14,6 +14,9 @@ import { table_columns }                                                        
 import { file_code }                                                                                                                                                                               from "@jimka/typescript-ui/glyphs/solid/file_code";
 import { key }                                                                                                                                                                                     from "@jimka/typescript-ui/glyphs/solid/key";
 import { diagram_project }                                                                                                                                                                         from "@jimka/typescript-ui/glyphs/solid/diagram_project";
+import { sitemap }                                                                                                                                                                                 from "@jimka/typescript-ui/glyphs/solid/sitemap";
+import { share_nodes }                                                                                                                                                                             from "@jimka/typescript-ui/glyphs/solid/share_nodes";
+import { circle_nodes }                                                                                                                                                                            from "@jimka/typescript-ui/glyphs/solid/circle_nodes";
 import { file_lines }                                                                                                                                                                              from "@jimka/typescript-ui/glyphs/solid/file_lines";
 import { user }                                                                                                                                                                                    from "@jimka/typescript-ui/glyphs/solid/user";
 import type { TreeNode }                                                                                                                                                                           from "@jimka/typescript-ui/component/tree";
@@ -80,12 +83,17 @@ import { LayoutStore }                                                          
 import { promptQueryName }                                                                                                                                                                         from "./promptQueryName";
 
 // The non-relation dock-tab glyphs (query / structure / definition / grants /
-// schema diagram / notes). The relation-kind glyphs (table / view / materialized
-// view) come from objectGlyphs via KIND_GLYPH, which registers them. `user` is
-// the membership-diagram root's glyph — also registered by RolesTree.ts, but
+// notes) plus the distinct diagram-tab glyphs: `diagram-project` is the FK
+// entity-relationship diagram (relation-rooted and whole-schema), `circle-nodes`
+// the whole-database ER diagram, `share-nodes` a view/matview dependency graph,
+// and `sitemap` a table inheritance/partitioning graph — one glyph per kind of
+// view so a tab (and its navigator "Show" menu item) reads its type at a glance.
+// The relation-kind glyphs (table / view / materialized view) come from
+// objectGlyphs via KIND_GLYPH, which registers them. `user` is the
+// membership-diagram root's glyph — also registered by RolesTree.ts, but
 // registered here too so the root node always renders regardless of whether the
 // Roles rail has mounted yet.
-Glyph.register(terminal, table_columns, file_code, key, diagram_project, file_lines, user);
+Glyph.register(terminal, table_columns, file_code, key, diagram_project, sitemap, share_nodes, circle_nodes, file_lines, user);
 
 // The registered glyph name for a role node in the diagram views (the
 // membership root, and buildRoleGrantsDiagram's/buildRoleMembershipDiagram's
@@ -1564,7 +1572,7 @@ export class SqlAdminController {
         this.openAsyncPanel({
             id,
             title: `${ref.database} (diagram)`,
-            glyph: "diagram-project",
+            glyph: "circle-nodes",
             ref,
         }, async () => {
             const schemas = await this.buildDatabaseGraphData(ref);
@@ -1730,7 +1738,7 @@ export class SqlAdminController {
         this.openAsyncPanel({
             id,
             title: `${ref.schema} (dependencies)`,
-            glyph: "diagram-project",
+            glyph: "share-nodes",
             ref,
         }, async () => {
             const data = await this.fetchDependencyGraph(ref);
@@ -1772,7 +1780,7 @@ export class SqlAdminController {
         this.openAsyncPanel({
             id,
             title  : `${ref.name} (dependencies)`,
-            glyph  : "diagram-project",
+            glyph  : "share-nodes",
             tooltip: this.panelTooltip(ref),
             ref,
         }, async () => {
@@ -1822,7 +1830,7 @@ export class SqlAdminController {
         this.openAsyncPanel({
             id,
             title: `${ref.schema} (inheritance)`,
-            glyph: "diagram-project",
+            glyph: "sitemap",
             ref,
         }, async () => {
             const data = await this.fetchInheritanceGraph(ref);
@@ -1865,7 +1873,7 @@ export class SqlAdminController {
         this.openAsyncPanel({
             id,
             title  : `${ref.name} (inheritance)`,
-            glyph  : "diagram-project",
+            glyph  : "sitemap",
             tooltip: this.panelTooltip(ref),
             ref,
         }, async () => {
@@ -2465,18 +2473,15 @@ export class SqlAdminController {
     }
 
     /**
-     * Show the selected role's base info (attributes + memberships) in the roles
-     * inspector and open (or focus) its grants tab in the Dock work area. A
-     * monotonic guard discards a stale fetch whose selection has since changed,
-     * so rapid role clicks never render the wrong role.
+     * Open (or focus) the selected role's grants tab in the Dock work area and
+     * show its base info (attributes + memberships) in the roles inspector. The
+     * grants tab opens at once behind the library's spinner, with the role detail
+     * fetched behind it — so a slow fetch never blocks the tab from appearing
+     * (mirroring how openTable defers a table's fetch). Reached by a double-click
+     * or the roles rail's "Show data".
      */
-    async showRole(name: string): Promise<void> {
-        const detail = await this.fetchRoleDetail(name);
-
-        if (detail) {
-            this.rolesProperties.show(detail);
-            this.openRoleGrants(name, detail.privileges);
-        }
+    showRole(name: string): void {
+        this.openRoleGrants(name);
     }
 
     /**
@@ -2515,28 +2520,40 @@ export class SqlAdminController {
     }
 
     /**
-     * Open the role's table grants in a Dock tab, or focus the existing one. The
-     * tab is deduped by role (mirroring how a table opens its data tab); the
-     * grids are read-only and a role's grants do not change within a session, so
-     * a re-selection focuses the open tab without refetching its contents.
+     * Open the role's table grants in a Dock tab, or focus the existing one, and
+     * refresh the roles inspector for the selection. The tab is deduped by role
+     * (mirroring how a table opens its data tab); the grids are read-only and a
+     * role's grants do not change within a session, so a re-selection focuses the
+     * open tab and only re-previews the inspector, without rebuilding the grid.
+     *
+     * The role detail is fetched behind the tab's own spinner (not before the tab
+     * opens) so opening never blocks on the round-trip, and it feeds both the
+     * grants grid and the inspector. Unlike the transient inspector preview
+     * (fetchRoleDetail), the fetch here is unguarded: a grants tab is deduped and
+     * persistent, so there is no stale selection to discard — a failure closes
+     * the tab and reports through the Dock "exception" handler.
      */
-    private openRoleGrants(role: string, privileges: RolePrivilege[]): void {
+    private openRoleGrants(role: string): void {
         const id = `grants/${this._connectionId}/${role}`;
 
         if (this.dock.focusPanel(id)) {
+            void this.showRoleProperties(role);
+
             return;
         }
 
-        this.dock.addPanel({
-            id,
-            title  : `Grants: ${role}`,
-            glyph  : "key",
-            content: RoleGrantsPanel(role, privileges),
-        });
+        this.openAsyncPanel({ id, title: `Grants: ${role}`, glyph: "key" }, async () => {
+            const detail = await getRoleDetail(this._connectionId, role);
 
-        // Track the grant set so the active-tab export (Tools menu) can reach it
-        // while this tab is focused, mirroring _activeQueryResult for query panels.
-        this._activeRoleGrants.set(id, { role, privileges });
+            this.rolesProperties.show(detail);
+
+            // Track the grant set so the active-tab export (Tools menu) can reach
+            // it while this tab is focused, mirroring _activeQueryResult for query
+            // panels.
+            this._activeRoleGrants.set(id, { role, privileges: detail.privileges });
+
+            return RoleGrantsPanel(role, detail.privileges);
+        });
     }
 
     /**

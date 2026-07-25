@@ -21,6 +21,9 @@ import { pencil }                               from "@jimka/typescript-ui/glyph
 import { trash }                                from "@jimka/typescript-ui/glyphs/solid/trash";
 import { arrows_rotate }                        from "@jimka/typescript-ui/glyphs/solid/arrows_rotate";
 import { play }                                 from "@jimka/typescript-ui/glyphs/solid/play";
+import { sitemap }                              from "@jimka/typescript-ui/glyphs/solid/sitemap";
+import { share_nodes }                          from "@jimka/typescript-ui/glyphs/solid/share_nodes";
+import { circle_nodes }                         from "@jimka/typescript-ui/glyphs/solid/circle_nodes";
 import type { DbObjectKind, DbObjectRef }       from "../contract";
 import { getFunctions, getObjects, getSchemas, getTypes } from "../data/api";
 import { KIND_GLYPH }                           from "./objectGlyphs";
@@ -31,8 +34,13 @@ import type { SqlAdminController }              from "../SqlAdminController";
 // view-matview-ddl phase's refresh glyph (Edit/Drop reuse "pencil"/"trash").
 // "arrow-up-1-9"/"code"/"cube" (the sequence/function/type-leaf glyphs, also
 // reused for their "Create …" menu items above) are registered by
-// objectGlyphs.ts, already imported above for KIND_GLYPH.
-Glyph.register(plus, pencil, trash, arrows_rotate, play);
+// objectGlyphs.ts, already imported above for KIND_GLYPH. The "Show" submenus'
+// distinct diagram glyphs — sitemap (inheritance), share-nodes (dependencies),
+// circle-nodes (whole-database diagram) — are registered here (and on the
+// controller for the matching dock tabs); "diagram-project"/"table-columns"/
+// "file-code" (the schema/relations diagram, structure, and definition items)
+// come from the controller's own registration.
+Glyph.register(plus, pencil, trash, arrows_rotate, play, sitemap, share_nodes, circle_nodes);
 
 /**
  * One object leaf, merged from whichever endpoint supplied it: `/objects`
@@ -191,11 +199,16 @@ class NavigatorTree extends Tree implements ExplorerTree {
                         { text: "Table", action: () => this.controller.createTable(ref) },
                         { text: "View", action: () => void this.controller.createView(ref) },
                     ] } },
+                    // One glyph per view kind, matching the dock tab each item opens
+                    // (see the controller's Glyph.register comment): circle-nodes the
+                    // whole-database ER, share-nodes the dependency graph, sitemap the
+                    // inheritance tree, diagram-project the schema ER. The items had no
+                    // glyphs at all before — they render blank without these.
                     { text: "Show", glyph: "diagram-project", submenu: { label: "Show", items: [
-                        { text: "Database diagram", action: () => void this.controller.openDatabaseDiagram({ connectionId: ref.connectionId, database: ref.database, kind: "database" }) },
-                        { text: "Dependency graph", action: () => void this.controller.openSchemaDependencyGraph(ref, node) },
-                        { text: "Inheritance graph", action: () => void this.controller.openSchemaInheritanceGraph(ref, node) },
-                        { text: "Schema diagram", action: () => void this.controller.openSchemaDiagram(ref, node) },
+                        { text: "Database diagram", glyph: "circle-nodes",   action: () => void this.controller.openDatabaseDiagram({ connectionId: ref.connectionId, database: ref.database, kind: "database" }) },
+                        { text: "Dependency graph", glyph: "share-nodes",    action: () => void this.controller.openSchemaDependencyGraph(ref, node) },
+                        { text: "Inheritance graph", glyph: "sitemap",        action: () => void this.controller.openSchemaInheritanceGraph(ref, node) },
+                        { text: "Schema diagram", glyph: "diagram-project", action: () => void this.controller.openSchemaDiagram(ref, node) },
                     ] } },
                 ]);
 
@@ -276,9 +289,14 @@ class NavigatorTree extends Tree implements ExplorerTree {
                 // FK edges and would render as a lone node); Dependencies is the
                 // connected dependency component; Inheritance is the pg_inherits
                 // partitioning/inheritance graph (also table-only).
+                // One glyph per view kind (see the schema menu above and the
+                // controller's Glyph.register comment): share-nodes the dependency
+                // graph, sitemap the inheritance tree, diagram-project the FK
+                // relations ER, table-columns the column inspector — no longer three
+                // items sharing "diagram-project".
                 items.push({ text: "Show", glyph: "diagram-project", submenu: { label: "Show", items: [
-                    { text: "Dependencies", glyph: "diagram-project", action: () => void this.controller.openRelationDependencyGraph(ref, node) },
-                    { text: "Inheritance",  glyph: "diagram-project", action: () => void this.controller.openRelationInheritanceGraph(ref, node) },
+                    { text: "Dependencies", glyph: "share-nodes",     action: () => void this.controller.openRelationDependencyGraph(ref, node) },
+                    { text: "Inheritance",  glyph: "sitemap",         action: () => void this.controller.openRelationInheritanceGraph(ref, node) },
                     { text: "Relations",    glyph: "diagram-project", action: () => void this.controller.openRelationDiagram(ref, node) },
                     { text: "Structure",    glyph: "table-columns",   action: () => void this.controller.openStructure(ref, node) },
                 ] } });
@@ -288,7 +306,7 @@ class NavigatorTree extends Tree implements ExplorerTree {
                 // its two Show items stay flat rather than in a one-or-two-item
                 // submenu: its connected dependency component and, since only a
                 // (materialized) view has one, its editable SQL definition.
-                items.push({ text: "Show dependencies", glyph: "diagram-project", action: () => void this.controller.openRelationDependencyGraph(ref, node) });
+                items.push({ text: "Show dependencies", glyph: "share-nodes", action: () => void this.controller.openRelationDependencyGraph(ref, node) });
                 items.push({ text: "Show definition", glyph: "file-code", action: () => void this.controller.openDefinition(ref, node) });
             }
 
