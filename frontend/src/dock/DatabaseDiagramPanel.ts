@@ -85,8 +85,12 @@ class DatabaseDiagramPanel extends Panel {
     /**
      * @param schemas - Every schema's tables + structures (from buildDatabaseGraphData).
      * @param onSelectTable - Invoked with the activated leaf's schema + table.
+     * @param onContextMenu - Invoked with a right-clicked Tables-mode leaf's
+     *   schema + table and the originating event. An Overview schema node or a
+     *   Tables-mode container box never forwards (mirrors the activate branch).
      */
-    constructor(schemas: SchemaTables[], onSelectTable: (schema: string, table: string) => void) {
+    constructor(schemas: SchemaTables[], onSelectTable: (schema: string, table: string) => void,
+                onContextMenu?: (schema: string, table: string, event: MouseEvent) => void) {
         // Locals before super() — they are super()'s children (this is
         // unavailable until super() returns).
         const full          = buildDatabaseDiagram(schemas);
@@ -184,6 +188,18 @@ class DatabaseDiagramPanel extends Panel {
 
             if (data) {
                 onSelectTable(data.schema, data.table);
+            }
+        });
+
+        view.on("contextmenu", (node: DiagramNodeData, event: MouseEvent) => {
+            if (this.mode === "overview" || (node.children?.length ?? 0) > 0) {
+                return;
+            }
+
+            const data = node.data as TableNodeData | undefined;
+
+            if (data) {
+                onContextMenu?.(data.schema, data.table, event);
             }
         });
 

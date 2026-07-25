@@ -24,14 +24,21 @@ class SchemaDiagramPanel extends DiagramView {
     /**
      * @param data - The graph model (from buildSchemaDiagram).
      * @param onSelectTable - Invoked with the activated node's table name (its id).
+     * @param onContextMenu - Invoked with a right-clicked node's table name and
+     *   the originating event; omitted callers get no context menu.
      */
-    constructor(data: DiagramData, onSelectTable: (table: string) => void) {
+    constructor(data: DiagramData, onSelectTable: (table: string) => void,
+                onContextMenu?: (table: string, event: MouseEvent) => void) {
         super({ data });
 
         // Double-click opens the table; a single click only selects it. The
         // "activate" payload is the double-clicked node, whose id is its table name.
         this.on("activate", (node: DiagramNodeData) => {
             onSelectTable(node.id);
+        });
+
+        this.on("contextmenu", (node: DiagramNodeData, event: MouseEvent) => {
+            onContextMenu?.(node.id, event);
         });
     }
 }

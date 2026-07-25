@@ -34,8 +34,11 @@ class RelationGraphPanel extends DiagramView {
      * @param data - The graph model (from buildRelationGraph).
      * @param onSelect - Invoked with the activated node's RelationNodeData.
      * @param rootId - The rooted entry's root node id, if this tab is rooted.
+     * @param onContextMenu - Invoked with a right-clicked node's
+     *   RelationNodeData and the originating event.
      */
-    constructor(data: DiagramData, onSelect: (node: RelationNodeData) => void, rootId?: string) {
+    constructor(data: DiagramData, onSelect: (node: RelationNodeData) => void, rootId?: string,
+                onContextMenu?: (node: RelationNodeData, event: MouseEvent) => void) {
         const nodeRenderer = (n: DiagramNodeData): Component => {
             const node = DiagramNode({ label: n.label, glyph: n.glyph });
 
@@ -49,6 +52,10 @@ class RelationGraphPanel extends DiagramView {
         super({ data, nodeRenderer });
 
         this.on("activate", (n: DiagramNodeData) => onSelect(n.data as RelationNodeData));
+
+        this.on("contextmenu", (n: DiagramNodeData, event: MouseEvent) => {
+            onContextMenu?.(n.data as RelationNodeData, event);
+        });
     }
 }
 

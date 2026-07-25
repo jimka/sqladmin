@@ -76,8 +76,12 @@ class RelationDiagramPanel extends Panel {
      *   the kind glyph so a view / matview root still renders when it has no FK
      *   edges).
      * @param onSelectTable - Invoked with the activated node's table name (its id).
+     * @param onContextMenu - Invoked with a right-clicked node's table name and
+     *   the originating event; omitted callers get no context menu (e.g. the
+     *   role-membership graph, whose nodes are roles, not database objects).
      */
-    constructor(full: DiagramData, root: DiagramNodeData, onSelectTable: (table: string) => void) {
+    constructor(full: DiagramData, root: DiagramNodeData, onSelectTable: (table: string) => void,
+                onContextMenu?: (table: string, event: MouseEvent) => void) {
         // Locals before super() — they are super()'s children (this is
         // unavailable until super() returns).
         const base = rootedDiagram(full, root, "both", DEFAULT_DEPTH);
@@ -143,6 +147,7 @@ class RelationDiagramPanel extends Panel {
         // construction-time `listeners:` bag to post-super() `.on()` calls so
         // `this` is initialized when a change fires.
         view.on("activate", (n: DiagramNodeData) => onSelectTable(n.id));
+        view.on("contextmenu", (n: DiagramNodeData, event: MouseEvent) => onContextMenu?.(n.id, event));
         directionControl.on("change", (v: string) => { this.direction = v as TraversalDirection; this.rebuildBase(); });
         depthControl.on("change",     (v: string) => { this.depth = Number(v); this.rebuildBase(); });
         pruneControl.on("change",     (v: boolean) => { this.prune = v; this.applyFilter(); });
