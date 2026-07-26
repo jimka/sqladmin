@@ -391,3 +391,76 @@ Finish by confirming the console is clean (the `favicon.ico` 404 is pre-existing
 [^eager-elk]: `DiagramView`'s constructor calls `setData`, which calls `relayout`, which calls `this._engine.layout(...)` straight away — a diagram starts building its ELK (and therefore its Worker) at construction, whether or not it is ever mounted. The Dock's lazy panel activates immediately on `addLazyPanel`, so the build factory runs at once and the exposed window is the length of the data fetch: on a large schema that is seconds, and the tab is closeable throughout. `Dock.onPanelClosed` emits `"close"` and evicts the frame, then the resolved content is dropped on the floor — so without the token check the panel would exist, hold a Worker, and be referenced by nothing.
 
 [^late-elk]: `ElkLayoutEngine.dispose()` sets a `_disposed` flag and terminates whatever instance exists. When disposal lands while ELK is still being imported and constructed, the construction path re-checks the flag on completion and terminates the instance it just built, so no Worker outlives the disposed engine. That is why row 8's assertion is `made === killed` rather than a fixed pair: whether the Worker gets created at all depends on how far construction had progressed.
+
+---
+
+## Implementation Notes
+
+- **The nine diagram spec blocks were re-aligned, not only extended.** Step 6
+  says to add `disposeOnClose: true,` "and nothing else", but the repo aligns
+  object-literal colons to the longest key, and `disposeOnClose` is longer than
+  every key already in those blocks. Adding it without re-padding would have
+  left each block half-aligned. All nine blocks are therefore padded to the new
+  width; no key, value, or ordering changed. (An audit round on the sibling
+  `elk-worker-adoption` branch raised exactly this kind of alignment drift as a
+  finding, which is why the wider diff was preferred over the literal reading.)
+- **A ninth unit test was added beyond the plan's eight behaviours.** Behaviour
+  8 pins that `this` survives `register` + `close`; the added case pins the same
+  for the *other* path that calls `dispose`, the immediate disposal inside
+  `settle` when a build lands after its tab closed. Both paths call the panel,
+  and only one of them was covered.
+- **The plan's Non-Goals section is stale on one point of fact.** It says both
+  `elkWorkerFactory` and the disposal path "live on unmerged, unpublished
+  library branches". They were merged to typescript-ui's `master` before this
+  branch was implemented — still unpublished, so the conclusion (nothing to
+  bump the `^0.2.0` range to) is unchanged and the Non-Goal stands. Step 9's
+  `TODO.md` wording was written to the merged-but-unpublished state.
+- **Behaviours 9–13 are browser-only and were verified manually**, per the
+  plan's [Verification](#verification) procedure — the project's vitest runs in
+  the node environment by design and cannot construct a panel. See the
+  verification record below.
+
+### Manual verification record
+
+Driven live via `chrome-devtools` against `npm run dev` served from this
+worktree, with the plan's ELK-only `window.Worker` counter installed before
+login. Backend run on the host, so the login Host was `localhost` (the verify
+skill's `sqladmin-db` is the compose-network name and does not resolve from a
+host-run backend). Every row of the plan's [Verification](#verification) table
+matched its expected `{ made, killed }` exactly:
+
+| # | Action | Expected | Observed |
+|---|---|---|---|
+| 1 | Open `hub` schema diagram (154 tables) | `{1,0}` | `{1,0}`, 154 nodes |
+| 2 | Close that tab | `{1,1}` | `{1,1}` |
+| 3 | Two more open+close cycles | `{3,3}` | `{3,3}` |
+| 4 | Database diagram (wrapper shape) open+close | `{4,4}` | `{4,4}`, 6 nodes |
+| 5 | Query → Explain → Explain diagram | `{5,4}` | `{5,4}` |
+| 6 | Explain diagram again (rebuild) | `{6,5}` | `{6,5}` |
+| 7 | Close the Diagram tab | `{6,6}` | `{6,6}` |
+| 8 | Close during load, then wait | `made === killed` | `{9,9}` |
+
+Row 4 is the evidence for behaviour 10 — `DatabaseDiagramPanel` is a `Panel`
+holding the `DiagramView`, so its release proves the `Component.destructor()`
+child recursion. Row 8 needed care to be meaningful: a first attempt closed the
+tab 250 ms after the menu click, by which point the build had already resolved
+(the status line had updated), so it exercised the ordinary register-then-close
+path rather than the race. Re-run by polling for the close button and clicking
+it the moment it existed — 20 ms in, with the counter still at its pre-open
+value and no node rendered — the build resolved afterwards, and its Worker was
+created **and** terminated: the `settle`-with-a-stale-token path, in the real
+app. Behaviour 13 additionally checked the dependency graph (313 nodes) and
+inheritance graph, both balancing to `made === killed` on close.
+
+**One defect found, library-side and recorded in [`TODO.md`](TODO.md) rather
+than fixed here** (the plan's [Non-Goals](#non-goals) reserve library changes):
+closing a diagram tab *while its entry animation is still running* logs one
+uncaught `DOM handle N is not registered`. The stack is entirely inside the
+library — `applyTransitionAndTo` → `InlineStyle.set` → `writeStyle` →
+`HandleRegistry.resolve` — a transition callback writing through a handle
+`Component.destructor()` has already released. It is a genuine regression in
+console cleanliness surfaced by this change (nothing disposed a diagram
+before), but not a functional one: the Worker is terminated in every case, the
+counters balance, and it does not fire when the diagram is allowed to settle
+first (0 errors) or when a `QueryPanel` is disposed (0 errors, the pre-existing
+disposal path). Reproduced twice.
