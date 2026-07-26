@@ -33,6 +33,7 @@ import { rootedDiagram, applyHide } from "../data/relationDiagram";
 import type { TraversalDirection }  from "../data/relationDiagram";
 import { applyCoverageStyle }       from "../data/fkCardinality";
 import { TableCardNode }            from "./TableCardNode";
+import { elkWorkerFactory }         from "./elkWorkerFactory";
 
 // One hop keeps the first cut readable — the root plus its direct FK neighbours,
 // not the whole transitive closure. The user widens it via the Depth control.
@@ -93,7 +94,7 @@ class RelationDiagramPanel extends Panel {
         // flag.
         const nodeRenderer = (n: DiagramNodeData): Component => TableCardNode(n, n.id === root.id);
 
-        const view   = DiagramView({ data: base, nodeRenderer });
+        const view   = DiagramView({ data: base, nodeRenderer, elkWorkerFactory });
         const legend = Panel({ layoutManager: new VBox({ spacing: 2 }), autoScroll: "auto" });
 
         const directionControl = ComboBox({

@@ -18,6 +18,7 @@ import { Glyph }                    from "@jimka/typescript-ui/component/display
 import { user }                     from "@jimka/typescript-ui/glyphs/solid/user";
 import { table }                    from "@jimka/typescript-ui/glyphs/solid/table";
 import type { GrantNodeData }       from "../data/buildRoleGrantsDiagram";
+import { elkWorkerFactory }         from "./elkWorkerFactory";
 
 // The role node and table-node glyphs this panel renders. Registered here so
 // the panel works standalone regardless of import order elsewhere (mirrors
@@ -41,7 +42,7 @@ class RoleGrantsDiagramPanel extends DiagramView {
      */
     constructor(data: DiagramData, onOpenTable: (schema: string, table: string) => void,
                 onContextMenu?: (schema: string, table: string, event: MouseEvent) => void) {
-        super({ data });
+        super({ data, elkWorkerFactory });
 
         this.on("activate", (node: DiagramNodeData) => {
             const meta = node.data as GrantNodeData | undefined;

@@ -168,8 +168,12 @@ export class QueryPanel {
         let chartSlot:   { content: Component; dispose(): void; result: QueryRowsResult } | null = null;
         let explainSlot: { editor: CodeEditor; result: QueryExplainResult; sql: string } | null = null;
         // The plan tree + diagram tab, built from the shown Explain plan re-fetched
-        // as FORMAT JSON. Closeable; a fresh build replaces it. Diagram/Tree hold no
-        // CodeMirror/chart, so its disposer is a no-op (the DOM subtree is enough).
+        // as FORMAT JSON. Closeable; a fresh build replaces it. This disposer is a
+        // pre-existing no-op predating elkWorkerFactory wiring; wiring it to call
+        // `content.dispose()` would still leave the DiagramView's ElkLayoutEngine
+        // Worker unreclaimed either way, since the library doesn't cascade
+        // disposal to it (see TODO.md) — it is not left as a no-op because there
+        // is nothing to reclaim.
         let diagramSlot: { content: Component; dispose(): void } | null = null;
 
         // Raised around a programmatic closeTab so its "tabclose" emit is ignored by

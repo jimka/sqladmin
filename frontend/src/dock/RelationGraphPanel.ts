@@ -9,15 +9,16 @@
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): extends DiagramView (class-
 // first). `nodeRenderer` is built as a local before `super()` — it closes over
 // the constructor's `rootId` param and the module `ROOT_BORDER`, not `this` —
-// and passed through `super({ data, nodeRenderer })`; the "activate" handler is
-// an inline arrow closing over `onSelect`, never handed off by reference, so it
-// needs no arrow-function field.
+// and passed through `super({ data, nodeRenderer, elkWorkerFactory })`; the
+// "activate" handler is an inline arrow closing over `onSelect`, never handed
+// off by reference, so it needs no arrow-function field.
 
 import { callable } from "@jimka/typescript-ui/core";
 import { DiagramNode, DiagramView }          from "@jimka/typescript-ui/component/diagram";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import type { Component }                    from "@jimka/typescript-ui/core";
 import type { RelationNodeData }             from "../data/buildRelationGraph";
+import { elkWorkerFactory }                  from "./elkWorkerFactory";
 
 // The root node's emphasis: a 2px accent border over the DiagramNode default of
 // a 1px border, so the root reads as the anchor of the view (mirrors
@@ -49,7 +50,7 @@ class RelationGraphPanel extends DiagramView {
             return node;
         };
 
-        super({ data, nodeRenderer });
+        super({ data, nodeRenderer, elkWorkerFactory });
 
         this.on("activate", (n: DiagramNodeData) => onSelect(n.data as RelationNodeData));
 

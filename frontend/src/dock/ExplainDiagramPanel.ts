@@ -24,10 +24,13 @@
 // are super()'s children — the super-cascade trap) and the tree/diagram
 // "selection" listeners are wired after super() via .on(...), capturing the
 // locals directly; the handlers close over the sibling view and the id→TreeNode
-// map rather than instance fields. No disposer is registered — the Tree,
-// DiagramView, and MemoryStore-backed tables need no explicit teardown (the
-// SchemaDiagram/RelationDiagram panels and QueryResultGrid are likewise opened
-// without a _panelDisposers entry).
+// map rather than instance fields. This panel is never itself a top-level
+// dock tab (unlike SchemaDiagramPanel/RelationDiagramPanel) — it is only ever
+// constructed inside QueryPanel's diagram slot, whose own disposer is a no-op
+// (see QueryPanel.ts). Since elkWorkerFactory wiring, this DiagramView's
+// ElkLayoutEngine may hold a Worker; `Component.dispose()` exists but the
+// library doesn't cascade it to the Worker, so calling it here wouldn't
+// reclaim one anyway — see TODO.md for the real (library-side) gap.
 
 import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border }                   from "@jimka/typescript-ui/layout";
@@ -45,6 +48,7 @@ import { buildExplainDiagram }      from "../data/buildExplainDiagram";
 import { buildPlanStepsRows }       from "../data/buildPlanSteps";
 import { formatMetric }             from "../data/explainFormat";
 import { ExplainNode }              from "./ExplainNode";
+import { elkWorkerFactory }         from "./elkWorkerFactory";
 import type { ExplainPlanNode, ExplainSummary } from "../data/parseExplainPlan";
 import type { AccordionLayoutBinding } from "../data/layoutStore";
 
@@ -160,7 +164,7 @@ class ExplainDiagramPanel extends Panel {
 
         // Custom node renderer: each node is a metric card (costs, rows, actual
         // timings, group key, batches, memory) heat-tinted by its plan share.
-        const diagram = new DiagramView({ data, nodeRenderer: (n: DiagramNodeData) => ExplainNode(n) });
+        const diagram = new DiagramView({ data, nodeRenderer: (n: DiagramNodeData) => ExplainNode(n), elkWorkerFactory });
 
         super({
             layoutManager: new Border(),
