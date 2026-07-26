@@ -15,6 +15,7 @@
 import { callable } from "@jimka/typescript-ui/core";
 import { DiagramView } from "@jimka/typescript-ui/component/diagram";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
+import { elkWorkerFactory } from "./elkWorkerFactory";
 
 /**
  * The read-only schema diagram panel. Extends DiagramView over the graph;
@@ -29,7 +30,7 @@ class SchemaDiagramPanel extends DiagramView {
      */
     constructor(data: DiagramData, onSelectTable: (table: string) => void,
                 onContextMenu?: (table: string, event: MouseEvent) => void) {
-        super({ data });
+        super({ data, elkWorkerFactory });
 
         // Double-click opens the table; a single click only selects it. The
         // "activate" payload is the double-clicked node, whose id is its table name.

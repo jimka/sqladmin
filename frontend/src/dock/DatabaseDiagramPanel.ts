@@ -32,6 +32,7 @@ import { groupBySchema }            from "../data/groupBySchema";
 import { buildSchemaOverviewDiagram } from "../data/schemaOverviewDiagram";
 import { rootedDiagram, applyHide, subgraph } from "../data/relationDiagram";
 import type { TraversalDirection }  from "../data/relationDiagram";
+import { elkWorkerFactory }         from "./elkWorkerFactory";
 
 // One hop keeps the first rooted cut readable, mirroring RelationDiagramPanel.
 const DEFAULT_DEPTH = 1;
@@ -97,7 +98,7 @@ class DatabaseDiagramPanel extends Panel {
         const overviewGraph = buildSchemaOverviewDiagram(schemas);
         const schemaNames   = schemas.map(s => s.schema);
 
-        const view = DiagramView({ data: overviewGraph });
+        const view = DiagramView({ data: overviewGraph, elkWorkerFactory });
 
         const rootControl = ComboBox({ items: [ROOT_NONE, ...full.nodes.map(n => n.id)], value: ROOT_NONE });
 
