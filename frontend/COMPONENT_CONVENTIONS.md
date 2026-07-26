@@ -99,6 +99,13 @@ ever invoked as `this.foo()` — never handed off by reference — may stay a
 plain method. When in doubt, prefer the arrow field: it's safe under both
 call styles, a plain method is only safe under one.
 
+The controller's own teardown registry sidesteps this hazard rather than
+relying on every panel to be safe under it: `PanelDisposers`
+(`src/dock/panelDisposers.ts`) stores the panel **object** and calls
+`panel.dispose()` itself, so registering a panel whose `dispose` is a plain
+prototype method — every library `Component`, including the diagram panels —
+cannot lose `this`.
+
 Stateless helpers that don't touch instance state at all (don't need to be
 methods) can stay ordinary module-level functions — see `save_` and
 `confirmDelete` in `TableWorkPanel.ts`, which take everything they need as
@@ -217,7 +224,7 @@ This is a **fallback from the preferred `extends` form (section (d))**, not
 an equal alternative — reach for `extends` first, and use composition only
 when the super-cascade hoist genuinely doesn't pay for itself. Within one
 module family sharing a single disposal path (e.g. several Dock panel
-builders feeding one `_panelDisposers` map), prefer applying composition
+builders feeding one `_panelDisposers` registry), prefer applying composition
 uniformly across the family rather than mixing `extends` and composition,
 even where a smaller sibling could technically take `extends` — a mixed
 shape fragments the pattern for no benefit. See
