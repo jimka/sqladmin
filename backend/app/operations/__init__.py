@@ -41,6 +41,15 @@ from .delete_row import DeleteRowCommand
 from .explain_query import ExplainQueryCommand
 from .export_rows import ExportRowsQuery
 from .function_definition import FunctionDefinitionQuery
+from .graph import (
+    SchemaColumnsQuery,
+    SchemaConstraintsQuery,
+    SchemaForeignKeysQuery,
+    SchemaIndexesQuery,
+    SchemaTablesQuery,
+    assemble_database_graph,
+    assemble_schema_graph,
+)
 from .insert_row import InsertRowCommand
 from .list_columns import ListColumnsQuery
 from .list_databases import ListDatabasesQuery
@@ -86,6 +95,13 @@ __all__ = [
     "ListIndexesQuery",
     "ListConstraintsQuery",
     "ListForeignKeysQuery",
+    "SchemaTablesQuery",
+    "SchemaColumnsQuery",
+    "SchemaIndexesQuery",
+    "SchemaConstraintsQuery",
+    "SchemaForeignKeysQuery",
+    "assemble_schema_graph",
+    "assemble_database_graph",
     "InsertRowCommand",
     "UpdateRowCommand",
     "DeleteRowCommand",

@@ -77,9 +77,14 @@ from .operations import (
     RoleMembershipsQuery,
     RolePrivilegesQuery,
     RunQueryCommand,
+    SchemaColumnsQuery,
+    SchemaConstraintsQuery,
     SchemaCreatePreview,
     SchemaDropPreview,
+    SchemaForeignKeysQuery,
+    SchemaIndexesQuery,
     SchemaRenamePreview,
+    SchemaTablesQuery,
     SequenceAlterPreview,
     SequenceCreatePreview,
     SequenceDetailQuery,
@@ -89,6 +94,8 @@ from .operations import (
     TypeDefinitionQuery,
     UpdateRowCommand,
     ViewDefinitionQuery,
+    assemble_database_graph,
+    assemble_schema_graph,
 )
 from .static import mount_static
 
@@ -460,6 +467,85 @@ async def structure(
             "indexes": indexes.get_result(),
             "constraints": constraints.get_result(),
             "foreignKeys": foreign_keys.get_result(),
+        }
+
+
+@app.get("/api/{connection_id}/{database}/{schema}/graph")
+async def schema_graph(
+    connection_id: str, database: str, schema: str,
+    session: Session = Depends(require_session),
+) -> dict:
+    """
+    Fetch a whole schema's ER-diagram metadata — every base table's structure
+    and columns — in one round trip, replacing the frontend's previous one-
+    ``/structure``-plus-one-``/columns`` fetch per table.
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/graph``.
+
+    Returns:
+        ``{"tables": [{"name", "structure": {...}, "columns": [...]}]}``, one
+        entry per base table in the schema, sorted by name.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        tables = SchemaTablesQuery(c, schema)
+        columns = SchemaColumnsQuery(c, schema)
+        indexes = SchemaIndexesQuery(c, schema)
+        constraints = SchemaConstraintsQuery(c, schema)
+        foreign_keys = SchemaForeignKeysQuery(c, schema)
+
+        await tables.apply()
+        await columns.apply()
+        await indexes.apply()
+        await constraints.apply()
+        await foreign_keys.apply()
+
+        return {
+            "tables": assemble_schema_graph(
+                tables.get_result(),
+                columns.get_result(),
+                indexes.get_result(),
+                constraints.get_result(),
+                foreign_keys.get_result(),
+            ),
+        }
+
+
+@app.get("/api/{connection_id}/{database}/graph")
+async def database_graph(
+    connection_id: str, database: str,
+    session: Session = Depends(require_session),
+) -> dict:
+    """
+    Fetch every non-system schema's tables and structures for the whole-
+    database ER diagram in one round trip, replacing the frontend's previous
+    ``O(schemas x tables)`` fan-out. Structure-only (no columns) — the
+    database diagram never renders column rows, and a whole-database column
+    dump could be large.
+
+    Route: ``GET /api/{connection_id}/{database}/graph``.
+
+    Returns:
+        ``{"schemas": [{"schema", "tables": [{"name", "structure"}]}]}``,
+        grouped by schema then table, both sorted by name.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        tables = SchemaTablesQuery(c, None)
+        indexes = SchemaIndexesQuery(c, None)
+        constraints = SchemaConstraintsQuery(c, None)
+        foreign_keys = SchemaForeignKeysQuery(c, None)
+
+        await tables.apply()
+        await indexes.apply()
+        await constraints.apply()
+        await foreign_keys.apply()
+
+        return {
+            "schemas": assemble_database_graph(
+                tables.get_result(),
+                indexes.get_result(),
+                constraints.get_result(),
+                foreign_keys.get_result(),
+            ),
         }
 
 

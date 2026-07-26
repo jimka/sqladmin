@@ -505,6 +505,29 @@ export interface TableStructure {
     foreignKeys: ForeignKeyMeta[];
 }
 
+/** One table's full graph metadata as returned by the schema-graph endpoint. */
+export interface SchemaGraphTable {
+    name: string;
+    structure: TableStructure;
+    columns: ColumnMeta[];
+}
+
+/** The schema-graph endpoint envelope: every base table's structure + columns. */
+export interface SchemaGraph {
+    tables: SchemaGraphTable[];
+}
+
+/** One schema's tables (structure only) inside the database-graph envelope. */
+export interface DatabaseGraphSchema {
+    schema: string;
+    tables: { name: string; structure: TableStructure }[];
+}
+
+/** The database-graph endpoint envelope: every non-system schema's tables. */
+export interface DatabaseGraph {
+    schemas: DatabaseGraphSchema[];
+}
+
 /** One relation in a dependency / inheritance graph, schema-qualified. `kind`
  *  is the collapsed contract kind (partitioned/foreign tables arrive as "table"). */
 export interface RelationNodeRef {

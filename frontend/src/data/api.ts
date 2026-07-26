@@ -44,6 +44,8 @@ import type {
     TypeDefinition,
     ViewDefinition,
     TableStructure,
+    SchemaGraph,
+    DatabaseGraph,
 } from "../contract";
 import type { ExplainOptions } from "./explain";
 
@@ -242,6 +244,16 @@ export function getStructure(ref: DbObjectRef): Promise<TableStructure> {
     const url = `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/structure`;
 
     return getJson<TableStructure>(url);
+}
+
+/** Fetch a whole schema's ER graph metadata (every base table's structure + columns) in one request. */
+export function getSchemaGraph(ref: DbObjectRef): Promise<SchemaGraph> {
+    return getJson<SchemaGraph>(`/api/${ref.connectionId}/${ref.database}/${ref.schema}/graph`);
+}
+
+/** Fetch a whole database's ER graph metadata (every non-system schema's tables + structures) in one request. */
+export function getDatabaseGraph(ref: DbObjectRef): Promise<DatabaseGraph> {
+    return getJson<DatabaseGraph>(`/api/${ref.connectionId}/${ref.database}/graph`);
 }
 
 /** Fetch a sequence's current state and parameters (pg_sequences). */

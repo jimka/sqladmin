@@ -23,7 +23,7 @@ import type { TreeNode }                                                        
 import type { ExplorerTree }                                                                                                                                                                       from "./navigator/NavigatorTree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                                                                                                                                     from "@jimka/typescript-ui/data";
 import type { AlterColumnAction, ColumnMeta, ConstraintKind, DbObjectRef, FunctionDefinition, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TypeDefinition } from "./contract";
-import { executeDdl, getColumns, getDependencies, getFunctionDefinition, getInheritance, getObjects, getRoleDetail, getRoles, getSchemas, getTablePrivileges, getTypeDefinition, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewAlterTypeAddValue, previewConstraint, previewCreateCompositeType, previewCreateEnumType, previewCreateFunction, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropFunction, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropType, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema, previewReplaceMatview, previewSequenceOwner, runExplain, runQuery, tableExportUrl } from "./data/api";
+import { executeDdl, getColumns, getDatabaseGraph, getDependencies, getFunctionDefinition, getInheritance, getRoleDetail, getRoles, getSchemaGraph, getSchemas, getTablePrivileges, getTypeDefinition, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewAlterTypeAddValue, previewConstraint, previewCreateCompositeType, previewCreateEnumType, previewCreateFunction, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropFunction, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropType, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema, previewReplaceMatview, previewSequenceOwner, runExplain, runQuery, tableExportUrl } from "./data/api";
 import { getSequenceDetail }                                                                                                                                                                       from "./data/api";
 import { exportQueryResult }                                                                                                                                                                       from "./dock/exportQueryResult";
 import { exportExplainPlan }                                                                                                                                                                       from "./dock/exportExplainResult";
@@ -1509,36 +1509,27 @@ export class SqlAdminController {
     }
 
     /**
-     * Fetch a whole schema's ER graph: list its tables, load each table's
-     * structure, and assemble the nodes+edges via buildSchemaDiagram. Shared by
-     * the schema diagram and the relation-rooted diagram (which walks this full
-     * graph from a chosen root). Returns null on failure, having already
-     * reported the error.
+     * Fetch a whole schema's ER graph in one bulk request and assemble the
+     * nodes+edges via buildSchemaDiagram. Shared by the schema diagram and the
+     * relation-rooted diagram (which walks this full graph from a chosen
+     * root). Returns null on failure, having already reported the error.
      *
      * @param ref - The schema to fetch (database + schema set).
-     * @param opts - `withColumns` also fetches every table's columns and builds
-     *   card-mode nodes (table cards + column-to-column FK ports) — used by the
-     *   relation-rooted diagram; omitted (or false) keeps the flat table-to-table
-     *   graph the schema-wide diagram shows.
+     * @param opts - `withColumns` builds card-mode nodes (table cards +
+     *   column-to-column FK ports) from the endpoint's always-fetched columns
+     *   — used by the relation-rooted diagram; omitted (or false) keeps the
+     *   flat table-to-table graph the schema-wide diagram shows.
      * @returns The full schema graph, or null if the fetch failed.
      */
     private async buildSchemaGraphData(ref: DbObjectRef, opts?: { withColumns?: boolean }): Promise<DiagramData | null> {
         try {
-            const objects    = await getObjects(ref.connectionId, ref.database!, ref.schema!);
-            const tables     = objects.filter(o => o.kind === "table").map(o => o.name);
-            const refFor     = (name: string): DbObjectRef =>
-                ({ connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name, kind: "table" });
-
-            // Structures and columns fetch concurrently in one Promise.all round.
-            // Columns are always needed for FK cardinality annotation; card mode
-            // additionally reuses the same fetched columns (no second round-trip).
-            const [structures, columns] = await Promise.all([
-                Promise.all(tables.map(name => getStructure(refFor(name)))),
-                Promise.all(tables.map(name => getColumns(refFor(name)))),
-            ]);
+            const graph      = await getSchemaGraph(ref);
+            const tables     = graph.tables.map(t => t.name);
+            const structures = graph.tables.map(t => t.structure);
+            const columns    = graph.tables.map(t => t.columns);
 
             const columnsByTable: Map<string, ColumnMeta[]> | undefined =
-                opts?.withColumns ? new Map(tables.map((name, i) => [name, columns[i]])) : undefined;
+                opts?.withColumns ? new Map(graph.tables.map(t => [t.name, t.columns])) : undefined;
 
             return annotateFkCardinality(buildSchemaDiagram(tables, structures, columnsByTable), tables, structures, columns);
         } catch (err) {
@@ -1597,10 +1588,8 @@ export class SqlAdminController {
     }
 
     /**
-     * Fetch every schema's tables + structures for the database diagram: list
-     * the database's schemas, then per schema list its tables and load each
-     * table's structure. The fetch is `O(schemas × tables)` round trips — a
-     * one-shot cost behind the tab open; the on-screen graph size is bounded by
+     * Fetch every schema's tables + structures for the database diagram in one
+     * bulk request. The on-screen graph size is bounded by
      * DatabaseDiagramPanel's rooted+prune+per-schema-hide filter layer, not by
      * this fetch. Returns null on failure, having already reported the error.
      *
@@ -1609,16 +1598,13 @@ export class SqlAdminController {
      */
     private async buildDatabaseGraphData(ref: DbObjectRef): Promise<SchemaTables[] | null> {
         try {
-            const schemaList = await getSchemas(ref.connectionId, ref.database!);
+            const graph = await getDatabaseGraph(ref);
 
-            return await Promise.all(schemaList.map(async ({ name: schema }) => {
-                const objects    = await getObjects(ref.connectionId, ref.database!, schema);
-                const tables     = objects.filter(o => o.kind === "table").map(o => o.name);
-                const structures = await Promise.all(tables.map(name =>
-                    getStructure({ connectionId: ref.connectionId, database: ref.database, schema, name, kind: "table" })));
-
-                return { schema, tables, structures } satisfies SchemaTables;
-            }));
+            return graph.schemas.map(s => ({
+                schema    : s.schema,
+                tables    : s.tables.map(t => t.name),
+                structures: s.tables.map(t => t.structure),
+            } satisfies SchemaTables));
         } catch (err) {
             this.notifyError(err, ref);
 
@@ -2560,10 +2546,12 @@ export class SqlAdminController {
      * Open (or focus) the role-membership graph rooted at `name`: every role as
      * a node, `role -> parent` edges from each role's `memberOf`, driven by the
      * reused RelationDiagramPanel (direction / depth / legend). The membership
-     * DAG needs every role's detail, so this fans out N per-role fetches
-     * (mirroring buildSchemaGraphData's per-table fan-out) — acceptable for a
-     * small role list. Double-clicking another role node shows its properties
-     * in the inspector; it does not open a table tab.
+     * DAG needs every role's detail, so this fans out N per-role fetches —
+     * unlike buildSchemaGraphData/buildDatabaseGraphData's single bulk `/graph`
+     * request, there is no combined role-detail endpoint to collapse this into,
+     * but N is a small role list, so the fan-out is acceptable. Double-clicking
+     * another role node shows its properties in the inspector; it does not
+     * open a table tab.
      *
      * @param name - The role to root the graph at.
      */
