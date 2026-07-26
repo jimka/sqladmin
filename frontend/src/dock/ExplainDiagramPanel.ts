@@ -26,11 +26,10 @@
 // locals directly; the handlers close over the sibling view and the id→TreeNode
 // map rather than instance fields. This panel is never itself a top-level
 // dock tab (unlike SchemaDiagramPanel/RelationDiagramPanel) — it is only ever
-// constructed inside QueryPanel's diagram slot, whose own disposer is a no-op
-// (see QueryPanel.ts). Since elkWorkerFactory wiring, this DiagramView's
-// ElkLayoutEngine may hold a Worker; `Component.dispose()` exists but the
-// library doesn't cascade it to the Worker, so calling it here wouldn't
-// reclaim one anyway — see TODO.md for the real (library-side) gap.
+// constructed inside QueryPanel's diagram slot, which disposes this panel on
+// every rebuild and on close. That dispose() cascades through Component's
+// child teardown to the DiagramView below, whose ElkLayoutEngine terminates
+// the ELK Web Worker it holds.
 
 import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border }                   from "@jimka/typescript-ui/layout";

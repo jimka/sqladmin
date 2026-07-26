@@ -168,12 +168,10 @@ export class QueryPanel {
         let chartSlot:   { content: Component; dispose(): void; result: QueryRowsResult } | null = null;
         let explainSlot: { editor: CodeEditor; result: QueryExplainResult; sql: string } | null = null;
         // The plan tree + diagram tab, built from the shown Explain plan re-fetched
-        // as FORMAT JSON. Closeable; a fresh build replaces it. This disposer is a
-        // pre-existing no-op predating elkWorkerFactory wiring; wiring it to call
-        // `content.dispose()` would still leave the DiagramView's ElkLayoutEngine
-        // Worker unreclaimed either way, since the library doesn't cascade
-        // disposal to it (see TODO.md) — it is not left as a no-op because there
-        // is nothing to reclaim.
+        // as FORMAT JSON. Closeable; a fresh build replaces it. The disposer
+        // releases the panel's DiagramView — and with it the ELK Web Worker its
+        // ElkLayoutEngine holds — so re-running Explain no longer strands one
+        // Worker per rebuild.
         let diagramSlot: { content: Component; dispose(): void } | null = null;
 
         // Raised around a programmatic closeTab so its "tabclose" emit is ignored by
@@ -571,7 +569,10 @@ export class QueryPanel {
                 refreshingTabs = false;
             }
 
-            diagramSlot = { content: nextDiagram, dispose: () => {} };
+            // Wrapped, not `dispose: nextDiagram.dispose` — ExplainDiagramPanel
+            // extends Panel, so `dispose` is a prototype method and a detached
+            // reference would lose its `this`.
+            diagramSlot = { content: nextDiagram, dispose: () => nextDiagram.dispose() };
 
             tab.setActiveContent(nextDiagram);
         }

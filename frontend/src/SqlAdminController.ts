@@ -73,6 +73,7 @@ import { DatabaseDiagramPanel }                                                 
 import type { SchemaTables }                                                                                                                                                                       from "./data/buildDatabaseDiagram";
 import { RoleGrantsDiagramPanel }                                                                                                                                                                  from "./dock/RoleGrantsDiagramPanel";
 import { RelationGraphPanel }                                                                                                                                                                      from "./dock/RelationGraphPanel";
+import { PanelDisposers }                                                                                                                                                                          from "./dock/panelDisposers";
 import type { DiagramData, DiagramNodeData }                                                                                                                                                       from "@jimka/typescript-ui/component/diagram";
 import { PropertiesPanel, relationTypeLabel }                                                                                                                                                      from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                                                                                                                                                    from "./roles/RolesPropertiesPanel";
@@ -202,11 +203,14 @@ export class SqlAdminController {
     private readonly _connectionId: string;
     private readonly _database    : string | undefined;
     private readonly _openPanels  : Map<string, OpenPanel> = new Map();
-    // Live-only panels (QueryPanel, DefinitionPanel, DocumentationPanel) expose
-    // a `dispose` that must run on tab close — the framework has no cascading
-    // dispose, so the controller owns invoking it (see the "close" handler
-    // below).
-    private readonly _panelDisposers: Map<string, () => void> = new Map();
+    // Panels that must be torn down on tab close: the composition wrappers
+    // (QueryPanel, DefinitionPanel, DocumentationPanel), whose CodeEditors hold
+    // a CodeMirror view and a ThemeManager subscription, and every diagram
+    // panel, whose DiagramView holds an ELK Web Worker. The framework has no
+    // cascading dispose, so the controller owns invoking it (see the "close"
+    // handler below). The registry takes the panel object, not `panel.dispose`
+    // — a detached prototype method would lose its `this`.
+    private readonly _panelDisposers: PanelDisposers = new PanelDisposers();
     private _navigator            : ExplorerTree | null = null;
     // The diagram panels' shared right-click menu, mirroring how NavigatorTree
     // and RolesTree each own one reusable Menu(). Named diagramContextMenu (see
@@ -308,8 +312,7 @@ export class SqlAdminController {
             this.disposePanel(e.id);
             this._activeQueryResult.delete(e.id);
             this._activeRoleGrants.delete(e.id);
-            this._panelDisposers.get(e.id)?.();
-            this._panelDisposers.delete(e.id);
+            this._panelDisposers.close(e.id);
         });
 
         // A deferred panel whose fetch rejected: the Dock has already closed the tab,
@@ -558,7 +561,7 @@ export class SqlAdminController {
             // itself, which already holds its own copy — nothing looks this
             // entry up by definitionPanelId.
             this._openPanels.set(id, { ref, node: node ?? null, detail: "definition" });
-            this._panelDisposers.set(id, panel.dispose);
+            this._panelDisposers.register(id, panel);
             this.syncToPanel(id);
 
             return panel.content;
@@ -1236,7 +1239,7 @@ export class SqlAdminController {
             panel = new FunctionDefinitionPanel(definition.definition, onSave);
 
             this._openPanels.set(id, { ref, node: node ?? null, detail: "definition" });
-            this._panelDisposers.set(id, panel.dispose);
+            this._panelDisposers.register(id, panel);
             this.syncToPanel(id);
 
             return panel.content;
@@ -1467,7 +1470,7 @@ export class SqlAdminController {
             this._notes.load(),
             markdown => this._notes.save(markdown),
         );
-        this._panelDisposers.set(id, panel.dispose);
+        this._panelDisposers.register(id, panel);
 
         this.dock.addPanel({ id, title: "Notes", glyph: "file-lines", content: panel.content });
     }
@@ -1491,9 +1494,10 @@ export class SqlAdminController {
 
         this.openAsyncPanel({
             id,
-            title: `${ref.schema} (diagram)`,
-            glyph: "diagram-project",
+            title         : `${ref.schema} (diagram)`,
+            glyph         : "diagram-project",
             ref,
+            disposeOnClose: true,
         }, async () => {
             const data = await this.buildSchemaGraphData(ref);
 
@@ -1578,9 +1582,10 @@ export class SqlAdminController {
 
         this.openAsyncPanel({
             id,
-            title: `${ref.database} (diagram)`,
-            glyph: "circle-nodes",
+            title         : `${ref.database} (diagram)`,
+            glyph         : "circle-nodes",
             ref,
+            disposeOnClose: true,
         }, async () => {
             const schemas = await this.buildDatabaseGraphData(ref);
 
@@ -1660,10 +1665,11 @@ export class SqlAdminController {
 
         this.openAsyncPanel({
             id,
-            title  : `${ref.name} (relations)`,
-            glyph  : "diagram-project",
-            tooltip: this.panelTooltip(ref),
+            title         : `${ref.name} (relations)`,
+            glyph         : "diagram-project",
+            tooltip       : this.panelTooltip(ref),
             ref,
+            disposeOnClose: true,
         }, async () => {
             const full = await this.buildSchemaGraphData(ref, { withColumns: true });
 
@@ -1760,9 +1766,10 @@ export class SqlAdminController {
 
         this.openAsyncPanel({
             id,
-            title: `${ref.schema} (dependencies)`,
-            glyph: "share-nodes",
+            title         : `${ref.schema} (dependencies)`,
+            glyph         : "share-nodes",
             ref,
+            disposeOnClose: true,
         }, async () => {
             const data = await this.fetchDependencyGraph(ref);
 
@@ -1813,10 +1820,11 @@ export class SqlAdminController {
 
         this.openAsyncPanel({
             id,
-            title  : `${ref.name} (dependencies)`,
-            glyph  : "share-nodes",
-            tooltip: this.panelTooltip(ref),
+            title         : `${ref.name} (dependencies)`,
+            glyph         : "share-nodes",
+            tooltip       : this.panelTooltip(ref),
             ref,
+            disposeOnClose: true,
         }, async () => {
             const full = await this.fetchDependencyGraph(ref);
 
@@ -1874,9 +1882,10 @@ export class SqlAdminController {
 
         this.openAsyncPanel({
             id,
-            title: `${ref.schema} (inheritance)`,
-            glyph: "sitemap",
+            title         : `${ref.schema} (inheritance)`,
+            glyph         : "sitemap",
             ref,
+            disposeOnClose: true,
         }, async () => {
             const data = await this.fetchInheritanceGraph(ref);
 
@@ -1928,10 +1937,11 @@ export class SqlAdminController {
 
         this.openAsyncPanel({
             id,
-            title  : `${ref.name} (inheritance)`,
-            glyph  : "sitemap",
-            tooltip: this.panelTooltip(ref),
+            title         : `${ref.name} (inheritance)`,
+            glyph         : "sitemap",
+            tooltip       : this.panelTooltip(ref),
             ref,
+            disposeOnClose: true,
         }, async () => {
             const full = await this.fetchInheritanceGraph(ref);
 
@@ -2130,7 +2140,7 @@ export class SqlAdminController {
             explainDiagramLayout: this.layout.bindAccordion("explainDiagram"),
         });
 
-        this._panelDisposers.set(id, panel.dispose);
+        this._panelDisposers.register(id, panel);
         this.dock.addPanel({ id, title: label, glyph: "terminal", content: panel.content });
     }
 
@@ -2658,8 +2668,9 @@ export class SqlAdminController {
 
         this.openAsyncPanel({
             id,
-            title: `${name} (membership)`,
-            glyph: "diagram-project",
+            title         : `${name} (membership)`,
+            glyph         : "diagram-project",
+            disposeOnClose: true,
         }, async () => {
             // The fetch now runs behind the library's spinner. A throw here closes
             // the tab and reaches the "exception" handler — so no local catch.
@@ -2691,8 +2702,9 @@ export class SqlAdminController {
 
         this.openAsyncPanel({
             id,
-            title: `${name} (grants graph)`,
-            glyph: "diagram-project",
+            title         : `${name} (grants graph)`,
+            glyph         : "diagram-project",
+            disposeOnClose: true,
         }, async () => {
             const detail = await this.fetchRoleDetail(name);
 
@@ -2917,11 +2929,21 @@ export class SqlAdminController {
      * with the library's spinner, `build` runs behind it, and the built panel
      * replaces the spinner. A rejection closes the tab and reaches the Dock
      * "exception" handler, which reports it through notifyError.
+     *
+     * @param spec - The tab's identity. `disposeOnClose` registers the built
+     *   panel for teardown on close — set it for every panel holding a resource
+     *   the DOM alone does not reclaim (a diagram's ELK Web Worker). A panel
+     *   whose build lands after its tab closed is disposed instead of
+     *   registered, so a close during the fetch strands nothing.
      */
     private openAsyncPanel(
-        spec: { id: string; title: string; glyph: string; tooltip?: string; ref?: DbObjectRef },
+        spec: { id: string; title: string; glyph: string; tooltip?: string; ref?: DbObjectRef; disposeOnClose?: boolean },
         build: () => Promise<Component>,
     ): void {
+        // Identity token for THIS open of spec.id, so a build landing after its
+        // tab closed (or after the id was reopened) is disposed, not registered.
+        const token = spec.disposeOnClose ? this._panelDisposers.beginLoad(spec.id) : null;
+
         this.dock.addLazyPanel({
             id     : spec.id,
             title  : spec.title,
@@ -2929,7 +2951,13 @@ export class SqlAdminController {
             tooltip: spec.tooltip,
             content: async () => {
                 try {
-                    return await build();
+                    const content = await build();
+
+                    if (token) {
+                        this._panelDisposers.settle(spec.id, token, content);
+                    }
+
+                    return content;
                 } catch (error) {
                     // Already wrapped (a helper that reported and returned null):
                     // pass it through so `reported` is not lost.
