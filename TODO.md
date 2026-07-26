@@ -43,3 +43,38 @@ Deferred features and known issues. Implemented work lives in
   `plans/minification-safe-class-names.md` (deferred).
 - **Large `MemoryStore.loadData` renders zero rows** (~1500+ rows) — a library
   bug, currently worked around with pagination (see `LIBRARY_NOTES.md`).
+- **`frontend/package.json`'s `"@jimka/typescript-ui": "^0.2.0"` doesn't admit
+  `elkWorkerFactory` yet.** The `elk-worker-adoption` plan's six `DiagramView`
+  sites typecheck today only because the local dev symlink points at an
+  unmerged, unpublished typescript-ui worktree — a plain `npm install` /
+  `npm ci` against the real `0.2.0` on the registry (pinned in
+  `package-lock.json`) fails on all six. Once typescript-ui publishes a
+  release carrying the option (`elk-layout-web-worker.md`), bump the range —
+  `^0.2.0` won't admit a `0.3.0`, the conventional level for an additive
+  feature — and regenerate the lockfile.
+- **Every diagram now leaks a Worker thread on top of the component graph it
+  already stranded.** Since `elk-worker-adoption`, each `DiagramView`'s
+  `ElkLayoutEngine` lazily constructs a Worker via the app's
+  `elkWorkerFactory` on first layout. `DiagramView` inherits the library's
+  generic `Component.dispose()` (it is not "no dispose API at all" —
+  `ElkLayoutEngine` isn't a `Component` and defines no disposal method of its
+  own at all; `DiagramView` doesn't override its inherited `dispose()` to
+  reach into it), so calling `dispose()` frees DOM/handles/theme subscriptions
+  on the `DiagramView` itself but not the Worker. (None of the five dock-tab
+  panels are ever disposed at all today — see below — so this was already
+  true of their node/button/cell theme subscriptions before this branch; the
+  Worker is a new resource added to an existing leak, not a new leak class.)
+  Five of the six panels (`SchemaDiagramPanel`, `RelationGraphPanel`,
+  `RoleGrantsDiagramPanel`, `DatabaseDiagramPanel`, `RelationDiagramPanel`)
+  are top-level dock tabs with no `_panelDisposers` entry, same as before, so
+  each held-open tab holds one Worker. `ExplainDiagramPanel` is worse: it is
+  never itself a top-level dock tab — it lives in `QueryPanel`'s
+  `diagramSlot`, which *does* already call a disposer on every rebuild
+  (`showDiagramTab` in `QueryPanel.ts`), but that disposer is a deliberate
+  no-op (see its comment), so re-running Explain on the same
+  query tab leaks one Worker **per rebuild**, not just per tab. Fixing the
+  underlying leak belongs in typescript-ui (a disposal path that reaches
+  elkjs's `terminateWorker()`); once it exists, `QueryPanel`'s diagramSlot
+  disposer is the one seam in this app already positioned to call it — the
+  five dock-tab panels would additionally need a `_panelDisposers` entry
+  each, which none of them have today.
