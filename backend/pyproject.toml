@@ -17,6 +17,9 @@ Homepage = "https://github.com/jimka/sqladmin"
 Repository = "https://github.com/jimka/sqladmin"
 "Bug Tracker" = "https://github.com/jimka/sqladmin/issues"
 
+[project.scripts]
+dev = "app.dev:main"
+
 [tool.poetry]
 packages = [{ include = "app" }]
 
