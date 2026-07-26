@@ -14,7 +14,6 @@ import { callable } from "@jimka/typescript-ui/core";
 import { Tree, IconLabelTreeNodeRenderer }      from "@jimka/typescript-ui/component/tree";
 import type { TreeNode }                        from "@jimka/typescript-ui/component/tree";
 import { Menu }                                 from "@jimka/typescript-ui/overlay";
-import type { MenuItemConfig }                  from "@jimka/typescript-ui/component/container";
 import { Glyph }                                from "@jimka/typescript-ui/component/display";
 import { plus }                                 from "@jimka/typescript-ui/glyphs/solid/plus";
 import { pencil }                               from "@jimka/typescript-ui/glyphs/solid/pencil";
@@ -28,6 +27,7 @@ import type { DbObjectKind, DbObjectRef }       from "../contract";
 import { getFunctions, getObjects, getSchemas, getTypes } from "../data/api";
 import { KIND_GLYPH }                           from "./objectGlyphs";
 import { isRelationKind, objectCategories }     from "./objectKinds";
+import { showObjectMenu }                       from "./objectMenu";
 import type { SqlAdminController }              from "../SqlAdminController";
 
 // The table-ddl launcher items' glyphs (create/rename/drop table), plus the
@@ -163,186 +163,18 @@ class NavigatorTree extends Tree implements ExplorerTree {
             }
         });
 
-        // Right-clicking a table/view/matview offers, in a separate tab each: its
-        // data first (a table's editable grid, or a view's auto-run browse query),
-        // then — for a table — "Open as query", then, below a separator, its
-        // structure and, for a (materialized) view, its SQL definition.
+        // Right-clicking any object shows its context menu, built by the shared
+        // buildObjectMenuItems (also used by the diagram panels — see
+        // objectMenu.ts) so the tree and every diagram agree on one menu per
+        // object kind.
         this.on("contextmenu", (node: TreeNode, event: MouseEvent) => {
             const ref = node.data as DbObjectRef | undefined;
 
-            // A schema node's own launchers (rename/drop this schema) come first,
-            // above a separator, since they're this schema's identity actions.
-            // Everything else — the structural "Create …" launchers (table-ddl /
-            // view-matview-ddl / schema-sequence-ddl / function-type-ddl phases)
-            // and the read-only diagram views (whole-schema ER, dependency,
-            // inheritance, and — since there is no database level — the
-            // whole-database ER diagram synthesized from this schema's own ref) —
-            // is grouped into a "Create" and a "Show" submenu, keeping the
-            // top-level menu short. "Create schema…" is NOT offered here: it moved
-            // to the Database accordion section's header tool (DatabaseExplorerView),
-            // since it targets the database, not this schema. Checked before the
-            // relation guard below (a schema is not a relation).
-            if (ref && ref.kind === "schema") {
-                this.contextMenu.show(event.clientX, event.clientY, [
-                    { text: "Rename", glyph: "pencil", action: () => this.controller.renameSchema(ref) },
-                    { text: "Drop", glyph: "trash", action: () => this.controller.dropSchema(ref) },
-                    { separator: true },
-                    // Nested submenu support is unverified, so the function-type-ddl
-                    // phase's own "Create type ▸ Enum/Composite" submenu is flattened
-                    // into two direct items here rather than nested inside "Create".
-                    { text: "Create", glyph: "plus", submenu: { label: "Create", items: [
-                        { text: "Composite type", action: () => this.controller.createType(ref, "composite") },
-                        { text: "Enum type", action: () => this.controller.createType(ref, "enum") },
-                        { text: "Function", action: () => this.controller.createFunction(ref) },
-                        { text: "Materialized view", action: () => void this.controller.createMaterializedView(ref) },
-                        { text: "Sequence", action: () => this.controller.createSequence(ref) },
-                        { text: "Table", action: () => this.controller.createTable(ref) },
-                        { text: "View", action: () => void this.controller.createView(ref) },
-                    ] } },
-                    // One glyph per view kind, matching the dock tab each item opens
-                    // (see the controller's Glyph.register comment): circle-nodes the
-                    // whole-database ER, share-nodes the dependency graph, sitemap the
-                    // inheritance tree, diagram-project the schema ER. The items had no
-                    // glyphs at all before — they render blank without these.
-                    { text: "Show", glyph: "diagram-project", submenu: { label: "Show", items: [
-                        { text: "Database diagram", glyph: "circle-nodes",   action: () => void this.controller.openDatabaseDiagram({ connectionId: ref.connectionId, database: ref.database, kind: "database" }) },
-                        { text: "Dependency graph", glyph: "share-nodes",    action: () => void this.controller.openSchemaDependencyGraph(ref, node) },
-                        { text: "Inheritance graph", glyph: "sitemap",        action: () => void this.controller.openSchemaInheritanceGraph(ref, node) },
-                        { text: "Schema diagram", glyph: "diagram-project", action: () => void this.controller.openSchemaDiagram(ref, node) },
-                    ] } },
-                ]);
-
+            if (!ref) {
                 return;
             }
 
-            // A sequence leaf is a listed object (it has a "Sequences" category)
-            // but not a relation (isRelation is false for it — see objectKinds.ts):
-            // it has no rows, so no data tab / double-click open, and its own small
-            // context menu is offered here instead of falling into the relation
-            // menu below. Checked before the relation guard, mirroring the schema
-            // branch above.
-            if (ref && ref.kind === "sequence") {
-                this.contextMenu.show(event.clientX, event.clientY, [
-                    { text: "Show info", glyph: "arrow-up-1-9", action: () => void this.controller.openSequence(ref, node) },
-                    { text: "Drop", glyph: "trash", action: () => this.controller.dropSequence(ref) },
-                ]);
-
-                return;
-            }
-
-            // A function/procedure leaf (function-type-ddl phase): also a
-            // listed-but-not-relation kind, mirroring the sequence branch above.
-            if (ref && ref.kind === "function") {
-                this.contextMenu.show(event.clientX, event.clientY, [
-                    // Running the routine is the primary action, so it leads —
-                    // above a separator from the definition/drop items below.
-                    // "Call" for a procedure, "Execute" for a function: the label
-                    // mirrors the CALL vs SELECT split executeFunction generates.
-                    { text: ref.isProcedure ? "Call" : "Execute", glyph: "play", action: () => this.controller.executeFunction(ref) },
-                    { separator: true },
-                    { text: "Show definition", glyph: "file-code", action: () => void this.controller.openFunctionDefinition(ref, node) },
-                    { text: "Drop", glyph: "trash", action: () => this.controller.dropFunction(ref) },
-                ]);
-
-                return;
-            }
-
-            // A standalone enum/composite type leaf (function-type-ddl phase).
-            if (ref && ref.kind === "type") {
-                this.contextMenu.show(event.clientX, event.clientY, [
-                    { text: "Edit", glyph: "pencil", action: () => void this.controller.editType(ref) },
-                    { text: "Drop", glyph: "trash", action: () => this.controller.dropType(ref) },
-                ]);
-
-                return;
-            }
-
-            if (!ref || !isRelation(ref.kind)) {
-                return;
-            }
-
-            const items: MenuItemConfig[] = [
-                // Mirrors the double-click: open (or focus) the relation's data tab and
-                // load it. A table's grid is editable (writes back), so it reads "Open
-                // data"; a view/matview is read-only and opens as an auto-run query
-                // (SELECT * … LIMIT n) — so it reads "Show data". The glyphs match the
-                // tabs each item opens.
-                { text: ref.kind === "table" ? "Open data" : "Show data", glyph: "table", action: () => void this.controller.openTable(ref, node) },
-            ];
-
-            // "Open as query" is a table-only affordance: a table's primary open is its
-            // editable grid, so browsing it as a generated SELECT is a distinct action.
-            // A view already opens as that query ("Show data" above), so the item would
-            // be a redundant duplicate there.
-            if (ref.kind === "table") {
-                items.push({ text: "Open as query", glyph: "terminal", action: () => this.controller.openQueryFor(ref) });
-            }
-
-            items.push({ separator: true });
-
-            if (ref.kind === "table") {
-                // Every read-only "Show …" view for a table grouped into one submenu,
-                // the "Show" prefix stripped and the items alphabetized — mirrors the
-                // schema context menu's Show submenu. Structure is the Columns +
-                // Indexes + Constraints + Foreign Keys inspector; Relations is the
-                // relation-rooted ER diagram (table-only — a view/matview root has no
-                // FK edges and would render as a lone node); Dependencies is the
-                // connected dependency component; Inheritance is the pg_inherits
-                // partitioning/inheritance graph (also table-only).
-                // One glyph per view kind (see the schema menu above and the
-                // controller's Glyph.register comment): share-nodes the dependency
-                // graph, sitemap the inheritance tree, diagram-project the FK
-                // relations ER, table-columns the column inspector — no longer three
-                // items sharing "diagram-project".
-                items.push({ text: "Show", glyph: "diagram-project", submenu: { label: "Show", items: [
-                    { text: "Dependencies", glyph: "share-nodes",     action: () => void this.controller.openRelationDependencyGraph(ref, node) },
-                    { text: "Inheritance",  glyph: "sitemap",         action: () => void this.controller.openRelationInheritanceGraph(ref, node) },
-                    { text: "Relations",    glyph: "diagram-project", action: () => void this.controller.openRelationDiagram(ref, node) },
-                    { text: "Structure",    glyph: "table-columns",   action: () => void this.controller.openStructure(ref, node) },
-                ] } });
-            } else {
-                // A view/matview has fewer facets — no structure/relations/inheritance
-                // (its only columns facet lives in the editable definition tab) — so
-                // its two Show items stay flat rather than in a one-or-two-item
-                // submenu: its connected dependency component and, since only a
-                // (materialized) view has one, its editable SQL definition.
-                items.push({ text: "Show dependencies", glyph: "share-nodes", action: () => void this.controller.openRelationDependencyGraph(ref, node) });
-                items.push({ text: "Show definition", glyph: "file-code", action: () => void this.controller.openDefinition(ref, node) });
-            }
-
-            // Structural launchers (table-ddl phase): rename/drop this table. Only a
-            // table offers them. Grouped in their own separated section since they
-            // mutate, unlike everything above.
-            if (ref.kind === "table") {
-                items.push({ separator: true });
-                items.push({ text: "Rename", glyph: "pencil", action: () => this.controller.renameTable(ref, node) });
-                items.push({ text: "Drop", glyph: "trash", action: () => this.controller.dropTable(ref, node) });
-            }
-
-            // Structural launchers (view-matview-ddl phase): drop this view or
-            // matview, plus a matview-only Refresh. Editing the definition is no
-            // longer a separate launcher — "Show definition" above now opens a
-            // directly-editable tab (DefinitionPanel) with its own Save button.
-            // Grouped in their own separated section, mirroring the table
-            // launchers above.
-            if (ref.kind === "view") {
-                items.push({ separator: true });
-                items.push({ text: "Drop", glyph: "trash", action: () => this.controller.dropRelation(ref) });
-            } else if (ref.kind === "materializedView") {
-                items.push({ separator: true });
-                items.push({ text: "Refresh", glyph: "arrows-rotate", action: () => this.controller.refreshMaterializedView(ref) });
-                items.push({ text: "Drop", glyph: "trash", action: () => this.controller.dropRelation(ref) });
-            }
-
-            // Export streams the full relation server-side (not the loaded page), so a
-            // large table/view exports without bulk-loading the grid.
-            items.push({ separator: true });
-            items.push({ text: "Export", glyph: "file-export", submenu: { label: "Export", items: [
-                { text: "CSV (.csv)",   glyph: "file-csv",  action: () => this.controller.exportTable(ref, "csv") },
-                { text: "JSON (.json)", glyph: "file-code", action: () => this.controller.exportTable(ref, "json") },
-            ] } });
-
-            this.contextMenu.show(event.clientX, event.clientY, items);
+            showObjectMenu(this.contextMenu, ref, this.controller, event, node);
         });
 
         this.on("loaderror", (_node: TreeNode, error: unknown) => this.controller.notifyError(error));

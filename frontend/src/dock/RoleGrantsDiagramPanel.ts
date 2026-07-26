@@ -35,8 +35,12 @@ class RoleGrantsDiagramPanel extends DiagramView {
     /**
      * @param data - The graph (from buildRoleGrantsDiagram).
      * @param onOpenTable - Invoked with a table node's schema and table on activate.
+     * @param onContextMenu - Invoked with a right-clicked table node's schema,
+     *   table, and the originating event. The role node (or a node with no
+     *   `data`) never forwards — it has no object menu.
      */
-    constructor(data: DiagramData, onOpenTable: (schema: string, table: string) => void) {
+    constructor(data: DiagramData, onOpenTable: (schema: string, table: string) => void,
+                onContextMenu?: (schema: string, table: string, event: MouseEvent) => void) {
         super({ data });
 
         this.on("activate", (node: DiagramNodeData) => {
@@ -44,6 +48,14 @@ class RoleGrantsDiagramPanel extends DiagramView {
 
             if (meta?.kind === "table") {
                 onOpenTable(meta.schema, meta.table);
+            }
+        });
+
+        this.on("contextmenu", (node: DiagramNodeData, event: MouseEvent) => {
+            const meta = node.data as GrantNodeData | undefined;
+
+            if (meta?.kind === "table") {
+                onContextMenu?.(meta.schema, meta.table, event);
             }
         });
     }

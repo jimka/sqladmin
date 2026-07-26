@@ -409,3 +409,49 @@ No gap remains for the diagrams this plan touches.
 [^glyphs]: A diagram tab is only reachable through the app shell, which constructs `NavigatorTree` (its module-level `Glyph.register(plus, pencil, trash, arrows_rotate, play, sitemap, share_nodes, circle_nodes)` runs on import) and the controller (its own registrations) before any diagram can open. `Glyph.register` is global and idempotent, so the shared menu's glyph strings resolve without `objectMenu.ts` importing — or re-registering — any glyph. If a menu glyph ever renders blank from a new load path, register it in the controller, not in `objectMenu.ts` (which must stay DOM-free).
 
 [^membership]: `openRoleMembershipDiagram` reuses `RelationDiagramPanel` with role nodes and an activate that calls `showRoleProperties`, not `openReferencedTable`. Making `onContextMenu` a required param would force that caller to supply a table menu for role nodes; making it optional lets the caller opt out, which is the correct behaviour (a role node shows no object menu).
+
+---
+
+## Implementation Notes
+
+Three points the post-implementation audit raised, recorded here per the
+`implement` skill's sanctioned deviation-note mechanism (this section is a
+record of what happened, not a redesign):
+
+- **Manual-verify coverage.** Two of the five wired panels were driven live in
+  a browser against a from-source backend: the **schema diagram**
+  (`SchemaDiagramPanel`) — right-click on a table node showed the full table
+  menu, and clicking "Open data" correctly opened that table's data tab — and
+  the **database diagram** (`DatabaseDiagramPanel`) in both modes —
+  right-clicking an **Overview** schema node showed no menu, and right-clicking
+  a **Tables**-mode leaf showed the correct table menu. A table double-click
+  was also re-confirmed to still open the table (the double-click parity
+  claim). The remaining three panels (`RelationDiagramPanel`,
+  `RelationGraphPanel` — covering the dependency/inheritance graphs —, and
+  `RoleGrantsDiagramPanel`) were **not** independently driven in a browser;
+  each forwards the library's `"contextmenu"` event through the identical
+  `onContextMenu?.(…)` pattern already exercised above, and their per-kind
+  item content is the same `buildObjectMenuItems`/`showObjectMenu` pair pinned
+  by the unit suite (`frontend/tests/navigator/objectMenu.test.ts`), so the
+  live checks plus the unit tests jointly cover the forwarding wiring and the
+  menu content, but the remaining three panels' forwarding was not itself
+  independently observed end-to-end in the browser.
+- **The Verification section's `this.contextMenu.show` grep bullet
+  (line ~354) is superseded.** The shrunk `NavigatorTree` handler was written
+  exactly as this plan's own [Internal Structure](#internal-structure) section
+  specifies — a call to `showObjectMenu(this.contextMenu, ref, this.controller,
+  event, node)` — which moves the `.show(...)` call into `showObjectMenu` in
+  `objectMenu.ts`. That grep therefore now returns zero matches in
+  `NavigatorTree.ts`, not one; the Verification bullet was written before this
+  Internal Structure detail was finalized and was never updated to match.
+- **The per-kind branches were decomposed, not moved as one verbatim block.**
+  [Internal Structure](#internal-structure) describes the builder body as "the
+  current tree handler, moved" via three mechanical edits, but
+  `frontend/src/navigator/objectMenu.ts` splits the moved logic into five
+  named per-kind functions (`schemaMenuItems`, `sequenceMenuItems`,
+  `functionMenuItems`, `typeMenuItems`, `relationMenuItems`) called from
+  `buildObjectMenuItems`. This follows `~/.claude/CODE_CONVENTIONS.md`'s
+  decompose-large-functions rule (the original handler's branches each ran to
+  several lines, and the combined body exceeded the ~30-line guideline) rather
+  than introducing a new pattern; the branch content and order within each
+  function is unchanged from the tree handler.

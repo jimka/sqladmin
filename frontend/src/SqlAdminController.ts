@@ -2,7 +2,7 @@
 // the open-panel registry (deduped by panel id). Components stay dumb: they emit,
 // the controller decides. All app-side errors funnel to notifyError.
 
-import { Dialog, Dock, Notification, NotificationHistoryButton, Tooltip }                                                                                                                          from "@jimka/typescript-ui/overlay";
+import { Dialog, Dock, Menu, Notification, NotificationHistoryButton, Tooltip }                                                                                                                    from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent, DockExceptionEvent }                                                                                                                                                 from "@jimka/typescript-ui/overlay";
 import { Component }                                                                                                                                                                               from "@jimka/typescript-ui/core";
 import { HBox }                                                                                                                                                                                    from "@jimka/typescript-ui/layout";
@@ -21,6 +21,7 @@ import { file_lines }                                                           
 import { user }                                                                                                                                                                                    from "@jimka/typescript-ui/glyphs/solid/user";
 import type { TreeNode }                                                                                                                                                                           from "@jimka/typescript-ui/component/tree";
 import type { ExplorerTree }                                                                                                                                                                       from "./navigator/NavigatorTree";
+import { showObjectMenu }                                                                                                                                                                          from "./navigator/objectMenu";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                                                                                                                                     from "@jimka/typescript-ui/data";
 import type { AlterColumnAction, ColumnMeta, ConstraintKind, DbObjectRef, FunctionDefinition, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TypeDefinition } from "./contract";
 import { executeDdl, getColumns, getDatabaseGraph, getDependencies, getFunctionDefinition, getInheritance, getRoleDetail, getRoles, getSchemaGraph, getSchemas, getTablePrivileges, getTypeDefinition, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewAlterTypeAddValue, previewConstraint, previewCreateCompositeType, previewCreateEnumType, previewCreateFunction, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropFunction, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropType, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema, previewReplaceMatview, previewSequenceOwner, runExplain, runQuery, tableExportUrl } from "./data/api";
@@ -207,6 +208,11 @@ export class SqlAdminController {
     // below).
     private readonly _panelDisposers: Map<string, () => void> = new Map();
     private _navigator            : ExplorerTree | null = null;
+    // The diagram panels' shared right-click menu, mirroring how NavigatorTree
+    // and RolesTree each own one reusable Menu(). Named diagramContextMenu (see
+    // below), not showObjectMenu, so the method does not shadow the imported
+    // module wrapper of the same purpose.
+    private readonly _objectMenu: Menu = Menu();
 
     // The per-connection localStorage stores backing the Queries view, the start
     // page, and the panel's Ctrl+↑/↓ recall.
@@ -468,7 +474,7 @@ export class SqlAdminController {
      * edits) open. Tables have no definition, so the navigator only offers
      * this for views (see NavigatorTree).
      */
-    async openDefinition(ref: DbObjectRef, node: TreeNode): Promise<void> {
+    async openDefinition(ref: DbObjectRef, node?: TreeNode): Promise<void> {
         const id = this.definitionPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
@@ -551,7 +557,7 @@ export class SqlAdminController {
             // definition tab's columns are only ever read by the DefinitionPanel
             // itself, which already holds its own copy — nothing looks this
             // entry up by definitionPanelId.
-            this._openPanels.set(id, { ref, node, detail: "definition" });
+            this._openPanels.set(id, { ref, node: node ?? null, detail: "definition" });
             this._panelDisposers.set(id, panel.dispose);
             this.syncToPanel(id);
 
@@ -1166,7 +1172,7 @@ export class SqlAdminController {
      * @param ref - the function/procedure leaf to open (its `signature`
      *   disambiguates overloads).
      */
-    async openFunctionDefinition(ref: DbObjectRef, node: TreeNode): Promise<void> {
+    async openFunctionDefinition(ref: DbObjectRef, node?: TreeNode): Promise<void> {
         const id = this.functionDefinitionPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
@@ -1229,7 +1235,7 @@ export class SqlAdminController {
 
             panel = new FunctionDefinitionPanel(definition.definition, onSave);
 
-            this._openPanels.set(id, { ref, node, detail: "definition" });
+            this._openPanels.set(id, { ref, node: node ?? null, detail: "definition" });
             this._panelDisposers.set(id, panel.dispose);
             this.syncToPanel(id);
 
@@ -1498,13 +1504,23 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: diagram (${data.nodes.length} tables)`);
 
-            return SchemaDiagramPanel(data, table => this.openReferencedTable({
-                connectionId: ref.connectionId,
-                database    : ref.database,
-                schema      : ref.schema,
-                name        : table,
-                kind        : "table",
-            }));
+            return SchemaDiagramPanel(
+                data,
+                table => this.openReferencedTable({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : ref.schema,
+                    name        : table,
+                    kind        : "table",
+                }),
+                (table, event) => this.diagramContextMenu({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : ref.schema,
+                    name        : table,
+                    kind        : "table",
+                }, event),
+            );
         });
     }
 
@@ -1577,13 +1593,23 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.database}: diagram (${tableCount} tables)`);
 
-            return DatabaseDiagramPanel(schemas, (schema, table) => this.openReferencedTable({
-                connectionId: ref.connectionId,
-                database    : ref.database,
-                schema,
-                name        : table,
-                kind        : "table",
-            }));
+            return DatabaseDiagramPanel(
+                schemas,
+                (schema, table) => this.openReferencedTable({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema,
+                    name        : table,
+                    kind        : "table",
+                }),
+                (schema, table, event) => this.diagramContextMenu({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema,
+                    name        : table,
+                    kind        : "table",
+                }, event),
+            );
         });
     }
 
@@ -1650,13 +1676,24 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: relations`);
 
-            return RelationDiagramPanel(full, root, table => this.openReferencedTable({
-                connectionId: ref.connectionId,
-                database    : ref.database,
-                schema      : ref.schema,
-                name        : table,
-                kind        : "table",
-            }));
+            return RelationDiagramPanel(
+                full,
+                root,
+                table => this.openReferencedTable({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : ref.schema,
+                    name        : table,
+                    kind        : "table",
+                }),
+                (table, event) => this.diagramContextMenu({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : ref.schema,
+                    name        : table,
+                    kind        : "table",
+                }, event),
+            );
         });
     }
 
@@ -1736,13 +1773,24 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: dependencies (${data.nodes.length} relations)`);
 
-            return RelationGraphPanel(data, nd => this.openReferencedTable({
-                connectionId: ref.connectionId,
-                database    : ref.database,
-                schema      : nd.schema,
-                name        : nd.name,
-                kind        : nd.kind,
-            }));
+            return RelationGraphPanel(
+                data,
+                nd => this.openReferencedTable({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : nd.schema,
+                    name        : nd.name,
+                    kind        : nd.kind,
+                }),
+                undefined,
+                (nd, event) => this.diagramContextMenu({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : nd.schema,
+                    name        : nd.name,
+                    kind        : nd.kind,
+                }, event),
+            );
         });
     }
 
@@ -1787,13 +1835,24 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: dependencies`);
 
-            return RelationGraphPanel(data, nd => this.openReferencedTable({
-                connectionId: ref.connectionId,
-                database    : ref.database,
-                schema      : nd.schema,
-                name        : nd.name,
-                kind        : nd.kind,
-            }), root.id);
+            return RelationGraphPanel(
+                data,
+                nd => this.openReferencedTable({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : nd.schema,
+                    name        : nd.name,
+                    kind        : nd.kind,
+                }),
+                root.id,
+                (nd, event) => this.diagramContextMenu({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : nd.schema,
+                    name        : nd.name,
+                    kind        : nd.kind,
+                }, event),
+            );
         });
     }
 
@@ -1828,13 +1887,24 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: inheritance (${data.nodes.length} relations)`);
 
-            return RelationGraphPanel(data, nd => this.openReferencedTable({
-                connectionId: ref.connectionId,
-                database    : ref.database,
-                schema      : nd.schema,
-                name        : nd.name,
-                kind        : nd.kind,
-            }));
+            return RelationGraphPanel(
+                data,
+                nd => this.openReferencedTable({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : nd.schema,
+                    name        : nd.name,
+                    kind        : nd.kind,
+                }),
+                undefined,
+                (nd, event) => this.diagramContextMenu({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : nd.schema,
+                    name        : nd.name,
+                    kind        : nd.kind,
+                }, event),
+            );
         });
     }
 
@@ -1880,13 +1950,24 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: inheritance`);
 
-            return RelationGraphPanel(data, nd => this.openReferencedTable({
-                connectionId: ref.connectionId,
-                database    : ref.database,
-                schema      : nd.schema,
-                name        : nd.name,
-                kind        : nd.kind,
-            }), root.id);
+            return RelationGraphPanel(
+                data,
+                nd => this.openReferencedTable({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : nd.schema,
+                    name        : nd.name,
+                    kind        : nd.kind,
+                }),
+                root.id,
+                (nd, event) => this.diagramContextMenu({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema      : nd.schema,
+                    name        : nd.name,
+                    kind        : nd.kind,
+                }, event),
+            );
         });
     }
 
@@ -1914,6 +1995,19 @@ export class SqlAdminController {
                 this._navigator?.selectNode(node);
             }
         })();
+    }
+
+    /**
+     * Show `ref`'s object context menu at `event`'s position — the same menu
+     * the navigator tree shows for the identical object, built by the shared
+     * buildObjectMenuItems (see objectMenu.ts). Called by each diagram panel's
+     * "contextmenu" forwarding; a no-op for a kind with no menu.
+     *
+     * @param ref - The right-clicked diagram node's object.
+     * @param event - The originating right-click.
+     */
+    private diagramContextMenu(ref: DbObjectRef, event: MouseEvent): void {
+        showObjectMenu(this._objectMenu, ref, this, event);
     }
 
     /**
@@ -2611,7 +2705,20 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${name}: grants graph (${data.nodes.length - 1} tables)`);
 
-            return RoleGrantsDiagramPanel(data, (schema, table) => this.openGrantedTable(schema, table));
+            return RoleGrantsDiagramPanel(
+                data,
+                (schema, table) => this.openGrantedTable(schema, table),
+                // Grants are within the connected database (RolePrivilege carries
+                // no database of its own), so the ref is built with the session
+                // db — the same database every navigator object lives in.
+                (schema, table, event) => this.diagramContextMenu({
+                    connectionId: this._connectionId,
+                    database    : this._database,
+                    schema,
+                    name        : table,
+                    kind        : "table",
+                }, event),
+            );
         });
     }
 
