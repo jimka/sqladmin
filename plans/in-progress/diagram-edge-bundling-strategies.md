@@ -692,3 +692,79 @@ so it cannot separate them.
     between the two pictures the user is trying to compare, which defeats the
     comparison. The cache holds one extra layout result per view and is cleared in
     `dispose()`.
+
+---
+
+## Implementation Notes
+
+### Measured on the `hub` schema
+
+| | Junction | Collector spine | Merge tree |
+|---|---|---|---|
+| `totalRouteLength` | 15.0M | 15.0M | 16.7M |
+| `distinctInkLength` | 14.9M | **12.8M** | 13.0M |
+| `maxVertexFan` | 27 | 8 | 8 |
+| `nodeIntersections` | 0 | 0 | 0 |
+
+Both new strategies hold `nodeIntersections` at 0 and keep all 1846 drawn paths.
+The viewport held exactly across every switch. Visually the junction baseline is
+a fence of ~90 parallel verticals, each edge descending its own channel into the
+hub; the spine collapses those onto one line, the tree into nested brackets.
+
+### `maxVertexFan` does not reach the predicted ~154
+
+`## Verification` expected the junction's fan to read "~154" and drop to a single
+digit. It reads **27**, dropping to 8. The prediction was wrong, not the metric:
+at the junction each member arrives from a channel entry thousands of units away
+across a stub only 32 units long, so the incident directions differ by far less
+than a degree and collapse when rounded onto `DIRECTION_GRID`. The metric still
+separates the strategies in the right direction and by a clear margin — it just
+cannot report a fan the geometry never makes angularly distinct.
+
+### Participation carries a third condition
+
+`## Internal Structure` gives two conditions for a member joining the shared
+structure: a non-null `priorVertex`, and an approach parallel to the normal. A
+third is required for the geometry to be valid — the channel entry must sit
+*further out* than the trunk it would join, or the spur doubles back on itself.
+It is applied per member (`participates`), matching the plan's own rule that a
+member with nothing to reroute keeps the single-junction tail rather than
+failing the whole bundle.
+
+### The spine's clamped length governs its whole bundle
+
+Where the spine clamps `L` down to fit the shortest perpendicular run, the
+clamped value is used as the innermost distance for *every* member of that
+bundle, including the non-participants that keep a junction tail and the members
+downgraded by `BOTH_ENDS_MIN_BENDS` below. Using the unclamped `length` for them
+would have put two different innermost points on one node's border, which the
+plan's "all three strategies end every member with `… → B → anchor`" rule reads
+as one. `junctionFallback` therefore reads the shared point back off the tail a
+member would otherwise have been given, rather than recomputing it — the second
+audit caught it recomputing.
+
+### `junctionFor` dissolved rather than thinning
+
+Step 2 called for leaving `junctionFor` as a two-line caller, but step 4 removed
+`JunctionPair`, which was its return type. It is therefore replaced by
+`bundleFrame` + `stubLength` + `junctionTail` rather than retained. The frame
+helpers also take a `BorderFrame` record (anchor, normal, tangent) instead of
+three loose parameters, since all three strategies thread the same triple
+through every call.
+
+### One section rewritten at both ends needs three bend points
+
+`## Internal Structure`'s three-vertex table describes one end at a time and
+assumes each end owns its own vertices. When a single section is bundled at both
+ends — two parallel edges between the same pair, which the schema diagram folds
+but the relation graphs do not — the two ends read the same bend list from
+opposite directions: the source's channel entry is `bendPoints[1]` and the
+target's is `bendPoints[length - 2]`. At exactly two bends those *are* each
+other's approach bends, so both ends dropped the vertex the other was routing
+from and the two shared runs were joined by a single diagonal straight across
+the inter-node gap, which no obstacle check covered.
+
+`resolveEndTails` now falls both ends back to the single junction below
+`BOTH_ENDS_MIN_BENDS` (three), the first length at which the ends' entries
+coincide on a middle vertex that neither drops. Found by the audit, not by the
+plan's cases, none of which bundle a section at both ends.
