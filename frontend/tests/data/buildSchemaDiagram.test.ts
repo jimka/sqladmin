@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildSchemaDiagram } from "../../src/data/buildSchemaDiagram";
+import { buildSchemaDiagram, collapseParallelFkEdges } from "../../src/data/buildSchemaDiagram";
+import type { DiagramEdgeData } from "@jimka/typescript-ui/component/diagram";
+import type { FkEdgeData } from "../../src/data/buildSchemaDiagram";
 import { CARD_WIDTH, cardHeight, columnPortY, portId } from "../../src/data/schemaCardModel";
+import { uniformNodeWidth } from "../../src/data/uniformNodeWidth";
 import type { TableStructure, ForeignKeyMeta, ColumnMeta } from "../../src/contract";
 
 /** Build a minimal ForeignKeyMeta, filling in the fields these tests don't vary. */
@@ -27,13 +30,23 @@ function column(name: string, isPrimaryKey = false): ColumnMeta {
 }
 
 describe("buildSchemaDiagram", () => {
-    it("emits one node per table with the table glyph", () => {
+    it("emits one node per table with the table glyph and one shared width", () => {
         const data = buildSchemaDiagram(["a", "b"], [structure(), structure()]);
+        const width = uniformNodeWidth(["a", "b"]);
 
         expect(data.nodes).toEqual([
-            { id: "a", label: "a", glyph: "table" },
-            { id: "b", label: "b", glyph: "table" },
+            { id: "a", label: "a", glyph: "table", width },
+            { id: "b", label: "b", glyph: "table", width },
         ]);
+    });
+
+    it("widens every node together when one table name is long", () => {
+        const data = buildSchemaDiagram(["a", "a_considerably_longer_name"], [structure(), structure()]);
+
+        // Every node in a layer must share an edge to read as a column, so the
+        // longest label sets the width for all of them, not just its own node.
+        expect(data.nodes[0].width).toBe(data.nodes[1].width);
+        expect(data.nodes[0].width).toBe(uniformNodeWidth(["a_considerably_longer_name"]));
     });
 
     it("keeps an intra-schema edge carrying the FK metadata", () => {
@@ -46,13 +59,13 @@ describe("buildSchemaDiagram", () => {
             id    : "a.fk_ab",
             source: "a",
             target: "b",
-            data  : {
+            data  : { fks: [{
                 columns   : ["x_id"],
                 refColumns: ["id"],
                 refSchema : "public",
                 onUpdate  : "NO ACTION",
                 onDelete  : "NO ACTION",
-            },
+            }] },
         }]);
     });
 
@@ -68,13 +81,13 @@ describe("buildSchemaDiagram", () => {
             ],
         );
 
-        expect(data.edges[0].data).toEqual({
+        expect(data.edges[0].data).toEqual({ fks: [{
             columns   : ["p", "q"],
             refColumns: ["r", "s"],
             refSchema : "public",
             onUpdate  : "CASCADE",
             onDelete  : "SET NULL",
-        });
+        }] });
     });
 
     it("drops a dangling / cross-schema edge", () => {
@@ -98,8 +111,12 @@ describe("buildSchemaDiagram", () => {
         expect(data.layoutOptions).toEqual({
             "elk.algorithm": "layered",
             "elk.direction": "RIGHT",
-            "elk.layered.spacing.nodeNodeBetweenLayers": "120",
+            "elk.layered.spacing.nodeNodeBetweenLayers": "60",
             "elk.spacing.nodeNode": "40",
+            // Widened from ELK's default 10 so a junction stub can sit past the
+            // 18-unit crow's-foot glyph and still stop short of the first bend.
+            "elk.spacing.edgeNode": "40",
+            "elk.layered.spacing.edgeNodeBetweenLayers": "40",
         });
     });
 
@@ -118,8 +135,98 @@ describe("buildSchemaDiagram", () => {
         expect(data.layoutOptions).toEqual({
             "elk.algorithm": "layered",
             "elk.direction": "RIGHT",
-            "elk.layered.spacing.nodeNodeBetweenLayers": "120",
+            "elk.layered.spacing.nodeNodeBetweenLayers": "60",
             "elk.spacing.nodeNode": "40",
+            // Widened from ELK's default 10 so a junction stub can sit past the
+            // 18-unit crow's-foot glyph and still stop short of the first bend.
+            "elk.spacing.edgeNode": "40",
+            "elk.layered.spacing.edgeNodeBetweenLayers": "40",
+        });
+    });
+
+    describe("folding parallel foreign keys (flat mode)", () => {
+        it("folds two FKs between the same table pair into one edge, keeping the first id and both keys", () => {
+            const data = buildSchemaDiagram(
+                ["a", "b"],
+                [structure([fk("fk1", "b"), fk("fk2", "b")]), structure()],
+            );
+
+            expect(data.edges).toHaveLength(1);
+            expect(data.edges[0].id).toBe("a.fk1");
+            expect((data.edges[0].data as { fks: unknown[] }).fks).toHaveLength(2);
+        });
+
+        it("does not fold FKs to different targets", () => {
+            const data = buildSchemaDiagram(
+                ["a", "b", "c"],
+                [structure([fk("fk1", "b"), fk("fk2", "c")]), structure(), structure()],
+            );
+
+            expect(data.edges).toHaveLength(2);
+        });
+
+        it("does not fold FKs from different sources to the same target", () => {
+            const data = buildSchemaDiagram(
+                ["a", "b", "c"],
+                [structure([fk("fk1", "c")]), structure([fk("fk1", "c")]), structure()],
+            );
+
+            expect(data.edges.map(e => e.id)).toEqual(["a.fk1", "b.fk1"]);
+        });
+
+        it("does not fold a pair the other way round: a->b and b->a stay two edges", () => {
+            const data = buildSchemaDiagram(
+                ["a", "b"],
+                [structure([fk("fk1", "b")]), structure([fk("fk1", "a")])],
+            );
+
+            expect(data.edges).toHaveLength(2);
+        });
+
+        it("folds two self-referential foreign keys on the same table", () => {
+            const data = buildSchemaDiagram(["a"], [structure([fk("fk1", "a"), fk("fk2", "a")])]);
+
+            expect(data.edges).toHaveLength(1);
+            expect(data.edges[0].id).toBe("a.fk1");
+            expect((data.edges[0].data as { fks: unknown[] }).fks).toHaveLength(2);
+        });
+
+        it("returns an empty list when given no edges", () => {
+            expect(collapseParallelFkEdges([])).toEqual([]);
+        });
+
+        it("keeps folded keys in first-seen (declaration) order", () => {
+            const data = buildSchemaDiagram(
+                ["a", "b"],
+                [structure([
+                    { name: "fk1", columns: ["x1"], refSchema: "public", refTable: "b", refColumns: ["id"], onUpdate: "NO ACTION", onDelete: "NO ACTION" },
+                    { name: "fk2", columns: ["x2"], refSchema: "public", refTable: "b", refColumns: ["id"], onUpdate: "NO ACTION", onDelete: "NO ACTION" },
+                ]), structure()],
+            );
+
+            expect(data.edges).toHaveLength(1);
+            expect((data.edges[0].data as FkEdgeData).fks.map(fk => fk.columns[0])).toEqual(["x1", "x2"]);
+        });
+    });
+
+    describe("collapseParallelFkEdges", () => {
+        function fkEdge(id: string, source: string, target: string, localCol: string): DiagramEdgeData {
+            return {
+                id, source, target,
+                data: { fks: [{ columns: [localCol], refColumns: ["id"], refSchema: "public", onUpdate: "NO ACTION", onDelete: "NO ACTION" }] } satisfies FkEdgeData,
+            };
+        }
+
+        it("does not mutate the input array or its edge objects", () => {
+            const edges = [fkEdge("a.fk1", "a", "b", "x1"), fkEdge("a.fk2", "a", "b", "x2")];
+            const originalFirst = edges[0];
+
+            const result = collapseParallelFkEdges(edges);
+
+            expect(edges).toHaveLength(2);
+            expect(edges[0]).toBe(originalFirst);
+            expect((edges[0].data as FkEdgeData).fks).toHaveLength(1);
+            expect(result[0]).not.toBe(originalFirst);
         });
     });
 
@@ -143,6 +250,17 @@ describe("buildSchemaDiagram", () => {
             expect(a.layoutOptions).toEqual({ "elk.portConstraints": "FIXED_POS" });
 
             expect(b.height).toBe(cardHeight(1));
+        });
+
+        it("card mode and flat mode share one layout-options map", () => {
+            const tables = ["a"];
+            const structures = [structure()];
+            const columnsByTable = new Map([["a", [column("id", true)]]]);
+
+            const card = buildSchemaDiagram(tables, structures, columnsByTable);
+            const flat = buildSchemaDiagram(tables, structures);
+
+            expect(card.layoutOptions).toBe(flat.layoutOptions);
         });
 
         it("anchors a single-column FK to matching EAST/WEST ports at the right row", () => {
@@ -227,13 +345,45 @@ describe("buildSchemaDiagram", () => {
             expect(data.edges[0].targetPort).toBe(portId("b", "id", "in"));
         });
 
-        it("leaves the flat path (no columnsByTable) unchanged: no ports, no data, no explicit size", () => {
-            const data = buildSchemaDiagram(["a", "b"], [structure([fk("fk_ab", "b")]), structure()]);
-
-            expect(data.nodes).toEqual([
-                { id: "a", label: "a", glyph: "table" },
-                { id: "b", label: "b", glyph: "table" },
+        it("does not fold parallel FKs in card mode: each keeps its own ports", () => {
+            const columnsByTable = new Map([
+                ["a", [column("id", true), column("x1"), column("x2")]],
+                ["b", [column("id", true)]],
             ]);
+            const data = buildSchemaDiagram(
+                ["a", "b"],
+                [structure([
+                    { name: "fk1", columns: ["x1"], refSchema: "public", refTable: "b", refColumns: ["id"], onUpdate: "NO ACTION", onDelete: "NO ACTION" },
+                    { name: "fk2", columns: ["x2"], refSchema: "public", refTable: "b", refColumns: ["id"], onUpdate: "NO ACTION", onDelete: "NO ACTION" },
+                ]), structure()],
+                columnsByTable,
+            );
+
+            expect(data.edges).toHaveLength(2);
+
+            for (const edge of data.edges) {
+                expect((edge.data as { fks: unknown[] }).fks).toHaveLength(1);
+            }
+
+            expect(data.edges[0].sourcePort).toBe(portId("a", "x1", "out"));
+            expect(data.edges[1].sourcePort).toBe(portId("a", "x2", "out"));
+            expect(data.edges[0].targetPort).toBe(portId("b", "id", "in"));
+            expect(data.edges[1].targetPort).toBe(portId("b", "id", "in"));
+        });
+
+        it("leaves the flat path (no columnsByTable) with no ports, no data, and no height", () => {
+            const data = buildSchemaDiagram(["a", "b"], [structure([fk("fk_ab", "b")]), structure()]);
+            const width = uniformNodeWidth(["a", "b"]);
+
+            // Flat mode carries a width — one shared value so a layer's nodes
+            // line up — but nothing else card mode adds: the height still comes
+            // from the rendered node, and there are no ports or column data.
+            expect(data.nodes).toEqual([
+                { id: "a", label: "a", glyph: "table", width },
+                { id: "b", label: "b", glyph: "table", width },
+            ]);
+            expect(data.nodes[0].height).toBeUndefined();
+            expect(data.nodes[0].layoutOptions).toBeUndefined();
             expect(data.edges[0].sourcePort).toBeUndefined();
             expect(data.edges[0].targetPort).toBeUndefined();
         });

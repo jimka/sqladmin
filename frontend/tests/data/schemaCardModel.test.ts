@@ -3,10 +3,12 @@ import {
     CARD_HEADER_HEIGHT,
     CARD_ROW_HEIGHT,
     cardHeight,
+    cardTooltip,
     columnPortY,
     columnTooltip,
     deriveColumnRows,
     portId,
+    tableTooltip,
 } from "../../src/data/schemaCardModel";
 import type { ColumnRowData } from "../../src/data/schemaCardModel";
 import type { ColumnMeta, ForeignKeyMeta } from "../../src/contract";
@@ -103,6 +105,81 @@ describe("columnPortY", () => {
     it("increases by CARD_ROW_HEIGHT per index", () => {
         expect(columnPortY(1) - columnPortY(0)).toBe(CARD_ROW_HEIGHT);
         expect(columnPortY(2) - columnPortY(1)).toBe(CARD_ROW_HEIGHT);
+    });
+});
+
+describe("columnPortY / cardHeight geometry contract", () => {
+    it("centres the port on the row it belongs to, with no allowance for a border or inset", () => {
+        for (let i = 0; i <= 5; i++) {
+            expect(columnPortY(i) + 0.5).toBe(CARD_HEADER_HEIGHT + i * CARD_ROW_HEIGHT + CARD_ROW_HEIGHT / 2);
+        }
+    });
+
+    it("sizes the card's outer height as the header plus the rows and nothing else", () => {
+        for (let n = 0; n <= 6; n++) {
+            expect(cardHeight(n)).toBe(CARD_HEADER_HEIGHT + n * CARD_ROW_HEIGHT);
+        }
+    });
+});
+
+describe("tableTooltip", () => {
+    it("lists column count, primary key, and foreign keys under the unlabelled name heading", () => {
+        const columns = [
+            row({ name: "id", pk: true }),
+            row({ name: "invoice_id", fk: true }),
+            row({ name: "order_id", fk: true }),
+            row({ name: "amount" }),
+        ];
+
+        expect(tableTooltip("credit_notes", columns)).toBe(
+            "credit_notes\nColumns: 4\nPrimary key: id\nForeign keys: invoice_id, order_id",
+        );
+    });
+
+    it("lists a composite primary key in declaration order, with a column that is both pk and fk in both lists", () => {
+        const columns = [
+            row({ name: "order_id", pk: true, fk: true }),
+            row({ name: "line_no", pk: true }),
+            row({ name: "qty" }),
+        ];
+
+        expect(tableTooltip("order_items", columns)).toBe(
+            "order_items\nColumns: 3\nPrimary key: order_id, line_no\nForeign keys: order_id",
+        );
+    });
+
+    it("omits the Primary key and Foreign keys lines when there are none", () => {
+        const columns = [row({ name: "ts" }), row({ name: "message" })];
+
+        expect(tableTooltip("audit_log", columns)).toBe("audit_log\nColumns: 2");
+    });
+
+    it("yields the heading alone for a node with no columns (the role-membership graph)", () => {
+        expect(tableTooltip("analyst", [])).toBe("analyst");
+    });
+});
+
+describe("cardTooltip", () => {
+    it("joins the table block and the column block with a blank line", () => {
+        const text = cardTooltip(
+            "credit_notes\nColumns: 4",
+            row({ name: "invoice_id", type: "bigint", fk: true, nullable: false }),
+        );
+
+        expect(text).toBe("credit_notes\nColumns: 4\n\nName: invoice_id\nType: bigint\nAttributes: FOREIGN KEY · NOT NULL");
+    });
+
+    it("separates the two blocks with exactly one blank line", () => {
+        const text = cardTooltip("t\nColumns: 1", row());
+
+        expect(text.split("\n").filter(l => l === "").length).toBe(1);
+    });
+
+    it("is exactly table + blank line + columnTooltip(column), for any inputs", () => {
+        const table = "some_table\nColumns: 2\nPrimary key: id";
+        const column = row({ name: "x", type: "text", pk: true, hasDefault: true });
+
+        expect(cardTooltip(table, column)).toBe(`${table}\n\n${columnTooltip(column)}`);
     });
 });
 

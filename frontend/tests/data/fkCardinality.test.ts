@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { DiagramData, DiagramEdgeData } from "@jimka/typescript-ui/component/diagram";
 import type { ColumnMeta, ConstraintMeta, IndexMeta, TableStructure } from "../../src/contract";
-import type { FkEdgeData } from "../../src/data/buildSchemaDiagram";
+import type { FkDetail, FkEdgeData } from "../../src/data/buildSchemaDiagram";
 import {
     parseIndexColumns,
     isFkUnique,
@@ -132,17 +132,19 @@ describe("isFkCovered", () => {
 });
 
 /** A one-edge DiagramData: table "child" FK-references table "parent". */
-function fkGraph(fk: Partial<FkEdgeData> = {}): {
+function fkGraph(fk: Partial<FkDetail> = {}): {
     data: DiagramData;
     childStructure: TableStructure;
 } {
     const fkData: FkEdgeData = {
-        columns: ["parent_id"],
-        refColumns: ["id"],
-        refSchema: "public",
-        onUpdate: "NO ACTION",
-        onDelete: "NO ACTION",
-        ...fk,
+        fks: [{
+            columns: ["parent_id"],
+            refColumns: ["id"],
+            refSchema: "public",
+            onUpdate: "NO ACTION",
+            onDelete: "NO ACTION",
+            ...fk,
+        }],
     };
 
     const edge: DiagramEdgeData = { id: "child.fk_parent", source: "child", target: "parent", data: fkData };
@@ -201,14 +203,14 @@ describe("annotateFkCardinality", () => {
         const { data } = fkGraph();
         const result = annotateFkCardinality(data, tables, [structure(), structure()], columnsFor(false));
 
-        expect((result.edges[0].data as FkEdgeData).uncovered).toBe(true);
+        expect((result.edges[0].data as FkEdgeData).fks[0].uncovered).toBe(true);
     });
 
     it("marks a covered FK edge uncovered:false", () => {
         const { data, childStructure } = fkGraph();
         const result = annotateFkCardinality(data, tables, [childStructure, structure()], columnsFor(false));
 
-        expect((result.edges[0].data as FkEdgeData).uncovered).toBe(false);
+        expect((result.edges[0].data as FkEdgeData).fks[0].uncovered).toBe(false);
     });
 
     it("includes a referential-action label when onDelete is not NO ACTION", () => {
@@ -232,7 +234,7 @@ describe("annotateFkCardinality", () => {
         annotateFkCardinality(data, tables, [childStructure, structure()], columnsFor(false));
 
         expect(data.edges[0]).toBe(originalEdge);
-        expect((data.edges[0].data as FkEdgeData).uncovered).toBeUndefined();
+        expect((data.edges[0].data as FkEdgeData).fks[0].uncovered).toBeUndefined();
         expect(data.edges[0].style).toBeUndefined();
     });
 
@@ -246,11 +248,123 @@ describe("annotateFkCardinality", () => {
     });
 });
 
+describe("annotateFkCardinality on a folded (two-key) edge", () => {
+    // The plan's worked example: orders has two foreign keys into addresses,
+    // both referencing addresses(id). fk_billing is mandatory and covered with
+    // an ON DELETE CASCADE; fk_shipping is optional, uncovered, and has no
+    // referential action. Neither key is unique.
+    function foldedGraph(): { data: DiagramData; ordersStructure: TableStructure } {
+        const fkData: FkEdgeData = {
+            fks: [
+                { columns: ["billing_address_id"], refColumns: ["id"], refSchema: "public", onUpdate: "NO ACTION", onDelete: "CASCADE" },
+                { columns: ["shipping_address_id"], refColumns: ["id"], refSchema: "public", onUpdate: "NO ACTION", onDelete: "NO ACTION" },
+            ],
+        };
+        const edge: DiagramEdgeData = { id: "orders.fk_billing", source: "orders", target: "addresses", data: fkData };
+        const data: DiagramData = {
+            nodes: [{ id: "orders", label: "orders" }, { id: "addresses", label: "addresses" }],
+            edges: [edge],
+        };
+        // Only billing_address_id is covered by an index; shipping_address_id is not.
+        const ordersStructure = structure({ indexes: [index("CREATE INDEX i ON t USING btree (billing_address_id)")] });
+
+        return { data, ordersStructure };
+    }
+
+    function foldedColumns(): ColumnMeta[][] {
+        return [[column("billing_address_id", false), column("shipping_address_id", true)], []];
+    }
+
+    it("drops the start marker to zeroOrMany when the folded keys disagree on unique/mandatory", () => {
+        const { data, ordersStructure } = foldedGraph();
+        const result = annotateFkCardinality(data, ["orders", "addresses"], [ordersStructure, structure()], foldedColumns());
+
+        expect(result.edges[0].style?.startMarker).toBe("zeroOrMany");
+        expect(result.edges[0].style?.endMarker).toBe("one");
+    });
+
+    it("sets uncovered per key, so a covered + uncovered pair yields [false, true]", () => {
+        const { data, ordersStructure } = foldedGraph();
+        const result = annotateFkCardinality(data, ["orders", "addresses"], [ordersStructure, structure()], foldedColumns());
+
+        expect((result.edges[0].data as FkEdgeData).fks.map(fk => fk.uncovered)).toEqual([false, true]);
+    });
+
+    it("omits the label when the folded keys' referential actions differ", () => {
+        const { data, ordersStructure } = foldedGraph();
+        const result = annotateFkCardinality(data, ["orders", "addresses"], [ordersStructure, structure()], foldedColumns());
+
+        expect(result.edges[0].style?.label).toBeUndefined();
+    });
+
+    it("Expected Behaviour row 1: a unique+mandatory key folded with a non-unique+optional key drops to zeroOrMany", () => {
+        // child.a_id -> parent(id): unique (a unique constraint matches it exactly),
+        // mandatory, covered, ON DELETE CASCADE. child.b_id -> parent(id): not
+        // unique (no constraint/index matches it), optional, uncovered, no label.
+        const fkData: FkEdgeData = {
+            fks: [
+                { columns: ["a_id"], refColumns: ["id"], refSchema: "public", onUpdate: "NO ACTION", onDelete: "CASCADE" },
+                { columns: ["b_id"], refColumns: ["id"], refSchema: "public", onUpdate: "NO ACTION", onDelete: "NO ACTION" },
+            ],
+        };
+        const edge: DiagramEdgeData = { id: "child.fk_parent", source: "child", target: "parent", data: fkData };
+        const data: DiagramData = {
+            nodes: [{ id: "child", label: "child" }, { id: "parent", label: "parent" }],
+            edges: [edge],
+        };
+        const childStructure = structure({ constraints: [constraint("unique", ["a_id"])] });
+        const cols: ColumnMeta[][] = [[column("a_id", false), column("b_id", true)], []];
+
+        const result = annotateFkCardinality(data, ["child", "parent"], [childStructure, structure()], cols);
+        const outEdge = result.edges[0];
+
+        expect(outEdge.style?.startMarker).toBe("zeroOrMany");
+        expect((outEdge.data as FkEdgeData).fks.map(fk => fk.uncovered)).toEqual([false, true]);
+        expect(outEdge.style?.label).toBeUndefined();
+    });
+
+    it("applyCoverageStyle tints the edge when at least one of the two folded keys is uncovered", () => {
+        const { data, ordersStructure } = foldedGraph();
+        const annotated = annotateFkCardinality(data, ["orders", "addresses"], [ordersStructure, structure()], foldedColumns());
+
+        expect(applyCoverageStyle(annotated, true).edges[0].style?.stroke).toBeTruthy();
+        expect(applyCoverageStyle(annotated, false).edges[0].style?.stroke).toBeUndefined();
+    });
+
+    it("keeps a unique/mandatory marker and a shared label when both folded keys fully agree", () => {
+        const fkData: FkEdgeData = {
+            fks: [
+                { columns: ["a_id"], refColumns: ["id"], refSchema: "public", onUpdate: "NO ACTION", onDelete: "CASCADE" },
+                { columns: ["b_id"], refColumns: ["id"], refSchema: "public", onUpdate: "NO ACTION", onDelete: "CASCADE" },
+            ],
+        };
+        const edge: DiagramEdgeData = { id: "child.fk_parent", source: "child", target: "parent", data: fkData };
+        const data: DiagramData = {
+            nodes: [{ id: "child", label: "child" }, { id: "parent", label: "parent" }],
+            edges: [edge],
+        };
+        const childStructure = structure({
+            indexes: [
+                index("CREATE INDEX i1 ON t USING btree (a_id)"),
+                index("CREATE INDEX i2 ON t USING btree (b_id)"),
+            ],
+        });
+        const cols: ColumnMeta[][] = [[column("a_id", false), column("b_id", false)], []];
+
+        const result = annotateFkCardinality(data, ["child", "parent"], [childStructure, structure()], cols);
+        const outEdge = result.edges[0];
+
+        expect(outEdge.style?.startMarker).toBe("oneOrMany");
+        expect((outEdge.data as FkEdgeData).fks.map(fk => fk.uncovered)).toEqual([false, false]);
+        expect(outEdge.style?.label).toBe("ON DELETE CASCADE");
+    });
+});
+
 describe("applyCoverageStyle", () => {
     function uncoveredEdge(): DiagramEdgeData {
         return {
             id: "e", source: "a", target: "b",
-            data: { columns: ["a"], refColumns: ["id"], refSchema: "public", onUpdate: "NO ACTION", onDelete: "NO ACTION", uncovered: true } satisfies FkEdgeData,
+            data: { fks: [{ columns: ["a"], refColumns: ["id"], refSchema: "public", onUpdate: "NO ACTION", onDelete: "NO ACTION", uncovered: true }] } satisfies FkEdgeData,
             style: { startMarker: "oneOrMany", endMarker: "one" },
         };
     }
@@ -258,7 +372,7 @@ describe("applyCoverageStyle", () => {
     function coveredEdge(): DiagramEdgeData {
         return {
             id: "e2", source: "a", target: "b",
-            data: { columns: ["a"], refColumns: ["id"], refSchema: "public", onUpdate: "NO ACTION", onDelete: "NO ACTION", uncovered: false } satisfies FkEdgeData,
+            data: { fks: [{ columns: ["a"], refColumns: ["id"], refSchema: "public", onUpdate: "NO ACTION", onDelete: "NO ACTION", uncovered: false }] } satisfies FkEdgeData,
             style: { startMarker: "one", endMarker: "one" },
         };
     }
@@ -296,5 +410,13 @@ describe("applyCoverageStyle", () => {
 
         expect(data.edges[0]).toBe(originalEdge);
         expect(data.edges[0].style?.stroke).toBeUndefined();
+    });
+
+    it("returns an edge whose data has no fks untouched rather than throwing", () => {
+        const nonFkEdge: DiagramEdgeData = { id: "dep", source: "a", target: "b", data: { kind: "dependency" } };
+        const data: DiagramData = { nodes: [], edges: [nonFkEdge] };
+
+        expect(() => applyCoverageStyle(data, true)).not.toThrow();
+        expect(applyCoverageStyle(data, true).edges[0]).toEqual(nonFkEdge);
     });
 });
