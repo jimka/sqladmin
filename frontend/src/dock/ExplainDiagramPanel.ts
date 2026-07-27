@@ -163,7 +163,12 @@ class ExplainDiagramPanel extends Panel {
 
         // Custom node renderer: each node is a metric card (costs, rows, actual
         // timings, group key, batches, memory) heat-tinted by its plan share.
-        const diagram = new DiagramView({ data, nodeRenderer: (n: DiagramNodeData) => ExplainNode(n), elkWorkerFactory });
+        const diagram = new DiagramView({
+            data,
+            nodeRenderer: (n: DiagramNodeData) => ExplainNode(n),
+            elkWorkerFactory,
+            initialFocusNode: roots[0]?.id,
+        });
 
         super({
             layoutManager: new Border(),

@@ -276,6 +276,61 @@ Two hazards to handle at that point:
 
 ---
 
+## Implementation Notes
+
+Manual verification (per `## Expected Behaviour → Manual-verify`) was performed against the
+real app — Postgres via `docker compose up -d db`, a dedicated backend on a free port with
+`SQLADMIN_ALLOWED_HOSTS` covering `localhost:5432`, and a `--strictPort` Vite dev server for
+this worktree's `frontend/` (the shared dev stack on :8000/:5173 was already in use by another
+concurrent session, so a separate backend/frontend pair avoided disturbing it) — driven with
+the chrome-devtools MCP tools, logging in with Host `localhost` (this environment has no
+`sqladmin-db` DNS entry outside the Docker Compose network; `localhost:5432` is the
+backend's default allowlisted host and is a like-for-like substitute for the same Postgres
+instance). Console stayed free of ELK errors in every case below (only the pre-existing
+favicon 404 and an incidental pre-login `/api/whoami` 401 were logged).
+
+Confirmed working as intended — the merge behaviour itself was actually seen, not just the
+absence of a crash:
+- **Role grants graph** (`readwrite` role, 8 granted tables): unambiguous — all 8 edges leave
+  the role node through one shared trunk before fanning out, matching item (A) exactly.
+- **Explain diagram** (`EXPLAIN ANALYZE` on a two-table join): confirmed *not* merged — the
+  `Hash Join` node's two incoming edges keep separate arrowheads and separate row-count
+  labels, as the exclusion in `buildExplainDiagram.ts` requires.
+- **Schema diagram, flat mode**: `public` (2 tables) and `sales` (4 tables, two disjoint FK
+  pairs) render unchanged, as expected with no convergence present in that data. The 154-table
+  `hub` schema visibly narrows to a small number of thick trunks before widening again,
+  consistent with merged input/output ports at a shared hub table, though this large a graph
+  did not let me isolate one specific converging node with certainty.
+- **Schema diagram, card mode** (`public.orders` "Show relations"): renders unchanged — FK
+  anchored to a specific column row, matching the pre-existing per-column port behavior.
+- **Database diagram, Overview mode**: unchanged (schema-level nodes only), as expected since
+  that builder is untouched.
+
+Rendered correctly, but the merge itself was not specifically isolated — only confirmed as
+"no ELK error, no dropped edge," not as "I watched a convergence happen here":
+- **Database diagram, Tables mode** (171 tables, all schemas): renders cross-schema FKs
+  without error, but I did not pick out one specific cross-schema target table and confirm its
+  incoming edges shared a single trunk the way the Role grants graph screen did.
+- **Dependency graph**: `public` (2 relations) and `hub` (313 relations) both render without
+  ELK errors; the `hub` graph was too dense to visually isolate one converging node, and
+  `public`'s 2 relations gave no convergence to look for.
+
+Not confirmed, and why:
+- **Inheritance graph**: every schema in this seeded database (`analytics`, `hub`, and others
+  checked) reports 0 relations — there are no partitioned tables in the dataset, so the merge
+  behavior on `INHERITANCE_LAYOUT` has no edges to exercise here. The option is present in the
+  constant (`SqlAdminController.ts`) and the graph renders an empty canvas without error, but a
+  converging parent-with-children case was not available to click through.
+- **Role membership graph**: opened (`readwrite`, depth 1) but the visible slice was a single
+  linear chain (`app_service -> readwrite -> readonly`), not a multi-parent convergence, so it
+  did not exercise the merge visually. `Show grants graph` (above) exercises the same
+  `buildRoleMembershipDiagram`/`buildRoleGrantsDiagram` sibling code path and layout-option
+  shape, so this is a coverage gap in the specific case checked, not in the code path.
+- The two remaining "Potential Challenges" call-outs — a self-referential FK's merged
+  self-loop, and two FK constraints between the same table pair collapsing to one drawn route
+  in flat mode — were not specifically constructed and checked; the seeded dataset's schema
+  diagrams did not happen to contain either case.
+
 ## Notes
 
 [^merge-semantics]: ELK registers the option as `org.eclipse.elk.layered.mergeEdges`, titled "Merge Edges", described as: *"Edges that have no ports are merged so they touch the connected nodes at the same points. When this option is disabled, one port is created for each edge directly connected to a node. When it is enabled, all such incoming edges share an input port, and all outgoing edges share an output port."* Default `false`. Read out of the option registry in the app's installed `node_modules/elkjs/lib/elk.bundled.js` (elkjs 0.10.2) and confirmed present in 0.12.0. Because it only affects portless edges, it needs no library support: graph-level `DiagramData.layoutOptions` already reach ELK untouched via `buildElkGraph`'s merge of `HIERARCHY_HANDLING_DEFAULT` < view defaults < `data.layoutOptions`.

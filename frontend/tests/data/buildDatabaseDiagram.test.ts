@@ -63,13 +63,13 @@ describe("buildDatabaseDiagram", () => {
             id    : "a.orders.fk_customer",
             source: "a.orders",
             target: "b.customers",
-            data  : {
+            data  : { fks: [{
                 columns   : ["x_id"],
                 refColumns: ["id"],
                 refSchema : "b",
                 onUpdate  : "NO ACTION",
                 onDelete  : "NO ACTION",
-            },
+            }] },
         }]);
     });
 
@@ -122,11 +122,27 @@ describe("buildDatabaseDiagram", () => {
         expect(data.edges.map(e => e.id)).toEqual(["a.orders.fk_x", "a.invoices.fk_x"]);
     });
 
+    it("folds two FKs between the same qualified table pair into one edge with both keys", () => {
+        const schemas: SchemaTables[] = [
+            { schema: "a", tables: ["orders"], structures: [structure([fk("fk1", "b", "customers"), fk("fk2", "b", "customers")])] },
+            { schema: "b", tables: ["customers"], structures: [structure()] },
+        ];
+
+        const data = buildDatabaseDiagram(schemas);
+
+        expect(data.edges).toHaveLength(1);
+        expect(data.edges[0].id).toBe("a.orders.fk1");
+        expect((data.edges[0].data as { fks: unknown[] }).fks).toHaveLength(2);
+    });
+
     it("returns an empty graph for an empty database, still with layered/RIGHT layout options", () => {
         const data = buildDatabaseDiagram([]);
 
         expect(data.nodes).toEqual([]);
         expect(data.edges).toEqual([]);
-        expect(data.layoutOptions).toEqual({ "elk.algorithm": "layered", "elk.direction": "RIGHT" });
+        expect(data.layoutOptions).toEqual({
+            "elk.algorithm": "layered",
+            "elk.direction": "RIGHT",
+        });
     });
 });

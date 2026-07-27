@@ -139,15 +139,19 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 ```
 
-### elkjs 0.10.2 — Eclipse Layout Kernel (JavaScript)
+### elkjs 0.12.0 — Eclipse Layout Kernel (JavaScript)
 
-© Kiel University and contributors, licensed under the Eclipse Public License
-2.0 (EPL-2.0). Unlike `@jimka/typescript-ui`'s own optional, dynamically
-imported use of `elkjs`, SQLAdmin's Vite build bundles it unmodified into
+© Kiel University and contributors, licensed under `EPL-2.0 OR
+GPL-3.0-or-later`: the Eclipse Public License 2.0, with GPL-3.0-or-later
+offered as a Secondary License. SQLAdmin does not combine elkjs with
+GPL-covered code, so it is received and redistributed under the EPL-2.0
+terms. Unlike `@jimka/typescript-ui`'s own optional, dynamically imported use
+of `elkjs`, SQLAdmin's Vite build bundles it unmodified into
 `dist/assets/elk.bundled-*.js`.
 
 - Source: <https://github.com/kieler/elkjs>
 - Full license text: <https://www.eclipse.org/legal/epl-2.0/>
+- Secondary license: <https://www.gnu.org/licenses/gpl-3.0-standalone.html>
 
 ### d3 (charting math)
 
@@ -284,7 +288,7 @@ already covered in full in Section 1 are included here too, for completeness.
 | d3-time | 3.1.0 | ISC |
 | d3-time-format | 4.1.0 | ISC |
 | discontinuous-range | 1.0.0 | MIT |
-| elkjs | 0.10.2 | EPL-2.0 |
+| elkjs | 0.12.0 | EPL-2.0 OR GPL-3.0-or-later |
 | internmap | 2.0.3 | ISC |
 | lexical | 0.46.0 | MIT |
 | marked | 18.0.6 | MIT |

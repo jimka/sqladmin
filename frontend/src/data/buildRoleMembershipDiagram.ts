@@ -7,7 +7,10 @@ import type { RoleDetail } from "../contract";
 
 // Left-to-right layered layout: a membership DAG reads naturally as a
 // hierarchy flow (member -> parent), matching the schema FK graph's layout.
-const LAYOUT_OPTIONS: Record<string, string> = { "elk.algorithm": "layered", "elk.direction": "RIGHT" };
+const LAYOUT_OPTIONS: Record<string, string> = {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+};
 
 // The registered glyph name for a role node. Deliberately an inline literal,
 // not imported from `../roles/RolesTree` (whose `Glyph.register(user)` import

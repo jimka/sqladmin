@@ -1,27 +1,43 @@
-// The read-only schema entity-relationship diagram, opened as its own Dock tab
-// from the navigator's schema-node right-click menu ("Open schema diagram").
-// Extends DiagramView (ELK-laid-out nodes/edges, pan/zoom, single-select) over
-// the graph the controller assembled via buildSchemaDiagram. A single click
-// only selects (highlights) a node; double-clicking a node reports its table
-// name back to the controller, which reuses openReferencedTable — the same
-// open path an FK link in StructurePanel uses — so activating a table behaves
-// identically.
+// The schema entity-relationship diagram, opened as its own Dock tab from the
+// navigator's schema-node right-click menu ("Open schema diagram"). Extends
+// DiagramShell (see ./diagramShell.ts) with a selectable root: the shell's
+// WEST `Root table` selector + direction/depth/prune controls + legend, over a
+// CENTER DiagramView built from the graph buildSchemaDiagram assembled. Opens
+// on the whole FK graph with no root chosen; picking a root narrows the view
+// to its direction+depth neighbourhood exactly as RelationDiagramPanel's fixed
+// root does, but here the user may pick a different root or clear back to the
+// whole graph at any time. A single click only selects (highlights) a node;
+// double-clicking a node reports its table name back to the controller, which
+// reuses openReferencedTable — the same open path an FK link in StructurePanel
+// uses — so activating a table behaves identically.
 //
-// Class-first (see ../../COMPONENT_CONVENTIONS.md): extends DiagramView (class-
-// first), so the instance itself is the mountable component. The "activate"
-// handler is an inline arrow closing over the constructor's `onSelectTable`
-// parameter, never handed off by reference, so it needs no arrow-function field.
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): extends DiagramShell
+// directly. The `JunctionDiagramView` (see ./JunctionDiagramView.ts) is built
+// as a local before `super()` (it is `super()`'s CENTER child); the
+// "activate" / "contextmenu" listeners are
+// wired after `super()`, inline arrows closing over the constructor's
+// `onSelectTable` / `onContextMenu` parameters, never handed off by
+// reference, so they need no arrow-function field. `applyFilter` and
+// `rebuildBase` are handed to `fillLegend`/invoked from `rootingChanged`, so
+// they are arrow-function fields.
 
 import { callable } from "@jimka/typescript-ui/core";
-import { DiagramView } from "@jimka/typescript-ui/component/diagram";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
-import { elkWorkerFactory } from "./elkWorkerFactory";
+import { rootedBase, filteredBase } from "../data/relationDiagram";
+import { attachFkEdgeTooltip } from "./edgeTooltip";
+import { DiagramShell, fillLegend } from "./diagramShell";
+import { JunctionDiagramView } from "./JunctionDiagramView";
 
 /**
- * The read-only schema diagram panel. Extends DiagramView over the graph;
- * double-clicking a node invokes `onSelectTable` with the node's table name.
+ * The schema diagram panel: the shell's WEST `Root table` + direction / depth
+ * + prune + legend column plus a CENTER DiagramView. Double-clicking a node
+ * invokes `onSelectTable` with the node's table name.
  */
-class SchemaDiagramPanel extends DiagramView {
+class SchemaDiagramPanel extends DiagramShell {
+    private readonly full: DiagramData;
+    private readonly hidden = new Set<string>();
+    private base: DiagramData;
+
     /**
      * @param data - The graph model (from buildSchemaDiagram).
      * @param onSelectTable - Invoked with the activated node's table name (its id).
@@ -30,18 +46,49 @@ class SchemaDiagramPanel extends DiagramView {
      */
     constructor(data: DiagramData, onSelectTable: (table: string) => void,
                 onContextMenu?: (table: string, event: MouseEvent) => void) {
-        super({ data, elkWorkerFactory });
+        // Local before super() — it is super()'s CENTER child (`this` is
+        // unavailable until super() returns).
+        const view = JunctionDiagramView({ data });
 
-        // Double-click opens the table; a single click only selects it. The
-        // "activate" payload is the double-clicked node, whose id is its table name.
-        this.on("activate", (node: DiagramNodeData) => {
+        super({ view, full: data, rootCaption: "Root table" });
+
+        this.full = data;
+        this.base = data;
+
+        attachFkEdgeTooltip(this.view);
+
+        // Double-click opens the table; a single click only selects it.
+        this.view.on("activate", (node: DiagramNodeData) => {
             onSelectTable(node.id);
         });
 
-        this.on("contextmenu", (node: DiagramNodeData, event: MouseEvent) => {
+        this.view.on("contextmenu", (node: DiagramNodeData, event: MouseEvent) => {
             onContextMenu?.(node.id, event);
         });
     }
+
+    protected rootingChanged(): void {
+        this.rebuildBase();
+    }
+
+    protected pruneChanged(): void {
+        this.applyFilter();
+    }
+
+    // Passed by reference to fillLegend's rows — MUST be an arrow field, or it
+    // would lose `this` when invoked as a callback.
+    private applyFilter = (): void => {
+        this.view.setData(
+            filteredBase(this.base, this.getRoot(), this.hidden, this.isPrune(), this.getDirection()));
+    };
+
+    private rebuildBase = (): void => {
+        this.base = rootedBase(this.full, this.getRoot(), this.getDirection(), this.getDepth());
+
+        this.hidden.clear();
+        fillLegend(this.legend, this.base, this.getRoot(), this.hidden, this.applyFilter);
+        this.applyFilter();
+    };
 }
 
 const SchemaDiagramPanelCallable = callable(SchemaDiagramPanel);

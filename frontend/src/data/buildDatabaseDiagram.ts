@@ -11,10 +11,14 @@
 import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import type { TableStructure } from "../contract";
 import type { FkEdgeData } from "./buildSchemaDiagram";
+import { collapseParallelFkEdges } from "./buildSchemaDiagram";
 
 // Left-to-right layered layout, matching buildSchemaDiagram's choice — a
 // database's FK graph still reads naturally as a dependency flow.
-const LAYOUT_OPTIONS: Record<string, string> = { "elk.algorithm": "layered", "elk.direction": "RIGHT" };
+const LAYOUT_OPTIONS: Record<string, string> = {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+};
 
 // The registered glyph name for a table node. Deliberately NOT imported from
 // `../navigator/objectGlyphs` — see buildSchemaDiagram.ts's TABLE_GLYPH for
@@ -60,6 +64,9 @@ export function qualifiedId(schema: string, table: string): string {
  *
  * @param schemas - Every schema's table names + structures, positionally paired.
  * @returns The nodes + edges + layered/RIGHT layout options for DiagramView.
+ *   Two foreign keys between the same qualified table pair fold into one edge
+ *   via {@link collapseParallelFkEdges} — this builder has no card mode, so
+ *   folding always applies.
  */
 export function buildDatabaseDiagram(schemas: SchemaTables[]): DiagramData {
     const nodes: DiagramNodeData[] = [];
@@ -101,17 +108,17 @@ export function buildDatabaseDiagram(schemas: SchemaTables[]): DiagramData {
                     target: targetId,
                     // Carried for later cardinality / column-to-column work;
                     // ignored by the current table-to-table rendering.
-                    data  : {
+                    data  : { fks: [{
                         columns   : fk.columns,
                         refColumns: fk.refColumns,
                         refSchema : fk.refSchema,
                         onUpdate  : fk.onUpdate,
                         onDelete  : fk.onDelete,
-                    } satisfies FkEdgeData,
+                    }] } satisfies FkEdgeData,
                 });
             }
         });
     }
 
-    return { nodes, edges, layoutOptions: LAYOUT_OPTIONS };
+    return { nodes, edges: collapseParallelFkEdges(edges), layoutOptions: LAYOUT_OPTIONS };
 }

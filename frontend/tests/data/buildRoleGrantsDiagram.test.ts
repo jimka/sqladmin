@@ -56,4 +56,13 @@ describe("buildRoleGrantsDiagram", () => {
         expect(ids).toContain("table:public.t");
         expect(new Set(ids).size).toBe(ids.length);
     });
+
+    it("sets the layered/RIGHT layout options", () => {
+        const out = buildRoleGrantsDiagram("app", []);
+
+        expect(out.layoutOptions).toEqual({
+            "elk.algorithm": "layered",
+            "elk.direction": "RIGHT",
+        });
+    });
 });
