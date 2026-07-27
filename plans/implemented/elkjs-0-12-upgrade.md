@@ -316,3 +316,74 @@ No public API changes, so no API doc page moves. The documentation work is entir
 [^no-new-tests]: This plan adds no logic, so there is nothing to red-green. The behaviour at risk — real ELK's output and its worker plumbing — is already covered as well as it can be: the five real-elkjs tests in `DiagramView.createEngine.test.ts` exercise construction, the `workerUrl` warning, and both disposal guards, and coordinates are deliberately not asserted anywhere (`DiagramView.test.ts` drives a `StubEngine`) because pinning ELK's exact output would make every upstream bump a test rewrite. That trade is what pushes the real verification into the manual surface table.
 
 [^tsui-range]: `npm view @jimka/typescript-ui versions` returns `0.1.0`, `0.1.1`, `0.2.0`, and `../typescript-ui/packages/lib/package.json` is still at `0.2.0` — so there is no published version whose peer range admits elkjs 0.12.0, and no version number the app could point at. `TODO.md` already tracks the wider problem (the published `0.2.0` carries neither `elkWorkerFactory` nor the Worker disposal path); step 15 adds the install-level consequence to that same bullet rather than opening a second entry for one root cause.
+
+---
+
+## Implementation Notes
+
+**Symlink target redirected to the typescript-ui worktree, not the main tree.**
+The plan's "Architecture Decisions" section (and the table under "The app-side
+install needs `--legacy-peer-deps`...") directs
+`frontend/node_modules/@jimka/typescript-ui` to be restored pointing at
+`/home/jika/typescript/typescript-ui/packages/lib` — the main typescript-ui
+checkout. This run executed under parallel worktree orchestration: both repos'
+work happened in pre-created sibling worktrees
+(`sqladmin/.worktrees/elkjs-0-12-upgrade` and
+`typescript-ui/.worktrees/elkjs-0-12-upgrade`) so that the main typescript-ui
+tree — which the user may be using concurrently for other work — is never
+touched. The symlink was therefore pointed at
+`/home/jika/typescript/typescript-ui/.worktrees/elkjs-0-12-upgrade/packages/lib`
+instead. This produces an identical verified outcome: the sqladmin worktree's
+typecheck, tests, and production build all ran against exactly the library
+state this plan produces (elkjs peer bumped to `^0.12.0`, notices and
+changelog/migration updated), just isolated from the main checkout. No other
+part of the plan changed.
+
+**App-side install used a clean install rather than the wholesale
+`node_modules` symlink.** The plan's own single-repo workflow assumes
+`frontend/node_modules` already exists in the tree being worked in. This
+worktree started with no `frontend/node_modules` at all. Rather than
+symlinking it wholesale from the main sqladmin tree's `frontend/node_modules`
+and then running `npm install --legacy-peer-deps` on top (which would mutate
+the main tree's real `node_modules` directory through the symlink, since npm
+writes through it), a plain `npm install --legacy-peer-deps` was run directly
+inside the worktree's `frontend/`, producing the worktree's own independent
+`node_modules`. This keeps the main sqladmin tree completely untouched, at the
+cost of a slower first install; the plan's step 10 checks (elkjs resolves to
+`0.12.0`, and the lockfile's elkjs entry is correct) passed identically either
+way.
+
+**The app lockfile carries one hunk outside the elkjs entry.** Step 10's check
+inspected only the elkjs entry, so this went unremarked at commit time:
+`frontend/package-lock.json` also flips `node_modules/typescript` from
+`"devOptional": true` to `"dev": true`. It is not caused by the elkjs bump —
+replaying `npm install --legacy-peer-deps` against the *unmodified* base
+manifest reproduces exactly this flip and nothing else. The cause is the
+plan-mandated `--legacy-peer-deps` flag: it makes npm ignore peer edges, so
+`typescript` stops being reachable through `lexical`'s optional
+`typescript >=5.2` peer and is no longer recorded as optional. It is inert here
+— no `--omit=dev` exists anywhere in the repo, and `npm ci` against the
+committed lockfile still installs `typescript`, so the Dockerfile build is
+unaffected — and it is left in place deliberately, because hand-reverting the
+line would desync the lockfile from what npm actually produces. An install
+without the flag will flip it back.
+
+**Outcome of step 18's manual diagram pass.** The pass was performed, driving a
+real browser session against this worktree's own dev server and a dedicated
+backend instance with a seeded database. Every surface rendered, with no
+empty-canvas failures and no worker or console errors on tab close: the schema
+diagram (checked both on a two-table schema and on a 154-table stress case),
+the database diagram in Overview and in rooted cross-schema Tables mode, the
+relation-rooted diagram, the schema and relation dependency graphs, the
+role-membership graph, the role-grants graph, and the Explain diagram. Two
+limitations are worth recording rather than glossing. First, the schema and
+relation inheritance graphs were opened and rendered without error, but the
+seed database declares no table-inheritance relationships (`select count(*)
+from pg_inherits` is 0), so those two confirmed only the empty/trivial-graph
+path — a populated inheritance graph was not exercised under elkjs 0.12.0.
+Second, the pass recorded rendering success and the absence of errors, but did
+not record an explicit judgement on step 18's spacing criterion (no overlapping
+nodes, no edges routed through nodes, the diagram still fitting its initial
+view). Coordinate drift is the one risk this bump carries that no automated
+check in either repo can see, so that judgement is worth making deliberately
+before merge.

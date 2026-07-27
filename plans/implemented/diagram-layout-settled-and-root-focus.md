@@ -548,6 +548,73 @@ App side: `TODO.md`'s known-issue bullet per step 21. `LIBRARY_NOTES.md` needs n
 
 ---
 
+## Implementation Notes
+
+- **`packages/lib/docs/api/**` is gitignored, not committed generated output.**
+  The plan's `## Files to Create / Modify / Delete` table and `## Documentation
+  Impact` both say to commit the TypeDoc-regenerated `DiagramView` class page
+  and `DiagramViewOptions` interface page under `docs/api/component/diagram/`.
+  In this checkout that whole directory is covered by
+  `typescript-ui/.gitignore:12` ("Generated docs output") and has never been
+  tracked — `git ls-files packages/lib/docs/api` returns nothing before or
+  after this branch. `npm run docs:api` was still run as the plan's
+  zero-warnings checkpoint (step 13), and it produced the expected pages
+  (`whenLaidOut`/`focusNode`/`initialFocusNode` all appear in the generated
+  `DiagramView`/`DiagramViewOptions` markdown), but there is nothing under
+  `docs/api` for git to see or commit. No source or test content changed as a
+  result — this only affects which files a commit could ever include.
+
+- **`DatabaseDiagramPanel`'s `rootControl` handler needed to await `whenLaidOut()`
+  before calling `focusNode`, which the plan's step 15 did not call for.**
+  Found live during manual verification (picking a Root table in Tables mode
+  panned the view thousands of pixels off-screen instead of centring the
+  root). Root cause: `buildDatabaseDiagram`'s node ids are schema-qualified
+  (`"schema.table"`) and stay stable across a re-root, so the newly-chosen
+  root is very often still present, under the same id, in the *previous*
+  graph `rebuildBase`'s `setData` call just started replacing. Calling
+  `focusNode(rootId)` synchronously right after `rebuildBase()` — as step 15
+  specifies — runs before the new graph's async ELK layout lands, so
+  `tryInitialCentre` matches the id against the still-shown *old* graph's
+  node instead, centres on its (unrelated) position there, and consumes the
+  one-shot `_needsInitialCentre` flag; when the new, correctly-rooted graph's
+  layout lands moments later, the flag is already spent and the pan is never
+  recomputed. Fixed by chaining the `focusNode` call off
+  `this.view.whenLaidOut()` instead of calling it inline, so it runs only
+  once the new graph has been promoted and `_nodeComponents` reflects it:
+  ```ts
+  void this.view.whenLaidOut().then(() => this.view.focusNode(rootId));
+  ```
+  This call site has no automated red-green cycle available for the same
+  reason the rest of this plan's app-side wiring doesn't (`DatabaseDiagramPanel`
+  imports UI-bundle modules that touch `document` at load). Verified live
+  against a dedicated Vite dev server for this worktree (proxying `/api` to
+  the already-running shared backend on `:8000`, which this plan doesn't
+  touch) with the chrome-devtools MCP tools: before the fix, picking Root
+  table `public.orders` in Tables mode produced `translate(-32510px,
+  136.333px) scale(1)` and an empty-looking canvas; after the fix, the same
+  action correctly shows the small rooted neighbourhood (`order_items`,
+  `orders`, `invoices`, `customers`) centred in the viewport.
+
+  A follow-up review of this fix (before this branch was finalised) found the
+  chained `.then()` above still races: `armLayoutSettled()` is a no-op while a
+  pass is already in flight, so two changes fired in quick succession share
+  one `whenLaidOut()` promise. If the root is cleared to `(none)` (or Mode is
+  switched away from Tables) before that shared promise settles, the *earlier*
+  root's `.then(() => this.view.focusNode(rootId))` was still attached to it
+  and fired once the later, unrelated layout landed — wrongly re-focusing on
+  the just-abandoned root. Fixed by re-reading `this.mode`/`this.rootId`
+  inside the callback instead of trusting the closed-over locals, so a stale
+  callback that resolves after either has since changed is a no-op:
+  ```ts
+  void this.view.whenLaidOut().then(() => {
+      if (this.mode === "tables" && this.rootId === rootId) {
+          this.view.focusNode(rootId);
+      }
+  });
+  ```
+
+---
+
 ## Notes
 
 [^visibility]: `display: none` would take the node out of its parent's laid-out set — `Component.getLaidOutComponents()` filters on `isDisplayed()` ([Component.ts:5019](../typescript-ui/packages/lib/src/typescript/lib/core/Component.ts#L5019)) — so the content host's `Absolute` pass would skip it and never commit the position `applyLayout` wrote, and the reveal would need a further layout pass to take effect. `visibility: hidden` keeps the layout slot, so a hidden node is measured and placed exactly as a shown one. That matters because the sequence being fixed is measure-then-place: `collectNodeSizes` reads each node component's `getPreferredSize()` to feed ELK, which is why the components have to exist and be measurable before any position is known.
