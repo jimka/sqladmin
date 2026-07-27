@@ -29,10 +29,12 @@ import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border, HBox, VBox } from "@jimka/typescript-ui/layout";
 import { Placement } from "@jimka/typescript-ui/primitive";
 import { Checkbox, ComboBox, Text } from "@jimka/typescript-ui/component/input";
-import type { DiagramView } from "@jimka/typescript-ui/component/diagram";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import type { TraversalDirection } from "../data/relationDiagram";
 import { rootChoices } from "../data/relationDiagram";
+import type { BundlingStrategy } from "../data/edgeRouteStubs";
+import { formatBundlingMetrics } from "../data/edgeBundleMetrics";
+import type { JunctionDiagramView } from "./JunctionDiagramView";
 
 /** The `Depth` choice meaning an unbounded walk. */
 export const DEPTH_ALL = "All";
@@ -49,6 +51,13 @@ export const DEFAULT_DEPTH = 1;
 
 /** The root selector's sentinel item: no root chosen, so the whole graph shows. */
 export const ROOT_NONE = "(none)";
+
+/** The `Edge bundling` selector's items, in order; the first is the default. */
+export const BUNDLING_CHOICES: { key: BundlingStrategy; label: string }[] = [
+    { key: "junction", label: "Junction" },
+    { key: "spine",    label: "Collector spine" },
+    { key: "tree",     label: "Merge tree" },
+];
 
 // Fixed width of the WEST side panel: enough for a checkbox plus a typical
 // table name without stealing canvas width from the diagram.
@@ -156,7 +165,7 @@ export function fillLegend(
 /** The CENTER view plus the subclass's extra control slots. */
 export interface DiagramShellSlots {
     /** The CENTER diagram. Built by the subclass, which owns the node renderer. */
-    view: DiagramView;
+    view: JunctionDiagramView;
     /** Always-visible controls above the `Root …` row (the database diagram's Mode row). */
     headerControls?: Component[];
     /** Controls inside the hideable block, above Direction. */
@@ -198,9 +207,11 @@ export type DiagramShellConfig = DiagramShellSlots & (FixedRoot | SelectableRoot
  */
 class DiagramShell extends Panel {
     /** The CENTER diagram. */
-    protected readonly view: DiagramView;
+    protected readonly view: JunctionDiagramView;
     /** The scrolling legend column; the subclass fills it. */
     protected readonly legend: Panel;
+    /** The four bundling numbers, refilled after every layout pass. */
+    private readonly bundlingMetrics: Panel;
 
     /** The `Root …` row, or null when the root is fixed (no row is built). */
     private readonly rootRow:     Component | null;
@@ -251,6 +262,9 @@ class DiagramShell extends Panel {
         const depthControl = ComboBox({ items: DEPTH_CHOICES, value: String(DEFAULT_DEPTH) });
         const pruneControl = Checkbox({ value: false });
 
+        const bundlingControl = ComboBox({ items: BUNDLING_CHOICES, value: BUNDLING_CHOICES[0].key });
+        const bundlingMetrics = Panel({ layoutManager: new VBox({ spacing: 0 }) });
+
         const rootedBlock = Panel({
             layoutManager: new VBox({ spacing: 4 }),
             components: [
@@ -263,10 +277,18 @@ class DiagramShell extends Panel {
         });
 
         // The `Root …` row sits above the hideable block, so it survives while
-        // the root is null.
+        // the root is null. The bundling row sits above everything and outside
+        // `rootedBlock`: the fan-in it addresses is at its worst on the whole
+        // graph, which is exactly when `rootedBlock` is hidden.
         const controls = Panel({
             layoutManager: new VBox({ spacing: 4 }),
-            components: [...(config.headerControls ?? []), ...(rootRow ? [rootRow] : []), rootedBlock],
+            components: [
+                labelledRow("Edge bundling", bundlingControl),
+                bundlingMetrics,
+                ...(config.headerControls ?? []),
+                ...(rootRow ? [rootRow] : []),
+                rootedBlock,
+            ],
         });
 
         const west = Panel({
@@ -293,6 +315,7 @@ class DiagramShell extends Panel {
         this.rootControl = rootControl;
         this.rootedBlock = rootedBlock;
         this.rootId      = initialRoot;
+        this.bundlingMetrics = bundlingMetrics;
 
         // Reads only this shell's own fields, so no subclass field is touched
         // before the subclass body has run.
@@ -319,6 +342,15 @@ class DiagramShell extends Panel {
         });
 
         rootControl?.on("change", (v: string) => this.chooseRoot(v === ROOT_NONE ? null : v));
+
+        // Deliberately no settleViewport: every strategy leaves the nodes and
+        // the graph bounds where they were, so the user's pan and zoom still
+        // mean the same thing — which is what makes the comparison readable.
+        bundlingControl.on("change", (v: string) => {
+            this.view.setBundlingStrategy(v as BundlingStrategy);
+        });
+
+        this.view.on("layout", () => this.refreshBundlingMetrics());
     }
 
     /**
@@ -414,6 +446,22 @@ class DiagramShell extends Panel {
     /** The prune checkbox changed. Subclasses re-filter here. */
     protected pruneChanged(): void {
         // Default: no-op. Overridden by subclasses.
+    }
+
+    // Rebuilds the metrics block from the view's latest bundling pass, the same
+    // clear-and-refill shape `fillLegend` uses.
+    private refreshBundlingMetrics(): void {
+        const metrics = this.view.getBundlingMetrics();
+
+        this.bundlingMetrics.removeAllComponents();
+
+        if (metrics === null) {
+            return;
+        }
+
+        for (const line of formatBundlingMetrics(metrics)) {
+            this.bundlingMetrics.addComponent(new Text(line));
+        }
     }
 
     // The selector's own gesture: adopt the root, then move the viewport.
