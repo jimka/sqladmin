@@ -35,7 +35,6 @@ import { annotateFkCardinality }                                                
 import { buildRoleMembershipDiagram }                                                                                                                                                              from "./data/buildRoleMembershipDiagram";
 import { buildRoleGrantsDiagram }                                                                                                                                                                  from "./data/buildRoleGrantsDiagram";
 import { buildRelationGraph, relationNodeId }                                                                                                                                                      from "./data/buildRelationGraph";
-import { rootedDiagram }                                                                                                                                                                           from "./data/relationDiagram";
 import { buildSelectSql, buildRoutineCallSql, routineCallIsComplete }                                                                                                                              from "./data/sql";
 import { buildStore }                                                                                                                                                                              from "./data/stores";
 import { TableWorkPanel }                                                                                                                                                                          from "./dock/TableWorkPanel";
@@ -73,6 +72,7 @@ import { DatabaseDiagramPanel }                                                 
 import type { SchemaTables }                                                                                                                                                                       from "./data/buildDatabaseDiagram";
 import { RoleGrantsDiagramPanel }                                                                                                                                                                  from "./dock/RoleGrantsDiagramPanel";
 import { RelationGraphPanel }                                                                                                                                                                      from "./dock/RelationGraphPanel";
+import { RootedRelationGraphPanel }                                                                                                                                                                from "./dock/RootedRelationGraphPanel";
 import { PanelDisposers }                                                                                                                                                                          from "./dock/panelDisposers";
 import type { DiagramData, DiagramNodeData }                                                                                                                                                       from "@jimka/typescript-ui/component/diagram";
 import { PropertiesPanel, relationTypeLabel }                                                                                                                                                      from "./properties/PropertiesPanel";
@@ -139,6 +139,27 @@ function elideName(name: string): string {
 
     // Trailing space before the ellipsis reads as a typo, so shed it.
     return `${name.slice(0, MAX_STATUS_NAME_CHARS - 1).trimEnd()}…`;
+}
+
+/** The optional hook a diagram-bearing panel exposes so its tab can wait for placement. */
+interface LayoutSettlingPanel {
+    whenLaidOut(): Promise<void>;
+}
+
+/**
+ * Hold a lazy tab's spinner until the panel's diagram has placed its nodes, so
+ * no tab is ever revealed showing an unplaced graph. The method is probed
+ * optionally: the non-diagram panels `openAsyncPanel` builds do not have it and
+ * resolve at once.
+ *
+ * @param content - The freshly built panel.
+ *
+ * @returns A promise resolving once the panel's first diagram layout settled.
+ */
+function awaitDiagramLayout(content: Component): Promise<void> {
+    const panel = content as unknown as Partial<LayoutSettlingPanel>;
+
+    return panel.whenLaidOut?.() ?? Promise.resolve();
 }
 
 /** A focusable section of the Queries view — the Saved or the Recent list. */
@@ -1789,7 +1810,6 @@ export class SqlAdminController {
                     name        : nd.name,
                     kind        : nd.kind,
                 }),
-                undefined,
                 (nd, event) => this.diagramContextMenu({
                     connectionId: ref.connectionId,
                     database    : ref.database,
@@ -1804,8 +1824,9 @@ export class SqlAdminController {
     /**
      * Open a relation-rooted dependency graph in the Dock (deduped by panel
      * id): the relation as the emphasized root plus its connected dependency
-     * component (both directions, unbounded depth) from the whole schema's
-     * dependency graph. Node activation is kind-aware via openReferencedTable.
+     * component within the direction/depth the panel's own controls choose
+     * (seeded at Both/1) from the whole schema's dependency graph. Node
+     * activation is kind-aware via openReferencedTable.
      *
      * @param ref - The relation to root at (kind table/view/matview; name set).
      * @param _node - The relation's navigator node; accepted for call-site
@@ -1839,12 +1860,12 @@ export class SqlAdminController {
                 glyph: KIND_GLYPH[ref.kind],
                 data : { schema: ref.schema!, name: ref.name!, kind: ref.kind },
             };
-            const data = rootedDiagram(full, root, "both", Number.POSITIVE_INFINITY);
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: dependencies`);
 
-            return RelationGraphPanel(
-                data,
+            return RootedRelationGraphPanel(
+                full,
+                root,
                 nd => this.openReferencedTable({
                     connectionId: ref.connectionId,
                     database    : ref.database,
@@ -1852,7 +1873,6 @@ export class SqlAdminController {
                     name        : nd.name,
                     kind        : nd.kind,
                 }),
-                root.id,
                 (nd, event) => this.diagramContextMenu({
                     connectionId: ref.connectionId,
                     database    : ref.database,
@@ -1905,7 +1925,6 @@ export class SqlAdminController {
                     name        : nd.name,
                     kind        : nd.kind,
                 }),
-                undefined,
                 (nd, event) => this.diagramContextMenu({
                     connectionId: ref.connectionId,
                     database    : ref.database,
@@ -1920,8 +1939,9 @@ export class SqlAdminController {
     /**
      * Open a relation-rooted inheritance/partitioning graph in the Dock
      * (deduped by panel id): the relation as the emphasized root plus its
-     * connected inheritance component (both directions, unbounded depth) from
-     * the whole schema's inheritance graph. Node activation is kind-aware via
+     * connected inheritance component within the direction/depth the panel's
+     * own controls choose (seeded at Both/1) from the whole schema's
+     * inheritance graph. Node activation is kind-aware via
      * openReferencedTable.
      *
      * @param ref - The relation to root at (kind table; name set).
@@ -1956,12 +1976,12 @@ export class SqlAdminController {
                 glyph: KIND_GLYPH[ref.kind],
                 data : { schema: ref.schema!, name: ref.name!, kind: ref.kind },
             };
-            const data = rootedDiagram(full, root, "both", Number.POSITIVE_INFINITY);
 
             this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: inheritance`);
 
-            return RelationGraphPanel(
-                data,
+            return RootedRelationGraphPanel(
+                full,
+                root,
                 nd => this.openReferencedTable({
                     connectionId: ref.connectionId,
                     database    : ref.database,
@@ -1969,7 +1989,6 @@ export class SqlAdminController {
                     name        : nd.name,
                     kind        : nd.kind,
                 }),
-                root.id,
                 (nd, event) => this.diagramContextMenu({
                     connectionId: ref.connectionId,
                     database    : ref.database,
@@ -2952,6 +2971,8 @@ export class SqlAdminController {
             content: async () => {
                 try {
                     const content = await build();
+
+                    await awaitDiagramLayout(content);
 
                     if (token) {
                         this._panelDisposers.settle(spec.id, token, content);

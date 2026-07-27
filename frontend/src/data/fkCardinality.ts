@@ -5,10 +5,17 @@
 // diagram barrel keep this node-vitest-testable, the same purity discipline
 // as buildSchemaDiagram.ts:16-21 (never import UI-bundle runtime code, which
 // runs DOM-touching module-level side effects on import).
+//
+// A folded edge (buildSchemaDiagram's collapseParallelFkEdges) carries several
+// foreign keys in FkEdgeData.fks. This module combines their individual
+// verdicts onto one line per three rules: the start marker claims unique or
+// mandatory only when every key agrees; the coverage warning fires when any
+// key lacks an index; the referential-action label shows only when every key
+// produces the same text.
 
 import type { DiagramData, DiagramEdgeMarker } from "@jimka/typescript-ui/component/diagram";
 import type { ColumnMeta, TableStructure } from "../contract";
-import type { FkEdgeData } from "./buildSchemaDiagram";
+import type { FkDetail, FkEdgeData } from "./buildSchemaDiagram";
 
 // Themed warning stroke for an uncovered FK edge, applied by applyCoverageStyle.
 // Reuses the library's notification-warning border var (amber/orange by
@@ -237,11 +244,34 @@ function cardinalityStartMarker(unique: boolean, mandatory: boolean): DiagramEdg
 }
 
 /**
- * Bakes cardinality `style` onto each FK edge and sets `uncovered` on its
- * {@link FkEdgeData}. `structures`/`columns` are positionally paired with
- * `tables` (the same order `buildSchemaGraphData` fetched them in). An edge
- * whose source table cannot be found in the maps is left without cardinality
- * style rather than throwing — a defensive fallback, not an expected path.
+ * The folded edge's referential-action label: the shared label when every
+ * folded key produces the same text (including every key sharing "no label"),
+ * `undefined` otherwise — one label cannot describe two different actions.
+ *
+ * @param fks - Every foreign key folded onto the edge.
+ * @returns The shared label, or `undefined` when the keys disagree.
+ */
+function agreedReferentialActionLabel(fks: FkDetail[]): string | undefined {
+    const labels = new Set(fks.map(fk => referentialActionLabel(fk.onUpdate, fk.onDelete)));
+
+    return labels.size === 1 ? [...labels][0] : undefined;
+}
+
+/**
+ * Bakes cardinality `style` onto each FK edge and sets `uncovered` on each of
+ * its {@link FkEdgeData.fks}. `structures`/`columns` are positionally paired
+ * with `tables` (the same order `buildSchemaGraphData` fetched them in). An
+ * edge whose source table cannot be found in the maps is left without
+ * cardinality style rather than throwing — a defensive fallback, not an
+ * expected path.
+ *
+ * A folded edge (more than one key in `fks`) combines its keys' own verdicts
+ * rather than picking one: the start marker claims **unique** or **mandatory**
+ * only when every key agrees; the referential-action label shows only when
+ * every key produces the same text; each key's own coverage verdict is kept on
+ * its `FkDetail.uncovered`, so a caller wanting "is any key uncovered" (e.g.
+ * {@link applyCoverageStyle}) asks with `fks.some(...)` rather than a second,
+ * edge-level flag that could drift from the per-key answers.
  *
  * @param data - The assembled schema `DiagramData` (from `buildSchemaDiagram`).
  * @param tables - The schema's table names, positionally paired with `structures`/`columns`.
@@ -266,15 +296,20 @@ export function annotateFkCardinality(
             return edge;
         }
 
-        const fkData    = edge.data as FkEdgeData;
-        const unique    = isFkUnique(fkData.columns, structure);
-        const mandatory = isFkMandatory(fkData.columns, tableColumns);
-        const covered   = isFkCovered(fkData.columns, structure);
-        const label     = referentialActionLabel(fkData.onUpdate, fkData.onDelete);
+        const fkData = edge.data as FkEdgeData;
+
+        const fks = fkData.fks.map((fk): FkDetail => ({
+            ...fk,
+            uncovered: !isFkCovered(fk.columns, structure),
+        }));
+
+        const unique    = fkData.fks.every(fk => isFkUnique(fk.columns, structure));
+        const mandatory = fkData.fks.every(fk => isFkMandatory(fk.columns, tableColumns));
+        const label     = agreedReferentialActionLabel(fkData.fks);
 
         return {
             ...edge,
-            data: { ...fkData, uncovered: !covered } satisfies FkEdgeData,
+            data: { fks } satisfies FkEdgeData,
             style: {
                 ...edge.style,
                 startMarker: cardinalityStartMarker(unique, mandatory),
@@ -300,7 +335,7 @@ export function applyCoverageStyle(data: DiagramData, show: boolean): DiagramDat
     const edges = data.edges.map((edge) => {
         const fkData = edge.data as FkEdgeData | undefined;
 
-        if (show && fkData?.uncovered) {
+        if (show && fkData?.fks?.some(fk => fk.uncovered) === true) {
             return { ...edge, style: { ...edge.style, stroke: COVERAGE_WARNING_STROKE } };
         }
 

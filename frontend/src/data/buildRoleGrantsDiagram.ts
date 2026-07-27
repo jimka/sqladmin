@@ -8,7 +8,10 @@ import type { RolePrivilege } from "../contract";
 
 // Left-to-right layered layout, matching the schema/membership graphs' layout
 // even though a depth-1 star has no real hierarchy to speak of.
-const LAYOUT_OPTIONS: Record<string, string> = { "elk.algorithm": "layered", "elk.direction": "RIGHT" };
+const LAYOUT_OPTIONS: Record<string, string> = {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+};
 
 // The registered glyph names for the role and table nodes. Deliberately
 // inline literals, not imported from `../roles/RolesTree` / `../navigator/

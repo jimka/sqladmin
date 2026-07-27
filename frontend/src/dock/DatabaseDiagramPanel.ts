@@ -3,60 +3,53 @@
 // database-scale table graph is an unreadable hairball on its own, so this
 // panel offers two modes: Overview (default) — one node per schema, edges
 // labelled with the cross-schema FK count, the legible entry point — and
-// Tables — the full cross-schema table graph, narrowed by the same
-// rooted/direction/depth/prune traversal RelationDiagramPanel uses, then
-// grouped into one compound container box per schema via groupBySchema.
-// Double-clicking a schema node in Overview drills into Tables mode filtered
-// to that schema; double-clicking a leaf in Tables mode opens that table
-// (using *that leaf's own* schema, read off its node data, since it varies
-// across the diagram); double-clicking a container is a no-op.
+// Tables — the full cross-schema table graph, narrowed by the shell's
+// selectable-root/direction/depth/prune traversal, then grouped into one
+// compound container box per schema via groupBySchema. Double-clicking a
+// schema node in Overview drills into Tables mode filtered to that schema;
+// double-clicking a leaf in Tables mode opens that table (using *that leaf's
+// own* schema, read off its node data, since it varies across the diagram);
+// double-clicking a container is a no-op.
 //
-// Class-first (see ../../COMPONENT_CONVENTIONS.md): extends Panel directly,
+// Overview mode is not modelled as "root = null": in Overview the drawn graph
+// is the schema overview, not the rooted table graph at all, so this panel
+// calls the shell's setRootingDisplayed(false) to hide the `Root table` row,
+// the traversal block, and the legend together, independently of the root
+// value the shell still tracks for when Tables mode returns.
+//
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): extends DiagramShell (see
+// ./diagramShell.ts) with a selectable root for its WEST Mode + `Root table` +
+// (Tables-mode-only) direction/depth/prune controls + per-schema legend,
 // following RelationDiagramPanel's pattern. Every former factory-closure `let`
 // becomes a private instance field; the closure helpers (`applyFilter`,
 // `rebuildLegend`, `rebuildBase`, `focusSchema`, `isHiddenLeaf`) become
 // arrow-function fields (consistency with the set — `applyFilter` is passed by
-// reference to `schemaLegendRow`, so it must be one). `modeControl`,
-// `rootControl`, `tablesControls`, and `legend` are fields (not just locals)
-// because `focusSchema` and the mode listener mutate them after construction.
+// reference to `schemaLegendRow`, so it must be one). `modeControl` is a field
+// (not just a local) because `focusSchema` and the mode listener mutate it
+// after construction; the root selector itself is the shell's.
 
-import { Component, Panel, callable } from "@jimka/typescript-ui/core";
-import { Border, HBox, VBox }       from "@jimka/typescript-ui/layout";
-import { Placement }                from "@jimka/typescript-ui/primitive";
+import { Component, callable } from "@jimka/typescript-ui/core";
+import { HBox }                     from "@jimka/typescript-ui/layout";
 import { Checkbox, ComboBox, Text } from "@jimka/typescript-ui/component/input";
-import { DiagramView }              from "@jimka/typescript-ui/component/diagram";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import { buildDatabaseDiagram }     from "../data/buildDatabaseDiagram";
 import type { SchemaTables, TableNodeData } from "../data/buildDatabaseDiagram";
 import { groupBySchema }            from "../data/groupBySchema";
 import { buildSchemaOverviewDiagram } from "../data/schemaOverviewDiagram";
-import { rootedDiagram, applyHide, subgraph } from "../data/relationDiagram";
-import type { TraversalDirection }  from "../data/relationDiagram";
-import { elkWorkerFactory }         from "./elkWorkerFactory";
-
-// One hop keeps the first rooted cut readable, mirroring RelationDiagramPanel.
-const DEFAULT_DEPTH = 1;
-
-// Depth choices offered in the control; capped low for the same reason
-// RelationDiagramPanel caps it — deeper walks quickly pull in most of the
-// database and defeat the point of a rooted view.
-const DEPTH_CHOICES = ["1", "2", "3"];
-
-// Fixed width of the WEST side panel, matching RelationDiagramPanel's legend.
-const LEGEND_WIDTH = 220;
-
-// The root ComboBox's sentinel item: no root selected, so Tables mode shows
-// the full (grouped) graph rather than a rooted neighbourhood.
-const ROOT_NONE = "(none)";
+import { applyHide, subgraph, rootedBase } from "../data/relationDiagram";
+import { attachFkEdgeTooltip }      from "./edgeTooltip";
+import { DiagramShell, labelledRow } from "./diagramShell";
+import type { DiagramShellConfig } from "./diagramShell";
+import { JunctionDiagramView }      from "./JunctionDiagramView";
 
 type DiagramMode = "overview" | "tables";
 
 /**
- * The database diagram panel: a Border layout with a WEST mode toggle +
- * (Tables-mode-only) root/direction/depth/prune controls + per-schema legend,
- * and a CENTER DiagramView.
+ * The database diagram panel: the shell's WEST Mode toggle + `Root table` +
+ * (Tables-mode-only) direction/depth/prune controls + per-schema legend, over
+ * a CENTER DiagramView.
  */
-class DatabaseDiagramPanel extends Panel {
+class DatabaseDiagramPanel extends DiagramShell {
     // Assembled once from the fetched schemas; both modes derive from these
     // without re-fetching. `full` is the flat, ungrouped table graph the
     // rooted/prune traversal runs on (grouping happens last, only for display).
@@ -70,18 +63,10 @@ class DatabaseDiagramPanel extends Panel {
     // (per-schema hide, optionally pruned) view over it is what Tables mode
     // actually shows, after grouping by schema. `base` is seeded post-`super()`.
     private mode: DiagramMode = "overview";
-    private rootId: string | null = null;
-    private direction: TraversalDirection = "both";
-    private depth = DEFAULT_DEPTH;
-    private prune = false;
     private readonly hiddenSchemas = new Set<string>();
     private base!: DiagramData;
 
-    private readonly view:           DiagramView;
-    private readonly modeControl:    ComboBox;
-    private readonly rootControl:    ComboBox;
-    private readonly tablesControls: Panel;
-    private readonly legend:         Panel;
+    private readonly modeControl: ComboBox;
 
     /**
      * @param schemas - Every schema's tables + structures (from buildDatabaseGraphData).
@@ -98,31 +83,7 @@ class DatabaseDiagramPanel extends Panel {
         const overviewGraph = buildSchemaOverviewDiagram(schemas);
         const schemaNames   = schemas.map(s => s.schema);
 
-        const view = DiagramView({ data: overviewGraph, elkWorkerFactory });
-
-        const rootControl = ComboBox({ items: [ROOT_NONE, ...full.nodes.map(n => n.id)], value: ROOT_NONE });
-
-        const directionControl = ComboBox({
-            items: [
-                { key: "downstream", label: "Downstream" },
-                { key: "upstream",   label: "Upstream" },
-                { key: "both",       label: "Both" },
-            ],
-            value: "both",
-        });
-
-        const depthControl = ComboBox({ items: DEPTH_CHOICES, value: String(DEFAULT_DEPTH) });
-        const pruneControl = Checkbox({ value: false });
-
-        const tablesControls = Panel({
-            layoutManager: new VBox({ spacing: 4 }),
-            components: [
-                labelledRow("Root table", rootControl),
-                labelledRow("Direction", directionControl),
-                labelledRow("Depth", depthControl),
-                new Component({ layoutManager: new HBox({ spacing: 4 }), components: [pruneControl, new Text("Hide with prune")] }),
-            ],
-        });
+        const view = JunctionDiagramView({ data: overviewGraph });
 
         const modeControl = ComboBox({
             items: [
@@ -132,50 +93,32 @@ class DatabaseDiagramPanel extends Panel {
             value: "overview",
         });
 
-        const legend = Panel({ layoutManager: new VBox({ spacing: 2 }), autoScroll: "auto" });
+        const config: DiagramShellConfig = {
+            view,
+            full,
+            rootCaption   : "Root table",
+            headerControls: [labelledRow("Mode", modeControl)],
+        };
 
-        // Overview is the default mode: the Tables-only controls + legend start
-        // hidden until the user switches (or drills in via focusSchema).
-        tablesControls.setDisplayed(false);
-        legend.setDisplayed(false);
-
-        const controls = Panel({
-            layoutManager: new VBox({ spacing: 4 }),
-            components: [labelledRow("Mode", modeControl), tablesControls],
-        });
-
-        const west = Panel({
-            layoutManager: new Border(),
-            preferredSize: { width: LEGEND_WIDTH, height: 0 },
-            minSize      : { width: LEGEND_WIDTH, height: 0 },
-            components: [
-                { component: controls, constraints: { placement: Placement.NORTH } },
-                { component: legend,   constraints: { placement: Placement.CENTER } },
-            ],
-        });
-
-        super({
-            layoutManager: new Border(),
-            components: [
-                { component: west, constraints: { placement: Placement.WEST } },
-                { component: view, constraints: { placement: Placement.CENTER } },
-            ],
-        });
+        super(config);
 
         this.full          = full;
         this.overviewGraph = overviewGraph;
         this.schemaNames   = schemaNames;
         this.base           = full;
-        this.view           = view;
         this.modeControl    = modeControl;
-        this.rootControl    = rootControl;
-        this.tablesControls = tablesControls;
-        this.legend         = legend;
+
+        // Overview is the default mode: this panel is not showing a rooted
+        // graph at all, so the selector row, the traversal block, and the
+        // legend all go.
+        this.setRootingDisplayed(false);
 
         // Wire listeners after super() (this now available). Moved from the
         // construction-time `listeners:` bag to post-super() `.on()` calls so
         // `this` is initialized when a change fires.
-        view.on("activate", (node: DiagramNodeData) => {
+        attachFkEdgeTooltip(this.view);
+
+        this.view.on("activate", (node: DiagramNodeData) => {
             if (this.mode === "overview") {
                 this.focusSchema(node.id); // the overview node's id is the bare schema name
                 return;
@@ -192,7 +135,7 @@ class DatabaseDiagramPanel extends Panel {
             }
         });
 
-        view.on("contextmenu", (node: DiagramNodeData, event: MouseEvent) => {
+        this.view.on("contextmenu", (node: DiagramNodeData, event: MouseEvent) => {
             if (this.mode === "overview" || (node.children?.length ?? 0) > 0) {
                 return;
             }
@@ -204,24 +147,26 @@ class DatabaseDiagramPanel extends Panel {
             }
         });
 
-        rootControl.on("change", (v: string) => { this.rootId = v === ROOT_NONE ? null : v; this.rebuildBase(); });
-        directionControl.on("change", (v: string) => { this.direction = v as TraversalDirection; this.rebuildBase(); });
-        depthControl.on("change", (v: string) => { this.depth = Number(v); this.rebuildBase(); });
-        pruneControl.on("change", (v: boolean) => { this.prune = v; this.applyFilter(); });
         modeControl.on("change", (v: string) => {
             this.mode = v as DiagramMode;
 
             if (this.mode === "overview") {
-                this.tablesControls.setDisplayed(false);
-                this.legend.setDisplayed(false);
+                this.setRootingDisplayed(false);
                 this.view.setData(this.overviewGraph);
             } else {
-                this.tablesControls.setDisplayed(true);
-                this.legend.setDisplayed(true);
+                this.setRootingDisplayed(true);
                 this.rebuildBase();
                 this.rebuildLegend();
             }
         });
+    }
+
+    protected rootingChanged(): void {
+        this.rebuildBase();
+    }
+
+    protected pruneChanged(): void {
+        this.applyFilter();
     }
 
     // True when `n`'s schema (read off its leaf data) is currently hidden.
@@ -238,8 +183,10 @@ class DatabaseDiagramPanel extends Panel {
             return;
         }
 
-        const filtered = this.rootId !== null
-            ? applyHide(this.base, this.rootId, new Set(this.base.nodes.filter(this.isHiddenLeaf).map(n => n.id)), this.prune, this.direction)
+        const root = this.getRoot();
+
+        const filtered = root !== null
+            ? applyHide(this.base, root, new Set(this.base.nodes.filter(this.isHiddenLeaf).map(n => n.id)), this.isPrune(), this.getDirection())
             : subgraph(this.base, new Set(this.base.nodes.filter(n => !this.isHiddenLeaf(n)).map(n => n.id)));
 
         this.view.setData(groupBySchema(filtered));
@@ -256,12 +203,7 @@ class DatabaseDiagramPanel extends Panel {
 
     // Re-root (or un-root) on a root/direction/depth change: fresh base.
     private rebuildBase = (): void => {
-        if (this.rootId === null) {
-            this.base = this.full;
-        } else {
-            const rootNode = this.full.nodes.find(n => n.id === this.rootId);
-            this.base = rootNode ? rootedDiagram(this.full, rootNode, this.direction, this.depth) : this.full;
-        }
+        this.base = rootedBase(this.full, this.getRoot(), this.getDirection(), this.getDepth());
 
         this.applyFilter();
     };
@@ -272,7 +214,6 @@ class DatabaseDiagramPanel extends Panel {
     // consistency with the rest of this helper set.
     private focusSchema = (schema: string): void => {
         this.mode = "tables";
-        this.rootId = null;
         this.hiddenSchemas.clear();
 
         for (const s of this.schemaNames) {
@@ -282,26 +223,13 @@ class DatabaseDiagramPanel extends Panel {
         }
 
         this.modeControl.setValue("tables");
-        this.rootControl.setValue(ROOT_NONE);
-        this.tablesControls.setDisplayed(true);
-        this.legend.setDisplayed(true);
-        this.rebuildBase();
+        this.setRootingDisplayed(true);
         this.rebuildLegend();
-    };
-}
 
-/**
- * A caption stacked above its control, matching RelationDiagramPanel's layout.
- *
- * @param caption - The control's label.
- * @param control - The control component.
- * @returns A VBox with the caption above the control.
- */
-function labelledRow(caption: string, control: Component): Component {
-    return new Component({
-        layoutManager: new VBox({ spacing: 2 }),
-        components   : [new Text(caption), control],
-    });
+        // Last: setRoot resets the selector to (none) and re-derives through
+        // rootingChanged, so mode and hiddenSchemas must already be set.
+        this.setRoot(null);
+    };
 }
 
 /**
