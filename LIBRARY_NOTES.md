@@ -8,6 +8,105 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎 Closing a table tab strands ~2288 per-instance stylesheet rules (0.4.0)
+
+Opening and closing one 20-column table tab (`wide.cols_20`, 42 rendered rows)
+leaves **2288 rules** behind on the shared sheet, every cycle, for ever. Four
+open/close cycles measured in the browser against 0.4.0:
+
+| after | rules | DOM nodes | components |
+|---|---|---|---|
+| fresh page load | 436 | 491 | 334 |
+| baseline (tabs closed) | 6771 | 618 | 426 |
+| cycle 1 | 9059 | 618 | 426 |
+| cycle 2 | 11347 | 618 | 426 |
+| cycle 3 | 13635 | 618 | 426 |
+| cycle 4 | 15923 | 618 | 426 |
+
+DOM nodes and live components return to **exactly** their baseline each time, so
+component teardown itself is correct — it is only the per-instance rules that
+survive. Growth is perfectly linear at +2288/cycle. Characterised at the end of
+that run: of 15,923 rules, 15,862 are `#uuid`-scoped per-instance rules and
+**15,385 of those are orphaned** — their element id is no longer in the
+document. 96.6% of the sheet is dead.
+
+**The 0.4.0 row-pool fix is present and correct — it is simply never reached.**
+`VirtualRowView.destructor()` does dispose every pooled row and the scroller's
+overlay scrollbars, exactly as the changelog describes, and
+`Component.destructor()` recurses into `_components`. The chain breaks one level
+up: **`Dock` never disposes the content component of a tab it closes.** Closing
+a tab removes the element and drops the tab, but nothing calls `dispose()` on
+what the consumer handed it, so no destructor in that subtree ever runs.
+
+SQLAdmin only escapes this where it opts in. `SqlAdminController.openAsyncPanel`
+registers a panel with its own `PanelDisposers` registry **only** when the
+caller passes `disposeOnClose: true` — set at the nine diagram sites, which own
+ELK workers that must be terminated, and *not* on `openTable` (line 448) or the
+structure panel (line 508). Those two are the app's highest-traffic tabs, and
+they are the ones measured above.
+
+So the app has a workaround available today (pass the flag at the remaining
+sites), but the durable fix is library-side: a consumer that closes a tab
+should not silently accumulate an unbounded stylesheet, and the evidence that
+this is a trap rather than a contract is that this app built a whole disposal
+registry to work around it and still missed its two busiest panels. Owning
+teardown in `Dock` would let most of `PanelDisposers` go away — its remaining
+job would be the genuinely app-specific part (ELK worker termination, and the
+in-flight-build token that disposes a panel whose tab closed mid-fetch).
+
+Note the changelog's quantified claim — a 45-column table retaining 104 rules
+per cycle where it used to retain 5512 — is measured on a directly-disposed
+view, not through a Dock tab close, which is why it does not describe what a
+consumer sees.
+
+Why it matters beyond memory: style-recalc cost grows with the size of the
+sheet, so every later frame in a session gets dearer. This is the mechanism
+behind the app-level symptom — *"performance drops after having opened and
+closed a number of tables"* — and it compounds the forced-reflow entry below,
+since each forced reflow re-runs style resolution against the bloated sheet.
+
+Repro: open a table tab, close it, and read
+`[...document.styleSheets].reduce((n, s) => n + s.cssRules.length, 0)` before
+and after. No app change can address this; it needs a library fix.
+
+---
+
+## 🐞🔎 Horizontal scrolling a wide grid layout-thrashes on `getBorderWidths` (0.4.0)
+
+Scrolling `wide.cols_60` (60 columns, 6014px of content in a 1206px viewport,
+54 rendered rows) horizontally from end to end at 1500×800 took **50.6 s for
+150 frames — 3.0 fps** — with a **5030 ms** longest main-thread block and 20
+blocks over 100 ms. A shorter 20-frame gesture took 30.1 s (1507 ms/frame).
+
+Chrome's ForcedReflow insight spans essentially the whole trace and attributes
+it to the library, not the app:
+
+- `getBorderWidths` @ `@jimka/typescript-ui/dist/lib/DOM-*.js` — 405 ms
+- `getScrollLeft` @ same — 146 ms
+- the measurement harness itself — 3 ms
+
+Two controls locate the cost. At 8px/frame, both an in-place jitter and a steady
+advance that *does* cross column boundaries run at ~62 fps with no gap over
+50 ms — so crossing a boundary is not the trigger. And the cost does not scale
+with column count: `cols_20` cost 1286 ms/frame against `cols_60`'s
+1507–2102 ms/frame, despite a third of the columns. What it scales with is the
+number of **cells entering the column window per frame** (rendered rows ×
+columns crossed).
+
+The plausible mechanism is 0.4.0's own content-box sweep: child placement now
+reads the component's border through `getContentBounds()` /
+`getBorderWidths()`, and column virtualization builds and recycles cells during
+a slide, so each cell built forces a synchronous layout. Correctness fix and
+virtualization are individually right and multiply badly together.
+
+Measured on a Vite **dev** build, which inflates the JS around the reflow; the
+forced reflow itself is browser layout cost and will not vanish in production,
+though the absolute numbers will improve. Worth re-measuring against a prod
+bundle before sizing the fix — note `vite preview` needs its own `preview.proxy`
+for `/api`, since `server.proxy` does not apply to it.
+
+---
+
 ## 🐞🩹🔎 A numeric `fontSize` passed to `Text`'s constructor is silently ignored
 
 `new Text("v0.1.0", { fontSize: 10 })` renders at the theme default (14px), not
