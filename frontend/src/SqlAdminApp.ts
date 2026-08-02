@@ -10,6 +10,7 @@ import { SqlAdminController }   from "./SqlAdminController";
 import { SqlAdminShell }        from "./shell/SqlAdminShell";
 import { whoami, setCsrfToken } from "./data/api";
 import { showLoginDialog }      from "./shell/LoginDialog";
+import { APP_FAVICON }          from "./appIdentity";
 
 // An async IIFE (not top-level await) so the boot gate works regardless of the
 // bundler's module target. A boot failure (e.g. whoami rejecting for a network
@@ -18,7 +19,7 @@ import { showLoginDialog }      from "./shell/LoginDialog";
     // Initialise the Body FIRST (empty) so the UI runtime — theme, layout, and
     // the overlay/layer manager a Dialog mounts into — is up before the login
     // dialog is shown. Without this the dialog is created but never renders.
-    Body.init({ layoutManager: Fit() });
+    Body.init({ layoutManager: Fit(), favicon: APP_FAVICON });
 
     const session = (await whoami()) ?? (await showLoginDialog());
 
