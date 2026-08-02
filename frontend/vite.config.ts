@@ -1,10 +1,15 @@
 import { defineConfig } from "vite";
 import pkg from "./package.json";
 
-// The library is consumed as a symlinked local dependency (file:../../typescript-ui),
-// so a few dev-server accommodations are needed:
-//   - fs.strict off: the linked package lives outside this project root.
-//   - dedupe + optimizeDeps.exclude: avoid double-bundling the linked ESM lib.
+// The library is consumed as a published package from the npm registry. The
+// dev-server accommodations below still earn their place:
+//   - fs.strict off: testing an unreleased library build means replacing
+//     frontend/node_modules/@jimka/typescript-ui with a symlink to the sibling
+//     ../typescript-ui checkout, which vite resolves to a real path outside
+//     this project root and will not serve under the default strict rule.
+//   - dedupe + optimizeDeps.exclude: keep one copy of the linked ESM lib, and
+//     keep vite's dep scanner out of it (which is what makes the explicit
+//     elkjs include below necessary).
 //   - /api proxy: the frontend issues relative /api/... calls; forward them to
 //     the FastAPI backend so requests stay same-origin (no CORS in dev).
 export default defineConfig({
@@ -42,10 +47,10 @@ export default defineConfig({
         // undefined, so `new ELK()` throws inside the library and the diagram
         // silently renders empty (the failure is swallowed by its layout catch).
         // Pre-bundling elkjs explicitly restores a proper default export. This only
-        // bites when the library is an installed package (a real node_modules copy,
-        // as the published ^0.1.0 resolves); with the file: symlink vite scanned the
-        // linked source and pre-bundled elkjs on its own. Production builds are
-        // unaffected — Rollup handles the CJS interop at build time.
+        // bites when the library is an installed package (a real node_modules copy —
+        // the standing arrangement); under a hand-made symlink to the local checkout
+        // vite scans the linked source and pre-bundles elkjs on its own. Production
+        // builds are unaffected — Rollup handles the CJS interop at build time.
         include: ["elkjs/lib/elk.bundled.js"],
         exclude: ["@jimka/typescript-ui"],
     },
