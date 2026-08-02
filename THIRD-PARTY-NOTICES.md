@@ -246,7 +246,7 @@ already covered in full in Section 1 are included here too, for completeness.
 | @codemirror/state | 6.7.1 | MIT |
 | @codemirror/view | 6.43.6 | MIT |
 | @fontsource-variable/manrope | 5.3.0 | OFL-1.1 |
-| @jimka/typescript-ui | 0.1.0 | PolyForm-Noncommercial-1.0.0 |
+| @jimka/typescript-ui | 0.4.0 | PolyForm-Noncommercial-1.0.0 |
 | @lexical/clipboard | 0.46.0 | MIT |
 | @lexical/code | 0.46.0 | MIT |
 | @lexical/code-core | 0.46.0 | MIT |
