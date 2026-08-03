@@ -23,12 +23,28 @@ open/close cycles measured in the browser against 0.4.0:
 | cycle 3 | 13635 | 618 | 426 |
 | cycle 4 | 15923 | 618 | 426 |
 
-DOM nodes and live components return to **exactly** their baseline each time, so
-component teardown itself is correct — it is only the per-instance rules that
-survive. Growth is perfectly linear at +2288/cycle. Characterised at the end of
-that run: of 15,923 rules, 15,862 are `#uuid`-scoped per-instance rules and
-**15,385 of those are orphaned** — their element id is no longer in the
-document. 96.6% of the sheet is dead.
+Growth is perfectly linear at +2288/cycle. Characterised at the end of that run:
+of 15,923 rules, 15,862 are `#uuid`-scoped per-instance rules and **15,385 of
+those are orphaned** — their element id is no longer in the document. 96.6% of
+the sheet is dead.
+
+The DOM-node and component columns returning to baseline reads like proof that
+teardown is fine and only the rules survive. **It is not, and that reading was
+wrong.** Those columns count `.ts-ui-component` *elements*, which disappear when
+an ancestor is removed whether or not any destructor ran — the number never
+measured JS-side teardown at all. The components are in fact **retained**: the
+id-keyed maps in the library's `core/Event.ts` hold a `CompFunc` of
+`{ component, listeners }`, a strong `Component` reference from a module-level
+Map, which is a GC root. So a component that ever registered a listener stays
+permanently reachable, and this is a memory leak as well as a stylesheet one.
+
+That has a second consequence worth spelling out, because it explains an
+otherwise puzzling observation: the framework's `_componentFinalizer` — the GC
+backstop that would have released handles and disposed selectors for a component
+nobody explicitly destroyed — **can never fire while a listener registration
+holds the component alive**. The leak disarms its own safety net. Fixing the
+listener maps (library plan `component-purges-event-listeners`) is what restores
+that backstop.
 
 **The 0.4.0 row-pool fix is present and correct — it is simply never reached.**
 `VirtualRowView.destructor()` does dispose every pooled row and the scroller's
