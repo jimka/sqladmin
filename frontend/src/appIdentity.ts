@@ -18,28 +18,32 @@ export const APP_VERSION: string = __APP_VERSION__;
 export const APP_TAGLINE = "A browser-based PostgreSQL administration & query tool.";
 
 /**
- * The app's mark: a database drum on a rounded plate, the tab icon that says
- * SQLAdmin rather than the library it is built on.
+ * The app's mark: a database drum filling its whole viewBox, the tab icon that
+ * says SQLAdmin rather than the library it is built on.
  *
  * Geometry, on a 32-unit viewBox so every dimension is a whole number and each
- * unit is half a pixel in a 16px browser tab: the plate is the full 32×32 with
- * a 6-unit corner radius, and clips the drum so it inherits those rounded
- * corners. The drum spans x 6-26 — its top ellipse at `cy` 8, its body from
- * y 8 to y 24, its bottom ellipse at `cy` 24 — and two 2-unit plate-coloured
- * bands at y 13 and y 19 cut it into the three stacked platters that read as a
- * database at tab size.
+ * unit is half a pixel in a 16px browser tab: the drum is full-bleed, spanning
+ * the entire width at `rx` 16. Its top ellipse sits at `cy` 6 and its bottom at
+ * `cy` 26, both `ry` 4, so the silhouette runs from y 2 to y 30. Three 4-unit
+ * bands at y 6, 14 and 22 form the platters, and the two 4-unit gaps between
+ * them are left transparent rather than painted, so the browser's own tab
+ * colour separates the platters in either theme. Full-bleed because an inset
+ * mark loses most of its detail once a 32-unit drawing is downsampled to a
+ * 16px tab.
  *
  * Colours are fixed rather than read from the active theme, and the SVG carries
  * its own `prefers-color-scheme` rule so the mark suits light *and* dark
- * browser chrome. The dark pair `#505050` / `#78AAF0` is lifted from the
- * library's own mark, so SQLAdmin's icon and the framework's sit together.
+ * browser chrome. The dark `#78AAF0` is lifted from the library's own mark, so
+ * SQLAdmin's icon and the framework's sit together.
  *
- * Declared with single quotes because the string is full of double quotes.
+ * Declared with single quotes because the string is full of double quotes, and
+ * on one line because every newline and indent would be percent-encoded into
+ * the data URI that ships on every page load.
  *
  * Exported for the encoding round-trip test; {@link APP_FAVICON} is what the
  * app actually installs.
  */
-export const APP_MARK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><style>.plate{fill:#FFFFFF}.mark{fill:#000000}@media(prefers-color-scheme:dark){.plate{fill:#505050}.mark{fill:#78AAF0}}</style><clipPath id="plate"><rect width="32" height="32" rx="6"/></clipPath><g clip-path="url(#plate)"><rect class="plate" width="32" height="32"/><ellipse class="mark" cx="16" cy="8" rx="10" ry="4"/><rect class="mark" x="6" y="8" width="20" height="16"/><ellipse class="mark" cx="16" cy="24" rx="10" ry="4"/><rect class="plate" x="6" y="13" width="20" height="2"/><rect class="plate" x="6" y="19" width="20" height="2"/></g></svg>';
+export const APP_MARK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><style>.mark{fill:#000000}@media(prefers-color-scheme:dark){.mark{fill:#78AAF0}}</style><ellipse class="mark" cx="16" cy="6" rx="16" ry="4"/><rect class="mark" x="0" y="6" width="32" height="4"/><rect class="mark" x="0" y="14" width="32" height="4"/><rect class="mark" x="0" y="22" width="32" height="4"/><ellipse class="mark" cx="16" cy="26" rx="16" ry="4"/></svg>';
 
 /**
  * The app's mark as a ready-to-use `data:` URI, for `Body.init`'s `favicon`
@@ -48,7 +52,7 @@ export const APP_MARK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 
  *
  * Encoded with `encodeURIComponent` rather than a hand-written escape list.
  * Getting that list wrong fails silently: an unescaped `#` truncates the URI at
- * `url(#plate)`, dropping the clip path and rendering a blank tab icon with
- * nothing in the console.
+ * the first colour literal — `#000000` — dropping every element after it and
+ * rendering a blank tab icon with nothing in the console.
  */
 export const APP_FAVICON = `data:image/svg+xml,${encodeURIComponent(APP_MARK_SVG)}`;
