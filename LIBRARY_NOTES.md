@@ -147,6 +147,48 @@ timing interaction with this app's own now-partially-redundant `PanelDisposers`
 workaround (not yet deleted — that is `adopt-dock-owned-teardown`, still
 unimplemented). Not resolved here; needs its own investigation.
 
+**Re-measured against the local `table-toolbar-button-residual-leak` fix
+(`TabButton`/`TabCloseButton` disposal, symlinked, not yet released) — real,
+confirmed correct, and initially looked like it had made no difference. It had.**
+The first re-measurement after symlinking this fix showed the retained-rules
+count completely unchanged (~72–79/cycle). Deep tracing (temporary
+`console.log` instrumentation in `TabButton.destructor`, `TabBar.createBarEntry`
+and `TabBar.removeBarEntry`, rebuilt into the symlinked lib) initially seemed to
+show the real, visible tab's `TabButton` disposing with a **null** `_closeButton`
+— looking exactly like the bug this fix was supposed to close. It wasn't: Vite's
+dependency pre-bundler (`node_modules/.vite/deps`) was serving a stale
+in-memory-optimized snapshot of the library from *before* this fix's rebuild,
+even after `rm -rf node_modules/.vite` and a hard page reload — the running dev
+server process needed a full restart (`vite --force`) to actually pick up the
+new `dist/lib`. Deleting the cache directory alone is not sufficient once a dev
+server has been running across several `npm run build:lib` cycles in the same
+session; a symlinked-lib verification round should restart the dev server, not
+just clear its cache. This cost most of a session and is worth remembering
+(see the project's `sqladmin-consumes-built-dist-lib`/`verify` guidance — this
+is the sharper, previously-missing corollary).
+
+After a genuine restart, the disambiguated trace showed the fix working exactly
+as designed: the real tab's `TabButton.destructor()` runs with a non-null
+`_closeButton`, and all seven of its own rules (`TabButton` ×4,
+`TabCloseButton` ×3) are cleanly disposed. Re-running the four-cycle
+`wide.cols_20` measurement against the correctly-loaded build:
+
+| cycle | retained (cumulative) | retained (this cycle) |
+|---|---|---|
+| 1 | 86 | 86 (includes one-time warm-up cost) |
+| 2 | 152 | 66 |
+| 3 | 218 | 66 |
+| 4 | 284 | 66 |
+
+Steady-state retained-per-cycle dropped from **~72–73 to 66** — a real, if
+modest, further reduction consistent with eliminating the `Component`(4) +
+`TabCloseButton`(3) survivors from the earlier breakdown. The remaining
+**~66/cycle** is not this fix's concern — it lines up with the untouched
+`Text`(38) + `Panel`(20) + `Button`(6) = 64 of the same breakdown, still
+pointing at `TableWorkPanel`'s toolbar (or its `Tooltip.attach` calls) as a
+separate, still-open defect. Not resolved here; still needs its own
+investigation.
+
 ---
 
 ## 🐞🔎 Horizontal scrolling a wide grid layout-thrashes on `getBorderWidths` (0.4.0)
