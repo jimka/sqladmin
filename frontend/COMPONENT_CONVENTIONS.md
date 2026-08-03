@@ -99,13 +99,6 @@ ever invoked as `this.foo()` — never handed off by reference — may stay a
 plain method. When in doubt, prefer the arrow field: it's safe under both
 call styles, a plain method is only safe under one.
 
-The controller's own teardown registry sidesteps this hazard rather than
-relying on every panel to be safe under it: `PanelDisposers`
-(`src/dock/panelDisposers.ts`) stores the panel **object** and calls
-`panel.dispose()` itself, so registering a panel whose `dispose` is a plain
-prototype method — every library `Component`, including the diagram panels —
-cannot lose `this`.
-
 Stateless helpers that don't touch instance state at all (don't need to be
 methods) can stay ordinary module-level functions — see `save_` and
 `confirmDelete` in `TableWorkPanel.ts`, which take everything they need as
@@ -189,45 +182,43 @@ to a dispose-shape cleanup. `QueryPanel` (`src/dock/QueryPanel.ts`, ~700
 lines, ~25 interdependent closures) is the worked example.
 
 There, class-first still applies, but as a **composition wrapper**: a plain
-class that owns a `content` (`Container`/`Component`) field and a `dispose`
-field, instead of `extends`-ing a library base. The factory's body moves into
-the constructor **verbatim**, ending in two field assignments instead of a
-`return { content, dispose }`:
+class that owns a `content` (`Container`/`Component`) field alone, instead of
+`extends`-ing a library base. The factory's body moves into the constructor
+**verbatim**, ending in one field assignment instead of a `return { content,
+dispose }`:
 
 ```ts
 export class QueryPanel {
-    readonly content: Container;
-    readonly dispose: () => void;
+    readonly content: QueryPanelContent;
 
     constructor(options: QueryPanelOptions) {
         // ...the original factory body, unchanged...
         this.content = panel;
-        this.dispose = () => { /* ...original dispose closure... */ };
     }
 }
 ```
 
-The consumer constructs with `new` and mounts `instance.content`, calling
-`instance.dispose()` on teardown — the same call-site shape as `extends`
-classes get from section (d), just without `this` referring to the mountable
-component itself.
+The consumer constructs with `new` and mounts `instance.content`; closing its
+tab is enough — the Dock destroys `content` and every registered descendant
+beneath it (each closure-held view, editor, chart), so the wrapper needs no
+`dispose` of its own. The composition wrapper's closures stay ordinary local
+functions/`let`s inside the constructor — they are not hoisted to fields or
+methods, since composition only needs `content` as public surface.
 
-`dispose` must still be a `readonly` **arrow-function field**, not a method,
-for the same by-reference reason as section (c): a consumer that stores
-`panel.dispose` (e.g. in a disposer map, or in a slot object handed off
-elsewhere) needs it bound at read time. The composition wrapper's closures
-otherwise stay ordinary local functions/`let`s inside the constructor — they
-are not hoisted to fields or methods, since composition only needs `content`
-and `dispose` as public surface.
+A wrapper's cleanup only needs to be more than that when some part of its
+subtree is deliberately kept alive outside `content`'s child tree while
+hidden, so the ordinary destroy recursion cannot always reach it. That part
+gets a `protected destructor()` override on a small `Component` subclass —
+`QueryPanelContent` (`src/dock/QueryPanel.ts`) is the worked example: it
+disposes the result `TabPanel` explicitly, because `hideResultPane` detaches
+that pane from the Split whenever no result is shown, and `dispose()` is
+documented idempotent, so a second pass while it's attached is harmless.
 
 This is a **fallback from the preferred `extends` form (section (d))**, not
 an equal alternative — reach for `extends` first, and use composition only
-when the super-cascade hoist genuinely doesn't pay for itself. Within one
-module family sharing a single disposal path (e.g. several Dock panel
-builders feeding one `_panelDisposers` registry), prefer applying composition
-uniformly across the family rather than mixing `extends` and composition,
-even where a smaller sibling could technically take `extends` — a mixed
-shape fragments the pattern for no benefit. See
+when the super-cascade hoist genuinely doesn't pay for itself. See
 `plans/implemented/class-first-lifecycle-panels.md` for the worked
 conversion of `QueryPanel`, `QueryResultChart`, `QueryResultGrid`,
-`DefinitionPanel`, and `DocumentationPanel`.
+`DefinitionPanel`, and `DocumentationPanel`, and
+`plans/in-progress/adopt-dock-owned-teardown.md` for the removal of every
+wrapper `dispose` this section used to require.
