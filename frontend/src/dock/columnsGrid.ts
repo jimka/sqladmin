@@ -56,13 +56,16 @@ const SEQUENCE_FIELDS: FieldOptions[] = [
 /**
  * Build a read-only grid over a store. Structure/definition edits are
  * toolbar- or Save-button-launched flows, never inline cell edits, so every
- * column stays locked regardless of caller.
+ * column stays locked regardless of caller. Shared by relation Columns
+ * (views/matviews), Indexes and Constraints; `autoSizeColumns` applies to all
+ * three, since each holds short identifiers plus one long definition-style
+ * column that content sizing handles well.
  *
  * @param store - The grid's backing store.
  * @returns A read-only Table over the store.
  */
 export function readOnlyTable(store: MemoryStore): Table {
-    return Table(store, { columns: [], rowReadOnly: () => true });
+    return Table(store, { columns: [], autoSizeColumns: true, rowReadOnly: () => true });
 }
 
 /**
@@ -87,7 +90,10 @@ export function buildColumnsGrid(columns: ColumnMeta[], onOpenSequence?: OpenSeq
  * The Columns grid with its Sequence cell rendered as a link — mirrors
  * StructurePanel's foreign-keys grid: columns listed explicitly to keep display
  * order while giving one field a link renderer, `appendUnlisted: false` so the
- * two lookup fields stay hidden, and every cell read-only.
+ * two lookup fields stay hidden, and every cell read-only. The `sequence`
+ * column carries a renderer, so the library never samples it under
+ * `autoSizeColumns` and it stays flexible, absorbing the width the other six
+ * columns do not use.
  *
  * @param store - The grid's backing store, holding `toColumnRows` output.
  * @param onOpenSequence - Invoked with the clicked sequence's schema and name.
@@ -105,8 +111,9 @@ function linkedColumnsTable(store: MemoryStore, onOpenSequence: OpenSequenceHand
             { field: "wireType" },
             { field: "sequence", renderer: () => new LinkCellRenderer() },
         ],
-        appendUnlisted: false,
-        rowReadOnly:    () => true,
+        autoSizeColumns: true,
+        appendUnlisted:  false,
+        rowReadOnly:     () => true,
     });
 
     // cellclick fires for any cell, so gate on the sequence column before acting.

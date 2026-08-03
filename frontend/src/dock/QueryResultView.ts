@@ -59,7 +59,10 @@ export class QueryResultGrid {
     constructor(result: QueryRowsResult) {
         // A fresh store + columns per run means columns never bleed across runs.
         const store = new MemoryStore({ model: buildQueryModel(result.columns), data: result.rows, autoLoad: true });
-        const grid  = Table(store, { columns: [], rowReadOnly: () => true });
+        // A result set's shape is unknown until it arrives, so its columns are
+        // sized from the returned rows; a free-text column is capped by the
+        // library at 400px.
+        const grid  = Table(store, { columns: [], autoSizeColumns: true, rowReadOnly: () => true });
 
         this.content = grid;
         this.dispose = () => {};
