@@ -507,3 +507,55 @@ The guide's second behaviour change, `DOMSource.onFontsReady` firing more than
 once or not at all, needs no app-side check — nothing under `frontend/src` calls
 it, so only the library's own use of it is in play, and step 20 already covers
 what that surfaces.
+
+### Parts D and E: results
+
+Both parts have now been run against the published 0.4.0 with no symlink, at a
+1500×800 viewport, via the `verify` skill. Part E's two findings are written up
+in `LIBRARY_NOTES.md`; what follows records Part D.
+
+**Passed.** Verification row 12 — the tab icon is SQLAdmin's own mark (decoded
+from the installed `link[rel=icon]`, and no `/favicon.ico` request is made at
+all). All eleven grids: the data grid and query-result grid both render 15
+header cells for `wide.cols_60`'s 60 columns, confirming column virtualization,
+with type-derived widths (`id` 42, int 98–102, string 78, boolean 104–107,
+date/timestamp 139); the four Structure grids, Role grants, Property/Value, and
+both Explain grids (`Metric`/`Value` at 151px each and `Action` 249 / `Cost` 52
+inside the 318px left pane) all fit their hosts with no clipped header and no
+column collapsed to a sliver. The startup font hold — a reload while logged in
+builds the shell in one piece with the navigator tree already populated, and
+`QueryPanel`'s editor seeding, its editor focus, and `DocumentationPanel`'s
+editor focus all land (`cm-content` and `WysiwygSurface` each become
+`activeElement`). Markdown markers, on both the start page and a Notes document
+seeded through `localStorage`: bullets share a right edge, and in an
+eleven-item numbered list `10.` and `11.` extend leftward to hold the shared
+right edge while every label from `one` to `eleven` keeps the same left edge —
+which is the two-digit case the marker-column change had to get right. Of the
+pixel shifts, the header band (no clipping at any grid's header/body divider),
+the `Dialog` close button (centred in the About dialog's title bar) and the
+`Tooltip` (93×30, label unclipped, inside the viewport) are all clean. No
+console errors or warnings at any point.
+
+**Two checks could not be completed by browser automation**, and both want a
+real pointer rather than more scripting:
+
+- **The `DragGhost` 2px change.** Synthetic `PointerEvent` sequences do not
+  start a drag — `DragManager` never builds a ghost, so there was nothing to
+  measure. The dock tabs were left unchanged, so nothing was disturbed by the
+  attempt.
+- **The unchanged-selection check** from the section above. The scenario needs
+  the inspector to diverge from the tree's selection before the re-click, and
+  the only route to that divergence — refocusing an already-open grants tab so
+  `syncToPanel` writes the inspector without moving the tree — does not fire
+  from a scripted tab click. Ordinary selection changes were verified working
+  (analyst → dba → analyst each updated the Details inspector correctly), so
+  what remains unverified is specifically the suppressed-redundant-emit path.
+  Note the app author independently observed the change behaving as intended:
+  selecting in the database list now issues two table-property fetches where it
+  previously issued three, which is one redundant emit removed with no lost
+  update.
+
+**One piece of collateral damage worth recording:** the Notes document for the
+`sqladmin.default` connection was overwritten during the markdown check and
+could not be restored — its prior contents were already gone by the time they
+were read. It was left empty rather than holding the test markdown.
