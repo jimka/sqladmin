@@ -85,6 +85,27 @@ Repro: open a table tab, close it, and read
 `[...document.styleSheets].reduce((n, s) => n + s.cssRules.length, 0)` before
 and after. No app change can address this; it needs a library fix.
 
+**Re-measured against the local `dock-disposes-tab-content` fix (symlinked, not
+yet released) — real, large, incomplete.** Four `wide.cols_20` open/close cycles:
+retained rules per cycle dropped from **2288 to 78** — a ~29× reduction — and the
+live-component count now returns to baseline correctly (`+4`, constant across
+cycles rather than growing, and confined to what looks like one tab button's own
+subtree — not investigated further). But growth is still perfectly linear at
++78/cycle, and it is still genuinely orphaned: of 854 `#uuid`-scoped rules
+present after four cycles, 380 have no matching element in the document. The fix
+is correct for what it targets (confirmed by code review: `constraintsFor` fixed
+at the source, the empty-state trap handled, no workaround anywhere) — this is a
+**second, smaller instance of the same defect class**, something else in a
+table tab's subtree still raw-appends chrome without registering it as a child,
+so `Tab.closeEntry`'s new disposal cannot reach it. Location not yet identified;
+a scoped snapshot (component id → className immediately before close, checked
+against orphaned rule selectors after) caught only the already-expected tab
+button chain, so the leak is likely chrome that mounts outside the tab's own DOM
+subtree entirely — a `LayerManager`-hosted `Tooltip` or `Menu` attached from a
+toolbar button (Export, Filter) is the obvious candidate, since those overlay
+into a separate root and would not appear in a scan scoped to the tab panel.
+Needs its own investigation before 0.4.1 ships.
+
 ---
 
 ## 🐞🔎 Horizontal scrolling a wide grid layout-thrashes on `getBorderWidths` (0.4.0)
@@ -141,6 +162,44 @@ are kept as the field report that started the hunt; the library demo's A/B
 figures above are the authoritative ones. To re-measure through this app against
 a production bundle, note `vite preview` needs its own `preview.proxy` for
 `/api`, since `server.proxy` does not apply to it.
+
+**Re-measured against the local `table-scroll-forced-reflow` fix (symlinked, not
+yet released) — the targeted mechanism is confirmed gone, but a second,
+different bottleneck dominates in this app and the field symptom is only
+partly resolved.** Instrumenting `getComputedStyle` and every
+`CSSStyleDeclaration.cssText` write during a scroll on `wide.cols_60` found
+**zero** `getComputedStyle` calls — the border-width cache is working exactly as
+designed, and `getBorderWidths` no longer appears anywhere in Chrome's
+forced-reflow attribution. The original 150-frame heartbeat measurement improved
+from 50.6 s to **26.5 s** (3.0 fps → 5.7 fps) — real, but nowhere near the
+library demo's own 8–10 s → 1.1–1.2 s.
+
+The remaining cost is not forced reflow: Chrome's ForcedReflow insight now
+attributes only **259 ms of ~26 s** to a different call (`getScrollLeft`), so
+over 99% of the time is something the fix's own mechanism cannot explain. A
+control at 120 px/frame is bimodal and steady-state (not a startup-backlog
+artefact — checked per-frame over 40 frames, front half 829 ms avg vs back half
+967 ms avg, evenly distributed throughout): about half the frames cost
+20–200 ms and the other half cost 1000–2550 ms, both while writing ~176
+`cssText` rules/frame against an ~2700-rule sheet with zero style reads. A
+sharper control — the same 120 px delta, oscillating (+120/−120 alternating)
+instead of advancing — costs **343 ms/frame** against a **steady** advance's
+**19.7 ms/frame** at the same delta size, an ~17× gap that the original
+finding's controls never surfaced (they only varied delta size, not direction).
+That points at something direction-sensitive in cell recycling — plausibly the
+"skip a cell whose geometry is unchanged" optimisation from 0.4.0's own
+changelog failing to help (or actively penalising) a window that keeps
+reversing, rather than at anything this fix touches.
+
+Two live hypotheses, neither confirmed: plain style-recalculation cost scaling
+with the ~2700-rule sheet size regardless of any read (a *different* cost model
+than the poisoned-write mechanism this fix removed, since removing all reads
+did not remove the bimodal slowness); or a genuinely separate forced-layout
+trigger this fix's `BorderWidths` cache does not cover, surfaced by `cols_60`'s
+richer per-cell wiring (editor pool, required-column outline, per-type
+renderers) that the library's minimal demo table does not exercise. Needs its
+own investigation before 0.4.1 ships — SQLAdmin is again the harder test the
+library's own demo did not surface.
 
 ---
 
