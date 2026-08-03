@@ -2,8 +2,9 @@
 // Fit host, seeded from the persisted per-connection notes and reporting every
 // edit back for persistence — the editable counterpart to DefinitionPanel's
 // read-only CodeEditor. A class-first composition wrapper: the instance owns
-// `content` and `dispose`, which now internalizes the editor teardown — the
-// editor itself is no longer exposed to the caller.
+// `content` alone — the editor is its only child, so the Dock's teardown on
+// tab close reaches it with no disposal of this class's own, and the editor
+// itself is not exposed to the caller.
 
 import { Container }      from "@jimka/typescript-ui/core";
 import { Fit }            from "@jimka/typescript-ui/layout";
@@ -15,7 +16,6 @@ import { MarkdownEditor } from "@jimka/typescript-ui/component/editor";
  */
 export class DocumentationPanel {
     readonly content: Container;
-    readonly dispose: () => void;
 
     /**
      * @param initial - The Markdown to seed the editor with (the persisted
@@ -33,6 +33,5 @@ export class DocumentationPanel {
         editor.onFirstLayout(() => editor.focus());
 
         this.content = Container({ layoutManager: new Fit(), components: [editor] });
-        this.dispose = () => editor.dispose();
     }
 }

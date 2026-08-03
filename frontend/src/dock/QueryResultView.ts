@@ -2,11 +2,15 @@
 // QueryPanel's result TabPanel:
 //
 //   * QueryResultGrid — the read-only results grid. Built for every rows
-//     result. Its MemoryStore needs no teardown, so dispose is a no-op.
+//     result. Needs no disposal of its own: the grid is `content`, so the
+//     Dock's teardown on tab close reaches it directly.
 //   * QueryResultChart — a bar/line chart of the same rows over a config strip
 //     (x/y column combos + a line/bar type toggle). Built only for a chartable
 //     result (>=1 row, >=1 numeric column); the caller (QueryPanel) guards on
-//     isChartable before calling. dispose releases the live chart instance.
+//     isChartable before calling. The live chart is a registered child of
+//     `content`, so a tab close reaches it too; `rebuildChart` still disposes
+//     the outgoing instance explicitly, since a config change swaps it for a
+//     fresh one inside a live tab, which no teardown recursion runs for.
 //
 // The chart is built in-memory from `buildChartSeries` (see chartConfig.ts)
 // rather than store-bound: a re-run always rebuilds the whole view (the result
@@ -45,12 +49,11 @@ const AXIS_GROUP_GAP = 12;
 
 /**
  * The results grid for a rows result. A class-first composition wrapper: the
- * instance owns `content` (the grid) and `dispose` (a no-op — the MemoryStore
- * needs no teardown).
+ * instance owns `content` (the grid) alone — the Dock destroys it, and the
+ * MemoryStore beneath it needs no teardown of its own.
  */
 export class QueryResultGrid {
     readonly content: Component;
-    readonly dispose: () => void;
 
     /**
      * @param result - The rows result to render (read-only: a query result
@@ -65,7 +68,6 @@ export class QueryResultGrid {
         const grid  = Table(store, { columns: [], autoSizeColumns: true, rowReadOnly: () => true });
 
         this.content = grid;
-        this.dispose = () => {};
     }
 }
 
@@ -73,12 +75,11 @@ export class QueryResultGrid {
  * The chart tab for a CHARTABLE rows result: a config strip (x/y column
  * combos over a line/bar type toggle) above the chart. A class-first
  * composition wrapper: the instance owns `content` (the strip-over-chart
- * subtree) and `dispose` (releasing the live chart instance). The caller must
- * guarantee `isChartable(result)`.
+ * subtree) alone — the Dock destroys `content` and the live chart registered
+ * beneath it on tab close. The caller must guarantee `isChartable(result)`.
  */
 export class QueryResultChart {
     readonly content: Component;
-    readonly dispose: () => void;
 
     /** @param result - The chartable rows result to chart. */
     constructor(result: QueryRowsResult) {
@@ -165,6 +166,5 @@ export class QueryResultChart {
         }
 
         this.content = content;
-        this.dispose = () => { chart.dispose(); };
     }
 }

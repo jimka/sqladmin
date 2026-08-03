@@ -21,8 +21,10 @@ Glyph.register(save);
 /**
  * An SQL CodeEditor paired with a NORTH toolbar carrying a dirty-gated Save
  * button. A composition helper (not a component): the owning panel reads
- * {@link editor} and {@link toolbar} to build its own layout, calls
- * {@link reload} after a successful save, and forwards {@link dispose}.
+ * {@link editor} and {@link toolbar} to build its own layout and calls
+ * {@link reload} after a successful save. {@link editor} is a registered
+ * descendant of the panel's `content`, so the Dock's teardown on tab close
+ * reaches it without this class owning any disposal of its own.
  */
 export class DefinitionEditor {
     /** The SQL editor holding the definition text. */
@@ -84,11 +86,6 @@ export class DefinitionEditor {
         this._baseline = definition;
         this.editor.setValue(definition);
         this.syncDirty();
-    }
-
-    /** Release the editor's view and theme subscription (forward from the panel's dispose). */
-    dispose(): void {
-        this.editor.dispose();
     }
 
     /**
