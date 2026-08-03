@@ -180,6 +180,43 @@ as designed: the real tab's `TabButton.destructor()` runs with a non-null
 | 3 | 218 | 66 |
 | 4 | 284 | 66 |
 
+**Root cause of the remaining ~66/cycle found and fixed — SQLAdmin's own bug,
+not the library's; `TableWorkPanel` was never it.** The `Button:6`-matches-the-
+toolbar reasoning above was a coincidence of counting, not a real lead — the
+`TableWorkPanel`/`ToolBar`/`Button` chain disposes cleanly: instrumenting
+`Component.destructor()` directly (temporary `console.log` of
+`constructor.name` + id on every call) and cross-referencing against the live
+stylesheet after close showed **zero** cases of "destructor ran but the rule
+survived" for anything reachable from a closed table tab. Every one of the
+1450 destructor calls traced across a `wide.cols_10` cycle correctly cleared
+its own rule.
+
+The actual survivors (53 unique component ids after one open/close pair) were
+never even *attempted* — no destructor call for any of them anywhere in the
+trace — and resolving their live DOM elements (`document.getElementById`)
+showed they were not part of the table tab's subtree at all: `className`s of
+`Text`/`Panel`/`Button`/`Glyph`, `textContent` reading "Ctrl/Cmd+↑ / ↓",
+"Databases rail", "Recent tables", "New Query", etc. — SQLAdmin's own
+**"Getting started" start page** (`frontend/src/shell/StartPage.ts`), which
+Dock's empty-region toggle re-shows every time the last tab closes.
+
+`StartPage.rebuild()` special-cased exactly one child (the transient
+`Markdown` welcome blurb) for an explicit `.dispose()` before
+`this.removeAllComponents()` — every *other* child (the "New Query" button,
+the recent-tables/saved-queries list rows, the shortcut legend, the
+"Connection" heading) was only detached, never disposed, on every single
+rebuild. `removeAllComponents()` is documented and correctly implemented as
+detach-only (mirrors `removeComponent`'s re-parent-friendly contract) — this
+was a caller-side gap, app code, not a library defect. Fixed by disposing
+every current child generically before removing them
+(`for (const c of this.getComponents()) c.dispose()`), which also let the
+`welcome`-specific special-casing be deleted entirely as redundant. Re-running
+the four-cycle `wide.cols_20` measurement against the fix: retained rules
+after close were **527 → 527 → 527 → 527** — flat across all four cycles,
+zero leak. This closes out the whole `wide.cols_20` open/close investigation
+that started this entry: 2288/cycle → 0/cycle across seven library-side fixes
+plus this one app-side fix.
+
 Steady-state retained-per-cycle dropped from **~72–73 to 66** — a real, if
 modest, further reduction consistent with eliminating the `Component`(4) +
 `TabCloseButton`(3) survivors from the earlier breakdown. The remaining

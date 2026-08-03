@@ -88,19 +88,18 @@ class StartPage extends Panel {
 
         this.setInsets(new Insets(PAGE_PADDING, PAGE_PADDING, PAGE_PADDING, PAGE_PADDING));
 
-        // The welcome blurb is transient: rebuilt (and disposed) each time the
-        // workspace toggles between empty and non-empty. removeAllComponents()
-        // below detaches it from the DOM but does not call dispose(), so its
-        // theme listener must be released explicitly before each rebuild. A
+        // The whole body is rebuilt each time the workspace toggles between
+        // empty and non-empty (recent tables / saved queries need to stay
+        // current). removeAllComponents() detaches the previous body from the
+        // DOM but does not call dispose() on it — every child (theme listeners,
+        // per-instance stylesheet rules) must be disposed explicitly first, or
+        // the previous rebuild's whole subtree leaks on every toggle. A
         // constructor-local closure captures `this` lexically, so passing
         // `rebuild` to `controller.onWorkspaceChanged` below is safe without an
         // arrow-function field.
-        let welcome: Markdown | null = null;
-
         const rebuild = (): void => {
-            if (welcome) {
-                welcome.dispose();
-                welcome = null;
+            for (const component of this.getComponents()) {
+                component.dispose();
             }
 
             this.removeAllComponents();
@@ -110,8 +109,7 @@ class StartPage extends Panel {
             this.addComponent(heading(APP_NAME, "600"));
 
             if (shouldShowWelcome(controller)) {
-                welcome = Markdown(GETTING_STARTED_MARKDOWN);
-                this.addComponent(welcome);
+                this.addComponent(Markdown(GETTING_STARTED_MARKDOWN));
             }
 
             this.addComponent(buildColumns(controller));
