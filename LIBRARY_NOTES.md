@@ -106,6 +106,47 @@ toolbar button (Export, Filter) is the obvious candidate, since those overlay
 into a separate root and would not appear in a scan scoped to the tab panel.
 Needs its own investigation before 0.4.1 ships.
 
+**Re-measured against the local `table-tab-close-residual-leak` fix (Menu
+teardown across all seven owners, symlinked, not yet released) — the
+`LayerManager`/`Menu` hypothesis was correct and is confirmed fixed at the
+unit level, but it was not the dominant contributor to this app's leak, and
+the app-level number barely moved.** Four `wide.cols_20` cycles on a fresh
+page: retained rules per cycle went from 78 to **~72–73** — an ~8% reduction,
+not the near-elimination the fix's own library-level tests show (confirmed via
+`insertRule`/`deleteRule` instrumentation across one full cycle: 2371 inserted,
+2299 deleted, 73 survivors, all `#uuid`-scoped).
+
+Cross-referencing every surviving rule's id against a `MutationObserver` log of
+every element ever added during the cycle (so transient components missed by a
+before/after DOM snapshot are still caught) identified the leak precisely, and
+it is **not `Menu`** — no `Menu`/`MenuItem`/`Tooltip` class appears anywhere in
+the survivors:
+
+| class | count |
+|---|---|
+| `Text` | 38 |
+| `Panel` | 20 |
+| `Button` | 6 |
+| `Component` | 4 |
+| `TabCloseButton` | 3 |
+| `Glyph` | 2 |
+
+`Button`: 6 matches `TableWorkPanel`'s toolbar button count exactly
+(Add/Delete/Save/Refresh/Filter/Export, each built through `glyphButton`,
+which routes every label through `Button`'s own tooltip text). This is **not**
+an unregistered-child defect the way `Menu` was: confirmed by reading source
+that `TableWorkPanel.addComponent(toolbar, …)` and `ToolBar`'s own
+`addComponent(button)` pattern both register normally, so the ordinary child
+recursion should already reach every one of these. Whatever leaks their rules
+is a different mechanism than "raw-appended, never a child" — possibly
+`Button`'s own `Tooltip.attach(this, str)` call (mirrors the `#uuid`-keyed
+static `Tooltip.attachments` map already flagged as an unrelated memory-only
+finding by the Menu-fix's own implementation, scoped out there as
+non-stylesheet — worth re-checking whether that scoping was too narrow), or a
+timing interaction with this app's own now-partially-redundant `PanelDisposers`
+workaround (not yet deleted — that is `adopt-dock-owned-teardown`, still
+unimplemented). Not resolved here; needs its own investigation.
+
 ---
 
 ## 🐞🔎 Horizontal scrolling a wide grid layout-thrashes on `getBorderWidths` (0.4.0)
@@ -200,6 +241,36 @@ richer per-cell wiring (editor pool, required-column outline, per-type
 renderers) that the library's minimal demo table does not exercise. Needs its
 own investigation before 0.4.1 ships — SQLAdmin is again the harder test the
 library's own demo did not surface.
+
+**Re-measured against the local `table-scroll-recycling-cost` fix
+(`setShadow`/`clearShadow` idempotence guard, symlinked, not yet released) —
+real, substantial, still incomplete, and the direction-sensitivity story from
+the prior entry does not hold up under a clean re-test.** On a fresh page
+(`wide.cols_60` opened once, no accumulated leak-cycle state — checked, since
+sheet size confounds this: freshly-opened `cols_60` alone reaches ~2800 rules,
+dwarfing the ~350 a preceding leak-cycle test would have added, so the two
+investigations' measurements don't contaminate each other here), the 150-frame
+heartbeat improved **26.5 s → 13.7–13.8 s** (5.7 fps → ~11 fps) — real, on top
+of the scroll fix's own already-confirmed elimination of every `getComputedStyle`
+call, but still roughly 10× the library demo's clean 1.1–1.2 s.
+
+The steady-vs-oscillating control **no longer shows anything close to 17×** —
+174.1 ms/frame steady vs 190.5 ms/frame oscillating, a ~1.1× ratio, matching
+what the scroll-fix plan's own instrumentation found (~1.7×) far better than
+the pre-fix field figure. But a third run of the **same steady pattern
+immediately after** the first two dropped to **18 ms/frame** — a ~10×
+difference between two identical gestures, one first-visit and one revisiting
+territory the prior gesture just covered. That is not explained by direction
+at all, and was not tested for in either prior investigation (both varied
+delta size or direction, never first-visit vs revisit of the same column
+range). The likely mechanism is some form of first-touch cost per column (or
+per column-type) that a revisit skips — consistent with, but not proven to be,
+the same stylesheet-size-scaling cost already implicated in the leak entry
+above, since a first-visit column may need rules a revisit already has
+materialised. Not resolved here; the position/history confound makes this hard
+to isolate through ad-hoc browser scripting and likely needs the library's own
+controlled test harness (as both prior investigations used) rather than more
+live-session measurement.
 
 ---
 
