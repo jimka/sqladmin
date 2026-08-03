@@ -48,6 +48,13 @@ Deferred features and known issues. Implemented work lives in
 
 ## Known issues / loose ends
 
+- **`ColumnMeta.dataType` is inconsistent between relation kinds.** Tables and
+  views take it from `information_schema.columns.data_type` (a type name with
+  no modifier); materialized views take it from `format_type`, which includes
+  one. `pg_type_to_wire` matches type names exactly, so a matview column
+  declared `timestamp(3) with time zone` falls through to `STRING` instead of
+  `ISO_STRING`. Narrow — it needs an explicit precision on a matview column —
+  and no fix is planned here.
 - **Prod build class-name mangling** — the prod bundle needs `esbuild.keepNames`
   (now applied and merged) or class names mangle and the app renders unstyled
   (see `LIBRARY_NOTES.md`). The robust library-side fix, so no consumer needs
