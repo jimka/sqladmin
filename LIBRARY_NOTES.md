@@ -93,17 +93,38 @@ with column count: `cols_20` cost 1286 ms/frame against `cols_60`'s
 number of **cells entering the column window per frame** (rendered rows ×
 columns crossed).
 
-The plausible mechanism is 0.4.0's own content-box sweep: child placement now
-reads the component's border through `getContentBounds()` /
-`getBorderWidths()`, and column virtualization builds and recycles cells during
-a slide, so each cell built forces a synchronous layout. Correctness fix and
-virtualization are individually right and multiply badly together.
+**The mechanism is not what the profiler's headline suggests, and the obvious
+reading of it is wrong.** `getBorderWidths` is only ~1.5% of a slow frame. The
+cost is what the read *does to everything after it*: `Component.getBorderSize()`
+issues a per-component `getComputedStyle` read mid-frame, and that read makes
+every **subsequent shared-stylesheet rule write in the same task about 85×
+dearer** — 0.014 ms to ~1.2 ms each. Those poisoned writes are ~80% of a slow
+frame. Established by measurement in the library's own demo, not by reading the
+trace summary.
 
-Measured on a Vite **dev** build, which inflates the JS around the reflow; the
-forced reflow itself is browser layout cost and will not vanish in production,
-though the absolute numbers will improve. Worth re-measuring against a prod
-bundle before sizing the fix — note `vite preview` needs its own `preview.proxy`
-for `/api`, since `server.proxy` does not apply to it.
+Two hypotheses were disproved on the way and are recorded here so they are not
+re-proposed: that `getBorderWidths` is itself expensive (it is not), and that
+read-all-then-write-all would fix it (it cannot — a render pass writes rules
+before it can read).
+
+The fix, planned in the library as `table-scroll-forced-reflow`, shares one
+browser measurement per border spec in a new internal `core/BorderWidths.ts`. It
+is A/B proven in the library's own 45-column demo table, which reproduces the
+stall without this app at all: 45 scroll frames went from 8.0–9.9 s with 9–10
+frames over 100 ms, to 1.08–1.18 s with none.
+
+**This is why the two entries compound, and the coupling is now mechanism rather
+than conjecture:** the poisoned rule-write cost scales with the size of the
+shared stylesheet, and the Dock-disposal leak above grows that sheet without
+bound. Every table tab closed makes wide-grid scrolling permanently slower for
+the rest of the session.
+
+The app-side numbers at the top of this entry came from a Vite **dev** build,
+which inflates the JS around the reflow but not the browser work itself. They
+are kept as the field report that started the hunt; the library demo's A/B
+figures above are the authoritative ones. To re-measure through this app against
+a production bundle, note `vite preview` needs its own `preview.proxy` for
+`/api`, since `server.proxy` does not apply to it.
 
 ---
 
