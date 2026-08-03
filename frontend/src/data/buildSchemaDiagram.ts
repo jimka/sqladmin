@@ -6,6 +6,7 @@ import type { DiagramData, DiagramEdgeData, DiagramNodeData, DiagramPortData } f
 import type { ColumnMeta, TableStructure } from "../contract";
 import { CARD_WIDTH, cardHeight, columnPortY, deriveColumnRows, portId } from "./schemaCardModel";
 import { uniformNodeWidth } from "./uniformNodeWidth";
+import type { MeasureWidths } from "./uniformNodeWidth";
 
 // Left-to-right layered layout: a schema's FK graph reads naturally as a
 // dependency flow (referencing table -> referenced table), matching the
@@ -96,6 +97,9 @@ export interface FkEdgeData {
  * @param structures - Each table's structure, positionally paired with `tables`.
  * @param columnsByTable - Optional per-table fetched columns; presence switches
  *   on card mode (see above).
+ * @param measureWidths - Optional real text measurer passed through to
+ *   `uniformNodeWidth`. Omitting it keeps the estimated node width, which is
+ *   what this builder's own tests do; the app supplies `Util.measureTextWidths`.
  * @returns The nodes + edges + layered/RIGHT layout options for DiagramView.
  *   Flat mode also folds parallel foreign keys — two FKs sharing both
  *   endpoints — into one edge via {@link collapseParallelFkEdges}; card mode
@@ -106,6 +110,7 @@ export function buildSchemaDiagram(
     tables: string[],
     structures: TableStructure[],
     columnsByTable?: Map<string, ColumnMeta[]>,
+    measureWidths?: MeasureWidths,
 ): DiagramData {
     const tableSet = new Set(tables);
 
@@ -113,8 +118,9 @@ export function buildSchemaDiagram(
     // each node is sized to its own label, so a layer's nodes are staggered by
     // up to 85px and stop reading as a column — card mode avoids this for free
     // by giving every card the same CARD_WIDTH, and applyCardMode overwrites
-    // this value with it.
-    const nodeWidth = uniformNodeWidth(tables);
+    // this value with it. `measureWidths`, when given, replaces the
+    // character-count estimate with a real batched measurement.
+    const nodeWidth = uniformNodeWidth(tables, measureWidths);
 
     const nodes: DiagramNodeData[] = tables.map(name => ({
         id   : name,

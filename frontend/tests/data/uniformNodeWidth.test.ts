@@ -38,4 +38,32 @@ describe("uniformNodeWidth", () => {
     it("never returns less than the minimum, however short the labels", () => {
         expect(uniformNodeWidth(["a"])).toBe(uniformNodeWidth([]));
     });
+
+    it("uses an injected measurer to decide the width, when given one", () => {
+        const stub = (texts: string[]): number[] => texts.map(t => t.length * 10);
+
+        // "orders" measures at 6 * 10 = 60, plus 46px of chrome, above the 96px floor.
+        expect(uniformNodeWidth(["orders"], stub)).toBe(106);
+    });
+
+    it("picks the widest measured label, not the longest string", () => {
+        const widths: Record<string, number> = { WW: 200, aaaaaaaa: 50 };
+        const stub = (texts: string[]): number[] => texts.map(t => widths[t]);
+
+        // "WW" measures wider than the eight-character "aaaaaaaa", so its 200px
+        // (plus 46px of chrome) wins over the longer string's smaller measurement.
+        expect(uniformNodeWidth(["WW", "aaaaaaaa"], stub)).toBe(246);
+    });
+
+    it("does not call the measurer for an empty graph", () => {
+        let calls = 0;
+        const stub = (texts: string[]): number[] => {
+            calls += 1;
+
+            return texts.map(() => 0);
+        };
+
+        expect(uniformNodeWidth([], stub)).toBe(96);
+        expect(calls).toBe(0);
+    });
 });

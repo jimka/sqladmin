@@ -4,7 +4,7 @@
 
 import { Dialog, Dock, Menu, Notification, NotificationHistoryButton, Tooltip }                                                                                                                    from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent, DockExceptionEvent }                                                                                                                                                 from "@jimka/typescript-ui/overlay";
-import { Component }                                                                                                                                                                               from "@jimka/typescript-ui/core";
+import { Component, Util }                                                                                                                                                                         from "@jimka/typescript-ui/core";
 import { HBox }                                                                                                                                                                                    from "@jimka/typescript-ui/layout";
 import { StatusBar }                                                                                                                                                                               from "@jimka/typescript-ui/component/container";
 import { Text }                                                                                                                                                                                    from "@jimka/typescript-ui/component/input";
@@ -1572,7 +1572,13 @@ export class SqlAdminController {
             const columnsByTable: Map<string, ColumnMeta[]> | undefined =
                 opts?.withColumns ? new Map(graph.tables.map(t => [t.name, t.columns])) : undefined;
 
-            return annotateFkCardinality(buildSchemaDiagram(tables, structures, columnsByTable), tables, structures, columns);
+            // The measurer is injected here, rather than inside buildSchemaDiagram
+            // or uniformNodeWidth, because this controller is the first module in
+            // the chain allowed to touch the DOM — both of those stay pure and
+            // node-vitest-testable (see buildSchemaDiagram.ts's header note).
+            const diagram = buildSchemaDiagram(tables, structures, columnsByTable, Util.measureTextWidths);
+
+            return annotateFkCardinality(diagram, tables, structures, columns);
         } catch (err) {
             this.notifyError(err, ref);
 
