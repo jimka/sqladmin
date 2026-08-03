@@ -8,6 +8,81 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎 A closed query tab's stale keydown subtree-listener throws on the next keydown (0.4.1, symlinked)
+
+Found during `adopt-dock-owned-teardown`'s manual verification (**M2**/**M3**), not by design. `QueryPanel.ts` wires
+`Event.addSubtreeListener(editor, "keydown", …)` for its Run/Save/Explain/Clear/history-recall shortcuts.
+`Component.destructor()` does not purge this module-level map entry when the editor is disposed — a known gap
+stated plainly in the library plan `dock-disposes-tab-content.md`'s Non-Goals, and recorded (before this entry
+existed) as a "bounded, silent" leak in `adopt-dock-owned-teardown.md`'s own footnote.
+
+**It is not merely silent.** Confirmed here: once at least one query tab has been closed, the very next `keydown`
+event anywhere in the document — not necessarily inside a query editor — throws `Uncaught Error: DOM handle <n> is
+not registered (released or never minted)`, from `DOM.ts`'s `resolve`/`getId`, called from `Event.ts`'s base
+listener as it walks the event target's ancestor chain against the stale subtree-listener entry and hits an
+already-released `Handle`. Reproduced reliably with a single query-tab open/close/keydown cycle — no accumulation
+needed — using both real UI interaction (click-driven) and scripted events, ruling out a test-harness artifact.
+
+**Confirmed unrelated to `adopt-dock-owned-teardown`'s own change.** The `Event.addSubtreeListener` call site in
+`QueryPanel.ts` is untouched by that plan's diff, and `editor.dispose()` is invoked identically either way — via
+the old app-side `PanelDisposers`-driven explicit call, or the new library-driven recursive one from
+`Tab.closeEntry`. Not fixed there: purging this map on dispose is a library-level fix, and adding an app-side
+`Event.removeSubtreeListener` call would be a new workaround in place of the one that plan retires (see its own
+Non-Goals). The app remains usable despite the thrown error — it did not visibly break subsequent interaction in
+this session — but a thrown, uncaught error on an unrelated keydown is a worse symptom than "leaked memory," and is
+worth fixing at the source rather than left as a latent trap for the next `Event`-adjacent change.
+
+---
+
+## ✂️🔎 `CodeEditor` construction grows CodeMirror's page-global stylesheet, independent of disposal (0.4.1)
+
+Found while chasing what looked like a teardown regression during `adopt-dock-owned-teardown`'s **M2** (a
+never-run query tab, closed four times): the aggregate `[...document.styleSheets].reduce((n, s) => n +
+s.cssRules.length, 0)` probe grew by a steady ~20 rules per cycle instead of returning to baseline. A scoped
+before/after id diff (every element id under the closed tab's own root, checked against the stylesheet after
+close) showed **zero** of them survived — the tab's whole `QueryPanelContent` subtree, including its `CodeEditor`,
+disposed cleanly. The growth turned out to be `.ͼN`-selector rules — CodeMirror's own `StyleModule` mount, one
+freshly-numbered module per `new CodeEditor(…)` call, accumulating on the document's stylesheet for the page's
+lifetime regardless of whether the owning `CodeEditor` is ever disposed. `EditorView.destroy()` does not and
+cannot remove them: `StyleModule` is designed to be shared/deduplicated across every live editor on the page, so a
+module's rules outliving one specific editor instance is CodeMirror's own contract, not a bug reachable from
+`Component.dispose()`. Confirmed the same growth occurs regardless of `adopt-dock-owned-teardown`'s changes,
+since `editor.dispose()` is called identically before and after that plan.
+
+**Practical consequence:** the aggregate stylesheet-rule-count probe this file uses throughout is *not* a reliable
+signal for any scenario that constructs a `CodeEditor`/`MarkdownEditor` — repeated `wide.cols_20` table-tab cycles
+(no `CodeEditor` involved) return to an exact flat baseline, but repeated query-tab cycles will not, even with
+perfectly correct disposal. A scoped id-diff against the closed tab's own subtree is the reliable substitute; the
+two entries above and below this one both used it instead of the aggregate. Not something the app or this plan
+can fix — CodeMirror's module cache is by design page-global — but worth a "Possible library improvement" if the
+library ever wants to interned/dedupe modules by content instead of by construction identity.
+
+---
+
+## 🐞🔎 A closed diagram/tree tab strands a handful of `LabelListItemRenderer`/`Text` rules (0.4.1, symlinked)
+
+Also found during `adopt-dock-owned-teardown`'s manual verification (**M3**/**M4**), using the same scoped
+before/after id diff as the entry above (the aggregate rule count is unreliable here too, for the same CodeMirror
+reason where a `CodeEditor` is anywhere on the page): capture every element id under the tab's own root before
+close, close the tab, then check which of those ids still back a stylesheet rule afterward. Reproduced identically
+in two unrelated contexts — `QueryPanel`'s
+Explain-diagram tab (its "Plan tree" `Tree`) and a whole-schema `SchemaDiagramPanel`'s table-card nodes — each
+leaving exactly six elements undisposed: three `LabelListItemRenderer` instances plus their three `Text` label
+children. Everything else in both subtrees disposed correctly, including the diagram's own `DiagramView` and (by
+the destructor chain that terminates it) its ELK Web Worker — this is not a worker-termination regression, just a
+small, consistent residual confined to one renderer class.
+
+**Confirmed unrelated to `adopt-dock-owned-teardown`.** Neither context is app code the deleted `PanelDisposers`
+registry ever covered — `LabelListItemRenderer`/`LabelTreeNodeRenderer` are library-internal renderers for `Tree`
+and/or `DiagramView` node content, not something SQLAdmin constructs or references directly. The likely shape,
+by analogy with the `Menu`/`Tooltip` unregistered-chrome defect this file already documents further down: some
+piece of a tree node's or diagram card's rich content renders without being registered as a normal child, so the
+ordinary destroy recursion `Tab.closeEntry` now drives never reaches it. Location not narrowed past the renderer
+class name; needs its own investigation, in the same spirit as the still-open `TableWorkPanel` toolbar residual
+below.
+
+---
+
 ## ✂️🔎 A paged remote store's `autoSizeColumns` widths derive from page one only (0.4.0)
 
 `Table.maybeResampleColumnWidths` re-derives column widths once, on the first
@@ -38,7 +113,7 @@ today (drag the column).
 
 ---
 
-## 🐞🔎 Closing a table tab strands ~2288 per-instance stylesheet rules (0.4.0)
+## 🐞✅ Closing a table tab strands ~2288 per-instance stylesheet rules (0.4.0)
 
 Opening and closing one 20-column table tab (`wide.cols_20`, 42 rendered rows)
 leaves **2288 rules** behind on the shared sheet, every cycle, for ever. Four
@@ -255,6 +330,18 @@ modest, further reduction consistent with eliminating the `Component`(4) +
 pointing at `TableWorkPanel`'s toolbar (or its `Tooltip.attach` calls) as a
 separate, still-open defect. Not resolved here; still needs its own
 investigation.
+
+**Fixed.** The underlying defect — `Dock` never disposing the content
+component of a tab it closes — is fixed library-side in the change that ships
+as 0.4.1: `Tab.closeEntry` now disposes the content it removes. In response,
+`adopt-dock-owned-teardown` deleted `PanelDisposers`, the `disposeOnClose`
+flag threaded through `openAsyncPanel`, and every wrapper `dispose` in the
+app that existed only to work around the gap. The one piece of teardown that
+survives is genuinely the app's own: `QueryPanelContent.destructor()`
+disposes `QueryPanel`'s result `TabPanel`, which `hideResultPane` deliberately
+detaches from the Split while no result is shown, so it is not always reached
+by the ordinary destroy recursion. The measured table above is left in place
+as the evidence for the fix.
 
 ---
 
