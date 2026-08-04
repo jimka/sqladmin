@@ -10,7 +10,7 @@ connection until you sign in, and drops it when your session ends.
 
 ## Status and intended use
 
-SQLAdmin 0.1.0 is a working tool, published as source-available noncommercial
+SQLAdmin is a working tool, published as source-available noncommercial
 software, built to exercise `@jimka/typescript-ui`. It is intended to run on
 a workstation or a trusted network against databases you control.
 
@@ -105,7 +105,7 @@ such wrinkle; it resolves by normal DNS and needs only the allowlist.
 ```bash
 docker run --rm -p 8000:8000 \
   -e SQLADMIN_ALLOWED_HOSTS=db.example.com:5432 \
-  ghcr.io/jimka/sqladmin:0.1.0
+  ghcr.io/jimka/sqladmin:0.4.0
 # Open http://localhost:8000
 ```
 
@@ -115,7 +115,7 @@ docker run --rm -p 8000:8000 \
 ```bash
 docker run --rm -p 8000:8000 \
   -e SQLADMIN_ALLOWED_HOSTS=host.docker.internal:5432 \
-  ghcr.io/jimka/sqladmin:0.1.0
+  ghcr.io/jimka/sqladmin:0.4.0
 # Open http://localhost:8000
 ```
 
@@ -127,7 +127,7 @@ reach database":
 docker run --rm -p 8000:8000 \
   -e SQLADMIN_ALLOWED_HOSTS=host.docker.internal:5432 \
   --add-host=host.docker.internal:host-gateway \
-  ghcr.io/jimka/sqladmin:0.1.0
+  ghcr.io/jimka/sqladmin:0.4.0
 # Open http://localhost:8000
 ```
 
