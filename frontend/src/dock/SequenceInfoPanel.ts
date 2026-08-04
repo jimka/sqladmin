@@ -33,12 +33,11 @@
 // MemoryStore whose `name` field is both value and display field makes
 // getValue() return the name, which is what the Save diff needs.
 //
-// Registers no disposer with the controller: it holds no CodeEditor, which is
-// the one widget this app disposes on tab close (see DefinitionPanel). Its
-// TextFields, ComboBoxes and the "Owned by column" Link/Text do each hold a
-// ThemeManager subscription, but only Text/Link expose a dispose() to release
-// one at all — disposing those two while the fields beside them cannot be
-// disposed would buy nothing.
+// Needs no disposal of its own: this panel `extends`-es a library base
+// rather than composing one, so every TextField, ComboBox and the "Owned by
+// column" Link/Text is a registered child, and the Dock's teardown on tab
+// close reaches each one's ThemeManager subscription without this class
+// naming a single one of them.
 
 import { Container, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border as BorderLayout, VBox } from "@jimka/typescript-ui/layout";

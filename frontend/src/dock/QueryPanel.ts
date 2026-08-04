@@ -29,16 +29,16 @@
 // it back), so the frontend blocks it for a statement that does not look
 // read-only — plain Explain is always safe.
 //
-// Built as a class-first composition wrapper (the instance owns `content` and
-// `dispose`, rather than `extends`-ing a library base — see
-// COMPONENT_CONVENTIONS.md's composition fallback). The panel's Component
-// subtree is dropped when the dock tab closes, but the live tab views (each
-// Data grid store, a Chart's chart instance, the Explain plan CodeEditor) and
-// the main editor are not torn down by that alone — the framework has no
-// cascading dispose. The instance exposes `dispose` alongside its `content`
-// precisely so the controller can release each live tab view's and the main
-// editor's CodeMirror views / chart / ThemeManager subscriptions explicitly;
-// see SqlAdminController's `_panelDisposers`.
+// Built as a class-first composition wrapper (the instance owns `content`
+// rather than `extends`-ing a library base — see COMPONENT_CONVENTIONS.md's
+// composition fallback). The Dock destroys `content` and every registered
+// child beneath it — each live tab view's CodeMirror view / chart / theme
+// subscription, and the main editor — when the tab closes, so this class
+// needs no `dispose` of its own. The one exception is the result pane: it is
+// deliberately kept alive and detached from the Split while no result is
+// shown (see hideResultPane), so nothing in the tab's subtree reaches it in
+// that state. `content` is a `QueryPanelContent`, a small `Container`
+// subclass whose `destructor()` override disposes it either way.
 
 import { Component, Container, Event } from "@jimka/typescript-ui/core";
 import { Placement }                     from "@jimka/typescript-ui/primitive";
@@ -140,14 +140,42 @@ export interface QueryPanelOptions {
 }
 
 /**
+ * The query panel's mountable root. Exists as a class rather than a bare
+ * `Container` so it can override `destructor()`: the Dock destroys this
+ * component when its tab closes, and the result pane is not always among
+ * its children.
+ */
+class QueryPanelContent extends Container {
+    private readonly _resultHost: TabPanel;
+
+    /** @param resultHost - The result pane, which the panel detaches while hidden. */
+    constructor(resultHost: TabPanel) {
+        super({ layoutManager: new BorderLayout({ spacing: 0 }) });
+
+        this._resultHost = resultHost;
+    }
+
+    /**
+     * `hideResultPane` removes the result pane from the Split while no result
+     * is shown, so the child recursion in `super.destructor()` cannot reach it
+     * then. Disposing it here covers both states — `dispose()` is idempotent,
+     * so the shown case is a harmless second pass.
+     */
+    protected destructor(): void {
+        this._resultHost.dispose();
+
+        super.destructor();
+    }
+}
+
+/**
  * A query panel: a SQL editor over a (resizable) result grid. A class-first
- * composition wrapper: the instance owns `content` (the panel subtree) and
- * `dispose` (releasing the main editor's — and, if shown, the plan editor's —
- * view and theme subscription).
+ * composition wrapper: the instance owns `content` (a {@link QueryPanelContent},
+ * whose own `destructor()` covers the one part of the subtree the Dock's
+ * teardown cannot always reach).
  */
 export class QueryPanel {
-    readonly content: Container;
-    readonly dispose: () => void;
+    readonly content: QueryPanelContent;
 
     constructor(options: QueryPanelOptions) {
         const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult, splitLayout, explainDiagramLayout } = options;
@@ -158,25 +186,25 @@ export class QueryPanel {
         // each owned by its own toolbar action: Data (the grid, from Run), Chart (a
         // chartable result's chart, from the Chart button), and Explain (a read-only
         // plan editor, from Explain / Explain Analyze). Each slot holds its
-        // currently-mounted tab's content, the disposer that releases that content's
-        // CodeMirror view / chart (the framework has no cascading dispose), and the
-        // result the tab exports — so switching tabs re-derives the export from the
-        // active slot without a shared stash. A slot is null when its tab is absent.
-        // Run refreshes only Data, the Chart button only Chart, Explain only Explain;
-        // none disturbs another's tab.
-        let dataSlot:    { content: Component; dispose(): void; result: QueryRowsResult } | null = null;
-        let chartSlot:   { content: Component; dispose(): void; result: QueryRowsResult } | null = null;
+        // currently-mounted tab's content and the result the tab exports — so
+        // switching tabs re-derives the export from the active slot without a shared
+        // stash. A slot is null when its tab is absent. Run refreshes only Data, the
+        // Chart button only Chart, Explain only Explain; none disturbs another's tab.
+        let dataSlot:    { content: Component; result: QueryRowsResult } | null = null;
+        let chartSlot:   { content: Component; result: QueryRowsResult } | null = null;
         let explainSlot: { editor: CodeEditor; result: QueryExplainResult; sql: string } | null = null;
         // The plan tree + diagram tab, built from the shown Explain plan re-fetched
-        // as FORMAT JSON. Closeable; a fresh build replaces it. The disposer
-        // releases the panel's DiagramView — and with it the ELK Web Worker its
-        // ElkLayoutEngine holds — so re-running Explain no longer strands one
-        // Worker per rebuild.
-        let diagramSlot: { content: Component; dispose(): void } | null = null;
+        // as FORMAT JSON. Closeable; a fresh build replaces it. Disposing the
+        // panel's DiagramView — and with it the ELK Web Worker its ElkLayoutEngine
+        // holds — is the Dock's job on tab close (and on this slot's own removal,
+        // since ExplainDiagramPanel is a registered child of the result TabPanel
+        // either way).
+        let diagramSlot: { content: Component } | null = null;
 
         // Raised around a programmatic closeTab so its "tabclose" emit is ignored by
-        // the onTabClose handler (the caller disposes the removed view itself),
-        // keeping disposal single-owner and preventing double-dispose.
+        // the onTabClose handler — it exists purely to stop that handler's slot
+        // nulling from running over a replacement slot the caller is about to set;
+        // it has nothing to do with disposal, which tab.closeTab already handles.
         let suppressCloseHandler = false;
 
         // Raised around a tab refresh (add the replacement tab(s), then remove the old
@@ -237,7 +265,7 @@ export class QueryPanel {
         const olderButton = glyphButton("angle-up", HISTORY_COLOR, `Older query (${OLDER_QUERY_SHORTCUT})`, () => recallInEditor(true));
         const newerButton = glyphButton("angle-down", HISTORY_COLOR, `Newer query (${NEWER_QUERY_SHORTCUT})`, () => recallInEditor(false));
 
-        const panel = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
+        const panel = new QueryPanelContent(resultHost);
         panel.addComponent(new ToolBar({
             components: [runButton, saveButton, clearButton, formatButton, chartButton, explainButton, analyzeButton, diagramButton, exportButton, Spacer.flex(), olderButton, newerButton],
         }), { placement: Placement.NORTH });
@@ -270,7 +298,7 @@ export class QueryPanel {
             syncToolbarButtons();
         }
 
-        /** Remove a tab programmatically (no onTabClose side-effects); the caller disposes the removed view. */
+        /** Remove a tab programmatically (no onTabClose side-effects); tab.closeTab disposes the removed view. */
         function removeTabSilently(content: Component): void {
             suppressCloseHandler = true;
 
@@ -281,39 +309,35 @@ export class QueryPanel {
             }
         }
 
-        /** Remove and dispose the Data tab (if present). */
+        /** Remove the Data tab (if present); removeTabSilently's tab.closeTab disposes its content. */
         function removeDataTab(): void {
             if (dataSlot) {
                 removeTabSilently(dataSlot.content);
-                dataSlot.dispose();
                 dataSlot = null;
             }
         }
 
-        /** Remove and dispose the Chart tab (if present). */
+        /** Remove the Chart tab (if present); removeTabSilently's tab.closeTab disposes its content. */
         function removeChartTab(): void {
             if (chartSlot) {
                 removeTabSilently(chartSlot.content);
-                chartSlot.dispose();
                 chartSlot = null;
             }
         }
 
-        /** Remove and dispose the Explain tab (if present). */
+        /** Remove the Explain tab (if present); removeTabSilently's tab.closeTab disposes its content. */
         function removeExplainTab(): void {
             if (explainSlot) {
                 removeTabSilently(explainSlot.editor);
-                explainSlot.editor.dispose();
                 explainSlot = null;
                 syncDiagramButton();
             }
         }
 
-        /** Remove and dispose the Diagram tab (if present). */
+        /** Remove the Diagram tab (if present); removeTabSilently's tab.closeTab disposes its content. */
         function removeDiagramTab(): void {
             if (diagramSlot) {
                 removeTabSilently(diagramSlot.content);
-                diagramSlot.dispose();
                 diagramSlot = null;
             }
         }
@@ -408,24 +432,22 @@ export class QueryPanel {
         tab.on("activate", () => syncExportToActiveTab());
 
         // The user closed a closeable tab (Chart, Explain, or Diagram — Data is not
-        // closeable): dispose its view. "activate" does NOT fire on the silent
-        // post-close reselection, and getActiveContent() is momentarily stale inside
-        // "tabclose" (emitted before the reselection), so defer the export recompute
-        // to a microtask, by when the surviving tab is selected.
+        // closeable): the library disposes its content as part of the close, so this
+        // only nulls the slot. "activate" does NOT fire on the silent post-close
+        // reselection, and getActiveContent() is momentarily stale inside "tabclose"
+        // (emitted before the reselection), so defer the export recompute to a
+        // microtask, by when the surviving tab is selected.
         tab.on("tabclose", (content: Component) => {
             if (suppressCloseHandler) {
                 return;
             }
 
             if (chartSlot && content === chartSlot.content) {
-                chartSlot.dispose();
                 chartSlot = null;
             } else if (explainSlot && content === explainSlot.editor) {
-                explainSlot.editor.dispose();
                 explainSlot = null;
                 syncDiagramButton();
             } else if (diagramSlot && content === diagramSlot.content) {
-                diagramSlot.dispose();
                 diagramSlot = null;
             }
 
@@ -569,10 +591,7 @@ export class QueryPanel {
                 refreshingTabs = false;
             }
 
-            // Wrapped, not `dispose: nextDiagram.dispose` — ExplainDiagramPanel
-            // extends Panel, so `dispose` is a prototype method and a detached
-            // reference would lose its `this`.
-            diagramSlot = { content: nextDiagram, dispose: () => nextDiagram.dispose() };
+            diagramSlot = { content: nextDiagram };
 
             tab.setActiveContent(nextDiagram);
         }
@@ -753,7 +772,7 @@ export class QueryPanel {
                 refreshingTabs = false;
             }
 
-            dataSlot = { content: nextData.content, dispose: nextData.dispose, result };
+            dataSlot = { content: nextData.content, result };
 
             tab.setActiveContent(nextData.content);
             setActiveExport({ kind: "rows", result });
@@ -784,7 +803,7 @@ export class QueryPanel {
                 refreshingTabs = false;
             }
 
-            chartSlot = { content: nextChart.content, dispose: nextChart.dispose, result };
+            chartSlot = { content: nextChart.content, result };
 
             tab.setActiveContent(nextChart.content);
             setActiveExport({ kind: "rows", result });
@@ -971,14 +990,6 @@ export class QueryPanel {
         }
 
         this.content = panel;
-        // Dispose the live tab views directly — no tab churn on a dying panel.
-        this.dispose = () => {
-            dataSlot?.dispose();
-            chartSlot?.dispose();
-            explainSlot?.editor.dispose();
-            diagramSlot?.dispose();
-            editor.dispose();
-        };
     }
 }
 

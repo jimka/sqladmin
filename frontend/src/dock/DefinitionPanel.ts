@@ -39,13 +39,13 @@ const COLUMNS_PANE_HEIGHT = 180;
 /**
  * A panel showing a view/matview's Columns grid above its editable,
  * SQL-highlighted definition. A class-first composition wrapper: the
- * instance owns `content` (the mountable subtree) and `dispose` (releasing
- * the editor's view and theme subscription) rather than `extends`-ing a
- * library base.
+ * instance owns `content` (the mountable subtree) rather than `extends`-ing
+ * a library base. It needs no `dispose` of its own — the Dock destroys
+ * `content` and everything registered beneath it, including the editor, when
+ * the tab closes.
  */
 export class DefinitionPanel {
     readonly content: Container;
-    readonly dispose: () => void;
 
     private readonly _editor: DefinitionEditor;
     private readonly _columnsStore: MemoryStore;
@@ -96,8 +96,6 @@ export class DefinitionPanel {
 
         this._editor = editor;
         this._columnsStore = columnsStore;
-
-        this.dispose = () => editor.dispose();
     }
 
     /**
