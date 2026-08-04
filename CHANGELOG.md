@@ -4,6 +4,35 @@ All notable changes to SQLAdmin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-08-04
+
+### Added
+- **SQLAdmin now wears its own browser-tab icon** — a database-drum mark on a
+  rounded plate — instead of the library's default one.
+
+### Changed
+- **Grid columns size themselves from their content.** The main data grid,
+  the Columns/Indexes/Constraints grids, the foreign-keys grid, query
+  results, and role grants now derive column widths from a sample of the
+  loaded rows instead of splitting the available width evenly. The
+  Property/Value inspector keeps a fixed label column instead, since its
+  store is reseeded on every selection.
+- **Schema diagram nodes are sized from a real text measurement** instead of
+  an estimate from character count, so nodes are tighter and long table
+  names no longer clip.
+
+### Fixed
+- **Closing a table tab no longer leaks stylesheet rules.** The dock did not
+  dispose a closed tab's content, so repeatedly opening and closing a wide
+  table could strand thousands of orphaned rules and gradually slow the app
+  down. Closing a tab now tears its content down properly.
+
+### Internal
+- Migrated to `@jimka/typescript-ui` 0.4.1.
+- Deleted the app's own tab-teardown bookkeeping — the `PanelDisposers`
+  registry, the `disposeOnClose` flag, and every composition wrapper's
+  `dispose` field — now that the library owns it.
+
 ## [0.3.0] — 2026-07-27
 
 ### Added
@@ -69,6 +98,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 First public release: browse schemas and roles, edit rows, run and EXPLAIN SQL,
 and visualize schema and role relationships as diagrams.
 
+[0.4.0]: https://github.com/jimka/sqladmin/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jimka/sqladmin/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jimka/sqladmin/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jimka/sqladmin/releases/tag/v0.1.0
