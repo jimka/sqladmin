@@ -46,6 +46,19 @@ does not block this app's adoption. SQLAdmin's `^0.4.1` dependency range will ac
 picking it up still needs a normal `npm install`/lockfile refresh in this app — the range alone does not pull a new
 version in on its own.
 
+**A related library fix already shipped in `0.4.1` — and does not close this entry.** `typescript-ui`'s
+`component-purges-event-listeners` plan added `Event.purgeComponent(componentId)`, called from the top of
+`Component.destructor()`, which purges a disposed component's own `listenerMap`/`subtreeListenerMap`/
+`viewportListenerMap` entries so they can't fire on a *later*, unrelated event. It's an ancestor of the `v0.4.1`
+tag and confirmed present in the installed package (`purgeComponent` appears in `dist/lib`'s `Component-*.js`).
+Re-tested live against the real installed `0.4.1` (not the symlink) after this shipped: closing `wide.cols_20`
+still throws the identical `DOM handle <n> is not registered` error, on the first close, every time. The two
+mechanisms are different: `purgeComponent` prevents a *stale* registration from a *past* disposal firing on a
+*future* event; this defect is **same-event reentrancy** — the click that closes the tab is itself the event whose
+own subtree-dispatch walk trips over the handle that same click's synchronous teardown released moments earlier,
+before that same event finishes bubbling. Purging eagerly on dispose doesn't help here because the walk that
+crashes belongs to the very event that triggered the dispose. Still open; no plan addresses this angle yet.
+
 ---
 
 ## ✂️🔎 `CodeEditor` construction grows CodeMirror's page-global stylesheet, independent of disposal (0.4.1)
@@ -481,6 +494,21 @@ materialised. Not resolved here; the position/history confound makes this hard
 to isolate through ad-hoc browser scripting and likely needs the library's own
 controlled test harness (as both prior investigations used) rather than more
 live-session measurement.
+
+**The first-touch hypothesis above was investigated and refuted — this entry is still open, but that specific
+theory is closed.** `typescript-ui`'s `table-scroll-first-visit-cost` plan ran a controlled first-visit/revisit
+protocol against the library's own demo tables, widened to `wide.cols_60`'s exact shape (60 columns, 6 types) —
+also an ancestor of `v0.4.1` and already in the installed package. Four consecutive identical sweeps over the same
+column range cost the same every time (62.5 / 63.4 / 62.7 / 60.6 ms/frame, identical `insertRule` counts); no
+first-visit penalty exists anywhere in `Row.setColumnWindow` / `Header.reconcileColumnCells` — both dispose a
+recycled cell's rule immediately, so there is no per-session cache for a revisit to warm. Their read on the ~10×
+field gap this entry measured: probably a **measurement artifact**, not a real cost — a sweep that runs the column
+window past the table's last column stops changing what it renders, so a sweep that happens to end there reads
+artificially cheap, which fits this entry's own description of the two compared sweeps as "overlapping-but-shifted,"
+not a clean identical-range comparison. Documentation-only change (`docs/concepts/performance.md`), no code fix,
+and no re-test has been run against a corrected boundary-safe protocol in SQLAdmin itself. The underlying
+~10×-vs-the-library-demo gap this entry opened with is therefore still unexplained — one candidate cause is ruled
+out, not the entry itself.
 
 ---
 
