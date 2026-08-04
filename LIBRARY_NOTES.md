@@ -8,7 +8,7 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
-## 🐞🔎 A closed query tab's stale keydown subtree-listener throws on the next keydown (0.4.1, symlinked)
+## 🐞🔎 Closing any panel with a live subtree listener throws on the next matching event (0.4.1, symlinked)
 
 Found during `adopt-dock-owned-teardown`'s manual verification (**M2**/**M3**), not by design. `QueryPanel.ts` wires
 `Event.addSubtreeListener(editor, "keydown", …)` for its Run/Save/Explain/Clear/history-recall shortcuts.
@@ -23,14 +23,28 @@ listener as it walks the event target's ancestor chain against the stale subtree
 already-released `Handle`. Reproduced reliably with a single query-tab open/close/keydown cycle — no accumulation
 needed — using both real UI interaction (click-driven) and scripted events, ruling out a test-harness artifact.
 
-**Confirmed unrelated to `adopt-dock-owned-teardown`'s own change.** The `Event.addSubtreeListener` call site in
-`QueryPanel.ts` is untouched by that plan's diff, and `editor.dispose()` is invoked identically either way — via
-the old app-side `PanelDisposers`-driven explicit call, or the new library-driven recursive one from
-`Tab.closeEntry`. Not fixed there: purging this map on dispose is a library-level fix, and adding an app-side
-`Event.removeSubtreeListener` call would be a new workaround in place of the one that plan retires (see its own
-Non-Goals). The app remains usable despite the thrown error — it did not visibly break subsequent interaction in
-this session — but a thrown, uncaught error on an unrelated keydown is a worse symptom than "leaked memory," and is
-worth fixing at the source rather than left as a latent trap for the next `Event`-adjacent change.
+**The blast radius is wider than one call site.** Re-confirmed during this run's phase-2 verification pass on a
+plain table tab, no query editor involved: closing `wide.cols_20`'s Data tab throws the identical `DOM handle <n>
+is not registered` error on the very first close, with a single real UI click and nothing scripted. `Table`'s own
+`Body.ts` (`Event.addSubtreeListener(this, "click", this.onSubtreeClick)`) and `Header.ts`
+(`click`/`contextmenu`) carry the same pattern the library uses internally, and the click that closes the tab is
+itself the event whose subtree walk trips over the handle the same click's `Tab.closeEntry` just released. So this
+is not specific to `keydown`, to `QueryPanel`, or to any app code — it is the library's own `Table` component
+tripping its own defect, on the single most common tab type in the app. Confirmed the app stays fully usable
+afterward in both cases (query tab and table tab): reopening and interacting with other panels works normally: the
+failure is a thrown console error on that one event, not a broken app.
+
+**Confirmed unrelated to `adopt-dock-owned-teardown`'s own change**, in both the original and the wider case. The
+`Event.addSubtreeListener` call sites in `QueryPanel.ts` and in the library's own `Table` component are untouched
+by that plan's diff, and `dispose()` is invoked identically either way — via the old app-side
+`PanelDisposers`-driven explicit call, or the new library-driven recursive one from `Tab.closeEntry`. Not fixed
+here: purging this map on dispose is a library-level fix, and adding an app-side `Event.removeSubtreeListener`
+call would be a new workaround in place of the one that plan retires (see its own Non-Goals) — and would not even
+cover the `Table`-internal case, which no app code can reach. **Deferred to 0.4.2**, not `0.4.1`: it does not stop
+the app from running — reopening and interacting with other panels works fine right after the thrown error — so it
+does not block this app's adoption. SQLAdmin's `^0.4.1` dependency range will accept a `0.4.2` once one exists, but
+picking it up still needs a normal `npm install`/lockfile refresh in this app — the range alone does not pull a new
+version in on its own.
 
 ---
 
