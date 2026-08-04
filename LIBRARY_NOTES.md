@@ -8,6 +8,36 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️🔎 A paged remote store's `autoSizeColumns` widths derive from page one only (0.4.0)
+
+`Table.maybeResampleColumnWidths` re-derives column widths once, on the first
+`'load'`/`'add'`/`'remove'`/`'datachange'` that finds records, and then sets a
+guard that only `Table.setStore` clears (see `Table.ts`'s `_hasResampled`
+handling). Against a `Store` over a paginated remote proxy — the shape both the
+main data grid (`dock/tableWriteRules.ts`) and the role-grants grid
+(`dock/RoleGrantsPanel.ts`) use — that first `'load'` is page one, so the
+derivation samples at most `SAMPLE_ROWS` (50) of the `PAGE_SIZE` (100) rows on
+that page and never resamples for any page, sort or filter afterwards. A
+column whose widest value lives on a later page renders at whatever width page
+one's sample produced and clips or truncates until the user drags it wider.
+
+This is a deliberate trade, not an oversight: re-deriving on every page/sort/
+filter would make column widths jump around under the user's cursor while
+paging, which is worse than a width that is occasionally too narrow. It is
+also not something the app can ask for — nothing on `Table`'s public surface
+exposes a "resample now" call short of `setStore`, which would also discard
+the store's loaded rows.
+
+**Possible library improvement:** expose a narrow, explicit "resample column
+widths against the currently loaded page" method (distinct from `setStore`,
+which replaces the store entirely) so a consumer whose store pages through
+data neither the app author nor its widths can equally clarify. Until then,
+sqladmin does nothing about it — see `content-derived-column-sizing.md`'s
+Non-Goals, and the plan's Potential Challenges for how a user works around it
+today (drag the column).
+
+---
+
 ## 🐞🔎 Closing a table tab strands ~2288 per-instance stylesheet rules (0.4.0)
 
 Opening and closing one 20-column table tab (`wide.cols_20`, 42 rendered rows)

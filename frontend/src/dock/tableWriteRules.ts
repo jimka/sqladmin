@@ -35,9 +35,13 @@ export function isRequiredColumn(column: ColumnMeta): boolean {
  * Save could not persist. Required columns (NOT NULL, not generated, no default)
  * get a header asterisk and an empty-cell outline from the library; read-only
  * wins over the outline, so a grid without UPDATE shows asterisks but no outlines.
+ * The grid is generated from a live schema and declares no widths, so its
+ * `string`/`auto` columns size themselves from the loaded page rather than
+ * sharing the viewport equally (`autoSizeColumns`).
  */
 export function buildColumnSpec(columns: ColumnMeta[], canUpdate: boolean): ColumnSpec {
     return {
+        autoSizeColumns: true,
         columns: columns.map(c => ({
             field: c.name,
             readOnly: !canUpdate || c.isGenerated,

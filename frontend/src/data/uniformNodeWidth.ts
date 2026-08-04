@@ -1,8 +1,9 @@
 // One width for every node in a flat (non-card) diagram, so a layer's nodes
-// share a left and right edge. No DOM — the width is estimated from label
-// length rather than measured, which is what keeps this pure and lets the
-// builders that use it stay node-vitest-testable (see buildSchemaDiagram.ts's
-// header note on never importing UI-bundle runtime code).
+// share a left and right edge. No DOM by default — the width is estimated
+// from label length, which is what keeps this pure and lets the builders that
+// use it stay node-vitest-testable (see buildSchemaDiagram.ts's header note on
+// never importing UI-bundle runtime code). A caller that can reach the DOM may
+// pass a real measurer instead; see `MeasureWidths`.
 
 /**
  * Rendered width per label character, in pixels.
@@ -23,7 +24,8 @@ const LABEL_CHAR_WIDTH = 6.8;
 const NODE_CHROME_WIDTH = 46;
 
 /**
- * Slack added on top of the fit, in pixels.
+ * Slack added on top of the estimating path's fit, in pixels. Not applied on
+ * the measured path — see `uniformNodeWidth`.
  *
  * The font is proportional, so a label of all-wide characters ("WWWW") renders
  * past what a per-character average predicts — the fit's residual reached
@@ -40,6 +42,13 @@ const LABEL_WIDTH_MARGIN = 16;
 const MIN_NODE_WIDTH = 96;
 
 /**
+ * Measures many strings under one font, returning one width per input.
+ * `Util.measureTextWidths` satisfies it; the diagram builders take it as a
+ * parameter so they never import DOM-backed library code themselves.
+ */
+export type MeasureWidths = (texts: string[]) => number[];
+
+/**
  * The single width every node of a flat diagram should be given, wide enough
  * for the longest label in the graph.
  *
@@ -50,11 +59,32 @@ const MIN_NODE_WIDTH = 96;
  * from its fixed `CARD_WIDTH`.
  *
  * @param labels - Every node label in the graph; entries may be empty.
+ * @param measureWidths - Optional real text measurer. Omitted, the widest
+ *   label's width is estimated from its character count; supplied, `labels`
+ *   is measured in one batched call and the estimating path's slack margin is
+ *   dropped, since a real measurement carries no residual for it to cover.
  * @returns The width to set on every node, a whole number of pixels.
  */
-export function uniformNodeWidth(labels: string[]): number {
-    const longest = labels.reduce((max, label) => Math.max(max, label.length), 0);
-    const fitted = longest * LABEL_CHAR_WIDTH + NODE_CHROME_WIDTH + LABEL_WIDTH_MARGIN;
+export function uniformNodeWidth(labels: string[], measureWidths?: MeasureWidths): number {
+    if (labels.length === 0) {
+        return MIN_NODE_WIDTH;
+    }
 
-    return Math.max(MIN_NODE_WIDTH, Math.ceil(fitted));
+    const widestLabelPx = measureWidths
+        ? widestMeasuredWidth(labels, measureWidths)
+        : widestEstimatedWidth(labels);
+
+    return Math.max(MIN_NODE_WIDTH, Math.ceil(widestLabelPx + NODE_CHROME_WIDTH));
+}
+
+/** The widest of `measureWidths`' real, batched measurements of `labels`. */
+function widestMeasuredWidth(labels: string[], measureWidths: MeasureWidths): number {
+    return Math.max(...measureWidths(labels));
+}
+
+/** The character-count fit's width for the longest label, plus its slack margin. */
+function widestEstimatedWidth(labels: string[]): number {
+    const longest = labels.reduce((max, label) => Math.max(max, label.length), 0);
+
+    return longest * LABEL_CHAR_WIDTH + LABEL_WIDTH_MARGIN;
 }

@@ -33,6 +33,15 @@ const PANEL_HEIGHT = 220;
 // so neither section can be dragged away entirely.
 const PANEL_MIN_HEIGHT = 96;
 
+// Width (px) of the Property column. Wide enough for the longest label either
+// inspector emits — "Connection limit" (roles/roleBaseInfoRows.ts) at 16
+// characters — plus the cell's own padding, leaving the larger half of the
+// 240px sidebar deck (ActivityBar's DECK_WIDTH) to the Value column. Declared
+// rather than sampled because the store is reseeded on every selection and the
+// library derives widths only once per store, so a sampled width would be
+// frozen at whatever the first selected object happened to hold.
+const PROPERTY_COLUMN_WIDTH = 120;
+
 /** Base for a read-only Property/Value inspector bound to a sidebar selection. */
 export class PropertyValuePanel {
     readonly component: Panel;
@@ -52,7 +61,13 @@ export class PropertyValuePanel {
             layoutManager: new Fit(),
             preferredSize: { width: 0, height: PANEL_HEIGHT },
             minSize      : { width: 0, height: PANEL_MIN_HEIGHT },
-            components   : [Table(this._store, { columns: [], rowReadOnly: () => true })],
+            components   : [Table(this._store, {
+                columns: [
+                    { field: "property", width: PROPERTY_COLUMN_WIDTH },
+                    { field: "value" },
+                ],
+                rowReadOnly: () => true,
+            })],
         });
     }
 

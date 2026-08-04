@@ -47,7 +47,7 @@ class RoleGrantsPanel extends Container {
         store.setPageSize(PAGE_SIZE);
 
         const toolbar    = buildToolBar(role, privileges);
-        const grid       = Table(store, { columns: [], rowReadOnly: () => true });
+        const grid       = Table(store, { columns: [], autoSizeColumns: true, rowReadOnly: () => true });
         const pagination = new PaginationBar(store);
 
         super({ layoutManager: new BorderLayout({ spacing: 0 }) });

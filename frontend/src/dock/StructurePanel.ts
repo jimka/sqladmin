@@ -403,6 +403,8 @@ function buildForeignKeysGrid(
     // Columns listed explicitly to keep display order while giving refTable a
     // link renderer; the rest stay read-only text. rowReadOnly locks every cell
     // (structure edits are toolbar-launched dialogs, not inline cell edits).
+    // refTable carries a renderer, so the library never samples it under
+    // autoSizeColumns and it stays flexible, absorbing the leftover width.
     const grid  = Table(store, {
         columns: [
             { field: "name" },
@@ -413,8 +415,9 @@ function buildForeignKeysGrid(
             { field: "onUpdate" },
             { field: "onDelete" },
         ],
-        appendUnlisted: false,
-        rowReadOnly:    () => true,
+        autoSizeColumns: true,
+        appendUnlisted:  false,
+        rowReadOnly:     () => true,
     });
 
     // Clicking a referenced-table link opens that table. cellclick fires for any

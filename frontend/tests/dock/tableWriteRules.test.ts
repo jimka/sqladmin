@@ -82,6 +82,10 @@ describe("buildColumnSpec", () => {
 
         expect(spec.columns).toEqual([{ field: "id", readOnly: true, required: false }]);
     });
+
+    it("opts the data grid into content-derived column sizing", () => {
+        expect(buildColumnSpec([column()], true).autoSizeColumns).toBe(true);
+    });
 });
 
 describe("missingRequiredFields", () => {
