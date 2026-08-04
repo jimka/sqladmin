@@ -423,3 +423,139 @@ No public API of this app changes, so no reference page moves. The documentation
 [^heartbeat]: `setInterval` schedules a macrotask, which cannot run while the main thread is blocked, so the largest gap between consecutive ticks is a lower bound on the longest single block during the gesture. The elk-worker-adoption run used exactly this to show that ELK layout had moved off the main thread (2,831 ticks over ~57 s; a 178 ms maximum gap across the 15.7 s interaction). It is used here alongside a trace rather than instead of one: the heartbeat gives the number a user feels, and the trace says which script the time belongs to.
 
 [^hold-window]: The hold is bounded at 50 ms of idle time after startup, so it only covers what is built in that window. `SqlAdminApp.ts` calls `Body.init` first, then awaits `whoami()`; when there is no session, the login dialog waits on a human and the shell is built long after the hold has released. With a live session cookie, `whoami()` resolves immediately and `SqlAdminShell` — with the start page, the navigator and roles trees, and the queries sidebar — is built inside the window. Dock panels are never in it: `data/layoutStore.ts` persists only `Split` gutter positions and `Accordion` section state, not open tabs, so every panel is created by a user action after load.
+
+---
+
+## Implementation Notes
+
+**This branch implements Parts A, B and C only. Parts D and E are outstanding by
+design, and the plan stays in `plans/in-progress/` until they are run.**
+
+Parts D and E both need the app driven in a browser against a live Postgres, and
+the user is deciding when to run them. Nothing about them is blocked or
+abandoned — steps 18-22 and 24-27 apply exactly as written. Verification rows
+1-11 all pass on this branch; rows 12 and 13 are the outstanding ones.
+
+Three steps behaved differently from what the plan assumed, all because the work
+ran in a fresh worktree rather than the main tree:
+
+- **Step 7 (install prep) was a no-op.** This worktree had no
+  `frontend/node_modules` at all, so there was no symlink to remove and no risk
+  of an install writing through one into the main tree's copy. Step 9's `npm
+  install` created a real install here from scratch — 124 packages, no
+  `ERESOLVE`, so the published 0.4.0's elkjs peer range agrees with the app's
+  `^0.12.0` as expected. The deliberate consequence is that this worktree's
+  `frontend/node_modules` must **not** be symlinked to the main tree's copy, the
+  habit elsewhere in this repo, for as long as Parts D and E are pending.
+- **Step 11 (clear the Vite dep cache) was a no-op**, confirmed rather than
+  assumed: a fresh install has no `frontend/node_modules/.vite` to clear. The
+  cache the step guards against can only exist after a dev server has run here,
+  so an empty diagram during Part D still means re-reading that step.
+- **Step 12's drift check found nothing beyond the library row.** The
+  regenerated lockfile's diff is four lines — the manifest range and the
+  `@jimka/typescript-ui` resolution — so `THIRD-PARTY-NOTICES.md` needed only
+  the one hand-edit the step calls for.
+
+**Step 23 was done early, out of its part.** It rewrites
+`.claude/skills/verify/SKILL.md`, which is documentation rather than browser
+work and is cleanly separable from the sweep around it; doing it now keeps that
+skill honest for whoever runs Part D, since the symlink it described no longer
+exists. `.claude/` is untracked and unignored, so the change is **not** in this
+branch's commits and cannot be — it is a live edit to the main tree's working
+copy of that skill, which `git status` reports only as an untracked `?? .claude/`
+directory. (Plan step 23 says it "will not appear in `git status`"; that is the
+one thing in the step that is wrong.)
+
+**Part C's rendered result is unverified.** The unit tests pin the encoding
+round-trip and the dark-mode rule, which is all a node-environment runner can
+see; that the tab actually shows SQLAdmin's drum rather than the library's
+bar-and-pane mark is Verification row 12, and it belongs to the Part D sweep.
+
+### A Part D check the plan's tables do not carry
+
+**0.4.0 stops firing `"selection"` for an unchanged selection**, and Part D's
+manual-verify tables never mention it. The library's migration guide leads its
+"Behaviour changes worth a check" section with it — `Tree`, the table body and
+`Table`'s rotated mode now stay silent when the resolved selection matches the
+one already held — and the plan cites that very section as what Part D looks
+for, so the omission is a gap in the tables rather than a decision. It is
+recorded here rather than fixed because it is exactly the kind of check that
+needs the browser; **whoever runs Part D should walk it alongside steps 19-22.**
+
+The app has nine live `"selection"` listeners. The one with a concrete path to a
+visible regression is the roles tree, because its listener and a second, unrelated
+caller write the same inspector:
+
+- `frontend/src/roles/RolesTree.ts:56` calls `showRoleProperties` on selection,
+  while `SqlAdminController.ts:2704` (a membership-diagram node activation) and
+  `SqlAdminController.ts:2649` (focusing an already-open grants tab) call it
+  **without** moving the tree's selection. So: click role X in the tree, then
+  activate a different role Y in its membership diagram — the inspector shows Y
+  while the tree still holds X — then click X in the tree again. Correct is the
+  inspector returning to X. If 0.4.0 suppresses that second click as redundant,
+  it stays on Y.
+- The remaining sites are lower risk and want a glance rather than a scenario:
+  `navigator/NavigatorTree.ts:124`, `dock/StructurePanel.ts:187`,
+  `dock/RelationDiagramPanel.ts:125`, `dock/ExplainDiagramPanel.ts:240`, `:248`
+  and `:256`, and `shell/localStorageWindow.ts:229`. Re-clicking an
+  already-selected row at each should leave the app in the state the row implies.
+- `dock/TableWorkPanel.ts:143` needs no check: `syncDeleteEnabled` is registered
+  on the store's change event as well as the grid's `"selection"`, which is the
+  "different trigger" the migration guide prescribes.
+
+The guide's second behaviour change, `DOMSource.onFontsReady` firing more than
+once or not at all, needs no app-side check — nothing under `frontend/src` calls
+it, so only the library's own use of it is in play, and step 20 already covers
+what that surfaces.
+
+### Parts D and E: results
+
+Both parts have now been run against the published 0.4.0 with no symlink, at a
+1500×800 viewport, via the `verify` skill. Part E's two findings are written up
+in `LIBRARY_NOTES.md`; what follows records Part D.
+
+**Passed.** Verification row 12 — the tab icon is SQLAdmin's own mark (decoded
+from the installed `link[rel=icon]`, and no `/favicon.ico` request is made at
+all). All eleven grids: the data grid and query-result grid both render 15
+header cells for `wide.cols_60`'s 60 columns, confirming column virtualization,
+with type-derived widths (`id` 42, int 98–102, string 78, boolean 104–107,
+date/timestamp 139); the four Structure grids, Role grants, Property/Value, and
+both Explain grids (`Metric`/`Value` at 151px each and `Action` 249 / `Cost` 52
+inside the 318px left pane) all fit their hosts with no clipped header and no
+column collapsed to a sliver. The startup font hold — a reload while logged in
+builds the shell in one piece with the navigator tree already populated, and
+`QueryPanel`'s editor seeding, its editor focus, and `DocumentationPanel`'s
+editor focus all land (`cm-content` and `WysiwygSurface` each become
+`activeElement`). Markdown markers, on both the start page and a Notes document
+seeded through `localStorage`: bullets share a right edge, and in an
+eleven-item numbered list `10.` and `11.` extend leftward to hold the shared
+right edge while every label from `one` to `eleven` keeps the same left edge —
+which is the two-digit case the marker-column change had to get right. Of the
+pixel shifts, the header band (no clipping at any grid's header/body divider),
+the `Dialog` close button (centred in the About dialog's title bar) and the
+`Tooltip` (93×30, label unclipped, inside the viewport) are all clean. No
+console errors or warnings at any point.
+
+**Two checks could not be completed by browser automation**, and both want a
+real pointer rather than more scripting:
+
+- **The `DragGhost` 2px change.** Synthetic `PointerEvent` sequences do not
+  start a drag — `DragManager` never builds a ghost, so there was nothing to
+  measure. The dock tabs were left unchanged, so nothing was disturbed by the
+  attempt.
+- **The unchanged-selection check** from the section above. The scenario needs
+  the inspector to diverge from the tree's selection before the re-click, and
+  the only route to that divergence — refocusing an already-open grants tab so
+  `syncToPanel` writes the inspector without moving the tree — does not fire
+  from a scripted tab click. Ordinary selection changes were verified working
+  (analyst → dba → analyst each updated the Details inspector correctly), so
+  what remains unverified is specifically the suppressed-redundant-emit path.
+  Note the app author independently observed the change behaving as intended:
+  selecting in the database list now issues two table-property fetches where it
+  previously issued three, which is one redundant emit removed with no lost
+  update.
+
+**One piece of collateral damage worth recording:** the Notes document for the
+`sqladmin.default` connection was overwritten during the markdown check and
+could not be restored — its prior contents were already gone by the time they
+were read. It was left empty rather than holding the test markdown.

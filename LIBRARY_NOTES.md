@@ -8,6 +8,351 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎 Closing a table tab strands ~2288 per-instance stylesheet rules (0.4.0)
+
+Opening and closing one 20-column table tab (`wide.cols_20`, 42 rendered rows)
+leaves **2288 rules** behind on the shared sheet, every cycle, for ever. Four
+open/close cycles measured in the browser against 0.4.0:
+
+| after | rules | DOM nodes | components |
+|---|---|---|---|
+| fresh page load | 436 | 491 | 334 |
+| baseline (tabs closed) | 6771 | 618 | 426 |
+| cycle 1 | 9059 | 618 | 426 |
+| cycle 2 | 11347 | 618 | 426 |
+| cycle 3 | 13635 | 618 | 426 |
+| cycle 4 | 15923 | 618 | 426 |
+
+Growth is perfectly linear at +2288/cycle. Characterised at the end of that run:
+of 15,923 rules, 15,862 are `#uuid`-scoped per-instance rules and **15,385 of
+those are orphaned** — their element id is no longer in the document. 96.6% of
+the sheet is dead.
+
+The DOM-node and component columns returning to baseline reads like proof that
+teardown is fine and only the rules survive. **It is not, and that reading was
+wrong.** Those columns count `.ts-ui-component` *elements*, which disappear when
+an ancestor is removed whether or not any destructor ran — the number never
+measured JS-side teardown at all. The components are in fact **retained**: the
+id-keyed maps in the library's `core/Event.ts` hold a `CompFunc` of
+`{ component, listeners }`, a strong `Component` reference from a module-level
+Map, which is a GC root. So a component that ever registered a listener stays
+permanently reachable, and this is a memory leak as well as a stylesheet one.
+
+That has a second consequence worth spelling out, because it explains an
+otherwise puzzling observation: the framework's `_componentFinalizer` — the GC
+backstop that would have released handles and disposed selectors for a component
+nobody explicitly destroyed — **can never fire while a listener registration
+holds the component alive**. The leak disarms its own safety net. Fixing the
+listener maps (library plan `component-purges-event-listeners`) is what restores
+that backstop.
+
+**The 0.4.0 row-pool fix is present and correct — it is simply never reached.**
+`VirtualRowView.destructor()` does dispose every pooled row and the scroller's
+overlay scrollbars, exactly as the changelog describes, and
+`Component.destructor()` recurses into `_components`. The chain breaks one level
+up: **`Dock` never disposes the content component of a tab it closes.** Closing
+a tab removes the element and drops the tab, but nothing calls `dispose()` on
+what the consumer handed it, so no destructor in that subtree ever runs.
+
+SQLAdmin only escapes this where it opts in. `SqlAdminController.openAsyncPanel`
+registers a panel with its own `PanelDisposers` registry **only** when the
+caller passes `disposeOnClose: true` — set at the nine diagram sites, which own
+ELK workers that must be terminated, and *not* on `openTable` (line 448) or the
+structure panel (line 508). Those two are the app's highest-traffic tabs, and
+they are the ones measured above.
+
+So the app has a workaround available today (pass the flag at the remaining
+sites), but the durable fix is library-side: a consumer that closes a tab
+should not silently accumulate an unbounded stylesheet, and the evidence that
+this is a trap rather than a contract is that this app built a whole disposal
+registry to work around it and still missed its two busiest panels. Owning
+teardown in `Dock` would let most of `PanelDisposers` go away — its remaining
+job would be the genuinely app-specific part (ELK worker termination, and the
+in-flight-build token that disposes a panel whose tab closed mid-fetch).
+
+Note the changelog's quantified claim — a 45-column table retaining 104 rules
+per cycle where it used to retain 5512 — is measured on a directly-disposed
+view, not through a Dock tab close, which is why it does not describe what a
+consumer sees.
+
+Why it matters beyond memory: style-recalc cost grows with the size of the
+sheet, so every later frame in a session gets dearer. This is the mechanism
+behind the app-level symptom — *"performance drops after having opened and
+closed a number of tables"* — and it compounds the forced-reflow entry below,
+since each forced reflow re-runs style resolution against the bloated sheet.
+
+Repro: open a table tab, close it, and read
+`[...document.styleSheets].reduce((n, s) => n + s.cssRules.length, 0)` before
+and after. No app change can address this; it needs a library fix.
+
+**Re-measured against the local `dock-disposes-tab-content` fix (symlinked, not
+yet released) — real, large, incomplete.** Four `wide.cols_20` open/close cycles:
+retained rules per cycle dropped from **2288 to 78** — a ~29× reduction — and the
+live-component count now returns to baseline correctly (`+4`, constant across
+cycles rather than growing, and confined to what looks like one tab button's own
+subtree — not investigated further). But growth is still perfectly linear at
++78/cycle, and it is still genuinely orphaned: of 854 `#uuid`-scoped rules
+present after four cycles, 380 have no matching element in the document. The fix
+is correct for what it targets (confirmed by code review: `constraintsFor` fixed
+at the source, the empty-state trap handled, no workaround anywhere) — this is a
+**second, smaller instance of the same defect class**, something else in a
+table tab's subtree still raw-appends chrome without registering it as a child,
+so `Tab.closeEntry`'s new disposal cannot reach it. Location not yet identified;
+a scoped snapshot (component id → className immediately before close, checked
+against orphaned rule selectors after) caught only the already-expected tab
+button chain, so the leak is likely chrome that mounts outside the tab's own DOM
+subtree entirely — a `LayerManager`-hosted `Tooltip` or `Menu` attached from a
+toolbar button (Export, Filter) is the obvious candidate, since those overlay
+into a separate root and would not appear in a scan scoped to the tab panel.
+Needs its own investigation before 0.4.1 ships.
+
+**Re-measured against the local `table-tab-close-residual-leak` fix (Menu
+teardown across all seven owners, symlinked, not yet released) — the
+`LayerManager`/`Menu` hypothesis was correct and is confirmed fixed at the
+unit level, but it was not the dominant contributor to this app's leak, and
+the app-level number barely moved.** Four `wide.cols_20` cycles on a fresh
+page: retained rules per cycle went from 78 to **~72–73** — an ~8% reduction,
+not the near-elimination the fix's own library-level tests show (confirmed via
+`insertRule`/`deleteRule` instrumentation across one full cycle: 2371 inserted,
+2299 deleted, 73 survivors, all `#uuid`-scoped).
+
+Cross-referencing every surviving rule's id against a `MutationObserver` log of
+every element ever added during the cycle (so transient components missed by a
+before/after DOM snapshot are still caught) identified the leak precisely, and
+it is **not `Menu`** — no `Menu`/`MenuItem`/`Tooltip` class appears anywhere in
+the survivors:
+
+| class | count |
+|---|---|
+| `Text` | 38 |
+| `Panel` | 20 |
+| `Button` | 6 |
+| `Component` | 4 |
+| `TabCloseButton` | 3 |
+| `Glyph` | 2 |
+
+`Button`: 6 matches `TableWorkPanel`'s toolbar button count exactly
+(Add/Delete/Save/Refresh/Filter/Export, each built through `glyphButton`,
+which routes every label through `Button`'s own tooltip text). This is **not**
+an unregistered-child defect the way `Menu` was: confirmed by reading source
+that `TableWorkPanel.addComponent(toolbar, …)` and `ToolBar`'s own
+`addComponent(button)` pattern both register normally, so the ordinary child
+recursion should already reach every one of these. Whatever leaks their rules
+is a different mechanism than "raw-appended, never a child" — possibly
+`Button`'s own `Tooltip.attach(this, str)` call (mirrors the `#uuid`-keyed
+static `Tooltip.attachments` map already flagged as an unrelated memory-only
+finding by the Menu-fix's own implementation, scoped out there as
+non-stylesheet — worth re-checking whether that scoping was too narrow), or a
+timing interaction with this app's own now-partially-redundant `PanelDisposers`
+workaround (not yet deleted — that is `adopt-dock-owned-teardown`, still
+unimplemented). Not resolved here; needs its own investigation.
+
+**Re-measured against the local `table-toolbar-button-residual-leak` fix
+(`TabButton`/`TabCloseButton` disposal, symlinked, not yet released) — real,
+confirmed correct, and initially looked like it had made no difference. It had.**
+The first re-measurement after symlinking this fix showed the retained-rules
+count completely unchanged (~72–79/cycle). Deep tracing (temporary
+`console.log` instrumentation in `TabButton.destructor`, `TabBar.createBarEntry`
+and `TabBar.removeBarEntry`, rebuilt into the symlinked lib) initially seemed to
+show the real, visible tab's `TabButton` disposing with a **null** `_closeButton`
+— looking exactly like the bug this fix was supposed to close. It wasn't: Vite's
+dependency pre-bundler (`node_modules/.vite/deps`) was serving a stale
+in-memory-optimized snapshot of the library from *before* this fix's rebuild,
+even after `rm -rf node_modules/.vite` and a hard page reload — the running dev
+server process needed a full restart (`vite --force`) to actually pick up the
+new `dist/lib`. Deleting the cache directory alone is not sufficient once a dev
+server has been running across several `npm run build:lib` cycles in the same
+session; a symlinked-lib verification round should restart the dev server, not
+just clear its cache. This cost most of a session and is worth remembering
+(see the project's `sqladmin-consumes-built-dist-lib`/`verify` guidance — this
+is the sharper, previously-missing corollary).
+
+After a genuine restart, the disambiguated trace showed the fix working exactly
+as designed: the real tab's `TabButton.destructor()` runs with a non-null
+`_closeButton`, and all seven of its own rules (`TabButton` ×4,
+`TabCloseButton` ×3) are cleanly disposed. Re-running the four-cycle
+`wide.cols_20` measurement against the correctly-loaded build:
+
+| cycle | retained (cumulative) | retained (this cycle) |
+|---|---|---|
+| 1 | 86 | 86 (includes one-time warm-up cost) |
+| 2 | 152 | 66 |
+| 3 | 218 | 66 |
+| 4 | 284 | 66 |
+
+**Root cause of the remaining ~66/cycle found and fixed — SQLAdmin's own bug,
+not the library's; `TableWorkPanel` was never it.** The `Button:6`-matches-the-
+toolbar reasoning above was a coincidence of counting, not a real lead — the
+`TableWorkPanel`/`ToolBar`/`Button` chain disposes cleanly: instrumenting
+`Component.destructor()` directly (temporary `console.log` of
+`constructor.name` + id on every call) and cross-referencing against the live
+stylesheet after close showed **zero** cases of "destructor ran but the rule
+survived" for anything reachable from a closed table tab. Every one of the
+1450 destructor calls traced across a `wide.cols_10` cycle correctly cleared
+its own rule.
+
+The actual survivors (53 unique component ids after one open/close pair) were
+never even *attempted* — no destructor call for any of them anywhere in the
+trace — and resolving their live DOM elements (`document.getElementById`)
+showed they were not part of the table tab's subtree at all: `className`s of
+`Text`/`Panel`/`Button`/`Glyph`, `textContent` reading "Ctrl/Cmd+↑ / ↓",
+"Databases rail", "Recent tables", "New Query", etc. — SQLAdmin's own
+**"Getting started" start page** (`frontend/src/shell/StartPage.ts`), which
+Dock's empty-region toggle re-shows every time the last tab closes.
+
+`StartPage.rebuild()` special-cased exactly one child (the transient
+`Markdown` welcome blurb) for an explicit `.dispose()` before
+`this.removeAllComponents()` — every *other* child (the "New Query" button,
+the recent-tables/saved-queries list rows, the shortcut legend, the
+"Connection" heading) was only detached, never disposed, on every single
+rebuild. `removeAllComponents()` is documented and correctly implemented as
+detach-only (mirrors `removeComponent`'s re-parent-friendly contract) — this
+was a caller-side gap, app code, not a library defect. Fixed by disposing
+every current child generically before removing them
+(`for (const c of this.getComponents()) c.dispose()`), which also let the
+`welcome`-specific special-casing be deleted entirely as redundant. Re-running
+the four-cycle `wide.cols_20` measurement against the fix: retained rules
+after close were **527 → 527 → 527 → 527** — flat across all four cycles,
+zero leak. This closes out the whole `wide.cols_20` open/close investigation
+that started this entry: 2288/cycle → 0/cycle across seven library-side fixes
+plus this one app-side fix.
+
+Steady-state retained-per-cycle dropped from **~72–73 to 66** — a real, if
+modest, further reduction consistent with eliminating the `Component`(4) +
+`TabCloseButton`(3) survivors from the earlier breakdown. The remaining
+**~66/cycle** is not this fix's concern — it lines up with the untouched
+`Text`(38) + `Panel`(20) + `Button`(6) = 64 of the same breakdown, still
+pointing at `TableWorkPanel`'s toolbar (or its `Tooltip.attach` calls) as a
+separate, still-open defect. Not resolved here; still needs its own
+investigation.
+
+---
+
+## 🐞🔎 Horizontal scrolling a wide grid layout-thrashes on `getBorderWidths` (0.4.0)
+
+Scrolling `wide.cols_60` (60 columns, 6014px of content in a 1206px viewport,
+54 rendered rows) horizontally from end to end at 1500×800 took **50.6 s for
+150 frames — 3.0 fps** — with a **5030 ms** longest main-thread block and 20
+blocks over 100 ms. A shorter 20-frame gesture took 30.1 s (1507 ms/frame).
+
+Chrome's ForcedReflow insight spans essentially the whole trace and attributes
+it to the library, not the app:
+
+- `getBorderWidths` @ `@jimka/typescript-ui/dist/lib/DOM-*.js` — 405 ms
+- `getScrollLeft` @ same — 146 ms
+- the measurement harness itself — 3 ms
+
+Two controls locate the cost. At 8px/frame, both an in-place jitter and a steady
+advance that *does* cross column boundaries run at ~62 fps with no gap over
+50 ms — so crossing a boundary is not the trigger. And the cost does not scale
+with column count: `cols_20` cost 1286 ms/frame against `cols_60`'s
+1507–2102 ms/frame, despite a third of the columns. What it scales with is the
+number of **cells entering the column window per frame** (rendered rows ×
+columns crossed).
+
+**The mechanism is not what the profiler's headline suggests, and the obvious
+reading of it is wrong.** `getBorderWidths` is only ~1.5% of a slow frame. The
+cost is what the read *does to everything after it*: `Component.getBorderSize()`
+issues a per-component `getComputedStyle` read mid-frame, and that read makes
+every **subsequent shared-stylesheet rule write in the same task about 85×
+dearer** — 0.014 ms to ~1.2 ms each. Those poisoned writes are ~80% of a slow
+frame. Established by measurement in the library's own demo, not by reading the
+trace summary.
+
+Two hypotheses were disproved on the way and are recorded here so they are not
+re-proposed: that `getBorderWidths` is itself expensive (it is not), and that
+read-all-then-write-all would fix it (it cannot — a render pass writes rules
+before it can read).
+
+The fix, planned in the library as `table-scroll-forced-reflow`, shares one
+browser measurement per border spec in a new internal `core/BorderWidths.ts`. It
+is A/B proven in the library's own 45-column demo table, which reproduces the
+stall without this app at all: 45 scroll frames went from 8.0–9.9 s with 9–10
+frames over 100 ms, to 1.08–1.18 s with none.
+
+**This is why the two entries compound, and the coupling is now mechanism rather
+than conjecture:** the poisoned rule-write cost scales with the size of the
+shared stylesheet, and the Dock-disposal leak above grows that sheet without
+bound. Every table tab closed makes wide-grid scrolling permanently slower for
+the rest of the session.
+
+The app-side numbers at the top of this entry came from a Vite **dev** build,
+which inflates the JS around the reflow but not the browser work itself. They
+are kept as the field report that started the hunt; the library demo's A/B
+figures above are the authoritative ones. To re-measure through this app against
+a production bundle, note `vite preview` needs its own `preview.proxy` for
+`/api`, since `server.proxy` does not apply to it.
+
+**Re-measured against the local `table-scroll-forced-reflow` fix (symlinked, not
+yet released) — the targeted mechanism is confirmed gone, but a second,
+different bottleneck dominates in this app and the field symptom is only
+partly resolved.** Instrumenting `getComputedStyle` and every
+`CSSStyleDeclaration.cssText` write during a scroll on `wide.cols_60` found
+**zero** `getComputedStyle` calls — the border-width cache is working exactly as
+designed, and `getBorderWidths` no longer appears anywhere in Chrome's
+forced-reflow attribution. The original 150-frame heartbeat measurement improved
+from 50.6 s to **26.5 s** (3.0 fps → 5.7 fps) — real, but nowhere near the
+library demo's own 8–10 s → 1.1–1.2 s.
+
+The remaining cost is not forced reflow: Chrome's ForcedReflow insight now
+attributes only **259 ms of ~26 s** to a different call (`getScrollLeft`), so
+over 99% of the time is something the fix's own mechanism cannot explain. A
+control at 120 px/frame is bimodal and steady-state (not a startup-backlog
+artefact — checked per-frame over 40 frames, front half 829 ms avg vs back half
+967 ms avg, evenly distributed throughout): about half the frames cost
+20–200 ms and the other half cost 1000–2550 ms, both while writing ~176
+`cssText` rules/frame against an ~2700-rule sheet with zero style reads. A
+sharper control — the same 120 px delta, oscillating (+120/−120 alternating)
+instead of advancing — costs **343 ms/frame** against a **steady** advance's
+**19.7 ms/frame** at the same delta size, an ~17× gap that the original
+finding's controls never surfaced (they only varied delta size, not direction).
+That points at something direction-sensitive in cell recycling — plausibly the
+"skip a cell whose geometry is unchanged" optimisation from 0.4.0's own
+changelog failing to help (or actively penalising) a window that keeps
+reversing, rather than at anything this fix touches.
+
+Two live hypotheses, neither confirmed: plain style-recalculation cost scaling
+with the ~2700-rule sheet size regardless of any read (a *different* cost model
+than the poisoned-write mechanism this fix removed, since removing all reads
+did not remove the bimodal slowness); or a genuinely separate forced-layout
+trigger this fix's `BorderWidths` cache does not cover, surfaced by `cols_60`'s
+richer per-cell wiring (editor pool, required-column outline, per-type
+renderers) that the library's minimal demo table does not exercise. Needs its
+own investigation before 0.4.1 ships — SQLAdmin is again the harder test the
+library's own demo did not surface.
+
+**Re-measured against the local `table-scroll-recycling-cost` fix
+(`setShadow`/`clearShadow` idempotence guard, symlinked, not yet released) —
+real, substantial, still incomplete, and the direction-sensitivity story from
+the prior entry does not hold up under a clean re-test.** On a fresh page
+(`wide.cols_60` opened once, no accumulated leak-cycle state — checked, since
+sheet size confounds this: freshly-opened `cols_60` alone reaches ~2800 rules,
+dwarfing the ~350 a preceding leak-cycle test would have added, so the two
+investigations' measurements don't contaminate each other here), the 150-frame
+heartbeat improved **26.5 s → 13.7–13.8 s** (5.7 fps → ~11 fps) — real, on top
+of the scroll fix's own already-confirmed elimination of every `getComputedStyle`
+call, but still roughly 10× the library demo's clean 1.1–1.2 s.
+
+The steady-vs-oscillating control **no longer shows anything close to 17×** —
+174.1 ms/frame steady vs 190.5 ms/frame oscillating, a ~1.1× ratio, matching
+what the scroll-fix plan's own instrumentation found (~1.7×) far better than
+the pre-fix field figure. But a third run of the **same steady pattern
+immediately after** the first two dropped to **18 ms/frame** — a ~10×
+difference between two identical gestures, one first-visit and one revisiting
+territory the prior gesture just covered. That is not explained by direction
+at all, and was not tested for in either prior investigation (both varied
+delta size or direction, never first-visit vs revisit of the same column
+range). The likely mechanism is some form of first-touch cost per column (or
+per column-type) that a revisit skips — consistent with, but not proven to be,
+the same stylesheet-size-scaling cost already implicated in the leak entry
+above, since a first-visit column may need rules a revisit already has
+materialised. Not resolved here; the position/history confound makes this hard
+to isolate through ad-hoc browser scripting and likely needs the library's own
+controlled test harness (as both prior investigations used) rather than more
+live-session measurement.
+
+---
+
 ## 🐞🩹🔎 A numeric `fontSize` passed to `Text`'s constructor is silently ignored
 
 `new Text("v0.1.0", { fontSize: 10 })` renders at the theme default (14px), not
