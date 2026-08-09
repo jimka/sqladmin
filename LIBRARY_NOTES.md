@@ -8,6 +8,67 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎 `SqlPreviewDialog`'s failed-execute retry crashes — `Dialog` now owns its content's teardown too (app bug, exposed by 0.4.1, symlinked)
+
+Found manually verifying `align-with-library-post-0.4.1`'s Change 2 "failed Execute, followed by retry"
+bullet — pre-existing code, **not** touched by that plan's diff (only `resizer.fit = () =>
+dialog.resizeToContent();` was added nearby; the crashing line itself,
+[`SqlPreviewDialog.ts:213`](frontend/src/dock/SqlPreviewDialog.ts#L213)'s
+`dialog.getContentComponent().removeComponent(content);`, is original `ddl-infrastructure.md` code).
+
+Repro: "Create table" on `wide`, name it `cols_10` (already exists), Execute. The expected
+`relation "cols_10" already exists"` error notification appears — but the dialog does **not** re-show for
+a retry; it simply vanishes. Console shows an unhandled rejection:
+
+```
+Uncaught (in promise)
+  at resolve (DOM.ts:239) → apply (DOM.ts:1474) → set (ElementAttributes.ts:51)
+  → setElementAttribute (Component.ts:1457) → setDataAttribute (Component.ts:1749)
+  → getLayoutManager (Component.ts:5334) → delLayoutConstraints (Component.ts:5294)
+  → unwireChild (Component.ts:4980) → removeComponent (Component.ts:5171)
+  → showExecuteRetryLoop (SqlPreviewDialog.ts:213)
+```
+
+**Root cause confirmed by reading the library, not guessed.** `Component.destructor()`
+([`Component.ts:762`](../typescript-ui/packages/lib/src/typescript/lib/core/Component.ts#L762)) recursively
+destroys every registered child (`for (const child of this._components) { child.destructor(); }`) — the
+same owned-teardown mechanism this app already adapted `Dock`/`Tab.closeEntry` to via
+`adopt-dock-owned-teardown` (see the top-of-file `Closing a table tab strands...` entry's resolution).
+`Dialog.destructor()` ([`Dialog.ts:1173`](../typescript-ui/packages/lib/src/typescript/lib/overlay/Dialog.ts#L1173))
+calls `super.destructor()`, so **`dialog.hide()` now destroys the dialog's entire content subtree** —
+`_contentContainer` and, since `SqlPreviewDialog` added it as a child, the persistent `content` Panel
+(form + "Regenerate SQL" button + `editor`) along with it. `hide()`'s `finalize()`
+([`Dialog.ts:1119`](../typescript-ui/packages/lib/src/typescript/lib/overlay/Dialog.ts#L1119)) calls
+`this.destructor()` *before* resolving the `show()` promise, so by the time `showExecuteRetryLoop`'s
+`await dialog.show()` returns after a Cancel/close/Execute-failure, `content` — and `editor` inside it — are
+already disposed. The catch block's `dialog.getContentComponent().removeComponent(content)` then operates
+on an already-torn-down parent and child, hitting a released DOM handle deep in `Component`'s attribute
+plumbing.
+
+**This is `Dialog` working as designed, not a library defect** — mirrors the same owned-teardown contract
+`Dock` already carries, and is presumably intentional/consistent library behaviour, unlike the `CodeEditor`
+entry above. The bug is **app-side**: `SqlPreviewDialog.ts`'s whole "detach the persistent content from the
+spent dialog and re-wrap it in a fresh one" retry design (see the file's own header comment,
+"`Dialog.hide()` destructs the Dialog instance on every dismissal, so a retry cannot re-show the same
+instance — it detaches the persistent content... so the form's and the editor's own state... survive
+across retries") was true when written but is now **false**: the content does not survive `hide()` to be
+detached at all. `FilterDialog` has no equivalent retry path to have already surfaced this against (Apply/
+Clear/Cancel don't retry), so `SqlPreviewDialog` appears to be the only place in the app this contract
+change actually breaks.
+
+**Confirmed no data corruption** — the `CREATE TABLE` correctly failed server-side before the crash (`wide.cols_10`
+unchanged); this is a pure UI-teardown/retry-flow bug, but it means **every DDL phase's Execute-failure retry
+is currently non-functional**: any invalid SQL, permission error, or name conflict on Execute silently
+drops the dialog instead of letting the user fix and retry, which is the dialog's whole documented purpose.
+
+**Not fixed here** — out of `align-with-library-post-0.4.1`'s scope (its two changes are `NavigatorTree`
+and `SqlPreviewDialog`'s *sizing*, not its retry lifecycle; this bug predates and is orthogonal to both).
+Fixing it properly needs a real redesign — e.g. rebuilding the form + editor content fresh on each retry
+instead of reusing the disposed instance, mirroring how `adopt-dock-owned-teardown` handled the same class
+of problem for Dock tabs — which belongs in its own plan, not a mid-implementation patch.
+
+---
+
 ## 🐞🔎 `CodeEditor.autoHeightMaxRows` can collapse the editor to 0px on a shrink (0.4.1, symlinked)
 
 Found while manually verifying `align-with-library-post-0.4.1`'s `SqlPreviewDialog` adoption of
