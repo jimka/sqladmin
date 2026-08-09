@@ -8,6 +8,27 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✅ Fixed in library: no way to grow a `CodeEditor` to fit its content
+
+`SqlPreviewDialog`'s DDL preview editor (`dock/SqlPreviewDialog.ts`) sat in a
+fixed 180px box regardless of how much SQL `generateSql()` produced, so a
+short preview left dead space and a long one deferred entirely to the
+dialog's outer scroll. There was no way to ask a `CodeEditor` to size itself
+to its own content, capped at a maximum.
+
+Fixed in the library: `CodeEditor` gained an opt-in `autoHeightMaxRows`
+option and a `"heightchange"` event fired whenever its measured height
+changes. Adopted here (plan `align-with-library-post-0.4.1`): the editor is
+capped at `SQL_PREVIEW_MAX_ROWS` (24, sized to this app's own `wide.cols_20`
+DDL fixture), and its seed `preferredSize` is dropped via
+`clearPreferredSize()` on the first `"heightchange"` so it stops fighting the
+editor's own live height on later relayouts. The dialog re-fits itself on
+every `"heightchange"` via a `resizer` object mirroring `FilterDialog`'s own
+re-fit hook, rewired on every dialog rebuild so a failed-execute retry keeps
+resizing correctly.
+
+---
+
 ## ✅ Fixed in library: no direct way to expand a freshly-loaded tree node
 
 `NavigatorTree.refresh()` (`navigator/NavigatorTree.ts`) needed to
