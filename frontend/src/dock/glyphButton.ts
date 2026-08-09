@@ -2,10 +2,13 @@
 // hover tooltip and the accessible name (aria-label). Shared by the dock work
 // panels (table / view / query / role-grants), whose toolbars all build their
 // actions this way. `glyphMenuButton` is the same face wired to a dropdown
-// menu instead of a click handler.
+// menu instead of a click handler, and `glyphToggleButton` is the same face
+// as a two-state toggle instead of a plain button — one owner, so the three
+// variants cannot drift apart in a toolbar that mixes them.
 
-import { Button }     from "@jimka/typescript-ui/component/button";
-import { MenuButton } from "@jimka/typescript-ui/component/button";
+import { Button }       from "@jimka/typescript-ui/component/button";
+import { MenuButton }   from "@jimka/typescript-ui/component/button";
+import { ToggleButton } from "@jimka/typescript-ui/component/button";
 import type { ButtonOptions }  from "@jimka/typescript-ui/component/button";
 import type { MenuItemConfig } from "@jimka/typescript-ui/component/container";
 
@@ -20,7 +23,7 @@ import type { MenuItemConfig } from "@jimka/typescript-ui/component/container";
  * @param color - Foreground (glyph) color.
  * @param label - Hover tooltip and accessible name; not shown on the face.
  *
- * @returns The shared options bag for both `glyphButton` and `glyphMenuButton`.
+ * @returns The shared options bag for `glyphButton`, `glyphMenuButton`, and `glyphToggleButton`.
  */
 function glyphButtonOptions(glyph: string, color: string, label: string): ButtonOptions {
     return { glyph, text: label, showText: false, showDescription: false, foregroundColor: color, compact: true };
@@ -68,4 +71,24 @@ export function glyphMenuButton(
     // as a *call* is TS2554, same as Button today). MenuButton wires its own
     // "action" listener, so there is no handler to pass.
     return MenuButton({ ...glyphButtonOptions(glyph, color, label), menuItems });
+}
+
+/**
+ * Build a compact, glyph-only toolbar toggle button.
+ *
+ * Unlike `glyphButton`, this takes no handler: a toggle's handler almost
+ * always needs the owning component (to react to the new state), which is
+ * unavailable while the button is being built as a pre-`super()` local — see
+ * ../COMPONENT_CONVENTIONS.md's super-cascade trap. The caller wires
+ * `.on("action", …)` itself once `super()` has returned.
+ *
+ * @param glyph - Registered glyph name for the button face.
+ * @param color - Foreground (glyph) color.
+ * @param label - Hover tooltip and accessible name; not shown on the face.
+ * @param selected - The toggle's initial selected state.
+ *
+ * @returns The unwired toggle button.
+ */
+export function glyphToggleButton(glyph: string, color: string, label: string, selected: boolean): ToggleButton {
+    return new ToggleButton("", { ...glyphButtonOptions(glyph, color, label), selected });
 }
