@@ -1,5 +1,6 @@
 // The dock work panel for one table: an inline ToolBar of glyph-only actions
-// (Add / Delete / Save … Refresh) over the live data grid.
+// over the live data grid — the record-view toggle and its Previous / Next
+// steppers at the far left, a separator, then Add / Delete / Save … Refresh.
 //
 // The toolbar drives the store directly: load / add / remove / sync. Transport
 // errors surface as the store's 'exception'/'sync' events, wired to the
@@ -8,21 +9,28 @@
 // table's structure opens in its own tab from the navigator's right-click menu
 // (see StructurePanel / SqlAdminController).
 //
+// The record-view toggle flips the same grid to the library's rotated
+// (field/value) display mode via `Table.setDisplayMode` — no second grid, no
+// app-side projection. The mode is read-only, so it never affects Save; only
+// Add changes meaning between the two views, since it needs the grid to fill
+// in a new row. Previous/Next step `store.getRecords()` — the loaded page —
+// clamped at both ends by the pure `stepIndex` helper.
+//
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the panel `extends
 // Container`, inlining its own Border frame directly (the same shape
-// RoleGrantsPanel inlines too). The three sync handlers
+// RoleGrantsPanel inlines too). The sync handlers and `toggleRecordView`
 // are arrow-function fields — they're registered by reference on
-// `store`/`dataGrid` events, which would drop `this` if they were plain
-// methods. `buildColumnSpec`/`save_`/`missingRequiredFields`/`confirmDelete`
-// stay stateless module-level functions.
+// `store`/`dataGrid`/`recordToggle` events, which would drop `this` if they
+// were plain methods. `buildColumnSpec`/`save_`/`missingRequiredFields`/
+// `confirmDelete`/`stepRecord` stay stateless module-level functions.
 
 import { Container, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
 import { Placement }                   from "@jimka/typescript-ui/primitive";
-import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
-import { Button }                      from "@jimka/typescript-ui/component/button";
+import { ToolBar, ToolBarSeparator }   from "@jimka/typescript-ui/component/menubar";
+import { Button, ToggleButton }        from "@jimka/typescript-ui/component/button";
 import { Spacer }                      from "@jimka/typescript-ui/component/container";
-import { glyphButton }                 from "./glyphButton";
+import { glyphButton, glyphToggleButton } from "./glyphButton";
 import { Table }                       from "@jimka/typescript-ui/component/table";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
 import { Dialog, DialogButtons }       from "@jimka/typescript-ui/overlay";
@@ -32,13 +40,17 @@ import { plus }                        from "@jimka/typescript-ui/glyphs/solid/p
 import { minus }                       from "@jimka/typescript-ui/glyphs/solid/minus";
 import { save }                        from "@jimka/typescript-ui/glyphs/solid/save";
 import { filter }                      from "@jimka/typescript-ui/glyphs/solid/filter";
+import { table_list }                  from "@jimka/typescript-ui/glyphs/solid/table_list";
+import { angle_left }                  from "@jimka/typescript-ui/glyphs/solid/angle_left";
+import { angle_right }                 from "@jimka/typescript-ui/glyphs/solid/angle_right";
 import type { ColumnMeta, TablePrivileges } from "../contract";
 import { openFilterDialog }            from "./FilterDialog";
 import { buildExportButton }           from "./exportButton";
 import { buildColumnSpec, missingRequiredFields } from "./tableWriteRules";
+import { stepIndex }                   from "./recordNavigation";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR, FILTER_ACTIVE_COLOR } from "../theme";
 
-Glyph.register(refresh, plus, minus, save, filter);
+Glyph.register(refresh, plus, minus, save, filter, table_list, angle_left, angle_right);
 
 /** Surface a short status message (validation / save feedback) to the user. */
 export type Notify = (message: string) => void;
@@ -58,11 +70,16 @@ class TableWorkPanel extends Container {
     private readonly privileges: TablePrivileges;
     private readonly canWrite:   boolean;
 
-    // Only the buttons the sync handlers toggle need to be reachable as
-    // fields; addButton is set once (setEnabled below) and never revisited.
-    private readonly deleteButton: Button;
-    private readonly saveButton:   Button;
-    private readonly filterButton: Button;
+    // The buttons the sync handlers toggle need to be reachable as fields.
+    // addButton is no longer a fixed capability: syncAddEnabled toggles it
+    // with the record-view state as well as with `privileges.insert`.
+    private readonly addButton:     Button;
+    private readonly deleteButton:  Button;
+    private readonly saveButton:    Button;
+    private readonly filterButton:  Button;
+    private readonly recordToggle:  ToggleButton;
+    private readonly prevButton:    Button;
+    private readonly nextButton:    Button;
 
     constructor(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable, privileges: TablePrivileges) {
         // `this` is unavailable until after `super()`, so the grid and toolbar
@@ -84,6 +101,14 @@ class TableWorkPanel extends Container {
             canWrite ? "Save" : "Save (read-only — no write permission)", () => save_(store, columns, notify));
         const filterButton = glyphButton("filter", PRIMARY_COLOR, "Filter rows", () => openFilterDialog(store, columns));
 
+        // Record view: flips the grid to one record's field/value rows via
+        // Table.setDisplayMode. The toggle's handler needs `this` (to re-sync
+        // Add and the steppers), which is unavailable here, so it is wired
+        // after super() returns. The steppers only need the `dataGrid` local.
+        const recordToggle = glyphToggleButton("table-list", PRIMARY_COLOR, "Record view (one record as field/value rows)", false);
+        const prevButton   = glyphButton("angle-left",  PRIMARY_COLOR, "Previous record", () => stepRecord(dataGrid, -1));
+        const nextButton   = glyphButton("angle-right", PRIMARY_COLOR, "Next record",     () => stepRecord(dataGrid, 1));
+
         // The full-relation export runs server-side (it streams the whole table, not
         // the grid's loaded page), so it stays correct regardless of paging, sort, or
         // filter — the table analogue of the query-result Export button.
@@ -91,11 +116,18 @@ class TableWorkPanel extends Container {
 
         const toolbar = new ToolBar({
             components: [
+                // Record view leads at the far left, set off from the edit actions by
+                // a separator — it's a view mode, not an edit, so it reads as its own
+                // group rather than one more button beside Add/Delete/Save.
+                recordToggle,
+                prevButton,
+                nextButton,
+                new ToolBarSeparator(),
                 addButton,
                 deleteButton,
                 saveButton,
-                // Flex spacer pushes the view actions (Filter, Export, Refresh) to the
-                // far right, away from the edit actions.
+                // Flex spacer pushes the remaining view actions (Filter, Export,
+                // Refresh) to the far right, away from the edit actions.
                 Spacer.flex(),
                 filterButton,
                 exportButton,
@@ -114,9 +146,13 @@ class TableWorkPanel extends Container {
         this.privileges = privileges;
         this.canWrite   = canWrite;
 
-        this.deleteButton = deleteButton;
-        this.saveButton   = saveButton;
-        this.filterButton = filterButton;
+        this.addButton     = addButton;
+        this.deleteButton  = deleteButton;
+        this.saveButton    = saveButton;
+        this.filterButton  = filterButton;
+        this.recordToggle  = recordToggle;
+        this.prevButton    = prevButton;
+        this.nextButton    = nextButton;
 
         this.addComponent(toolbar, { placement: Placement.NORTH });
         this.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
@@ -127,9 +163,13 @@ class TableWorkPanel extends Container {
         this.syncFilterActive();
         store.on("filterchange", this.syncFilterActive);
 
-        // Add is a fixed capability: without INSERT it stays disabled for the
-        // panel's life; otherwise it is always available.
-        addButton.setEnabled(privileges.insert);
+        // Add is no longer a fixed capability: it also disables while the
+        // record view is showing, since only the grid can fill in a new row.
+        this.syncAddEnabled();
+
+        // The record-view toggle flips the grid's display mode; re-sync Add
+        // and the steppers on every flip (both read getDisplayMode()).
+        this.recordToggle.on("action", this.toggleRecordView);
 
         // Save is only meaningful with unsaved edits/adds/removes AND some write
         // right; 'datachange' fires on each of those (and after a sync clears them).
@@ -142,6 +182,17 @@ class TableWorkPanel extends Container {
         this.syncDeleteEnabled();
         dataGrid.on("selection", this.syncDeleteEnabled);
         store.on("datachange", this.syncDeleteEnabled);
+
+        // The steppers need a neighbour to exist in the loaded records;
+        // re-check on selection changes (stepping/toggling, and a reload or
+        // filter re-target, since Table re-emits 'selection' when it
+        // re-targets the rotated record after its source store reloads) and
+        // on 'datachange' (add/remove changes which records are loaded;
+        // 'datachange' does not fire on load, so it is 'selection', not this,
+        // that covers a reload).
+        this.syncStepEnabled();
+        dataGrid.on("selection", this.syncStepEnabled);
+        store.on("datachange", this.syncStepEnabled);
     }
 
     // Registered by reference on `store` ("filterchange") — an arrow-function
@@ -165,6 +216,44 @@ class TableWorkPanel extends Container {
         const hasLiveSelection = this.dataGrid.getSelectedRecords().some((r: ModelRecord) => live.has(r));
 
         this.deleteButton.setEnabled(this.privileges.delete && hasLiveSelection);
+    };
+
+    // Registered by reference on `recordToggle` ("action") — arrow-function field.
+    private toggleRecordView = (): void => {
+        const record = this.dataGrid.getSelectedRecord();
+
+        if (this.recordToggle.isSelected()) {
+            this.dataGrid.setDisplayMode("rotated");
+        } else {
+            this.dataGrid.setDisplayMode("normal");
+            // setDisplayMode re-selects the displayed record but does not reveal it;
+            // selectRecord's normal-mode path scrolls the row back into view.
+            this.dataGrid.selectRecord(record);
+        }
+
+        this.syncAddEnabled();
+        this.syncStepEnabled();
+    };
+
+    // Only ever called as this.syncAddEnabled(), but stays an arrow field to
+    // match its siblings in this file (COMPONENT_CONVENTIONS.md (c)).
+    private syncAddEnabled = (): void => {
+        const rotated = this.dataGrid.getDisplayMode() === "rotated";
+
+        this.addButton.setEnabled(this.privileges.insert && !rotated);
+        this.addButton.setDescription(rotated ? "Switch to the grid view to add a row" : "");
+    };
+
+    // Registered by reference on both `dataGrid` ("selection") and `store`
+    // ("datachange") — arrow-function field.
+    private syncStepEnabled = (): void => {
+        const rotated = this.dataGrid.getDisplayMode() === "rotated";
+        const records = this.store.getRecords();
+        const current = this.dataGrid.getSelectedRecord();
+        const index   = current ? records.indexOf(current) : -1;
+
+        this.prevButton.setEnabled(rotated && stepIndex(index, -1, records.length) !== null);
+        this.nextButton.setEnabled(rotated && stepIndex(index,  1, records.length) !== null);
     };
 }
 
@@ -201,6 +290,22 @@ async function confirmDelete(store: AjaxStore, dataGrid: Table): Promise<void> {
 
     if (result === "confirm") {
         selected.forEach((r: ModelRecord) => store.remove(r));
+    }
+}
+
+/**
+ * Step the record view's displayed record by `delta` positions within the
+ * loaded, filtered/sorted records, clamped at both ends. A stateless helper
+ * so it can be wired from the Previous/Next buttons while they are still
+ * pre-`super()` locals, closing over `dataGrid` alone (no `this`).
+ */
+function stepRecord(dataGrid: Table, delta: number): void {
+    const records = dataGrid.getStore().getRecords();
+    const current = dataGrid.getSelectedRecord();
+    const target  = stepIndex(current ? records.indexOf(current) : -1, delta, records.length);
+
+    if (target !== null) {
+        dataGrid.selectRecord(records[target]);
     }
 }
 

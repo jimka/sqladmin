@@ -11,8 +11,11 @@ Deferred features and known issues. Implemented work lives in
   `LIBRARY_NOTES.md`). The query-workspace and schema-views plans ship a
   defensive row cap; real pagination is the proper fix.
 - **Import data from JSON / CSV into a table.**
-- **Row-detail viewer** — expand one row (wide tables, JSON / large-text columns)
-  into a form/panel.
+- **Row-detail editing** — the Data tab's record view (shipped in
+  `table-record-detail-view`) shows one row at a time as field/value rows but
+  is read-only. Still unshipped: editing a record field-by-field, and reading
+  a JSON / large-text value in full (the record view's value column is
+  width-capped by the library).
 - **Copy-as** — cell / row / `INSERT` statement.
 
 ### Query workflow
