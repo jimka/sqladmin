@@ -2,15 +2,16 @@
 // shell's CENTER (a Card deck alongside the Dock) whenever no dock panels are
 // open. The controller toggles this deck off the Dock's "emptychange" event, so
 // no panel bookkeeping lives here; the page itself is a plain composed Panel laid
-// out as a two-column "home": a full-width app-heading header over a left column
-// and a right column. The left column stacks two panels — the welcome blurb
-// (shown only on an empty workspace) above the quick actions / recent tables /
-// saved queries panel; the right column holds the keyboard-shortcut legend and
-// connection info. Both columns are width-capped (COLUMN_MAX_WIDTH) and
-// left-anchored, so on a wide window they stop growing and leave empty page
-// background to their right rather than stretching into two sparse panes — this
-// is intentional, not a layout bug. It rebuilds on the controller's
-// onWorkspaceChanged seam so the recent/saved lists stay current.
+// out as a two-column "home", with no page-level heading of its own — the
+// AppHeader brand strip above the menu bar already names the app, so repeating
+// "SQLAdmin" here would be redundant. The left column stacks two panels — the
+// welcome blurb (shown only on an empty workspace) above the quick actions /
+// recent tables / saved queries panel; the right column holds only the
+// keyboard-shortcut legend. Both columns are width-capped (COLUMN_MAX_WIDTH)
+// and left-anchored, so on a wide window they stop growing and leave empty
+// page background to their right rather than stretching into two sparse
+// panes — this is intentional, not a layout bug. It rebuilds on the
+// controller's onWorkspaceChanged seam so the recent/saved lists stay current.
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the page `extends Panel`
 // directly, so the instance itself is the mountable component. `id` and
@@ -33,7 +34,6 @@ import { buildShortcutLegend }      from "./shortcutLegend";
 import type { SavedQuery }          from "../data/queryStore";
 import type { SqlAdminController }  from "../SqlAdminController";
 import { MUTED_TEXT_COLOR }         from "../theme";
-import { APP_NAME }                 from "../appIdentity";
 
 Glyph.register(plus);
 
@@ -57,9 +57,7 @@ const BUTTON_HEIGHT = 30;
 const COLUMN_MAX_WIDTH = 420;
 
 // The empty-workspace welcome blurb, shown above the quick actions only when
-// there are no recent tables and no saved queries (see shouldShowWelcome). It
-// opens with a `##`-level heading, not another `#` app title, so it doesn't
-// stutter against the "SQLAdmin" heading already on the page.
+// there are no recent tables and no saved queries (see shouldShowWelcome).
 const GETTING_STARTED_MARKDOWN = `## Getting started
 
 Your workspace is empty. Open a new query or pick a table from the sidebar
@@ -125,10 +123,6 @@ class StartPage extends Panel {
 
             this.removeAllComponents();
 
-            // Full-width header above the columns: the app heading alone. The
-            // welcome blurb moved into the left column — see buildLeftColumn.
-            this.addComponent(heading(APP_NAME, "600"));
-
             this.addComponent(buildColumns(controller));
 
             this.doLayout();
@@ -141,11 +135,11 @@ class StartPage extends Panel {
 
 /**
  * Build the two-column body: quick actions and stored lists on the left, the
- * shortcut legend and connection info on the right. Both columns take equal
- * weight and are pinned to the row's top edge (`anchor: NORTH`) so the page
- * reads as a home rather than a stretched split, splitting the row evenly up
- * to `COLUMN_MAX_WIDTH` each — beyond that the surplus width is left empty on
- * the right rather than stretching the columns further.
+ * shortcut legend on the right. Both columns take equal weight and are pinned
+ * to the row's top edge (`anchor: NORTH`) so the page reads as a home rather
+ * than a stretched split, splitting the row evenly up to `COLUMN_MAX_WIDTH`
+ * each — beyond that the surplus width is left empty on the right rather than
+ * stretching the columns further.
  *
  * The explicit anchor matters because this HBox isn't `stretching`, so absent
  * one, `BoxLayout` falls back to baseline alignment: it centres a null-baseline
@@ -157,7 +151,7 @@ class StartPage extends Panel {
  * depending on which is shown. `anchor: NORTH` sidesteps baseline guessing
  * entirely for both.
  *
- * @param controller - Supplies the quick actions, stored lists, and connection.
+ * @param controller - Supplies the quick actions and stored lists.
  *
  * @returns The columns container.
  */
@@ -165,7 +159,7 @@ function buildColumns(controller: SqlAdminController): Component {
     const columns = Panel({ layoutManager: new HBox({ spacing: COLUMN_SPACING }) });
 
     columns.addComponent(buildLeftColumn(controller), { weight: 1, anchor: AnchorType.NORTH });
-    columns.addComponent(buildRightColumn(controller), { weight: 1, anchor: AnchorType.NORTH });
+    columns.addComponent(buildRightColumn(), { weight: 1, anchor: AnchorType.NORTH });
 
     return columns;
 }
@@ -215,22 +209,17 @@ function buildQuickActions(controller: SqlAdminController): Panel {
 }
 
 /**
- * Build the right column: the keyboard-shortcut legend over the connection info.
- *
- * @param controller - Supplies the connection id.
+ * Build the right column: the keyboard-shortcut legend.
  *
  * @returns The right column panel.
  */
-function buildRightColumn(controller: SqlAdminController): Panel {
+function buildRightColumn(): Panel {
     const column = Panel({
         layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
         maxSize      : { width: COLUMN_MAX_WIDTH, height: UNBOUNDED },
     });
 
     column.addComponent(buildShortcutLegend());
-
-    column.addComponent(heading("Connection", "600"));
-    column.addComponent(mutedText(controller.connectionId));
 
     return column;
 }
@@ -267,14 +256,6 @@ function heading(text: string, fontWeight: string): Component {
     header.setForegroundColor(MUTED_TEXT_COLOR);
 
     return header;
-}
-
-/** A muted informational line. */
-function mutedText(text: string): Component {
-    const line = new Text(text);
-    line.setForegroundColor(MUTED_TEXT_COLOR);
-
-    return line;
 }
 
 /**
