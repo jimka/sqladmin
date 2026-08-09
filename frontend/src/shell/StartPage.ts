@@ -2,11 +2,12 @@
 // shell's CENTER (a Card deck alongside the Dock) whenever no dock panels are
 // open. The controller toggles this deck off the Dock's "emptychange" event, so
 // no panel bookkeeping lives here; the page itself is a plain composed Panel laid
-// out as a two-column "home": a full-width header (the app heading and, on an
-// empty workspace, the welcome blurb) over a left column of quick actions /
-// recent tables / saved queries and a right column of the keyboard-shortcut
-// legend and connection info. Both columns are width-capped (COLUMN_MAX_WIDTH)
-// and left-anchored, so on a wide window they stop growing and leave empty page
+// out as a two-column "home": a full-width app-heading header over a left column
+// and a right column. The left column stacks two panels — the welcome blurb
+// (shown only on an empty workspace) above the quick actions / recent tables /
+// saved queries panel; the right column holds the keyboard-shortcut legend and
+// connection info. Both columns are width-capped (COLUMN_MAX_WIDTH) and
+// left-anchored, so on a wide window they stop growing and leave empty page
 // background to their right rather than stretching into two sparse panes — this
 // is intentional, not a layout bug. It rebuilds on the controller's
 // onWorkspaceChanged seam so the recent/saved lists stay current.
@@ -124,13 +125,9 @@ class StartPage extends Panel {
 
             this.removeAllComponents();
 
-            // Full-width header above the columns: the app heading, and — only
-            // on an empty workspace — the transient welcome blurb.
+            // Full-width header above the columns: the app heading alone. The
+            // welcome blurb moved into the left column — see buildLeftColumn.
             this.addComponent(heading(APP_NAME, "600"));
-
-            if (shouldShowWelcome(controller)) {
-                this.addComponent(Markdown(GETTING_STARTED_MARKDOWN));
-            }
 
             this.addComponent(buildColumns(controller));
 
@@ -164,8 +161,8 @@ function buildColumns(controller: SqlAdminController): Component {
 }
 
 /**
- * Build the left column: the New Query action over the Recent tables and Saved
- * queries lists (each hidden while empty).
+ * Build the left column: the welcome blurb (only on an empty workspace) above
+ * the quick actions panel, stacked in the column's own VBox.
  *
  * @param controller - Supplies the quick actions and stored lists.
  *
@@ -177,14 +174,34 @@ function buildLeftColumn(controller: SqlAdminController): Panel {
         maxSize      : { width: COLUMN_MAX_WIDTH, height: UNBOUNDED },
     });
 
-    column.addComponent(actionButton("New Query", () => controller.openQuery(), "plus"));
+    if (shouldShowWelcome(controller)) {
+        column.addComponent(Markdown(GETTING_STARTED_MARKDOWN));
+    }
 
-    appendList(column, "Recent tables", controller.recentTables(),
-        ref => actionButton(ref.name ?? "(table)", () => controller.reopenTable(ref)));
-    appendList(column, "Saved queries", controller.savedList(),
-        (q: SavedQuery) => actionButton(q.name, () => controller.openSavedQuery(q.name)));
+    column.addComponent(buildQuickActions(controller));
 
     return column;
+}
+
+/**
+ * Build the quick actions panel: the New Query action over the Recent tables
+ * and Saved queries lists (each hidden while empty).
+ *
+ * @param controller - Supplies the quick actions and stored lists.
+ *
+ * @returns The quick actions panel.
+ */
+function buildQuickActions(controller: SqlAdminController): Panel {
+    const panel = Panel({ layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }) });
+
+    panel.addComponent(actionButton("New Query", () => controller.openQuery(), "plus"));
+
+    appendList(panel, "Recent tables", controller.recentTables(),
+        ref => actionButton(ref.name ?? "(table)", () => controller.reopenTable(ref)));
+    appendList(panel, "Saved queries", controller.savedList(),
+        (q: SavedQuery) => actionButton(q.name, () => controller.openSavedQuery(q.name)));
+
+    return panel;
 }
 
 /**
