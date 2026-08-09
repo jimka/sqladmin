@@ -8,7 +8,7 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
-## 🐞🔎 Closing any panel with a live subtree listener throws on the next matching event (0.4.1, symlinked)
+## 🐞✅ Closing any panel with a live subtree listener throws on the next matching event (0.4.1, symlinked)
 
 Found during `adopt-dock-owned-teardown`'s manual verification (**M2**/**M3**), not by design. `QueryPanel.ts` wires
 `Event.addSubtreeListener(editor, "keydown", …)` for its Run/Save/Explain/Clear/history-recall shortcuts.
@@ -59,9 +59,25 @@ own subtree-dispatch walk trips over the handle that same click's synchronous te
 before that same event finishes bubbling. Purging eagerly on dispose doesn't help here because the walk that
 crashes belongs to the very event that triggered the dispose. Still open; no plan addresses this angle yet.
 
----
+**Fixed — confirmed live, 2026-08-09.** `typescript-ui`'s `subtree-listener-reentrant-dispose` plan (commits
+`fa11d755`…`dc4edf85`, an ancestor of the current `master` but not yet tagged — sits past `v0.4.1` in `next.md`)
+makes the subtree-listener ancestor walk tolerant of a handle released mid-dispatch by the same event that is
+still bubbling: "A component disposed synchronously by a handler running during an event's own dispatch — most
+commonly, a tab's close button disposing the tab's content — no longer throws `DOM handle <n> is not registered`
+when that same event's subtree-listener walk reaches the released handle. The walk now ends cleanly at that point
+instead." That is a direct match for both repros logged above.
 
-## ✂️🔎 `CodeEditor` construction grows CodeMirror's page-global stylesheet, independent of disposal (0.4.1)
+Re-ran both against the symlinked build (`packages/lib` at `0914daee`, dist rebuilt same day): (1) opened a query
+tab, closed it, pressed a key — no console error. (2) opened `public.customers`'s Data tab, closed it, clicked
+elsewhere in the document — no console error. Both previously threw on the very first cycle, no accumulation
+needed, so a clean single cycle each is sufficient evidence. `list_console_messages` showed only the pre-login
+`401` and the two Vite HMR debug lines throughout the whole session — no new errors from either repro or from
+general navigation (tree expand/collapse, context menu, dialogs).
+
+**Not yet released.** `master` is 178 commits past the `v0.4.1` tag with the version field still reading `0.4.1`
+— this fix ships whenever that batch is cut (the `next.md` changelog page, not yet numbered). SQLAdmin's `^0.4.1`
+range will accept it once tagged; until then this is verified only against the symlinked build, not the installed
+package.
 
 Found while chasing what looked like a teardown regression during `adopt-dock-owned-teardown`'s **M2** (a
 never-run query tab, closed four times): the aggregate `[...document.styleSheets].reduce((n, s) => n +
@@ -137,238 +153,6 @@ data neither the app author nor its widths can equally clarify. Until then,
 sqladmin does nothing about it — see `content-derived-column-sizing.md`'s
 Non-Goals, and the plan's Potential Challenges for how a user works around it
 today (drag the column).
-
----
-
-## 🐞✅ Closing a table tab strands ~2288 per-instance stylesheet rules (0.4.0)
-
-Opening and closing one 20-column table tab (`wide.cols_20`, 42 rendered rows)
-leaves **2288 rules** behind on the shared sheet, every cycle, for ever. Four
-open/close cycles measured in the browser against 0.4.0:
-
-| after | rules | DOM nodes | components |
-|---|---|---|---|
-| fresh page load | 436 | 491 | 334 |
-| baseline (tabs closed) | 6771 | 618 | 426 |
-| cycle 1 | 9059 | 618 | 426 |
-| cycle 2 | 11347 | 618 | 426 |
-| cycle 3 | 13635 | 618 | 426 |
-| cycle 4 | 15923 | 618 | 426 |
-
-Growth is perfectly linear at +2288/cycle. Characterised at the end of that run:
-of 15,923 rules, 15,862 are `#uuid`-scoped per-instance rules and **15,385 of
-those are orphaned** — their element id is no longer in the document. 96.6% of
-the sheet is dead.
-
-The DOM-node and component columns returning to baseline reads like proof that
-teardown is fine and only the rules survive. **It is not, and that reading was
-wrong.** Those columns count `.ts-ui-component` *elements*, which disappear when
-an ancestor is removed whether or not any destructor ran — the number never
-measured JS-side teardown at all. The components are in fact **retained**: the
-id-keyed maps in the library's `core/Event.ts` hold a `CompFunc` of
-`{ component, listeners }`, a strong `Component` reference from a module-level
-Map, which is a GC root. So a component that ever registered a listener stays
-permanently reachable, and this is a memory leak as well as a stylesheet one.
-
-That has a second consequence worth spelling out, because it explains an
-otherwise puzzling observation: the framework's `_componentFinalizer` — the GC
-backstop that would have released handles and disposed selectors for a component
-nobody explicitly destroyed — **can never fire while a listener registration
-holds the component alive**. The leak disarms its own safety net. Fixing the
-listener maps (library plan `component-purges-event-listeners`) is what restores
-that backstop.
-
-**The 0.4.0 row-pool fix is present and correct — it is simply never reached.**
-`VirtualRowView.destructor()` does dispose every pooled row and the scroller's
-overlay scrollbars, exactly as the changelog describes, and
-`Component.destructor()` recurses into `_components`. The chain breaks one level
-up: **`Dock` never disposes the content component of a tab it closes.** Closing
-a tab removes the element and drops the tab, but nothing calls `dispose()` on
-what the consumer handed it, so no destructor in that subtree ever runs.
-
-SQLAdmin only escapes this where it opts in. `SqlAdminController.openAsyncPanel`
-registers a panel with its own `PanelDisposers` registry **only** when the
-caller passes `disposeOnClose: true` — set at the nine diagram sites, which own
-ELK workers that must be terminated, and *not* on `openTable` (line 448) or the
-structure panel (line 508). Those two are the app's highest-traffic tabs, and
-they are the ones measured above.
-
-So the app has a workaround available today (pass the flag at the remaining
-sites), but the durable fix is library-side: a consumer that closes a tab
-should not silently accumulate an unbounded stylesheet, and the evidence that
-this is a trap rather than a contract is that this app built a whole disposal
-registry to work around it and still missed its two busiest panels. Owning
-teardown in `Dock` would let most of `PanelDisposers` go away — its remaining
-job would be the genuinely app-specific part (ELK worker termination, and the
-in-flight-build token that disposes a panel whose tab closed mid-fetch).
-
-Note the changelog's quantified claim — a 45-column table retaining 104 rules
-per cycle where it used to retain 5512 — is measured on a directly-disposed
-view, not through a Dock tab close, which is why it does not describe what a
-consumer sees.
-
-Why it matters beyond memory: style-recalc cost grows with the size of the
-sheet, so every later frame in a session gets dearer. This is the mechanism
-behind the app-level symptom — *"performance drops after having opened and
-closed a number of tables"* — and it compounds the forced-reflow entry below,
-since each forced reflow re-runs style resolution against the bloated sheet.
-
-Repro: open a table tab, close it, and read
-`[...document.styleSheets].reduce((n, s) => n + s.cssRules.length, 0)` before
-and after. No app change can address this; it needs a library fix.
-
-**Re-measured against the local `dock-disposes-tab-content` fix (symlinked, not
-yet released) — real, large, incomplete.** Four `wide.cols_20` open/close cycles:
-retained rules per cycle dropped from **2288 to 78** — a ~29× reduction — and the
-live-component count now returns to baseline correctly (`+4`, constant across
-cycles rather than growing, and confined to what looks like one tab button's own
-subtree — not investigated further). But growth is still perfectly linear at
-+78/cycle, and it is still genuinely orphaned: of 854 `#uuid`-scoped rules
-present after four cycles, 380 have no matching element in the document. The fix
-is correct for what it targets (confirmed by code review: `constraintsFor` fixed
-at the source, the empty-state trap handled, no workaround anywhere) — this is a
-**second, smaller instance of the same defect class**, something else in a
-table tab's subtree still raw-appends chrome without registering it as a child,
-so `Tab.closeEntry`'s new disposal cannot reach it. Location not yet identified;
-a scoped snapshot (component id → className immediately before close, checked
-against orphaned rule selectors after) caught only the already-expected tab
-button chain, so the leak is likely chrome that mounts outside the tab's own DOM
-subtree entirely — a `LayerManager`-hosted `Tooltip` or `Menu` attached from a
-toolbar button (Export, Filter) is the obvious candidate, since those overlay
-into a separate root and would not appear in a scan scoped to the tab panel.
-Needs its own investigation before 0.4.1 ships.
-
-**Re-measured against the local `table-tab-close-residual-leak` fix (Menu
-teardown across all seven owners, symlinked, not yet released) — the
-`LayerManager`/`Menu` hypothesis was correct and is confirmed fixed at the
-unit level, but it was not the dominant contributor to this app's leak, and
-the app-level number barely moved.** Four `wide.cols_20` cycles on a fresh
-page: retained rules per cycle went from 78 to **~72–73** — an ~8% reduction,
-not the near-elimination the fix's own library-level tests show (confirmed via
-`insertRule`/`deleteRule` instrumentation across one full cycle: 2371 inserted,
-2299 deleted, 73 survivors, all `#uuid`-scoped).
-
-Cross-referencing every surviving rule's id against a `MutationObserver` log of
-every element ever added during the cycle (so transient components missed by a
-before/after DOM snapshot are still caught) identified the leak precisely, and
-it is **not `Menu`** — no `Menu`/`MenuItem`/`Tooltip` class appears anywhere in
-the survivors:
-
-| class | count |
-|---|---|
-| `Text` | 38 |
-| `Panel` | 20 |
-| `Button` | 6 |
-| `Component` | 4 |
-| `TabCloseButton` | 3 |
-| `Glyph` | 2 |
-
-`Button`: 6 matches `TableWorkPanel`'s toolbar button count exactly
-(Add/Delete/Save/Refresh/Filter/Export, each built through `glyphButton`,
-which routes every label through `Button`'s own tooltip text). This is **not**
-an unregistered-child defect the way `Menu` was: confirmed by reading source
-that `TableWorkPanel.addComponent(toolbar, …)` and `ToolBar`'s own
-`addComponent(button)` pattern both register normally, so the ordinary child
-recursion should already reach every one of these. Whatever leaks their rules
-is a different mechanism than "raw-appended, never a child" — possibly
-`Button`'s own `Tooltip.attach(this, str)` call (mirrors the `#uuid`-keyed
-static `Tooltip.attachments` map already flagged as an unrelated memory-only
-finding by the Menu-fix's own implementation, scoped out there as
-non-stylesheet — worth re-checking whether that scoping was too narrow), or a
-timing interaction with this app's own now-partially-redundant `PanelDisposers`
-workaround (not yet deleted — that is `adopt-dock-owned-teardown`, still
-unimplemented). Not resolved here; needs its own investigation.
-
-**Re-measured against the local `table-toolbar-button-residual-leak` fix
-(`TabButton`/`TabCloseButton` disposal, symlinked, not yet released) — real,
-confirmed correct, and initially looked like it had made no difference. It had.**
-The first re-measurement after symlinking this fix showed the retained-rules
-count completely unchanged (~72–79/cycle). Deep tracing (temporary
-`console.log` instrumentation in `TabButton.destructor`, `TabBar.createBarEntry`
-and `TabBar.removeBarEntry`, rebuilt into the symlinked lib) initially seemed to
-show the real, visible tab's `TabButton` disposing with a **null** `_closeButton`
-— looking exactly like the bug this fix was supposed to close. It wasn't: Vite's
-dependency pre-bundler (`node_modules/.vite/deps`) was serving a stale
-in-memory-optimized snapshot of the library from *before* this fix's rebuild,
-even after `rm -rf node_modules/.vite` and a hard page reload — the running dev
-server process needed a full restart (`vite --force`) to actually pick up the
-new `dist/lib`. Deleting the cache directory alone is not sufficient once a dev
-server has been running across several `npm run build:lib` cycles in the same
-session; a symlinked-lib verification round should restart the dev server, not
-just clear its cache. This cost most of a session and is worth remembering
-(see the project's `sqladmin-consumes-built-dist-lib`/`verify` guidance — this
-is the sharper, previously-missing corollary).
-
-After a genuine restart, the disambiguated trace showed the fix working exactly
-as designed: the real tab's `TabButton.destructor()` runs with a non-null
-`_closeButton`, and all seven of its own rules (`TabButton` ×4,
-`TabCloseButton` ×3) are cleanly disposed. Re-running the four-cycle
-`wide.cols_20` measurement against the correctly-loaded build:
-
-| cycle | retained (cumulative) | retained (this cycle) |
-|---|---|---|
-| 1 | 86 | 86 (includes one-time warm-up cost) |
-| 2 | 152 | 66 |
-| 3 | 218 | 66 |
-| 4 | 284 | 66 |
-
-**Root cause of the remaining ~66/cycle found and fixed — SQLAdmin's own bug,
-not the library's; `TableWorkPanel` was never it.** The `Button:6`-matches-the-
-toolbar reasoning above was a coincidence of counting, not a real lead — the
-`TableWorkPanel`/`ToolBar`/`Button` chain disposes cleanly: instrumenting
-`Component.destructor()` directly (temporary `console.log` of
-`constructor.name` + id on every call) and cross-referencing against the live
-stylesheet after close showed **zero** cases of "destructor ran but the rule
-survived" for anything reachable from a closed table tab. Every one of the
-1450 destructor calls traced across a `wide.cols_10` cycle correctly cleared
-its own rule.
-
-The actual survivors (53 unique component ids after one open/close pair) were
-never even *attempted* — no destructor call for any of them anywhere in the
-trace — and resolving their live DOM elements (`document.getElementById`)
-showed they were not part of the table tab's subtree at all: `className`s of
-`Text`/`Panel`/`Button`/`Glyph`, `textContent` reading "Ctrl/Cmd+↑ / ↓",
-"Databases rail", "Recent tables", "New Query", etc. — SQLAdmin's own
-**"Getting started" start page** (`frontend/src/shell/StartPage.ts`), which
-Dock's empty-region toggle re-shows every time the last tab closes.
-
-`StartPage.rebuild()` special-cased exactly one child (the transient
-`Markdown` welcome blurb) for an explicit `.dispose()` before
-`this.removeAllComponents()` — every *other* child (the "New Query" button,
-the recent-tables/saved-queries list rows, the shortcut legend, the
-"Connection" heading) was only detached, never disposed, on every single
-rebuild. `removeAllComponents()` is documented and correctly implemented as
-detach-only (mirrors `removeComponent`'s re-parent-friendly contract) — this
-was a caller-side gap, app code, not a library defect. Fixed by disposing
-every current child generically before removing them
-(`for (const c of this.getComponents()) c.dispose()`), which also let the
-`welcome`-specific special-casing be deleted entirely as redundant. Re-running
-the four-cycle `wide.cols_20` measurement against the fix: retained rules
-after close were **527 → 527 → 527 → 527** — flat across all four cycles,
-zero leak. This closes out the whole `wide.cols_20` open/close investigation
-that started this entry: 2288/cycle → 0/cycle across seven library-side fixes
-plus this one app-side fix.
-
-Steady-state retained-per-cycle dropped from **~72–73 to 66** — a real, if
-modest, further reduction consistent with eliminating the `Component`(4) +
-`TabCloseButton`(3) survivors from the earlier breakdown. The remaining
-**~66/cycle** is not this fix's concern — it lines up with the untouched
-`Text`(38) + `Panel`(20) + `Button`(6) = 64 of the same breakdown, still
-pointing at `TableWorkPanel`'s toolbar (or its `Tooltip.attach` calls) as a
-separate, still-open defect. Not resolved here; still needs its own
-investigation.
-
-**Fixed.** The underlying defect — `Dock` never disposing the content
-component of a tab it closes — is fixed library-side in the change that ships
-as 0.4.1: `Tab.closeEntry` now disposes the content it removes. In response,
-`adopt-dock-owned-teardown` deleted `PanelDisposers`, the `disposeOnClose`
-flag threaded through `openAsyncPanel`, and every wrapper `dispose` in the
-app that existed only to work around the gap. The one piece of teardown that
-survives is genuinely the app's own: `QueryPanelContent.destructor()`
-disposes `QueryPanel`'s result `TabPanel`, which `hideResultPane` deliberately
-detaches from the Split while no result is shown, so it is not always reached
-by the ordinary destroy recursion. The measured table above is left in place
-as the evidence for the fix.
 
 ---
 
@@ -510,6 +294,115 @@ and no re-test has been run against a corrected boundary-safe protocol in SQLAdm
 ~10×-vs-the-library-demo gap this entry opened with is therefore still unexplained — one candidate cause is ruled
 out, not the entry itself.
 
+**The app-level headline numbers above (50.6s → 26.5s → 13.7s) were never re-run against a realistic input
+protocol — only the library's own internal controls were. Doing so against live SQLAdmin changes the story
+again: a single scroll gesture is genuinely fast, but the entry is not resolved — it reproduces worse than ever
+documented, through a different, now-identified mechanism.** Every number in this entry's history was gathered by
+dispatching a synthetic `WheelEvent` on every animation frame — the same harness `typescript-ui`'s
+`table-scroll-recycling-cost` plan already proved confounded (see its `smooth-scroller-confound` footnote):
+`SmoothScroller`'s easing loop re-renders on every frame it is "mid-flight," independent of how many events were
+dispatched, so a harness that redispatches every frame never lets it settle and measures a sustained worst case no
+real gesture produces. That correction was only ever applied to the library's own internal control test, never to
+this entry's SQLAdmin-side headline figures.
+
+Re-measured against live SQLAdmin (`wide.cols_60`, symlinked build, both prior fixes present) with a realistic
+protocol instead: a burst of 12 `WheelEvent`s over ~300 ms (typical trackpad-fling cadence), then idle. **A single
+fresh sweep is fast and smooth** — 1.8 s wall-clock, worst inter-frame gap 21 ms, matching this app's own informal
+manual-testing impression exactly. A human-paced sequence of three such flicks with ~900 ms dwell between them
+(look, scroll, look, scroll) stays smooth throughout — 3.1 s, zero gaps over 50 ms — even though it covers the same
+net distance as the failing cases below.
+
+**But rapid, repeated sweeps — especially reversing direction with little or no dwell — reproducibly stall for
+seconds, confirmed across many trials, not a one-off:** 12.1 s (worst gap 8.2 s) → 15.9 s (6.1 s) → 36.5 s (9.9 s)
+→ 44.7 s (14.5 s) across one escalating same-session sequence; a later instrumented sequence hit 52.5 s, 75.6 s,
+and 41.7 s in three consecutive rounds. No console errors at any point. This is not the already-fixed leak: a
+before/after diff of every `#uuid`-scoped rule's live-vs-orphaned status across many cycles found **zero orphaned
+rules** every time — added rules always belonged to currently-rendered elements, matching `Row.setColumnWindow`'s
+documented recycle-or-dispose contract. It is also not the already-fixed forced-reflow mechanism: `getComputedStyle`
+stayed at **zero calls** throughout every trial, live-instrumented (see below).
+
+**Isolating the harness from the table shows `SmoothScroller` itself costs a real, bounded ~15×, with cols_60
+responsible for a further, much larger and non-deterministic multiplier on top.** Same reversing-sweep pattern,
+three ways: direct `VirtualScroller.setScrollX` (bypassing `SmoothScroller` and `WheelEvent` entirely) against the
+library's own 45-column demo — 298 ms for six full-width alternating jumps, worst gap 55 ms, ~77 rule writes per
+jump, zero `getComputedStyle` calls. The same jumps driven through real `WheelEvent`s (so through `SmoothScroller`)
+against the same 45-column demo — 4.3 s, worst gap 107 ms: real, bounded overhead from the easing loop, still
+smooth. The identical `WheelEvent`-driven protocol against live SQLAdmin's `wide.cols_60` — 12–75 s, worst gaps up
+to 14.5 s: another large multiplier on top, and this time not bounded — it got worse, not better, across repeated
+trials in the same session.
+
+**Three candidate explanations for that remaining multiplier were tested by direct reproduction and ruled out.**
+(1) Cell-type richness: a demo table rebuilt to `wide.cols_60`'s exact shape (60 columns, 6 types — string, number,
+boolean, date, time, datetime — via `Model`/`MemoryStore`/`TablePanel` imported live from the dev server, mirroring
+`table-scroll-first-visit-cost`'s own widened-demo technique) reproduced none of it: 4.2 s, worst gap 110 ms, under
+the identical reversing-burst protocol. (2) The one non-declarative thing SQLAdmin's own code does —
+`tableWriteRules.ts`'s `required: isRequiredColumn(c)`, which activates the library's required-column outline,
+documented as re-evaluated on every visible-window render pass — was added to that same widened demo (one column
+marked `required`, matching that only 1 of `wide.cols_60`'s 60 columns is actually `NOT NULL`). Still no
+reproduction: 6.0 s, worst gap 268 ms. (3) Ambient shared-stylesheet size: the widened demo's sheet was inflated
+with ~4,200 synthetic dummy rules to match live SQLAdmin's own ~8,200-rule total. Still no reproduction: 5.3 s,
+worst gap 262 ms — ruling out stylesheet *rule count* in isolation (see below for why this doesn't rule out DOM
+*element* count, which this test never controlled for).
+
+**Live instrumentation of the real app (not just the isolated demo) shows rule-write volume does not explain the
+wall-clock cost either — something else dominates.** `DOM.sink.setRuleStyles` was patched on the actual running
+module instance (found via `performance.getEntriesByType('resource')`, since a naive re-import of the same source
+path creates a second, unpatched module graph and silently patches nothing — the live instance is served at
+`/@fs/.../dist/lib/core.es.js?t=<timestamp>`, not `/node_modules/...`). Across five consecutive instrumented
+rounds, rule-write count and wall-clock time did not correlate: one round wrote 1,412 rules in 3.7 s; two other
+rounds wrote only **26 rules each** yet took **5.6 s and 6.2 s**, with worst single-frame gaps of 5.0 s and 5.5 s.
+`getComputedStyle` was zero in every round.
+
+**A performance trace taken during a live reproduction (confirmed the stall still reproduces without tracing
+first, so this was for attribution only) points at ordinary style recalculation scaling with page size, not a
+forced read.** Chrome's `ForcedReflow` insight attributed only 969 ms total (across a ~170 s trace) to
+`getScrollLeft` — real, small, and already the known non-dominant contributor from this entry's own earlier
+measurements. Its `DOMSize` insight is the more consequential one: repeated *ordinary* (non-forced) style
+recalculation passes costing 60–80 ms each and touching **5,470–6,038 of the page's 9,318 total DOM elements per
+pass** — essentially the whole page restyles on every recalculation, not just the handful of cells that actually
+changed. This is, for the first time with direct trace evidence, this entry's own long-standing second hypothesis
+("plain style-recalculation cost scaling with... sheet size regardless of any read") — except the scaling variable
+looks like total **DOM element count**, not stylesheet rule count: candidate (3) above inflated the stylesheet to
+match live SQLAdmin's rule count and still stayed fast, but never touched the demo's DOM element count, whereas
+live SQLAdmin's persistent chrome (sidebar database tree, menus, dock, the CodeMirror query editor) plausibly
+carries a much larger total element count than the isolated demo ever reaches.
+
+**Tested and also ruled out: raw DOM element count alone is not sufficient either.** The isolated demo (the
+required-column variant) was bulked from 5,414 to 9,615 total elements — matching live SQLAdmin's 9,318 — by
+appending 4,200 plain `div.ts-ui-component` filler nodes off-screen, no stylesheet changes beyond what those
+elements' existing shared classes already implied. Re-running the identical reversing-burst protocol (four
+consecutive legs this time, to match the length of the worst real-app sequences): 12.4 s total, worst single-frame
+gap 421 ms, **zero gaps over 500 ms** — a real but mild ~20–30%-per-leg slowdown from the pre-bulk baseline, nowhere
+near live SQLAdmin's 5–75 s stalls with multi-second individual gaps. Five candidate explanations have now been
+tested by direct reproduction and ruled out: cell-type richness, the required-column outline, stylesheet rule
+count, and raw DOM element count, on top of the already-excluded forced-reflow and stylesheet-leak mechanisms.
+
+**Two more candidates were tested the same way and also ruled out.** A live `CodeMirror` instance (the library's
+own `CodeEditor` demo, which materializes the `ͼ1`/`ͼ2`/`cm-*` rules and `cm-blink` keyframe animations this file's
+diff shows near its top) was mounted onto the same page alongside the bulked, required-column, 60-column/6-type
+repro — the identical four-leg reversing-burst protocol still finished in 13.1 s, worst gap 353 ms, zero over
+500 ms. DOM nesting depth was tested by re-parenting the repro `Window`'s root element under a chain of 12
+`display:contents` wrapper `div`s (14 total levels from `body`, comparable to live SQLAdmin's `Dock` →
+`TabPanel` → `QueryPanelContent` → `Container` × 2 → `Table` chain) — 12.9 s, worst gap 358 ms, zero over 500 ms.
+Neither moved the needle. **Seven candidate explanations have now been tested by direct reproduction and ruled
+out** — cell-type richness, the required-column outline, stylesheet rule count, DOM element count, live
+`CodeMirror` presence, and DOM nesting depth, on top of the already-excluded forced-reflow and stylesheet-leak
+mechanisms — and an isolated demo combining *all six* structural factors at once still stays under ~13 s with no
+individual gap over 500 ms, against live SQLAdmin's 5–75 s with gaps up to 14.5 s under the identical protocol.
+
+**Status: severity is confirmed input-pattern-dependent, the entry's remaining mechanism is confirmed (via Chrome's
+own trace insights) to be ordinary style-recalculation cost rather than a forced read or a leak, but every
+structural variable cheap enough to synthesize in an isolated demo has now been tried and ruled out.** Typical,
+human-paced scrolling — including repeatedly sweeping the same wide table — is fast and smooth; nothing here
+changes that. Rapid, sustained, direction-reversing scrolling against live SQLAdmin reproducibly stalls for
+seconds, sometimes over a minute; no combination of matched cell types, required-column config, stylesheet size,
+DOM element count, live `CodeMirror` presence, or nesting depth reproduces it in isolation. What remains
+untested — because it cannot be cheaply synthesized, only actually lived through — is genuine multi-minute
+session accumulation: internal `Table`/`Row`/`Header` bookkeeping state that a long-running real session builds up
+and a freshly-constructed demo, no matter how structurally bulked, never does. Needs its own library-side plan,
+matching this entry's established pattern, to instrument that internal state directly (not just its DOM/stylesheet
+symptoms) across a long-running session before attempting a fix.
+
 ---
 
 ## 🐞🩹🔎 A numeric `fontSize` passed to `Text`'s constructor is silently ignored
@@ -533,66 +426,6 @@ after construction instead of passing `fontSize` in the constructor options.
 The library fix is to have the field initializers not clobber an explicitly-set
 numeric size — e.g. seed the var binding only when no `fontSize` option was
 supplied, or move the restore ahead of the option cascade.
-
----
-
-## ✅ Fixed in library: no way to register a Dock tab whose content arrives later
-
-Every async "open" in this app fetched its data **before** creating a tab —
-`dock.addPanel`/`addLazyPanel` both required the panel's `Component` (or a
-synchronous factory returning one) up front. Against a real database that
-meant the user clicked, nothing appeared for seconds, and then a finished tab
-popped in. There was no library-level way to say "register the tab now, build
-its content once this fetch resolves" — a consumer that fetches before it can
-build had to hand-roll its own placeholder panel and swap logic to get a tab
-to appear first.
-
-Fixed in the library (typescript-ui plan `tab-lazy-layout-constraint`):
-`DockPanelSpec.content` widens to accept a `ComponentFactory` that may return
-`Component | Promise<Component>`, and `dock.addLazyPanel` runs an async
-factory behind its own spinner, swapping the built panel in on success. A
-rejection tears the tab down and reaches a new Dock `"exception"` event
-(`{ id, error }`) instead of leaving an empty tab behind. This app adopted
-both across all fourteen of its async opens (plan
-`lazy-tab-loading-sequence`): each `open*` method now registers its tab first
-via a shared `openAsyncPanel` helper and hands the Dock an async factory,
-with a single `dock.on("exception", …)` subscription routing failures to the
-existing `notifyError`. SQLAdmin ships no spinner code, no placeholder
-component, and no in-flight bookkeeping of its own.
-
----
-
-## ✅ Fixed in library: button-triggered menus were anchored to the pointer
-
-Four dock toolbar buttons (table/role-grants Export, the Structure panel's
-Alter-column and Add-constraint launchers, the query-result Export) passed
-`event.clientX`/`event.clientY` to `Menu.show(...)`, which cursor-anchors and
-clamps-but-never-flips. It looked fine only because three of the four sat in
-toolbars pinned to the top of their panel; the Structure accordion's header
-tools live in a scrolling host and can reach the bottom edge, where the menu
-would clamp upward over the button instead of flipping cleanly above it.
-
-Fixed in the library by `MenuButton` (anchors to the button's rect, flips above
-when the room below is short) plus a rect-anchored `Menu.toggleFor` (typescript-ui
-plan `menu-anchored-placement`), adopted here across all four sites (plan
-`menubutton-adoption`).
-
-Adopting it surfaced two API gaps, both raised and **fixed in the library
-before this migration landed** — logged here as resolved, not as open papercuts:
-
-- An early draft mandated a single non-overloaded `MenuButton` constructor,
-  which would have forced every options-first construction to pass a dummy
-  `undefined` text. It now mirrors `Button`'s overload pair (options-only
-  last), so `MenuButton({ … })` works exactly like `Button({ … })`.
-- A per-open item provider had no way to say "open nothing" — an empty array
-  mounted a bare, empty panel. `Menu.toggleFor` now suppresses the open (and
-  still fires `onClose`) when the resolved item list is empty, which is what
-  lets this app's two dynamic builders (`buildQueryExportItems`,
-  `buildAlterColumnItems`) return `[]` instead of inventing placeholder
-  strings for a state that has no honest explanation.
-
-Both gaps were found only by a second consumer trying to *use* the component —
-which is exactly what this app is for.
 
 ---
 
@@ -629,43 +462,3 @@ names must be the real ones, not a single mangled token.
 from `constructor.name` (use an explicit static class-name registry), so a
 consumer's minifier settings can't break styling. Until then, every consumer must
 be told to keep names.
-
----
-
-## ✅ Fixed in library: `Split.setPaneSize` looked like a raw primitive, but a weight-0 pane's decay was a refill bug
-
-`setPaneSize(pane, px)` just seeds/overrides that one pane's stored size; it does
-**not** rebalance the siblings. To force a *flexible* pane to a specific size you
-must still set the other flexible panes too, so the stored sizes sum to the
-available extent — the same thing [`dock/QueryPanel.ts`](frontend/src/dock/QueryPanel.ts)
-already does when it splits the editor over the result grid (it sets both panes).
-This part is by design, not a defect: `weight` is consulted only by the
-*container-resize* delta path (when `available` changes); a same-extent refill
-scales the flexible panes **proportionally**.
-
-The shell sidebar's collapse/expand cycle looked like it hit the same rule, but
-didn't: the sidebar is `{ weight: 0 }` — a resize-pinned pane, not a flexible
-one — and the pre-fix refill classified it flexible anyway (it tested only
-`min == max`, the *hard* collapse pin), so a same-extent refill rescaled it like
-any other flexible pane. Collapse pins the sidebar `min == max == RAIL_WIDTH`,
-inflating the weighted dock to fill the freed space; expand then called
-`setPaneSize(sidebar, lastWidth)` alone, leaving the dock at its inflated width,
-so Σ overshot `available` and the proportional refill scaled the sidebar back
-*below* `lastWidth`, compounding every cycle (280 → 226 → 190 → 165 → …;
-confirmed offline in the library's `Split` TestDOM harness). That decay **was**
-the library gap — a weight-0 pane should never be rescaled by a same-extent
-refill, resize-pinned or not — and it is fixed upstream by
-`split-weight-pin-refill`'s three-tier cascade (hard-pinned / resize-pinned /
-flexible), which now holds a weight-0 pane at its stored px regardless of
-sibling inflation.
-
-The app's apportion-both-panes `expand()` workaround —
-`setPaneSize(dock, (paneSize(sidebar) + paneSize(dock)) − lastWidth)` — **has
-been removed** as part of `plans/implemented/layout-persistence.md` (step 6b). A
-lone `split.setPaneSize(sidebar, lastWidth)` now holds: the fixed refill pins the
-weight-0 sidebar at that px and the flexible dock alone reclaims the freed width
-(`shell/SqlAdminShell.ts`, `buildWorkArea`).
-
-The surviving "apportion all panes" guidance above is unchanged for the general
-case — a caller forcing a *flexible* pane to a size still has to apportion its
-siblings; only the weight-0-pin case is now handled by the library's refill.
