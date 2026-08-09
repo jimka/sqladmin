@@ -8,6 +8,59 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎 `CodeEditor.autoHeightMaxRows` can collapse the editor to 0px on a shrink (0.4.1, symlinked)
+
+Found while manually verifying `align-with-library-post-0.4.1`'s `SqlPreviewDialog` adoption of
+`autoHeightMaxRows` (the entry below this one) — not a defect in the app's own wiring, which matches the
+plan's `## Internal Structure` exactly. **Reproduced twice, cleanly, via the ordinary "Create table" DDL
+dialog with no scripted shortcuts beyond driving the same UI a real user would:**
+
+1. Open "Create table", name it, add one column (`id integer`), click "Regenerate SQL" — editor renders
+   3 lines at a real, correct **68px**.
+2. Click "Add column", fill a second column (`col_1 text`), click "Regenerate SQL" — editor **grows**
+   correctly to 4 lines at **87.375px**. Growth works.
+3. Click that second column's "Remove column", click "Regenerate SQL" again — back to the exact same
+   3-line SQL text as step 1. The editor's committed height is now **0px** (`style="...height: 0px"` on the
+   `.CodeEditor` element), even though `.cm-scroller.scrollHeight` correctly reports **68px** of real
+   content a full second later. The editor is completely invisible — not merely undersized — while its
+   underlying CodeMirror document is intact and correct (confirmed: executing the dialog at this point
+   creates the table exactly as the 3-line SQL specifies, so this is a pure layout/height bug, not a data
+   bug).
+
+**Ruled out: the app's own `resizer.fit()` call is not the trigger.** `SqlPreviewDialog`'s
+`"heightchange"` listener calls `editor.clearPreferredSize()` then `resizer.fit()` (→
+`dialog.resizeToContent()`) synchronously, mirroring `FilterDialog`'s precedent. Suspecting this
+synchronous call might be re-entering `CodeEditor`'s own `geometryChanged`-driven `syncAutoHeight()` mid-
+measurement (plausible, since `resizeToContent()` changes the very box `syncAutoHeight` measures), the
+call was temporarily deferred via `queueMicrotask(() => resizer.fit())` and the repro re-run from a fresh
+page load. **Identical result — height still collapses to 0px on the same shrink.** Since the collapse
+still happens even when the app's resize call cannot execute until after the current synchronous work (and
+any microtask queue ahead of it) has drained, the cause is not this app's call timing; it lives inside
+`syncAutoHeight` itself (`CodeEditor.ts:835`) or the `EditorView.updateListener` that re-invokes it
+(`CodeEditor.ts:696`, on `heightChanged || geometryChanged`) — plausibly a re-entrant cascade: `syncAutoHeight`'s
+own `this.setHeight(desired)` commit is itself a geometry change CodeMirror's internal `ResizeObserver`-driven
+measurement reacts to, re-invoking `syncAutoHeight` again on an *unchanged* shape, where only a **sub-pixel**
+shrink is guarded against (`CodeEditor.ts:984`'s `previousHeight - desired < 1` check) — a chain of several
+such re-entrant calls each shrinking by more than a pixel would not be caught by that guard and could walk the
+height down past zero, entirely within the library's own update loop, with no app involvement. Not confirmed by
+instrumenting the library directly (would need a `dist/lib` rebuild with temporary logging); this is the
+leading hypothesis from reading `syncAutoHeight`'s source and its own extensive comments about the analogous
+*growth* re-entrancy the method already guards against, not a certainty.
+
+**Not fixed here** — out of this plan's scope (`## Non-Goals`: "Any library-side (`typescript-ui` repo)
+change"), and there is no legitimate app-side workaround for a component-internal computation bug (per this
+project's own "fix in library, not workaround" convention — a defensive minimum-height clamp in the app
+would hide the symptom, not the cause, and every one of `SqlPreviewDialog`'s existing manual-verify bullets
+for "no visible fixed-height box" / "grows or shrinks to fit content" is written against `autoHeightMaxRows`
+behaving correctly, which a client-side clamp would only partially restore). **This is a real, user-facing
+regression risk**: unlike the old fixed-180px box, which was always at least visible, a user who adds then
+removes a column (or otherwise edits the form back to a shorter previous state) before executing can lose
+all visual access to the SQL they are about to run. Needs its own library-side investigation before this
+adoption should be considered fully safe for end users, even though the app-side wiring itself is correct
+and complete per the plan.
+
+---
+
 ## ✅ Fixed in library: no way to grow a `CodeEditor` to fit its content
 
 `SqlPreviewDialog`'s DDL preview editor (`dock/SqlPreviewDialog.ts`) sat in a
