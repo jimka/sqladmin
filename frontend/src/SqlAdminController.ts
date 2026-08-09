@@ -413,8 +413,11 @@ export class SqlAdminController {
      *
      * The `node` is optional: an FK-referenced table may have no currently-loaded
      * navigator node, so its tab still opens but the focus-sync skips the reveal.
+     * It may also be a still-pending `Promise` — an in-progress navigator reveal
+     * (see `openReferencedTable`) — so a slow reveal never delays the tab itself;
+     * it is awaited alongside the table's own fetch instead of gating it.
      */
-    async openTable(ref: DbObjectRef, node?: TreeNode): Promise<void> {
+    async openTable(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>): Promise<void> {
         // A view/matview has no editable data surface, so it opens as an auto-run
         // browse query on the shared QueryPanel rather than a dedicated data panel.
         // A query panel has no pagination, so the seed carries buildSelectSql's
@@ -422,9 +425,9 @@ export class SqlAdminController {
         // fresh query tab (no dedup, like every query panel); it is still recorded
         // in recent tables so it reopens from the start page.
         if (ref.kind === "view" || ref.kind === "materializedView") {
-            if (node) {
-                this.rememberTable(ref, node);
-            }
+            // Not awaited: remembering the table has no bearing on the query tab
+            // that follows, and a pending reveal must not delay it.
+            void Promise.resolve(node).then(resolved => { if (resolved) { this.rememberTable(ref, resolved); } });
 
             this.openQuery(buildSelectSql(ref), true, ref.name);
 
@@ -446,18 +449,21 @@ export class SqlAdminController {
         }, async () => {
             // The fetch now runs behind the library's spinner. A throw here closes
             // the tab and reaches the "exception" handler — so no local catch. The
-            // two requests are independent, so they run concurrently; getColumns
-            // is shared with the selection-driven Properties fetch via fetchColumns.
-            const [columns, privileges] = await Promise.all([this.fetchColumns(ref), getTablePrivileges(ref)]);
+            // requests are independent, so they run concurrently; getColumns is
+            // shared with the selection-driven Properties fetch via fetchColumns,
+            // and a pending `node` reveal rides along rather than gating any of it.
+            const [columns, privileges, resolvedNode] = await Promise.all([
+                this.fetchColumns(ref), getTablePrivileges(ref), Promise.resolve(node),
+            ]);
             const store = buildStore(ref, buildModel(columns), columns);
 
             store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
             store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
 
-            this._openPanels.set(id, { ref, node: node ?? null, store, columns });
+            this._openPanels.set(id, { ref, node: resolvedNode ?? null, store, columns });
 
-            if (node) {
-                this.rememberTable(ref, node);
+            if (resolvedNode) {
+                this.rememberTable(ref, resolvedNode);
             }
 
             const notify = (message: string): void => { this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: ${message}`); };
@@ -605,8 +611,12 @@ export class SqlAdminController {
      * with `roles: []` — see SequenceInfoPanelDeps.roles). A sequence has no
      * rows, so unlike openTable this has no store to register, and unlike
      * openDefinition the panel needs no dispose (see SequenceInfoPanel).
+     *
+     * `node` may be a still-pending `Promise` — an in-progress navigator reveal
+     * (see `openReferencedSequence`) — awaited alongside the detail/roles fetch
+     * rather than gating the tab.
      */
-    async openSequence(ref: DbObjectRef, node?: TreeNode): Promise<void> {
+    async openSequence(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>): Promise<void> {
         const id = this.sequenceInfoPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
@@ -620,9 +630,9 @@ export class SqlAdminController {
             tooltip: this.panelTooltip(ref),
             ref,
         }, async () => {
-            const [detailResult, rolesResult] = await Promise.allSettled([
-                getSequenceDetail(ref),
-                getRoles(ref.connectionId),
+            const [[detailResult, rolesResult], resolvedNode] = await Promise.all([
+                Promise.allSettled([getSequenceDetail(ref), getRoles(ref.connectionId)]),
+                Promise.resolve(node),
             ]);
 
             if (detailResult.status === "rejected") {
@@ -632,7 +642,7 @@ export class SqlAdminController {
             const detail = detailResult.value;
             const roles  = rolesResult.status === "fulfilled" ? rolesResult.value.map(r => r.name) : [];
 
-            this._openPanels.set(id, { ref, node: node ?? null, detail: "info" });
+            this._openPanels.set(id, { ref, node: resolvedNode ?? null, detail: "info" });
             this.syncToPanel(id);
 
             return SequenceInfoPanel(detail, {
@@ -656,8 +666,14 @@ export class SqlAdminController {
         });
     }
 
-    /** Open a read-only structure (column metadata) tab for a table/view. */
-    async openStructure(ref: DbObjectRef, node?: TreeNode): Promise<void> {
+    /**
+     * Open a read-only structure (column metadata) tab for a table/view.
+     *
+     * `node` may be a still-pending `Promise` — an in-progress navigator reveal
+     * (see `openReferencedStructure`) — awaited alongside the structure fetch
+     * rather than gating the tab.
+     */
+    async openStructure(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>): Promise<void> {
         const id = this.structurePanelId(ref);
 
         if (this.dock.focusPanel(id)) {
@@ -672,10 +688,13 @@ export class SqlAdminController {
             ref,
         }, async () => {
             // The fetch now runs behind the library's spinner. A throw here closes
-            // the tab and reaches the "exception" handler — so no local catch.
-            const [columns, structure] = await Promise.all([getColumns(ref), getStructure(ref)]);
+            // the tab and reaches the "exception" handler — so no local catch. A
+            // pending `node` reveal rides along rather than gating the fetch.
+            const [columns, structure, resolvedNode] = await Promise.all([
+                getColumns(ref), getStructure(ref), Promise.resolve(node),
+            ]);
 
-            this._openPanels.set(id, { ref, node: node ?? null, columns, detail: "structure" });
+            this._openPanels.set(id, { ref, node: resolvedNode ?? null, columns, detail: "structure" });
             this.syncToPanel(id);
 
             return StructurePanel(columns, structure, (refSchema, refTable) =>
@@ -1992,26 +2011,25 @@ export class SqlAdminController {
      * Open a foreign key's referenced table in the Dock and reveal it in the
      * navigator. `Tree.revealByPredicate` expands the path to the node —
      * loading lazy branches (unexpanded schemas) as needed — so the target is
-     * revealed even when the user never navigated to it, then the tab opens with
-     * that node (so the panel remembers it) and it is selected. Best-effort: if
-     * no node matches, the tab still opens.
+     * revealed even when the user never navigated to it. That reveal can take a
+     * moment (each unexpanded branch on the path is a fetch), so it runs
+     * concurrently with the tab's own open rather than gating it: the tab
+     * appears at once, exactly like every other open path, with its content
+     * loading lazily behind it (see openTable); the navigator selection lands
+     * whenever the reveal resolves. Best-effort: if no node matches, the tab
+     * still opens.
      *
      * @param ref - The referenced table to open.
      */
     openReferencedTable(ref: DbObjectRef): void {
-        void (async () => {
-            const node = (await this._navigator?.revealByPredicate((data: unknown) => {
-                const r = data as DbObjectRef | undefined;
+        const revealed = (this._navigator?.revealByPredicate((data: unknown) => {
+            const r = data as DbObjectRef | undefined;
 
-                return !!r && r.database === ref.database && r.schema === ref.schema && r.name === ref.name;
-            })) ?? undefined;
+            return !!r && r.database === ref.database && r.schema === ref.schema && r.name === ref.name;
+        }) ?? Promise.resolve(null)).then(n => n ?? undefined);
 
-            await this.openTable(ref, node);
-
-            if (node) {
-                this._navigator?.selectNode(node);
-            }
-        })();
+        void this.openTable(ref, revealed);
+        void revealed.then(node => { if (node) { this._navigator?.selectNode(node); } });
     }
 
     /**
@@ -2030,39 +2048,31 @@ export class SqlAdminController {
     /**
      * Open a column's backing sequence's info tab and reveal it in the
      * navigator — the Structure tab's Sequence link. Best-effort, exactly like
-     * {@link openReferencedTable}: if no node matches, the tab still opens.
+     * {@link openReferencedTable}: if no node matches, the tab still opens; the
+     * reveal runs concurrently with the tab's own open rather than gating it.
      *
      * @param ref - The sequence to open (kind "sequence").
      */
     openReferencedSequence(ref: DbObjectRef): void {
-        void (async () => {
-            const node = await this.revealObject(ref);
+        const revealed = this.revealObject(ref);
 
-            await this.openSequence(ref, node);
-
-            if (node) {
-                this._navigator?.selectNode(node);
-            }
-        })();
+        void this.openSequence(ref, revealed);
+        void revealed.then(node => { if (node) { this._navigator?.selectNode(node); } });
     }
 
     /**
      * Open a table's Structure tab and reveal the table in the navigator — the
      * sequence info tab's "Owned by column" link. Best-effort, exactly like
-     * {@link openReferencedTable}.
+     * {@link openReferencedTable}: the reveal runs concurrently with the tab's
+     * own open rather than gating it.
      *
      * @param ref - The table whose structure to open (kind "table").
      */
     openReferencedStructure(ref: DbObjectRef): void {
-        void (async () => {
-            const node = await this.revealObject(ref);
+        const revealed = this.revealObject(ref);
 
-            await this.openStructure(ref, node);
-
-            if (node) {
-                this._navigator?.selectNode(node);
-            }
-        })();
+        void this.openStructure(ref, revealed);
+        void revealed.then(node => { if (node) { this._navigator?.selectNode(node); } });
     }
 
     /**
