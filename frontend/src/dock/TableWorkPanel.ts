@@ -1,6 +1,6 @@
 // The dock work panel for one table: an inline ToolBar of glyph-only actions
-// (Add / Delete / Save … Refresh, plus a record-view toggle and its Previous /
-// Next steppers) over the live data grid.
+// over the live data grid — the record-view toggle and its Previous / Next
+// steppers at the far left, a separator, then Add / Delete / Save … Refresh.
 //
 // The toolbar drives the store directly: load / add / remove / sync. Transport
 // errors surface as the store's 'exception'/'sync' events, wired to the
@@ -27,7 +27,7 @@
 import { Container, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
 import { Placement }                   from "@jimka/typescript-ui/primitive";
-import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
+import { ToolBar, ToolBarSeparator }   from "@jimka/typescript-ui/component/menubar";
 import { Button, ToggleButton }        from "@jimka/typescript-ui/component/button";
 import { Spacer }                      from "@jimka/typescript-ui/component/container";
 import { glyphButton, glyphToggleButton } from "./glyphButton";
@@ -116,15 +116,19 @@ class TableWorkPanel extends Container {
 
         const toolbar = new ToolBar({
             components: [
-                addButton,
-                deleteButton,
-                saveButton,
-                // Flex spacer pushes the view actions (record view, Filter, Export,
-                // Refresh) to the far right, away from the edit actions.
-                Spacer.flex(),
+                // Record view leads at the far left, set off from the edit actions by
+                // a separator — it's a view mode, not an edit, so it reads as its own
+                // group rather than one more button beside Add/Delete/Save.
                 recordToggle,
                 prevButton,
                 nextButton,
+                new ToolBarSeparator(),
+                addButton,
+                deleteButton,
+                saveButton,
+                // Flex spacer pushes the remaining view actions (Filter, Export,
+                // Refresh) to the far right, away from the edit actions.
+                Spacer.flex(),
                 filterButton,
                 exportButton,
                 // Refresh discards unsaved edits then reloads from the server. reject()
