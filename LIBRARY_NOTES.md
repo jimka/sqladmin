@@ -8,6 +8,59 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎 `Markdown` renders a trailing link-reference-definition block as literal text
+
+Found manually verifying the new Changelog dialog (the `changelog-dialog` plan)
+against the real `CHANGELOG.md`, whose bottom carries a standard
+[reference-style link](https://spec.commonmark.org/0.31.2/#link-reference-definitions)
+block:
+
+```markdown
+## [0.4.0] — 2026-08-04
+...
+[0.4.0]: https://github.com/jimka/sqladmin/releases/tag/v0.4.0
+[0.3.0]: https://github.com/jimka/sqladmin/releases/tag/v0.3.0
+```
+
+The heading's `[0.4.0]` **does** render as a working link to the GitHub release
+tag — `marked`'s lexer resolves the reference correctly for that purpose. But
+the trailing `[0.4.0]: https://…` definition lines themselves also render, as a
+plain paragraph of literal source text at the very end of the document, instead
+of being consumed silently the way every CommonMark-compliant renderer treats a
+link-reference definition. Reproduced in a live browser: with the dialog
+scrolled to the bottom, the last visible content is the raw four lines
+`[0.4.0]: https://github.com/jimka/sqladmin/releases/tag/v0.4.0 [0.3.0]: …`
+etc., run together with no blank lines between them (their own blank-line
+separators were part of what got "consumed").
+
+**Root cause confirmed by reading the library, not guessed.**
+[`Markdown.appendBlockToken`](../typescript-ui/packages/lib/src/typescript/lib/component/display/Markdown.ts#L1401)'s
+switch only special-cases `heading`, `paragraph`, `list`, `blockquote`, `code`,
+`table`, and `space` — there is no `case "def"` for marked's link-reference-definition
+token type. Every other token type falls through to the `default` branch,
+[`this.appendTextNode(parent, token.raw ?? "")`](../typescript-ui/packages/lib/src/typescript/lib/component/display/Markdown.ts#L1413),
+which renders the token's raw source text as a plain visible text node — the
+same catch-all the class doc comment describes as the deliberate "never a
+crash, never markup" fallback for genuinely unsupported constructs (images, raw
+HTML). A `def` token is different: `marked`'s lexer *does* fully resolve it
+(the heading link above proves the reference data reaches the renderer), it is
+only the definition's own leftover token in the block list that has nowhere to
+go, so it prints instead of vanishing.
+
+**Not worked around in the app.** Per the Changelog dialog's plan, the fix
+belongs in the library (skip/ignore `def` tokens in `appendBlockToken`, mirroring
+`case "space": break;`), not in a `changelogText.ts`-side Markdown pre-processing
+step that strips reference definitions before handing the string to `Markdown` —
+that would just be masking the same defect for every other `Markdown` consumer
+who writes reference-style links.
+
+**Verify:** render `# H\n\n[x]: https://example.com\n` (or any Markdown source
+whose only reference-style link's definition trails un-referenced-elsewhere text)
+through `Markdown` and check the rendered DOM for a paragraph containing the
+literal `[x]: https://example.com` text.
+
+---
+
 ## 🐞🔎 `SqlPreviewDialog`'s failed-execute retry crashes — `Dialog` now owns its content's teardown too (app bug, exposed by 0.4.1, symlinked)
 
 Found manually verifying `align-with-library-post-0.4.1`'s Change 2 "failed Execute, followed by retry"
