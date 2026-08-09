@@ -3,13 +3,19 @@
 # runs Node under QEMU.
 FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS frontend
 
-WORKDIR /build
+WORKDIR /build/frontend
 
 # Dependency layer first so it caches independently of source changes.
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
 COPY frontend/ ./
+# The Changelog dialog inlines the repo-root changelog at build time
+# (frontend/src/shell/changelogText.ts imports ../../../CHANGELOG.md?raw),
+# so the builder mirrors the repo: /build is the repo root, /build/frontend
+# the frontend package. Copied after the source layer so a changelog-only
+# edit does not invalidate it.
+COPY CHANGELOG.md /build/CHANGELOG.md
 RUN npm run build
 
 # API + static server.
@@ -29,7 +35,7 @@ COPY backend/pyproject.toml backend/poetry.lock* backend/README.md ./
 RUN poetry install --only main --no-root
 
 COPY backend/app ./app
-COPY --from=frontend /build/dist ./static
+COPY --from=frontend /build/frontend/dist ./static
 COPY LICENSE.md THIRD-PARTY-NOTICES.md ./
 
 # Run as an unprivileged user (carried over from backend/Dockerfile).

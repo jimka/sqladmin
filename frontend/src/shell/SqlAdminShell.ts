@@ -36,6 +36,7 @@ import { file_csv }                from "@jimka/typescript-ui/glyphs/solid/file_
 import { file_code }               from "@jimka/typescript-ui/glyphs/solid/file_code";
 import { bars }                    from "@jimka/typescript-ui/glyphs/solid/bars";
 import { keyboard }                from "@jimka/typescript-ui/glyphs/solid/keyboard";
+import { scroll }                  from "@jimka/typescript-ui/glyphs/solid/scroll";
 import { right_from_bracket }      from "@jimka/typescript-ui/glyphs/solid/right_from_bracket";
 import { ActivityBar, SIDEBAR_RAIL_WIDTH, SIDEBAR_DEFAULT_WIDTH } from "./ActivityBar";
 import type { SidebarSizer } from "./ActivityBar";
@@ -54,6 +55,7 @@ import { openAboutDialog }         from "./aboutDialog";
 import { AppHeader }               from "./AppHeader";
 import { logout }                  from "../data/api";
 import { openShortcutsDialog }     from "./shortcutsDialog";
+import { openChangelogDialog }     from "./changelogDialog";
 import { openLocalStorageWindow }  from "./localStorageWindow";
 import type { SqlAdminController } from "../SqlAdminController";
 
@@ -64,7 +66,7 @@ import type { SqlAdminController } from "../SqlAdminController";
 // composition root, and referenced by name downstream.
 Glyph.register(database, circle_info, users, terminal, arrows_rotate);
 // Glyphs decorating the menu bar's menus, items, and submenus.
-Glyph.register(plus, floppy_disk, clock_rotate_left, wrench, eye, file_export, file_lines, file_csv, file_code, bars, keyboard, right_from_bracket);
+Glyph.register(plus, floppy_disk, clock_rotate_left, wrench, eye, file_export, file_lines, file_csv, file_code, bars, keyboard, right_from_bracket, scroll);
 
 // The view-container ids; each view's rail button selects it by this id.
 const DATABASE_VIEW_ID = "database";
@@ -99,6 +101,7 @@ class SqlAdminShell extends Container {
             onOpenDocumentation: () => controller.openDocumentation(),
             onShowLocalStorage : () => openLocalStorageWindow(),
             onShowShortcuts    : () => openShortcutsDialog(),
+            onShowChangelog    : () => openChangelogDialog(),
             onAbout            : () => openAboutDialog(),
             onShowDatabases    : () => sidebar.selectView(DATABASE_VIEW_ID),
             onShowRoles        : () => sidebar.selectView(ROLES_VIEW_ID),
@@ -332,8 +335,10 @@ interface MenuBarActions {
     onOpenDocumentation: () => void;
     /** Opens the localStorage inspector window (Tools → Show localStorage…). */
     onShowLocalStorage: () => void;
-    /** Opens the Keyboard Shortcuts dialog (the menu-bar button beside About, and the ? accelerator). */
+    /** Opens the Keyboard Shortcuts dialog (the menu-bar button left of Changelog, and the ? accelerator). */
     onShowShortcuts: () => void;
+    /** Opens the Changelog dialog (the menu-bar button between Shortcuts and About). */
+    onShowChangelog: () => void;
     /** Opens the About dialog (the far-right menu-bar button). */
     onAbout: () => void;
     /** Selects the Databases rail (View → Databases, and the Alt+D accelerator). */
@@ -414,11 +419,15 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
     const shortcuts = Button({ glyph: "keyboard", text: "Shortcuts", showText: true, showDescription: false, compact: true, flat: true });
     shortcuts.on("action", actions.onShowShortcuts);
 
+    const changelog = Button({ glyph: "scroll", text: "Changelog", showText: true, showDescription: false, compact: true, flat: true });
+    changelog.on("action", actions.onShowChangelog);
+
     const about = Button({ glyph: "circle-info", text: "About", showText: true, showDescription: false, compact: true, flat: true });
     about.on("action", actions.onAbout);
 
     menuBar.addComponent(Spacer.flex());
     menuBar.addComponent(shortcuts);
+    menuBar.addComponent(changelog);
     menuBar.addComponent(about);
 
     return menuBar;

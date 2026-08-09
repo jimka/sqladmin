@@ -6,7 +6,11 @@ import pkg from "./package.json";
 //   - fs.strict off: testing an unreleased library build means replacing
 //     frontend/node_modules/@jimka/typescript-ui with a symlink to the sibling
 //     ../typescript-ui checkout, which vite resolves to a real path outside
-//     this project root and will not serve under the default strict rule.
+//     this project root and will not serve under the default strict rule. The
+//     Changelog dialog's src/shell/changelogText.ts also depends on this: it
+//     imports the repo root's CHANGELOG.md?raw, which sits outside the Vite
+//     root (frontend/'s own package-lock.json makes Vite treat frontend/ as
+//     the workspace root), so the dev server 403s it under the default rule.
 //   - dedupe + optimizeDeps.exclude: keep one copy of the linked ESM lib, and
 //     keep vite's dep scanner out of it (which is what makes the explicit
 //     elkjs include below necessary).
