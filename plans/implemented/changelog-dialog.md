@@ -417,3 +417,29 @@ _Development_ section (`docker compose up -d db`, the backend via uvicorn,
     the image root is what the import resolves to. Mirroring the repo layout
     makes the arithmetic self-evident and costs nothing — the stage is a
     throwaway builder whose only output is `dist`.
+
+---
+
+## Implementation Notes
+
+**The `docker build --target frontend` check in `## Verification` could not be
+run to a passing result — a pre-existing, unrelated failure.** `RUN npm run
+build` fails its `tsc --noEmit` step inside the container on three errors, all
+in files this plan never touches: `frontend/src/dock/SqlPreviewDialog.ts`
+(`autoHeightMaxRows`, a `"heightchange"` event) and
+`frontend/src/navigator/NavigatorTree.ts` (`expandNode`). Those APIs exist only
+in the local, unreleased `typescript-ui` checkout that dev/build consume via
+the `frontend/node_modules/@jimka/typescript-ui` symlink override — not in the
+`@jimka/typescript-ui@0.4.1` published to the npm registry that `npm ci` installs
+inside the Docker build. Confirmed pre-existing and unrelated to this branch:
+the identical failure, at the identical two files, reproduces building
+`--target frontend` straight from `main` with the *original* (unmodified)
+Dockerfile — before `WORKDIR`, the `COPY frontend/ ./` layer, and the new
+`COPY CHANGELOG.md /build/CHANGELOG.md` step, which all completed successfully
+in both builds. So the Dockerfile restructuring itself (`## Architecture
+Decisions`, "The Docker frontend stage mirrors the repo layout") is verified
+structurally correct up to the point of the pre-existing failure; the full
+`docker build` was not exercised past `RUN npm run build`. Unblocking it is a
+library-release-gating concern outside this plan's scope (see
+`plans/implemented/align-with-library-post-0.4.1.md`, the branch that
+introduced the two now-unreleased APIs).
