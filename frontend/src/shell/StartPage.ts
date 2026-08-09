@@ -22,7 +22,7 @@
 // constructor-local closures, same as the original factory.
 
 import { Component, Panel, callable } from "@jimka/typescript-ui/core";
-import { VBox, HBox }               from "@jimka/typescript-ui/layout";
+import { VBox, HBox, AnchorType }   from "@jimka/typescript-ui/layout";
 import { Insets, UNBOUNDED }        from "@jimka/typescript-ui/primitive";
 import { Text }                     from "@jimka/typescript-ui/component/input";
 import { Button }                   from "@jimka/typescript-ui/component/button";
@@ -142,10 +142,20 @@ class StartPage extends Panel {
 /**
  * Build the two-column body: quick actions and stored lists on the left, the
  * shortcut legend and connection info on the right. Both columns take equal
- * weight and top-anchor their content so the page reads as a home rather than a
- * stretched split, splitting the row evenly up to `COLUMN_MAX_WIDTH` each —
- * beyond that the surplus width is left empty on the right rather than
- * stretching the columns further.
+ * weight and are pinned to the row's top edge (`anchor: NORTH`) so the page
+ * reads as a home rather than a stretched split, splitting the row evenly up
+ * to `COLUMN_MAX_WIDTH` each — beyond that the surplus width is left empty on
+ * the right rather than stretching the columns further.
+ *
+ * The explicit anchor matters because this HBox isn't `stretching`, so absent
+ * one, `BoxLayout` falls back to baseline alignment: it centres a null-baseline
+ * child within the row's text-line band instead of placing it at the top. The
+ * right column reports a real baseline (its first child, the shortcut legend,
+ * is Text-bearing) while the left column's first child — the welcome
+ * Markdown, or the New Query button when the blurb is hidden — does not
+ * always, so the two columns could drift out of alignment with each other
+ * depending on which is shown. `anchor: NORTH` sidesteps baseline guessing
+ * entirely for both.
  *
  * @param controller - Supplies the quick actions, stored lists, and connection.
  *
@@ -154,8 +164,8 @@ class StartPage extends Panel {
 function buildColumns(controller: SqlAdminController): Component {
     const columns = Panel({ layoutManager: new HBox({ spacing: COLUMN_SPACING }) });
 
-    columns.addComponent(buildLeftColumn(controller), { weight: 1 });
-    columns.addComponent(buildRightColumn(controller), { weight: 1 });
+    columns.addComponent(buildLeftColumn(controller), { weight: 1, anchor: AnchorType.NORTH });
+    columns.addComponent(buildRightColumn(controller), { weight: 1, anchor: AnchorType.NORTH });
 
     return columns;
 }
