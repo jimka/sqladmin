@@ -32,25 +32,37 @@ import { Glyph }                                 from "@jimka/typescript-ui/comp
 import { LineChart, BarChart }                   from "@jimka/typescript-ui/component/chart";
 import { chart_line }                            from "@jimka/typescript-ui/glyphs/solid/chart_line";
 import { chart_column }                          from "@jimka/typescript-ui/glyphs/solid/chart_column";
+import { table_list }                            from "@jimka/typescript-ui/glyphs/solid/table_list";
+import { angle_left }                            from "@jimka/typescript-ui/glyphs/solid/angle_left";
+import { angle_right }                           from "@jimka/typescript-ui/glyphs/solid/angle_right";
 import { buildQueryModel }                       from "../data/buildModel";
 import {
     defaultChartConfig, xCandidates, numericColumns, isTimeX, buildChartSeries,
 } from "../data/chartConfig";
 import type { ChartConfig } from "../data/chartConfig";
 import type { QueryRowsResult } from "../contract";
+import { glyphButton, glyphToggleButton } from "./glyphButton";
+import { stepIndex } from "./recordNavigation";
+import { PRIMARY_COLOR } from "../theme";
 
-// The line/bar type toggles inside the chart strip. The grid/chart glyphs that
+// The line/bar type toggles inside the chart strip, plus the record-view toggle
+// and its Previous/Next steppers on the Data tab. The grid/chart glyphs that
 // label the Data/Chart tabs are registered by QueryPanel, which owns the tabs.
-Glyph.register(chart_line, chart_column);
+Glyph.register(chart_line, chart_column, table_list, angle_left, angle_right);
 
 // Horizontal gap (px) separating the x-axis pair from the y-axis pair in the
 // chart config strip, so "x: [..]" and "y: [..]" read as two distinct groups.
 const AXIS_GROUP_GAP = 12;
 
 /**
- * The results grid for a rows result. A class-first composition wrapper: the
- * instance owns `content` (the grid) alone — the Dock destroys it, and the
- * MemoryStore beneath it needs no teardown of its own.
+ * The results grid for a rows result: a toolbar (record-view toggle plus its
+ * Previous/Next steppers) over the read-only grid. A class-first composition
+ * wrapper: the instance owns `content` (the toolbar-over-grid subtree) alone —
+ * the Dock destroys it, and the MemoryStore beneath it needs no teardown of
+ * its own. `toggleRecordView`, `stepRecord`, and `syncStepEnabled` are plain
+ * functions closing over the constructor's own locals, not arrow-function
+ * fields — see COMPONENT_CONVENTIONS.md (f): a composition wrapper has no
+ * `this` for an arrow field to bind.
  */
 export class QueryResultGrid {
     readonly content: Component;
@@ -67,7 +79,59 @@ export class QueryResultGrid {
         // library at 400px.
         const grid  = Table(store, { columns: [], autoSizeColumns: true, rowReadOnly: () => true });
 
-        this.content = grid;
+        const recordToggle = glyphToggleButton("table-list", PRIMARY_COLOR, "Record view (one record as field/value rows)", false);
+        const prevButton   = glyphButton("angle-left",  PRIMARY_COLOR, "Previous record", () => stepRecord(-1));
+        const nextButton   = glyphButton("angle-right", PRIMARY_COLOR, "Next record",     () => stepRecord(1));
+
+        const toolbar = new ToolBar({ components: [recordToggle, prevButton, nextButton] });
+
+        const content = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
+        content.addComponent(toolbar, { placement: Placement.NORTH });
+        content.addComponent(grid,    { placement: Placement.CENTER });
+
+        recordToggle.on("action", toggleRecordView);
+        grid.on("selection", syncStepEnabled);
+        syncStepEnabled();
+
+        /** Flip the grid's display mode and re-seed/re-sync the steppers. */
+        function toggleRecordView(): void {
+            const record = grid.getSelectedRecord();
+
+            if (recordToggle.isSelected()) {
+                grid.setDisplayMode("rotated");
+            } else {
+                grid.setDisplayMode("normal");
+                // setDisplayMode re-selects the displayed record but does not reveal
+                // it; selectRecord's normal-mode path scrolls the row back into view.
+                grid.selectRecord(record);
+            }
+
+            syncStepEnabled();
+        }
+
+        /** Step the displayed record by `delta`, clamped to the loaded rows. */
+        function stepRecord(delta: number): void {
+            const records = store.getRecords();
+            const current = grid.getSelectedRecord();
+            const target  = stepIndex(current ? records.indexOf(current) : -1, delta, records.length);
+
+            if (target !== null) {
+                grid.selectRecord(records[target]);
+            }
+        }
+
+        /** Enable Previous/Next only in record view, and only where a neighbour exists. */
+        function syncStepEnabled(): void {
+            const rotated = grid.getDisplayMode() === "rotated";
+            const records = store.getRecords();
+            const current = grid.getSelectedRecord();
+            const index   = current ? records.indexOf(current) : -1;
+
+            prevButton.setEnabled(rotated && stepIndex(index, -1, records.length) !== null);
+            nextButton.setEnabled(rotated && stepIndex(index,  1, records.length) !== null);
+        }
+
+        this.content = content;
     }
 }
 
