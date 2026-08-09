@@ -8,7 +8,163 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
-## 🐞✅ Closing any panel with a live subtree listener throws on the next matching event (0.4.1, symlinked)
+## 🐞🔎 `SqlPreviewDialog`'s failed-execute retry crashes — `Dialog` now owns its content's teardown too (app bug, exposed by 0.4.1, symlinked)
+
+Found manually verifying `align-with-library-post-0.4.1`'s Change 2 "failed Execute, followed by retry"
+bullet — pre-existing code, **not** touched by that plan's diff (only `resizer.fit = () =>
+dialog.resizeToContent();` was added nearby; the crashing line itself,
+[`SqlPreviewDialog.ts:213`](frontend/src/dock/SqlPreviewDialog.ts#L213)'s
+`dialog.getContentComponent().removeComponent(content);`, is original `ddl-infrastructure.md` code).
+
+Repro: "Create table" on `wide`, name it `cols_10` (already exists), Execute. The expected
+`relation "cols_10" already exists"` error notification appears — but the dialog does **not** re-show for
+a retry; it simply vanishes. Console shows an unhandled rejection:
+
+```
+Uncaught (in promise)
+  at resolve (DOM.ts:239) → apply (DOM.ts:1474) → set (ElementAttributes.ts:51)
+  → setElementAttribute (Component.ts:1457) → setDataAttribute (Component.ts:1749)
+  → getLayoutManager (Component.ts:5334) → delLayoutConstraints (Component.ts:5294)
+  → unwireChild (Component.ts:4980) → removeComponent (Component.ts:5171)
+  → showExecuteRetryLoop (SqlPreviewDialog.ts:213)
+```
+
+**Root cause confirmed by reading the library, not guessed.** `Component.destructor()`
+([`Component.ts:762`](../typescript-ui/packages/lib/src/typescript/lib/core/Component.ts#L762)) recursively
+destroys every registered child (`for (const child of this._components) { child.destructor(); }`) — the
+same owned-teardown mechanism this app already adapted `Dock`/`Tab.closeEntry` to via
+`adopt-dock-owned-teardown` (see the top-of-file `Closing a table tab strands...` entry's resolution).
+`Dialog.destructor()` ([`Dialog.ts:1173`](../typescript-ui/packages/lib/src/typescript/lib/overlay/Dialog.ts#L1173))
+calls `super.destructor()`, so **`dialog.hide()` now destroys the dialog's entire content subtree** —
+`_contentContainer` and, since `SqlPreviewDialog` added it as a child, the persistent `content` Panel
+(form + "Regenerate SQL" button + `editor`) along with it. `hide()`'s `finalize()`
+([`Dialog.ts:1119`](../typescript-ui/packages/lib/src/typescript/lib/overlay/Dialog.ts#L1119)) calls
+`this.destructor()` *before* resolving the `show()` promise, so by the time `showExecuteRetryLoop`'s
+`await dialog.show()` returns after a Cancel/close/Execute-failure, `content` — and `editor` inside it — are
+already disposed. The catch block's `dialog.getContentComponent().removeComponent(content)` then operates
+on an already-torn-down parent and child, hitting a released DOM handle deep in `Component`'s attribute
+plumbing.
+
+**This is `Dialog` working as designed, not a library defect** — mirrors the same owned-teardown contract
+`Dock` already carries, and is presumably intentional/consistent library behaviour, unlike the `CodeEditor`
+entry above. The bug is **app-side**: `SqlPreviewDialog.ts`'s whole "detach the persistent content from the
+spent dialog and re-wrap it in a fresh one" retry design (see the file's own header comment,
+"`Dialog.hide()` destructs the Dialog instance on every dismissal, so a retry cannot re-show the same
+instance — it detaches the persistent content... so the form's and the editor's own state... survive
+across retries") was true when written but is now **false**: the content does not survive `hide()` to be
+detached at all. `FilterDialog` has no equivalent retry path to have already surfaced this against (Apply/
+Clear/Cancel don't retry), so `SqlPreviewDialog` appears to be the only place in the app this contract
+change actually breaks.
+
+**Confirmed no data corruption** — the `CREATE TABLE` correctly failed server-side before the crash (`wide.cols_10`
+unchanged); this is a pure UI-teardown/retry-flow bug, but it means **every DDL phase's Execute-failure retry
+is currently non-functional**: any invalid SQL, permission error, or name conflict on Execute silently
+drops the dialog instead of letting the user fix and retry, which is the dialog's whole documented purpose.
+
+**Not fixed here** — out of `align-with-library-post-0.4.1`'s scope (its two changes are `NavigatorTree`
+and `SqlPreviewDialog`'s *sizing*, not its retry lifecycle; this bug predates and is orthogonal to both).
+Fixing it properly needs a real redesign — e.g. rebuilding the form + editor content fresh on each retry
+instead of reusing the disposed instance, mirroring how `adopt-dock-owned-teardown` handled the same class
+of problem for Dock tabs — which belongs in its own plan, not a mid-implementation patch.
+
+---
+
+## 🐞🔎 `CodeEditor.autoHeightMaxRows` can collapse the editor to 0px on a shrink (0.4.1, symlinked)
+
+Found while manually verifying `align-with-library-post-0.4.1`'s `SqlPreviewDialog` adoption of
+`autoHeightMaxRows` (the entry below this one) — not a defect in the app's own wiring, which matches the
+plan's `## Internal Structure` exactly. **Reproduced twice, cleanly, via the ordinary "Create table" DDL
+dialog with no scripted shortcuts beyond driving the same UI a real user would:**
+
+1. Open "Create table", name it, add one column (`id integer`), click "Regenerate SQL" — editor renders
+   3 lines at a real, correct **68px**.
+2. Click "Add column", fill a second column (`col_1 text`), click "Regenerate SQL" — editor **grows**
+   correctly to 4 lines at **87.375px**. Growth works.
+3. Click that second column's "Remove column", click "Regenerate SQL" again — back to the exact same
+   3-line SQL text as step 1. The editor's committed height is now **0px** (`style="...height: 0px"` on the
+   `.CodeEditor` element), even though `.cm-scroller.scrollHeight` correctly reports **68px** of real
+   content a full second later. The editor is completely invisible — not merely undersized — while its
+   underlying CodeMirror document is intact and correct (confirmed: executing the dialog at this point
+   creates the table exactly as the 3-line SQL specifies, so this is a pure layout/height bug, not a data
+   bug).
+
+**Ruled out: the app's own `resizer.fit()` call is not the trigger.** `SqlPreviewDialog`'s
+`"heightchange"` listener calls `editor.clearPreferredSize()` then `resizer.fit()` (→
+`dialog.resizeToContent()`) synchronously, mirroring `FilterDialog`'s precedent. Suspecting this
+synchronous call might be re-entering `CodeEditor`'s own `geometryChanged`-driven `syncAutoHeight()` mid-
+measurement (plausible, since `resizeToContent()` changes the very box `syncAutoHeight` measures), the
+call was temporarily deferred via `queueMicrotask(() => resizer.fit())` and the repro re-run from a fresh
+page load. **Identical result — height still collapses to 0px on the same shrink.** Since the collapse
+still happens even when the app's resize call cannot execute until after the current synchronous work (and
+any microtask queue ahead of it) has drained, the cause is not this app's call timing; it lives inside
+`syncAutoHeight` itself (`CodeEditor.ts:835`) or the `EditorView.updateListener` that re-invokes it
+(`CodeEditor.ts:696`, on `heightChanged || geometryChanged`) — plausibly a re-entrant cascade: `syncAutoHeight`'s
+own `this.setHeight(desired)` commit is itself a geometry change CodeMirror's internal `ResizeObserver`-driven
+measurement reacts to, re-invoking `syncAutoHeight` again on an *unchanged* shape, where only a **sub-pixel**
+shrink is guarded against (`CodeEditor.ts:984`'s `previousHeight - desired < 1` check) — a chain of several
+such re-entrant calls each shrinking by more than a pixel would not be caught by that guard and could walk the
+height down past zero, entirely within the library's own update loop, with no app involvement. Not confirmed by
+instrumenting the library directly (would need a `dist/lib` rebuild with temporary logging); this is the
+leading hypothesis from reading `syncAutoHeight`'s source and its own extensive comments about the analogous
+*growth* re-entrancy the method already guards against, not a certainty.
+
+**Not fixed here** — out of this plan's scope (`## Non-Goals`: "Any library-side (`typescript-ui` repo)
+change"), and there is no legitimate app-side workaround for a component-internal computation bug (per this
+project's own "fix in library, not workaround" convention — a defensive minimum-height clamp in the app
+would hide the symptom, not the cause, and every one of `SqlPreviewDialog`'s existing manual-verify bullets
+for "no visible fixed-height box" / "grows or shrinks to fit content" is written against `autoHeightMaxRows`
+behaving correctly, which a client-side clamp would only partially restore). **This is a real, user-facing
+regression risk**: unlike the old fixed-180px box, which was always at least visible, a user who adds then
+removes a column (or otherwise edits the form back to a shorter previous state) before executing can lose
+all visual access to the SQL they are about to run. Needs its own library-side investigation before this
+adoption should be considered fully safe for end users, even though the app-side wiring itself is correct
+and complete per the plan.
+
+---
+
+## ✅ Fixed in library: no way to grow a `CodeEditor` to fit its content
+
+`SqlPreviewDialog`'s DDL preview editor (`dock/SqlPreviewDialog.ts`) sat in a
+fixed 180px box regardless of how much SQL `generateSql()` produced, so a
+short preview left dead space and a long one deferred entirely to the
+dialog's outer scroll. There was no way to ask a `CodeEditor` to size itself
+to its own content, capped at a maximum.
+
+Fixed in the library: `CodeEditor` gained an opt-in `autoHeightMaxRows`
+option and a `"heightchange"` event fired whenever its measured height
+changes. Adopted here (plan `align-with-library-post-0.4.1`): the editor is
+capped at `SQL_PREVIEW_MAX_ROWS` (24, sized to this app's own `wide.cols_20`
+DDL fixture), and its seed `preferredSize` is dropped via
+`clearPreferredSize()` on the first `"heightchange"` so it stops fighting the
+editor's own live height on later relayouts. The dialog re-fits itself on
+every `"heightchange"` via a `resizer` object mirroring `FilterDialog`'s own
+re-fit hook, rewired on every dialog rebuild so a failed-execute retry keeps
+resizing correctly.
+
+---
+
+## ✅ Fixed in library: no direct way to expand a freshly-loaded tree node
+
+`NavigatorTree.refresh()` (`navigator/NavigatorTree.ts`) needed to
+auto-expand a single-schema database's lone schema node on load. `Tree` had
+no direct "expand this node" call, so the app matched the schema's first
+category node via `revealByPredicate(data => data === undefined)` —
+`revealByPredicate` expands a match's *ancestors*, not the match itself, so
+this was a surrogate-match trick to reach the schema one level up.
+
+Fixed in the library: `Tree` gained `expandNode(node)`, which runs the same
+commit path a caret click does (including the lazy-load branch) directly on
+the node you already have. Adopted here (plan
+`align-with-library-post-0.4.1`): `refresh()` now calls
+`this.expandNode(nodes[0])`, since `loadSchemas()` already resolves the
+schema's own `TreeNode`. One behaviour changed at an edge case: an *empty*
+single schema now expands to an empty parent instead of staying collapsed,
+per `_loadAndExpand`'s own documented behaviour for a zero-length resolved
+children array — a minor improvement, not a regression.
+
+---
+
+## 🐞🔎 Closing any panel with a live subtree listener throws on the next matching event (0.4.1, symlinked)
 
 Found during `adopt-dock-owned-teardown`'s manual verification (**M2**/**M3**), not by design. `QueryPanel.ts` wires
 `Event.addSubtreeListener(editor, "keydown", …)` for its Run/Save/Explain/Clear/history-recall shortcuts.

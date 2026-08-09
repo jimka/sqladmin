@@ -37,12 +37,22 @@ import type { QueryStatusResult }  from "../contract";
 // DIALOG_WIDTH (500), a bit wider to give the SQL editor room to breathe.
 const DEFAULT_DIALOG_WIDTH = 560;
 
-// The editor's initial height. CodeEditor fills whatever box it is given
-// (see CodeEditor.ts's class doc — it needs "a sized host"), and the dialog
-// has no Split/resizer here, so a fixed preferred height keeps a few lines of
-// generated SQL visible without the dialog growing unboundedly; the dialog's
-// own content container scrolls past that if a preview is longer.
-const EDITOR_HEIGHT = 180;
+// The editor's placeholder height for the one layout pass before it has
+// mounted and measured its own content (see plans/align-with-library-post-0.4.1.md's
+// "autoHeightMaxRows takes over from preferredSize" decision). Cleared via
+// clearPreferredSize() on the editor's first "heightchange", after which the
+// editor's own live height drives its preferred size instead — keeping this
+// as a permanent preferredSize would fight autoHeightMaxRows on every later
+// relayout, snapping the editor back to this fixed number.
+const EDITOR_SEED_HEIGHT = 180;
+
+// Row cap CodeEditor's autoHeightMaxRows grows the preview to before its own
+// scrollbar takes over. Sized to this app's own "wide table" DDL shape: a
+// generated CREATE TABLE is one line per column plus an opening/closing paren
+// line (backend/app/sql/ddl.py's create_table), and wide.cols_20 (this app's
+// standard many-column fixture, see LIBRARY_NOTES.md) is 22 such lines; 24
+// leaves headroom for a trailing clause without immediately scrolling.
+const SQL_PREVIEW_MAX_ROWS = 24;
 
 // Vertical gap between the form, the "Regenerate SQL" row, and the editor —
 // matches FilterDialog's ROW_SPACING order of magnitude for a consistent
@@ -103,9 +113,27 @@ export function openSqlPreviewDialog(options: SqlPreviewDialogOptions): void {
  * @param options - the phase's form, SQL generator, and execute/callbacks.
  */
 async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<void> {
+    // Re-fit hook for the current Dialog. Wired to a real dialog only once
+    // showExecuteRetryLoop builds one — mirrors FilterDialog's own `resizer`
+    // object, needed here because the editor (and its "heightchange" listener)
+    // is built before any Dialog exists, and showExecuteRetryLoop rebuilds
+    // `dialog` again on every failed-execute retry.
+    const resizer = { fit: () => {} };
+
     const editor = new CodeEditor("", {
-        language:      "sql",
-        preferredSize: { width: 0, height: EDITOR_HEIGHT },
+        language:          "sql",
+        autoHeightMaxRows: SQL_PREVIEW_MAX_ROWS,
+        preferredSize:     { width: 0, height: EDITOR_SEED_HEIGHT },
+    });
+
+    // Once the editor has real measured content — first mount, and every
+    // "Regenerate SQL"/manual edit that changes its row count after — drop the
+    // seed preferredSize constraint (see EDITOR_SEED_HEIGHT's comment above)
+    // and re-fit the current dialog to the new height (Dialog does not do
+    // this on its own past its one-time post-open resizeToContent()).
+    editor.on("heightchange", () => {
+        editor.clearPreferredSize();
+        resizer.fit();
     });
 
     const regenerateButton = Button({ text: "Regenerate SQL", compact: true });
@@ -118,7 +146,7 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
 
     try {
         await refreshPreview(editor, options);
-        await showExecuteRetryLoop(content, editor, options);
+        await showExecuteRetryLoop(content, editor, options, resizer);
     } finally {
         editor.dispose();
     }
@@ -150,13 +178,18 @@ async function refreshPreview(editor: CodeEditor, options: SqlPreviewDialogOptio
  * @param content - the persistent form + editor content, reused across retries.
  * @param editor - the preview editor executed SQL is read from.
  * @param options - carries `execute`, `onSuccess`, and the error reporter.
+ * @param resizer - rewired to the current Dialog on every build, so the
+ *     editor's "heightchange" listener always re-fits the live dialog even
+ *     after a failed-execute retry rebuilds it.
  */
 async function showExecuteRetryLoop(
     content: Component,
     editor: CodeEditor,
     options: SqlPreviewDialogOptions,
+    resizer: { fit: () => void },
 ): Promise<void> {
     let dialog = buildDialog(content, options);
+    resizer.fit = () => dialog.resizeToContent();
 
     for (;;) {
         const result = await dialog.show();
@@ -179,6 +212,7 @@ async function showExecuteRetryLoop(
             // it in a fresh dialog for the retry.
             dialog.getContentComponent().removeComponent(content);
             dialog = buildDialog(content, options);
+            resizer.fit = () => dialog.resizeToContent();
         }
     }
 }

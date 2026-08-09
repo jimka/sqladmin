@@ -197,14 +197,12 @@ class NavigatorTree extends Tree implements ExplorerTree {
             .then(nodes => {
                 this.setNodes(nodes);
 
-                // A single-schema database: expand that lone schema so its
-                // category folders show immediately. revealByPredicate expands
-                // the match's ANCESTORS (not the match), so match the schema's
-                // first category node — the only nodes with no `data` (see
-                // categoryNode) — to expand exactly the schema, one level. An
-                // empty schema has no category to match, so nothing expands.
+                // A single-schema database: expand that lone schema immediately so
+                // its category folders show without an extra click. nodes[0] IS
+                // that schema's own TreeNode (see schemaNode below); expandNode
+                // loads its children via the node's loadChildren if not cached yet.
                 if (nodes.length === 1) {
-                    void this.revealByPredicate(data => data === undefined);
+                    this.expandNode(nodes[0]);
                 }
             })
             .catch(error => this.controller.notifyError(error));
