@@ -4,6 +4,45 @@ All notable changes to SQLAdmin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-08-09
+
+### Added
+- **A record view for tables and query results.** The data grid and the SQL
+  workspace's query results grid both gain a toolbar toggle that flips
+  between the normal grid and a one-record-at-a-time field/value view, with
+  Previous/Next buttons to step through the loaded rows. On the data grid,
+  Add is disabled while the record view is showing, since only the grid can
+  fill in a new row.
+- **A Changelog dialog joins Shortcuts and About** on the menu bar. It opens
+  a modal titled "SQLAdmin 0.5.0" and renders this file with the library's
+  Markdown viewer — the body is the real CHANGELOG.md, inlined at build
+  time, so it can never drift from the release.
+
+### Changed
+- **The start page's layout was simplified.** The welcome blurb now sits
+  above quick actions in the left column instead of spanning the full page
+  width, the redundant "SQLAdmin" heading and Connection line are gone (the
+  app header already shows both), and both columns are capped at a fixed
+  maximum width and pinned to the row's top edge instead of stretching and
+  drifting off-center on a wide window.
+- **The SQL preview dialog grows to fit the generated SQL** instead of
+  scrolling a fixed 180px box, up to a 24-row cap.
+
+### Fixed
+- **Opening a table from a sequence's "Owned by column" link no longer
+  delays the tab.** Revealing the target in the navigator — expanding
+  whatever schema branches were still collapsed — used to run to completion
+  before the tab opened at all. The reveal now runs concurrently with the
+  tab's own open, so the tab appears at once and the navigator selection
+  lands whenever the reveal resolves. The same fix applies to opening a
+  referenced table from a foreign key, and to a sequence's or table's own
+  cross-reference links.
+
+### Internal
+- Migrated to `@jimka/typescript-ui` 0.5.0.
+- Unit-test coverage for the record-view step logic and the changelog
+  dialog's build-time inlining.
+
 ## [0.4.0] — 2026-08-04
 
 ### Added
@@ -98,6 +137,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 First public release: browse schemas and roles, edit rows, run and EXPLAIN SQL,
 and visualize schema and role relationships as diagrams.
 
+[0.5.0]: https://github.com/jimka/sqladmin/releases/tag/v0.5.0
 [0.4.0]: https://github.com/jimka/sqladmin/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jimka/sqladmin/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jimka/sqladmin/releases/tag/v0.2.0
