@@ -30,7 +30,9 @@ It is not hardened for exposure to the public internet:
   Flip a wide table into a one-record-at-a-time field/value view and step
   through the loaded rows with Previous/Next.
 - **SQL workspace** — run ad-hoc queries, `EXPLAIN` a statement, and save
-  queries for reuse. Export query and table results to CSV or JSON.
+  queries for reuse. Export query and table results to CSV or JSON. Flip a
+  query's results into the same one-record-at-a-time field/value view as the
+  data grid, with Previous/Next to step through the returned rows.
 - **Structure & definitions** — inspect columns, view a view's definition, and
   read a table's `GRANT`s.
 - **Diagrams** — schema-overview, per-schema, relation, and role
