@@ -2,11 +2,16 @@
 // shell's CENTER (a Card deck alongside the Dock) whenever no dock panels are
 // open. The controller toggles this deck off the Dock's "emptychange" event, so
 // no panel bookkeeping lives here; the page itself is a plain composed Panel laid
-// out as a two-column "home": a full-width header (the app heading and, on an
-// empty workspace, the welcome blurb) over a left column of quick actions /
-// recent tables / saved queries and a right column of the keyboard-shortcut
-// legend and connection info. It rebuilds on the controller's onWorkspaceChanged
-// seam so the recent/saved lists stay current.
+// out as a two-column "home", with no page-level heading of its own — the
+// AppHeader brand strip above the menu bar already names the app, so repeating
+// "SQLAdmin" here would be redundant. The left column stacks two panels — the
+// welcome blurb (shown only on an empty workspace) above the quick actions /
+// recent tables / saved queries panel; the right column holds only the
+// keyboard-shortcut legend. Both columns are width-capped (COLUMN_MAX_WIDTH)
+// and left-anchored, so on a wide window they stop growing and leave empty
+// page background to their right rather than stretching into two sparse
+// panes — this is intentional, not a layout bug. It rebuilds on the
+// controller's onWorkspaceChanged seam so the recent/saved lists stay current.
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the page `extends Panel`
 // directly, so the instance itself is the mountable component. `id` and
@@ -18,8 +23,8 @@
 // constructor-local closures, same as the original factory.
 
 import { Component, Panel, callable } from "@jimka/typescript-ui/core";
-import { VBox, HBox }               from "@jimka/typescript-ui/layout";
-import { Insets }                   from "@jimka/typescript-ui/primitive";
+import { VBox, HBox, AnchorType }   from "@jimka/typescript-ui/layout";
+import { Insets, UNBOUNDED }        from "@jimka/typescript-ui/primitive";
 import { Text }                     from "@jimka/typescript-ui/component/input";
 import { Button }                   from "@jimka/typescript-ui/component/button";
 import { Glyph, Markdown }          from "@jimka/typescript-ui/component/display";
@@ -29,7 +34,6 @@ import { buildShortcutLegend }      from "./shortcutLegend";
 import type { SavedQuery }          from "../data/queryStore";
 import type { SqlAdminController }  from "../SqlAdminController";
 import { MUTED_TEXT_COLOR }         from "../theme";
-import { APP_NAME }                 from "../appIdentity";
 
 Glyph.register(plus);
 
@@ -44,10 +48,16 @@ const ENTRY_SPACING = 6;
 const COLUMN_SPACING = 32;
 const BUTTON_HEIGHT = 30;
 
+// The widest a single column is allowed to grow. Matches the Keyboard Shortcuts
+// dialog's width (shortcutsDialog.ts), which was picked to fit the widest
+// "keys  label" legend row without wrapping — the legend is the widest fixed
+// content either column carries, so it sets the ceiling. Below this width both
+// columns still split the row evenly; above it they stop growing and the surplus
+// stays as empty space to the right of the page.
+const COLUMN_MAX_WIDTH = 420;
+
 // The empty-workspace welcome blurb, shown above the quick actions only when
-// there are no recent tables and no saved queries (see shouldShowWelcome). It
-// opens with a `##`-level heading, not another `#` app title, so it doesn't
-// stutter against the "SQLAdmin" heading already on the page.
+// there are no recent tables and no saved queries (see shouldShowWelcome).
 const GETTING_STARTED_MARKDOWN = `## Getting started
 
 Your workspace is empty. Open a new query or pick a table from the sidebar
@@ -113,14 +123,6 @@ class StartPage extends Panel {
 
             this.removeAllComponents();
 
-            // Full-width header above the columns: the app heading, and — only
-            // on an empty workspace — the transient welcome blurb.
-            this.addComponent(heading(APP_NAME, "600"));
-
-            if (shouldShowWelcome(controller)) {
-                this.addComponent(Markdown(GETTING_STARTED_MARKDOWN));
-            }
-
             this.addComponent(buildColumns(controller));
 
             this.doLayout();
@@ -133,58 +135,91 @@ class StartPage extends Panel {
 
 /**
  * Build the two-column body: quick actions and stored lists on the left, the
- * shortcut legend and connection info on the right. Both columns take equal
- * weight and top-anchor their content so the page reads as a home rather than a
- * stretched split.
+ * shortcut legend on the right. Both columns take equal weight and are pinned
+ * to the row's top edge (`anchor: NORTH`) so the page reads as a home rather
+ * than a stretched split, splitting the row evenly up to `COLUMN_MAX_WIDTH`
+ * each — beyond that the surplus width is left empty on the right rather than
+ * stretching the columns further.
  *
- * @param controller - Supplies the quick actions, stored lists, and connection.
+ * The explicit anchor matters because this HBox isn't `stretching`, so absent
+ * one, `BoxLayout` falls back to baseline alignment: it centres a null-baseline
+ * child within the row's text-line band instead of placing it at the top. The
+ * right column reports a real baseline (its first child, the shortcut legend,
+ * is Text-bearing) while the left column's first child — the welcome
+ * Markdown, or the New Query button when the blurb is hidden — does not
+ * always, so the two columns could drift out of alignment with each other
+ * depending on which is shown. `anchor: NORTH` sidesteps baseline guessing
+ * entirely for both.
+ *
+ * @param controller - Supplies the quick actions and stored lists.
  *
  * @returns The columns container.
  */
 function buildColumns(controller: SqlAdminController): Component {
     const columns = Panel({ layoutManager: new HBox({ spacing: COLUMN_SPACING }) });
 
-    columns.addComponent(buildLeftColumn(controller), { weight: 1 });
-    columns.addComponent(buildRightColumn(controller), { weight: 1 });
+    columns.addComponent(buildLeftColumn(controller), { weight: 1, anchor: AnchorType.NORTH });
+    columns.addComponent(buildRightColumn(), { weight: 1, anchor: AnchorType.NORTH });
 
     return columns;
 }
 
 /**
- * Build the left column: the New Query action over the Recent tables and Saved
- * queries lists (each hidden while empty).
+ * Build the left column: the welcome blurb (only on an empty workspace) above
+ * the quick actions panel, stacked in the column's own VBox.
  *
  * @param controller - Supplies the quick actions and stored lists.
  *
  * @returns The left column panel.
  */
 function buildLeftColumn(controller: SqlAdminController): Panel {
-    const column = Panel({ layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }) });
+    const column = Panel({
+        layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
+        maxSize      : { width: COLUMN_MAX_WIDTH, height: UNBOUNDED },
+    });
 
-    column.addComponent(actionButton("New Query", () => controller.openQuery(), "plus"));
+    if (shouldShowWelcome(controller)) {
+        column.addComponent(Markdown(GETTING_STARTED_MARKDOWN));
+    }
 
-    appendList(column, "Recent tables", controller.recentTables(),
-        ref => actionButton(ref.name ?? "(table)", () => controller.reopenTable(ref)));
-    appendList(column, "Saved queries", controller.savedList(),
-        (q: SavedQuery) => actionButton(q.name, () => controller.openSavedQuery(q.name)));
+    column.addComponent(buildQuickActions(controller));
 
     return column;
 }
 
 /**
- * Build the right column: the keyboard-shortcut legend over the connection info.
+ * Build the quick actions panel: the New Query action over the Recent tables
+ * and Saved queries lists (each hidden while empty).
  *
- * @param controller - Supplies the connection id.
+ * @param controller - Supplies the quick actions and stored lists.
+ *
+ * @returns The quick actions panel.
+ */
+function buildQuickActions(controller: SqlAdminController): Panel {
+    const panel = Panel({ layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }) });
+
+    panel.addComponent(actionButton("New Query", () => controller.openQuery(), "plus"));
+
+    appendList(panel, "Recent tables", controller.recentTables(),
+        ref => actionButton(ref.name ?? "(table)", () => controller.reopenTable(ref)));
+    appendList(panel, "Saved queries", controller.savedList(),
+        (q: SavedQuery) => actionButton(q.name, () => controller.openSavedQuery(q.name)));
+
+    return panel;
+}
+
+/**
+ * Build the right column: the keyboard-shortcut legend.
  *
  * @returns The right column panel.
  */
-function buildRightColumn(controller: SqlAdminController): Panel {
-    const column = Panel({ layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }) });
+function buildRightColumn(): Panel {
+    const column = Panel({
+        layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
+        maxSize      : { width: COLUMN_MAX_WIDTH, height: UNBOUNDED },
+    });
 
     column.addComponent(buildShortcutLegend());
-
-    column.addComponent(heading("Connection", "600"));
-    column.addComponent(mutedText(controller.connectionId));
 
     return column;
 }
@@ -221,14 +256,6 @@ function heading(text: string, fontWeight: string): Component {
     header.setForegroundColor(MUTED_TEXT_COLOR);
 
     return header;
-}
-
-/** A muted informational line. */
-function mutedText(text: string): Component {
-    const line = new Text(text);
-    line.setForegroundColor(MUTED_TEXT_COLOR);
-
-    return line;
 }
 
 /**

@@ -189,3 +189,100 @@ No exported API changes, so no doc page or barrel is touched. The change is user
 [^unbounded-height]: A box layout derives its own maximum from its children's: `BoxLayout.aggregateMaxSize` sums the children's maxima along the main axis and takes the largest along the cross axis, treating the `UNBOUNDED` sentinel as "no limit" (`/home/jika/typescript/typescript-ui/packages/lib/src/typescript/lib/layout/BoxLayout.ts:292-352`). Two consequences. First, capping the two columns automatically caps the columns row that holds them, at roughly `2 × COLUMN_MAX_WIDTH + COLUMN_SPACING` plus insets — so the row needs no `maxSize` of its own. Second, a finite `maxSize.height` on a column would propagate up as a height ceiling on the row, which would fight the page's `autoScroll: "y"` scroll host and could strand the bottom of the shortcut legend. `UNBOUNDED` is exported from `@jimka/typescript-ui/primitive`, the entry point `StartPage.ts` already imports `Insets` from.
 
 [^no-unit-test]: The project's Vitest runs in a Node environment with no DOM, which is exactly why `shouldShowWelcome` was split out into `frontend/src/shell/startPageWelcome.ts` — `StartPage.ts`'s top-level imports touch `document` at module-load time and cannot be imported by a test. This change adds no pure logic that could be split out the same way: it is two option-bag entries and a constant, and the behaviour it produces is layout geometry the headless runner could not measure anyway. Verification is by eye, per `## Verification`.
+
+---
+
+## Implementation Notes
+
+### Manual verification performed
+
+Driven live via a Chrome instance against a dedicated Vite dev server for this
+worktree (port 5180, `--strictPort`, left the main tree's dev server on 5173
+undisturbed) with the native backend on :8000 and Postgres on :5432, logged in
+with Host `localhost`, Port `5432`, Database `sqladmin`, user/password
+`sqladmin`.
+
+Covered, against `## Expected Behaviour`:
+
+- **Wide window (case 1).** At 1500×900 and again at 2200×900, `evaluate_script`
+  measured both column `Panel`s' `getBoundingClientRect()` directly: left
+  column width 420, left 312; right column width 420, left 764 (= 312 + 420 +
+  32, confirming `COLUMN_SPACING` held). The columns row itself measured 880
+  wide (= 420 + 32 + 420 + the row `Panel`'s own 4 px×2 default content inset).
+  Screenshots at both widths show the capped pair flush with the page's left
+  padding and empty page background to their right, not centred.
+- **Narrow window (case 2).** At 900×900 both columns shrank together to 264
+  px each (still equal), and `document.documentElement.scrollWidth ===
+  clientWidth` (900 = 900) confirmed no horizontal scrollbar appeared.
+- **The shortcut legend still fits (case 4).** Screenshotted the right column
+  at the capped width and the Keyboard Shortcuts dialog (`?` accelerator) side
+  by side: every row (including the longest, "Ctrl/Cmd+Shift+E — Explain
+  Analyze the statement") renders on one line with no wrapping or clipping in
+  either. The dialog's own content is in fact narrower (~388 px inner width:
+  420 − 16 px `CONTENT_PAD` per side) than the capped column (~412 px: 420 − 4
+  px `Panel` default inset per side), so the column was never the tighter
+  fit.
+- **Quick-action buttons follow the column (case 5).** Re-measured the "New
+  Query" `<button>` element itself (not its column) directly:
+  `getBoundingClientRect().width` is 412 px — the capped 420 px column minus
+  `Panel`'s 4 px inset per side, exactly as `## Potential Challenges`
+  predicts — confirming the button stretches to the capped column's inner
+  width rather than shrink-wrapping its label or spanning a half-window
+  width. (An earlier pass at this note mismeasured the button as 420 px by
+  reading the column `Panel`'s own outer width instead of the button's; this
+  is the corrected figure.)
+- **Header and welcome blurb unchanged (case 6).** Visually confirmed
+  unchanged in every screenshot above; not measured separately, since this
+  plan does not touch the header or blurb code.
+- **Vertical scrolling still works (case 7).** At 1500×500 a vertical
+  scrollbar was visible on the start page, and `scrollIntoView()` on the
+  "Connection" label confirmed the bottom of the right column is reachable
+  by scroll.
+- **Rebuild is unaffected (case 8).** Opened `public.customers` as a table
+  tab, then closed it via the tab's close button. The rebuilt start page
+  showed the same 420×420 capped columns (now with a "Recent tables" entry
+  in the left column), confirming the cap survives `rebuild`.
+- **Live resize (case 3).** Not separately exercised as a continuous drag —
+  the discrete measurements above at 900, 1500, and 2200 px are consistent
+  with the plan's claimed shape (even split below the cap, held cap above
+  it), but no intermediate frames were captured to rule out a relayout
+  artefact exactly at the 420 px boundary.
+
+### Correction to `[^shipped-support]`'s registry claim
+
+`[^shipped-support]` (footnote, near the end of `## Notes`) states the app
+consumes `@jimka/typescript-ui` "from the registry" and that no symlink
+override is needed to verify this change. That is not the state the
+verification above actually ran against: the main tree's
+`frontend/node_modules/@jimka/typescript-ui` is a pre-existing symlink to
+`/home/jika/typescript/typescript-ui/packages/lib` (predating this
+implementation, left over from prior library-verification work), currently
+at `v0.4.1-178-g0914daee` rather than the registry-published `0.4.1`; this
+worktree's `frontend/node_modules` was symlinked to the main tree's for
+tooling, so typecheck, build, tests, and the manual verification above all
+ran through that local build, not a literal registry install.
+
+This does not change the plan's conclusion. The width-resolution code the
+plan depends on is unchanged between the `v0.4.1` tag and the local
+checkout's current HEAD — `git diff v0.4.1 HEAD -- packages/lib/src/.../layout/HBox.ts
+packages/lib/src/.../layout/BoxLayout.ts` (in the `typescript-ui` checkout)
+shows no diff touching `resolveChildWidth`'s `maxSize` clamp or
+`aggregateMaxSize`'s perimeter-plus-children-maxima sum, both load-bearing
+for this change. So "no library change is needed" still holds for the
+actual pinned `^0.4.1` dependency; only the footnote's description of what
+ran the verification was inaccurate.
+
+### Reconciliation of step 8's predicted grep count
+
+Step 8 (`## Ordered Implementation Steps`) predicts `grep -c
+'COLUMN_MAX_WIDTH' frontend/src/shell/StartPage.ts` returns 3. Run as
+written, it returns **5**: the declaration (`StartPage.ts:56`), the two
+`maxSize` uses (`:177`, `:200`), and two doc-comment prose references the
+plan's own steps 5 and 6 directed (`:8`, the module header; `:149`, the
+`buildColumns` doc comment — step 5's text itself reads '"up to
+`COLUMN_MAX_WIDTH` each"'). The check's actual purpose — confirming the cap
+reached both columns, not exactly one omitted — is satisfied: both `maxSize`
+uses are present, one per column. The predicted count of 3 was written
+before accounting for steps 5/6's own doc-comment wording; left as written
+above rather than edited, since `## Ordered Implementation Steps` is the
+plan's original text and this note is the record of what actually ran.
