@@ -8,7 +8,28 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
-## 🐞✅ Closing any panel with a live subtree listener throws on the next matching event (0.4.1, symlinked)
+## ✅ Fixed in library: no direct way to expand a freshly-loaded tree node
+
+`NavigatorTree.refresh()` (`navigator/NavigatorTree.ts`) needed to
+auto-expand a single-schema database's lone schema node on load. `Tree` had
+no direct "expand this node" call, so the app matched the schema's first
+category node via `revealByPredicate(data => data === undefined)` —
+`revealByPredicate` expands a match's *ancestors*, not the match itself, so
+this was a surrogate-match trick to reach the schema one level up.
+
+Fixed in the library: `Tree` gained `expandNode(node)`, which runs the same
+commit path a caret click does (including the lazy-load branch) directly on
+the node you already have. Adopted here (plan
+`align-with-library-post-0.4.1`): `refresh()` now calls
+`this.expandNode(nodes[0])`, since `loadSchemas()` already resolves the
+schema's own `TreeNode`. One behaviour changed at an edge case: an *empty*
+single schema now expands to an empty parent instead of staying collapsed,
+per `_loadAndExpand`'s own documented behaviour for a zero-length resolved
+children array — a minor improvement, not a regression.
+
+---
+
+## 🐞🔎 Closing any panel with a live subtree listener throws on the next matching event (0.4.1, symlinked)
 
 Found during `adopt-dock-owned-teardown`'s manual verification (**M2**/**M3**), not by design. `QueryPanel.ts` wires
 `Event.addSubtreeListener(editor, "keydown", …)` for its Run/Save/Explain/Clear/history-recall shortcuts.
