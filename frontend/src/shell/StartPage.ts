@@ -5,8 +5,11 @@
 // out as a two-column "home": a full-width header (the app heading and, on an
 // empty workspace, the welcome blurb) over a left column of quick actions /
 // recent tables / saved queries and a right column of the keyboard-shortcut
-// legend and connection info. It rebuilds on the controller's onWorkspaceChanged
-// seam so the recent/saved lists stay current.
+// legend and connection info. Both columns are width-capped (COLUMN_MAX_WIDTH)
+// and left-anchored, so on a wide window they stop growing and leave empty page
+// background to their right rather than stretching into two sparse panes — this
+// is intentional, not a layout bug. It rebuilds on the controller's
+// onWorkspaceChanged seam so the recent/saved lists stay current.
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the page `extends Panel`
 // directly, so the instance itself is the mountable component. `id` and
@@ -19,7 +22,7 @@
 
 import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox, HBox }               from "@jimka/typescript-ui/layout";
-import { Insets }                   from "@jimka/typescript-ui/primitive";
+import { Insets, UNBOUNDED }        from "@jimka/typescript-ui/primitive";
 import { Text }                     from "@jimka/typescript-ui/component/input";
 import { Button }                   from "@jimka/typescript-ui/component/button";
 import { Glyph, Markdown }          from "@jimka/typescript-ui/component/display";
@@ -43,6 +46,14 @@ const PAGE_PADDING = 24;
 const ENTRY_SPACING = 6;
 const COLUMN_SPACING = 32;
 const BUTTON_HEIGHT = 30;
+
+// The widest a single column is allowed to grow. Matches the Keyboard Shortcuts
+// dialog's width (shortcutsDialog.ts), which was picked to fit the widest
+// "keys  label" legend row without wrapping — the legend is the widest fixed
+// content either column carries, so it sets the ceiling. Below this width both
+// columns still split the row evenly; above it they stop growing and the surplus
+// stays as empty space to the right of the page.
+const COLUMN_MAX_WIDTH = 420;
 
 // The empty-workspace welcome blurb, shown above the quick actions only when
 // there are no recent tables and no saved queries (see shouldShowWelcome). It
@@ -135,7 +146,9 @@ class StartPage extends Panel {
  * Build the two-column body: quick actions and stored lists on the left, the
  * shortcut legend and connection info on the right. Both columns take equal
  * weight and top-anchor their content so the page reads as a home rather than a
- * stretched split.
+ * stretched split, splitting the row evenly up to `COLUMN_MAX_WIDTH` each —
+ * beyond that the surplus width is left empty on the right rather than
+ * stretching the columns further.
  *
  * @param controller - Supplies the quick actions, stored lists, and connection.
  *
@@ -159,7 +172,10 @@ function buildColumns(controller: SqlAdminController): Component {
  * @returns The left column panel.
  */
 function buildLeftColumn(controller: SqlAdminController): Panel {
-    const column = Panel({ layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }) });
+    const column = Panel({
+        layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
+        maxSize      : { width: COLUMN_MAX_WIDTH, height: UNBOUNDED },
+    });
 
     column.addComponent(actionButton("New Query", () => controller.openQuery(), "plus"));
 
@@ -179,7 +195,10 @@ function buildLeftColumn(controller: SqlAdminController): Panel {
  * @returns The right column panel.
  */
 function buildRightColumn(controller: SqlAdminController): Panel {
-    const column = Panel({ layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }) });
+    const column = Panel({
+        layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
+        maxSize      : { width: COLUMN_MAX_WIDTH, height: UNBOUNDED },
+    });
 
     column.addComponent(buildShortcutLegend());
 
