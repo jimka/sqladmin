@@ -439,6 +439,143 @@ The SQLAdmin frontend's vitest harness runs with `environment: "node"` (`fronten
 
 ---
 
+## Implementation Notes
+
+- **`syncExportToActiveTab()` was dropped from the factory's non-rows branch and
+  replaced by a new `tab.on("exception", …)` handler, not called per `##
+  Internal Structure`'s `refreshDataTab` listing.** As specified, the call sat
+  right before the `throw new Error("statement returned no rows")` — but at
+  that point the still-spinning Data tab this same call is about to fail is
+  still the *selected* entry, and a lazy entry's `component` is `null` until it
+  resolves. `Tab.getActiveContent()` (`tab.getActiveContent()`, read inside
+  `syncExportToActiveTab`) therefore always returned `null`, so the call always
+  nulled the export instead of picking up a surviving Chart/Explain tab — and
+  the same gap left the export stale (still pointing at an old Data tab) after
+  a re-run's genuine fetch error, which never called it at all. Read the
+  installed library's `Tab.ts` (`failEntry` → `closeEntry` → `selectNextContent`,
+  all synchronous, before `emit("exception")`) and confirmed a handler on that
+  event fires *after* the library's own post-failure reselection, unlike
+  `"tabclose"` (emitted mid-`closeEntry`, before reselection — hence that
+  handler's existing `queueMicrotask` defer). `refreshDataTab`'s three throw
+  sites (stale run, non-rows, genuine fetch error) all funnel through this one
+  path uniformly, so one handler now covers all three instead of one
+  narrowly-timed call in one of them.
+
+- **`ERROR_BANNER_BG` uses the library's `--ts-ui-notification-error-bg` CSS
+  token instead of the literal `"rgba(198, 40, 40, 0.08)"` `##
+  Internal Structure` specified.** The literal was a hand-derived wash off
+  `DESTRUCTIVE_COLOR`'s channel values — exactly the per-file color drift
+  `theme.ts`'s own header comment says centralizing app colors there was meant
+  to prevent, and it would not track the library's dark theme the way every
+  other panel's background/border tokens do (`ExplainNode.ts`,
+  `TableCardNode.ts`, `RelationGraphPanel.ts`, `fkCardinality.ts` all go through
+  a `var(--ts-ui-…, <fallback>)` token). `Notification.ts`/`Dialog.ts` in the
+  installed library already use `--ts-ui-notification-error-bg` for this exact
+  "error surface background" purpose; the banner now does too, with
+  `ModernTheme.ts`'s light-mode value as the `var()` fallback.
+
+- **`clear()` calls `hideResultPane()` directly, not left to the tab-count-driven
+  `"empty"` event the plan's `## Internal Structure` code block relied on
+  (`removeExplainTab()`'s trailing comment: "the last removal empties the strip
+  → "empty" → hideResultPane").** That cascade assumes the four `remove*Tab()`
+  calls can always drain the strip to zero, which held before this plan (no tab
+  existed until a fetch resolved) but not after: a run's Data tab is added
+  *before* its fetch resolves, so a Clear pressed mid-run can leave a
+  still-building lazy entry behind that no slot tracks and that
+  `removeDataTab()` cannot reach — the library exposes no way to close an
+  unbuilt entry directly (no closeTab-by-index/id), and cancelling the fetch
+  itself is out of scope (`## Non-Goals`). `hideResultPane()` is idempotent and
+  safe to call unconditionally; the orphaned entry stays inert until its own
+  promise settles, at which point `++runSeq` (already in `clear()`, for the
+  same reason) makes its staleness check discard it via the library's normal
+  lazy-tab failure teardown into an already-hidden pane.
+
+- **`QueryPanelContent`'s constructor gained a second parameter, and its
+  `destructor()` a second disposal — neither mentioned in `## Internal
+  Structure`, which only names `resultHost`'s existing dispose-on-destruct
+  pattern for context, not as something this plan's own additions needed to
+  extend.** The error banner is a second subtree the file deliberately keeps
+  alive detached from `panel` while hidden (`hideErrorBanner`'s
+  `panel.removeComponent(errorBanner!)`, mirroring `hideResultPane`'s
+  `body.removeComponent(resultHost)`) — and `Component.removeComponent` does
+  not dispose, so without an explicit reach, closing a query tab after a
+  dismissed or superseded banner would leak the banner's `Glyph`/`Text`/dismiss
+  button subtree, exactly the failure mode `COMPONENT_CONVENTIONS.md`'s
+  "kept-alive-while-hidden" clause exists to prevent (and the one this same
+  file already solves once, for `resultHost`). `QueryPanelContent` now takes a
+  `getErrorBanner: () => Component | null` — late-bound because the banner is
+  built lazily, well after the constructor runs — and `destructor()` disposes
+  both.
+
+- **`liveTabCount()`'s result is no longer sufficient on its own for
+  `refreshDataTab`'s `insertIndex`; a new `pendingDataTabs` counter is added
+  alongside it.** `## Internal Structure`'s `liveTabCount` counts the four
+  slots, correct for Chart/Explain/Diagram (always added as already-built
+  content, so their slot is populated the instant they're added) but not for
+  Data: a lazy entry occupies a strip position from the moment it's added, yet
+  doesn't populate `dataSlot` until (if ever) it resolves to rows. Under a
+  single in-flight run this never shows, because there's at most one such gap
+  and `insertIndex` is read before that run's own entry is added — but
+  `## Expected Behaviour` case 8 (Ctrl/Cmd+Enter twice before the first fetch
+  resolves — the Run button disables mid-run, the shortcut doesn't check it)
+  puts a *second* pending entry in the strip while the first is still
+  unsettled, and `liveTabCount()` alone undercounts by one, misselecting the
+  first run's still-spinning tab instead of the second's. `pendingDataTabs`
+  tracks exactly this gap: incremented when `refreshDataTab` adds an entry,
+  decremented in a `finally` around the factory body once that entry settles
+  (built or torn down, in any of its three outcomes) — so `insertIndex` reads
+  `liveTabCount() + pendingDataTabs`, matching the strip's actual length
+  regardless of how many runs are overlapping.
+
+- **The factory's success branch no longer unconditionally calls
+  `setActiveExport({ kind: "rows", result })`, though `## Internal Structure`
+  names that exact call.** Tab selection happens at run *start* now
+  (`refreshDataTab`'s `tab.setActiveTabIndex`), not at completion the way the
+  old synchronous `showRowsResult` did it, so the Data tab this fetch is
+  building can finish while some other tab (Chart/Explain) is the one on
+  screen — the user is free to switch mid-fetch, since only the toolbar
+  buttons, not the tab strip, disable while a run is busy. An unconditional
+  `setActiveExport` here would silently point Export at rows that aren't what's
+  showing. Two sub-cases, handled differently:
+  - **The common case — this run's own tab is (or stays) the active one.** The
+    call is skipped entirely, relying on the library's own
+    `Tab._onBarTabPressed`: selecting an unbuilt lazy entry (as
+    `setActiveTabIndex` does above) marks it `announceActivation = true`; once
+    the factory returns and the entry's `component` is set, the library emits
+    `"activate"` if — and only if — the entry is *still* the selected one. The
+    file's pre-existing `tab.on("activate", () => syncExportToActiveTab())`
+    handler (added for Chart/Explain/Diagram, unchanged by this plan) already
+    turns that into the correct export. Calling `syncExportToActiveTab()`
+    unconditionally instead would see this entry's own component as still null
+    (not installed until after the factory returns) and wrongly null the
+    export, only for `"activate"` to immediately correct it — a needless
+    flicker this avoids. Confirmed live: run a query, switch to an open
+    Explain tab before the fetch resolves, let it finish in the background —
+    the Export menu still offers "Export text (.txt)"/"Export JSON (.json)"
+    (the plan's export shape), not "Export CSV", proving the background
+    completion never touched it.
+  - **The old Data tab (if any) was itself the active one when this fetch
+    landed** — reachable because the old and new Data-labeled tabs coexist in
+    the strip for the duration of the fetch (`## Architecture Decisions`), so
+    a user can click the *old* one while the new one is still spinning.
+    `removeDataTab()`, called right above, closes it — and since it was
+    selected, the library's own `Tab.selectNextContent` reselects its *left*
+    neighbor synchronously. `oldDataTabWasActive` (captured just before that
+    call) gates an explicit `syncExportToActiveTab()` afterward, so the export
+    follows wherever that reselection landed — usually an already-built
+    Chart/Explain tab, or null if the pane is now empty — rather than staying
+    pinned to the rows the closed tab is about to lose. One residual case is
+    not fully chased: when the old Data tab was the *only* other tab, the
+    left-neighbor fallback can land back on this run's own still-building
+    entry; the library's post-close reselection (`_bar.setActiveVisual`)
+    bypasses the path that sets `announceActivation`, so no `"activate"` ever
+    fires for it and the export stays null (safe, if not ideal) rather than
+    resolving to the new rows until the next real tab click or run re-syncs it
+    — a rare, low-severity, self-healing gap accepted rather than adding a
+    second deferred-timing mechanism on top of `"activate"`'s existing one.
+
+---
+
 ## Notes
 
 [^tabpanel-not-dock]: `openTable`/`openAsyncPanel` register a top-level `Dock` tab via `Dock.addLazyPanel`, which internally wraps the lazy factory in a dedicated single-tab identity frame (its own strip-hidden `Tab`) so the *frame* — an already-built, eager component — can be the target of the outer region's `setActiveContent`. `resultHost` here is not the Dock; it is an ordinary `TabPanel` the query panel owns directly, sitting among up to three sibling tabs (Data/Chart/Explain). `TabPanel.addTab`/`addLazyTab` expose the exact same underlying `Tab.addDeferredComponent` + `Tab.materializeAsync` + `createSpinnerWrap()` machinery `Dock` uses, reached one layer more directly, with no need for a wrapper frame — confirmed by reading `TabPanel.ts` and `Tab.ts` in the typescript-ui source rather than assumed from the `Dock` precedent.
