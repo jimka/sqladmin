@@ -7,11 +7,26 @@
 // "SQLAdmin" here would be redundant. The left column stacks two panels — the
 // welcome blurb (shown only on an empty workspace) above the quick actions /
 // recent tables / saved queries panel; the right column holds only the
-// keyboard-shortcut legend. Both columns are width-capped (COLUMN_MAX_WIDTH)
-// and left-anchored, so on a wide window they stop growing and leave empty
-// page background to their right rather than stretching into two sparse
-// panes — this is intentional, not a layout bug. It rebuilds on the
-// controller's onWorkspaceChanged seam so the recent/saved lists stay current.
+// keyboard-shortcut legend. Both columns render at their own fixed natural
+// width (COLUMN_MAX_WIDTH is a safety ceiling, not a target) and are
+// left-anchored — neither carries HBox weight, so neither a viewport resize
+// nor the user dragging the shell's navigator-rail gutter
+// (SqlAdminShell.ts's buildWorkArea) changes their width. A third, empty
+// flex `Spacer` column is this row's only weighted child, so it alone
+// absorbs whatever width the two fixed columns leave over (see
+// buildColumns). That isn't just cosmetic: without an actually-unbounded
+// weighted child here, the row's own reported max width would be bounded by
+// the two capped columns, which `Card.getMaxSize()` (this page lives in the
+// shell's CENTER Card deck) forwards straight to the Split's CENTER pane —
+// and `Split.onDrag` clamps the dragged pane's floor to
+// `total − partnerMax`, so with a bounded CENTER max, so much as touching
+// the sidebar gutter snaps the navigator rail open to whatever floor that
+// arithmetic works out to (reproducible by dragging the gutter with this
+// spacer removed — it isn't just a passive-resize issue). The
+// always-unbounded spacer keeps this row's, and so the CENTER pane's, max
+// width unbounded, which keeps any slack here where it's invisible instead
+// of leaking into the rail on touch. It rebuilds on the controller's
+// onWorkspaceChanged seam so the recent/saved lists stay current.
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the page `extends Panel`
 // directly, so the instance itself is the mountable component. `id` and
@@ -27,6 +42,7 @@ import { VBox, HBox, AnchorType }   from "@jimka/typescript-ui/layout";
 import { Insets, UNBOUNDED }        from "@jimka/typescript-ui/primitive";
 import { Text }                     from "@jimka/typescript-ui/component/input";
 import { Button }                   from "@jimka/typescript-ui/component/button";
+import { Spacer }                   from "@jimka/typescript-ui/component/container";
 import { Glyph, Markdown }          from "@jimka/typescript-ui/component/display";
 import { plus }                     from "@jimka/typescript-ui/glyphs/solid/plus";
 import { shouldShowWelcome }        from "./startPageWelcome";
@@ -48,13 +64,17 @@ const ENTRY_SPACING = 6;
 const COLUMN_SPACING = 32;
 const BUTTON_HEIGHT = 30;
 
-// The widest a single column is allowed to grow. Matches the Keyboard Shortcuts
-// dialog's width (shortcutsDialog.ts), which was picked to fit the widest
-// "keys  label" legend row without wrapping — the legend is the widest fixed
-// content either column carries, so it sets the ceiling. Below this width both
-// columns still split the row evenly; above it they stop growing and the surplus
-// stays as empty space to the right of the page.
-const COLUMN_MAX_WIDTH = 420;
+// The fixed width of each content column: min and max width are both pinned
+// to this one value, clamping the column's own content-driven preferred
+// width up or down to exactly 350px regardless of what its content would
+// otherwise ask for — height is deliberately left alone (unlike a Border
+// layout's WEST region, this HBox isn't stretching, so an explicit
+// `preferredSize.height` here would be taken literally and collapse the
+// column instead of being ignored). Neither column ever grows or shrinks —
+// only the trailing flex Spacer in buildColumns responds to available width.
+// See the file-header comment for why that matters beyond this page's own
+// look.
+const COLUMN_WIDTH = 350;
 
 // The empty-workspace welcome blurb, shown above the quick actions only when
 // there are no recent tables and no saved queries (see shouldShowWelcome).
@@ -134,22 +154,30 @@ class StartPage extends Panel {
 }
 
 /**
- * Build the two-column body: quick actions and stored lists on the left, the
- * shortcut legend on the right. Both columns take equal weight and are pinned
- * to the row's top edge (`anchor: NORTH`) so the page reads as a home rather
- * than a stretched split, splitting the row evenly up to `COLUMN_MAX_WIDTH`
- * each — beyond that the surplus width is left empty on the right rather than
- * stretching the columns further.
+ * Build the page body: quick actions and stored lists on the left, the
+ * shortcut legend on the right, and a trailing empty flex `Spacer` column.
+ * The two content columns are fixed-width — pinned to the row's top edge
+ * (`anchor: NORTH`) at exactly `COLUMN_WIDTH` — and carry no HBox weight, so
+ * neither a viewport resize nor a navigator-rail gutter drag changes them;
+ * the spacer is this row's only weighted child, so it alone grows or shrinks
+ * to fill whatever the row doesn't need. The spacer's own `minSize` is
+ * pinned to zero so it can shrink away entirely on a narrow window instead
+ * of forcing the row wider than its two fixed columns need. Keeping the
+ * spacer's max width unbounded also keeps this row's (and so the page's)
+ * reported max width unbounded — see the file-header comment for why a
+ * bounded max width here would leak into the shell's navigator rail the
+ * moment its gutter is touched, not just on a passive resize.
  *
- * The explicit anchor matters because this HBox isn't `stretching`, so absent
- * one, `BoxLayout` falls back to baseline alignment: it centres a null-baseline
- * child within the row's text-line band instead of placing it at the top. The
- * right column reports a real baseline (its first child, the shortcut legend,
- * is Text-bearing) while the left column's first child — the welcome
- * Markdown, or the New Query button when the blurb is hidden — does not
- * always, so the two columns could drift out of alignment with each other
- * depending on which is shown. `anchor: NORTH` sidesteps baseline guessing
- * entirely for both.
+ * The explicit anchor on the content columns matters because this HBox isn't
+ * `stretching`, so absent one, `BoxLayout` falls back to baseline alignment:
+ * it centres a null-baseline child within the row's text-line band instead of
+ * placing it at the top. The right column reports a real baseline (its first
+ * child, the shortcut legend, is Text-bearing) while the left column's first
+ * child — the welcome Markdown, or the New Query button when the blurb is
+ * hidden — does not always, so the two columns could drift out of alignment
+ * with each other depending on which is shown. `anchor: NORTH` sidesteps
+ * baseline guessing entirely for both; the spacer carries no content, so its
+ * anchor is moot.
  *
  * @param controller - Supplies the quick actions and stored lists.
  *
@@ -158,8 +186,12 @@ class StartPage extends Panel {
 function buildColumns(controller: SqlAdminController): Component {
     const columns = Panel({ layoutManager: new HBox({ spacing: COLUMN_SPACING }) });
 
-    columns.addComponent(buildLeftColumn(controller), { weight: 1, anchor: AnchorType.NORTH });
-    columns.addComponent(buildRightColumn(), { weight: 1, anchor: AnchorType.NORTH });
+    columns.addComponent(buildLeftColumn(controller), { anchor: AnchorType.NORTH });
+    columns.addComponent(buildRightColumn(), { anchor: AnchorType.NORTH });
+
+    const spacer = Spacer.flex();
+    spacer.setMinSize({ width: 0, height: 0 });
+    columns.addComponent(spacer);
 
     return columns;
 }
@@ -175,7 +207,8 @@ function buildColumns(controller: SqlAdminController): Component {
 function buildLeftColumn(controller: SqlAdminController): Panel {
     const column = Panel({
         layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
-        maxSize      : { width: COLUMN_MAX_WIDTH, height: UNBOUNDED },
+        minSize      : { width: COLUMN_WIDTH, height: 0 },
+        maxSize      : { width: COLUMN_WIDTH, height: UNBOUNDED },
     });
 
     if (shouldShowWelcome(controller)) {
@@ -216,7 +249,8 @@ function buildQuickActions(controller: SqlAdminController): Panel {
 function buildRightColumn(): Panel {
     const column = Panel({
         layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
-        maxSize      : { width: COLUMN_MAX_WIDTH, height: UNBOUNDED },
+        minSize      : { width: COLUMN_WIDTH, height: 0 },
+        maxSize      : { width: COLUMN_WIDTH, height: UNBOUNDED },
     });
 
     column.addComponent(buildShortcutLegend());
