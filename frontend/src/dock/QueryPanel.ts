@@ -166,7 +166,7 @@ export interface QueryPanelOptions {
     onResult?: (active: ActiveExport | null) => void;
     /** The saved editor/result Split geometry plus its save hooks (`controller.layout.bindSplit("query")`). */
     splitLayout: SplitLayoutBinding;
-    /** The saved Explain-diagram info-column Accordion open state plus its save hooks (`controller.layout.bindAccordion("explainDiagram")`). */
+    /** The saved Explain-diagram info-column Accordion open state and section sizes plus its save hooks (`controller.layout.bindAccordion("explainDiagram")`). */
     explainDiagramLayout: AccordionLayoutBinding;
 }
 
