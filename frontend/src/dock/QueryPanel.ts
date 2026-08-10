@@ -7,11 +7,15 @@
 //
 //   * Data    — the read-only results grid (a query result has no PK and is
 //               never written back). Driven by Run; present for every rows result.
-//               Registered as a lazy tab (TabPanel.addTab's factory form) bound
-//               to Run's in-flight fetch: the tab and the library's own spinner
-//               appear immediately, covering both the network round trip and the
-//               grid construction, and the spinner is swapped for the grid once
-//               both finish. See refreshDataTab.
+//               First run: registered as a lazy tab (TabPanel.addTab's factory
+//               form) bound to Run's in-flight fetch, so the tab and the
+//               library's own spinner appear immediately, covering both the
+//               network round trip and the grid construction. Re-run (a Data
+//               tab already exists): the existing tab is overlaid with a
+//               ProgressSpinner in place instead — reusing the lazy-tab path
+//               here would show two "Data" tabs for the whole fetch, since the
+//               old one can't safely be removed until the new one is confirmed
+//               to hold rows. See refreshDataTab / refreshExistingDataTab.
 //   * Chart   — a bar/line chart of the current Data rows over a config strip;
 //               opened/refreshed on demand by the Chart toolbar button (enabled
 //               only for a chartable result — >=1 row, >=1 numeric column) and
@@ -59,7 +63,7 @@ import { Spacer, TabPanel }                     from "@jimka/typescript-ui/compo
 import { glyphButton, glyphMenuButton }         from "./glyphButton";
 import { CodeEditor }                           from "@jimka/typescript-ui/component/editor";
 import { Text }                                 from "@jimka/typescript-ui/component/input";
-import { Glyph }                                from "@jimka/typescript-ui/component/display";
+import { Glyph, ProgressSpinner }               from "@jimka/typescript-ui/component/display";
 import { play }                                 from "@jimka/typescript-ui/glyphs/solid/play";
 import { eraser }                               from "@jimka/typescript-ui/glyphs/solid/eraser";
 import { floppy_disk }                          from "@jimka/typescript-ui/glyphs/solid/floppy_disk";
@@ -101,6 +105,11 @@ Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, fil
 // The editor's starting height once the result pane is shown below it; the Split
 // gutter lets the user resize from there.
 const EDITOR_HEIGHT = 150;
+
+// Matches the library's own TablePanel auto-overlay spinner size (see
+// ProgressSpinner's "which loading affordance" docs) — refreshDataTab's
+// in-place overlay is the same "component exists, data pending" case.
+const DATA_TAB_OVERLAY_SPINNER_SIZE = 24;
 
 // The library's own error-notification wash (Notification/Dialog use the same
 // token — see typescript-ui's Theme.ts) rather than a hand-rolled tint off
@@ -853,29 +862,45 @@ export class QueryPanel {
         }
 
         /**
-         * Registers `run()`'s in-flight fetch as the Data tab's content source: adds a
-         * new lazy tab bound to `resultPromise` and selects it immediately, so the tab
-         * and its spinner appear before the fetch resolves — both the query and the
-         * grid construction happen behind that spinner. The factory awaits the SAME
-         * promise `run()` itself is awaiting, so this is one network round trip, not two.
+         * Registers `run()`'s in-flight fetch as the Data tab's content source.
          *
-         * The prior Data tab (if any) is left completely alone until the factory
-         * confirms a rows result: only then is it safe to discard, so neither a fetch
-         * error nor a non-rows result on a re-run ever destroys a Data tab that already
-         * held good rows. A run superseded by a newer one before its fetch resolves
-         * discards itself the same way, via the runSeq check.
+         * No Data tab exists yet: adds a new lazy tab bound to `resultPromise` and
+         * selects it immediately, so the tab and its spinner appear before the fetch
+         * resolves — both the query and the grid construction happen behind that
+         * spinner. This is the "component does not exist yet" case in
+         * `ProgressSpinner`'s loading-affordance docs.
          *
-         * Ctrl/Cmd+Enter can fire this a second time before the first call's factory
-         * has settled (the Run button disables mid-run, but the shortcut doesn't check
-         * it), so more than one lazy Data entry can be in the strip at once, each
-         * counted by `pendingDataTabs` until its own factory settles — see
-         * `liveTabCount`'s doc comment for why `insertIndex` needs both counts.
+         * A Data tab already exists: refreshing it through the same lazy-tab path
+         * would add a *second* "Data" tab and only remove the old one once the fetch
+         * resolves — two Data tabs on screen for the whole round trip, not just a
+         * frame. Since the component already exists here, this is instead the
+         * "data is pending" case in the same docs, and is delegated to
+         * `refreshExistingDataTab`, which overlays a spinner on the existing tab
+         * in place with no tab-list change at all.
+         *
+         * Either way, the prior Data tab's content (if any) is left completely alone
+         * until the new fetch is confirmed to hold rows: neither a fetch error nor a
+         * non-rows result on a re-run ever destroys a Data tab that already held good
+         * rows. The factory/overlay awaits the SAME promise `run()` itself is
+         * awaiting, so this is one network round trip, not two.
+         *
+         * Ctrl/Cmd+Enter can fire this a second time before the first call's fetch
+         * has settled (the Run button disables mid-run, but the shortcut doesn't
+         * check it) — see `liveTabCount`'s doc comment for how the no-existing-tab
+         * path stays correct under that race, and `refreshExistingDataTab`'s for how
+         * the existing-tab path does.
          *
          * @param resultPromise - The in-flight `runQuery(sql)` call this run started.
          * @param seq - This run's `runSeq` snapshot, re-checked once the fetch resolves.
          */
         function refreshDataTab(resultPromise: Promise<QueryResult>, seq: number): void {
             ensureResultPaneShown();
+
+            if (dataSlot) {
+                refreshExistingDataTab(dataSlot.content, resultPromise, seq);
+
+                return;
+            }
 
             const insertIndex = liveTabCount() + pendingDataTabs;
 
@@ -897,66 +922,19 @@ export class QueryPanel {
                         // Matches the file's existing rule (see the header comment): a
                         // command-tag/DDL result drops the Data tab, leaving any Chart/
                         // Explain tab. This attempt's own (still-spinning) tab is torn
-                        // down too, by the throw below — while it's still the selected
-                        // tab, so re-deriving the export here (before that teardown
-                        // reselects a surviving neighbor) would only ever see a
-                        // component-less entry and wrongly null the export. The
-                        // tab.on("exception") handler re-syncs it once the library has
-                        // actually reselected.
-                        removeDataTab();
+                        // down too, by the throw below.
                         syncChartButton();
                         throw new Error("statement returned no rows");
                     }
 
                     const grid = new QueryResultGrid(result);
 
-                    // Capture this BEFORE removeDataTab() below, which is the only
-                    // thing here that can move tab selection: if the user clicked the
-                    // old Data tab while this fetch was in flight (nothing disables
-                    // the tab strip mid-run, only the toolbar buttons), removing it
-                    // moves selection to its left neighbor via the library's own
-                    // reselection (Tab.selectNextContent) — a *different* tab becomes
-                    // active, and the export must follow it, not stay pinned to the
-                    // rows that tab is about to lose.
-                    const oldDataTabWasActive = dataSlot !== null && tab.getActiveContent() === dataSlot.content;
-
-                    removeDataTab(); // safe now — this run produced rows and won
+                    // No prior Data tab existed — that's why this branch ran instead
+                    // of refreshExistingDataTab — so there is nothing else to remove
+                    // and no selection to reconcile here.
                     dataSlot = { content: grid.content, result };
                     syncChartButton();
 
-                    if (oldDataTabWasActive) {
-                        // The tab removeDataTab() just closed was the active one, so
-                        // the library already reselected a neighbor synchronously,
-                        // above (Tab.selectNextContent's fallback: the closed tab's
-                        // *left* neighbor). Re-derive the export from wherever that
-                        // landed instead of leaving it pinned to the discarded old
-                        // tab's rows. Usually resolves to an already-built Chart/
-                        // Explain tab (or null, pane now empty) — the one edge case
-                        // where the fallback can land back on this run's own
-                        // still-building entry (the old Data tab was the *only* other
-                        // tab, at index 0) sees a null active component here and
-                        // correctly nulls the export rather than leaving it wrong; see
-                        // `## Implementation Notes` for why that residual case
-                        // self-heals on the next tab click rather than being chased
-                        // further.
-                        syncExportToActiveTab();
-                    }
-
-                    // Otherwise (the common case: this tab was already the active one
-                    // and stays that way, or some other tab was active and untouched
-                    // by removeDataTab()) deliberately do NOT set the export here.
-                    // `tab.setActiveTabIndex` (below run()'s call to this function)
-                    // already marked this entry "announce activation once built, if
-                    // still selected" (`Tab._onBarTabPressed`'s lazy-entry branch); the
-                    // library honors that once `grid.content` is installed, emitting
-                    // "activate" only if this tab is *still* the active one — which
-                    // the file's existing `tab.on("activate", () =>
-                    // syncExportToActiveTab())` handler (above) already turns into the
-                    // correct export. Calling syncExportToActiveTab() unconditionally
-                    // here instead would see this entry's own component as still null
-                    // (not installed until after this factory returns) and wrongly
-                    // null the export on every ordinary run, only for "activate" to
-                    // immediately correct it — a needless flicker this avoids.
                     return grid.content;
                 } finally {
                     // Settled (built or torn down) either way — no longer pending.
@@ -972,6 +950,98 @@ export class QueryPanel {
             // without waiting for the fetch. Runs on every call, including one later
             // found stale — the keystroke that triggered it is real either way.
             Component.afterNextLayout(() => editor.focus());
+        }
+
+        /**
+         * Refresh an already-existing Data tab in place. See `refreshDataTab`'s doc
+         * comment for why this exists as a separate path: the lazy-tab path used when
+         * no Data tab exists yet would show two "Data" tabs for the whole fetch if
+         * reused here, since the old one can't safely be removed until the new fetch
+         * is confirmed to hold rows.
+         *
+         * The tab is selected immediately, matching a first run's "jump to Data on
+         * Run" behaviour, and DOM focus is reclaimed for the editor the same way.
+         * The overlay is torn down and the swap performed synchronously the instant
+         * the shared fetch settles, so a re-run never shows two Data tabs — not even
+         * for a single frame.
+         *
+         * Ctrl/Cmd+Enter firing this a second time before the first call's fetch has
+         * settled shows two overlays stacked on the same tab briefly (harmless — the
+         * second is just a visual no-op on top of the first). Only the run that is
+         * still current (`seq === runSeq`) when its fetch resolves performs the swap;
+         * a superseded one just clears its own overlay and leaves the tab alone,
+         * exactly as a superseded no-existing-tab run discards itself via the same
+         * check.
+         *
+         * @param oldContent - The existing Data tab's content component to overlay.
+         * @param resultPromise - The in-flight `runQuery(sql)` call this run started.
+         * @param seq - This run's `runSeq` snapshot, re-checked once the fetch resolves.
+         */
+        function refreshExistingDataTab(oldContent: Component, resultPromise: Promise<QueryResult>, seq: number): void {
+            tab.setActiveContent(oldContent);
+            Component.afterNextLayout(() => editor.focus());
+
+            const overlay = new ProgressSpinner(DATA_TAB_OVERLAY_SPINNER_SIZE);
+            overlay.showOverlay(oldContent);
+
+            void resultPromise.then(
+                result => {
+                    overlay.hideOverlay();
+
+                    if (seq !== runSeq) {
+                        // Superseded by a newer run before this one resolved — that
+                        // run owns the tab now (its own overlay, or its own swap,
+                        // already in flight or done). Touch nothing.
+                        return;
+                    }
+
+                    if (result.kind !== "rows") {
+                        // Matches the file's existing rule (see the header comment): a
+                        // command-tag/DDL result drops the Data tab, leaving any
+                        // Chart/Explain tab.
+                        removeDataTab();
+                        syncChartButton();
+
+                        return;
+                    }
+
+                    const grid = new QueryResultGrid(result);
+
+                    // Capture this BEFORE removeDataTab() below, which is the only
+                    // thing here that can move tab selection: if the user clicked
+                    // away from the Data tab while this fetch was in flight (nothing
+                    // disables the tab strip mid-run, only the toolbar buttons),
+                    // removing it moves selection to its left neighbor via the
+                    // library's own reselection (Tab.selectNextContent) — a
+                    // *different* tab is active, and the export must follow it, not
+                    // stay pinned to the rows that tab is about to lose.
+                    const oldDataTabWasActive = tab.getActiveContent() === oldContent;
+
+                    // Add-then-remove in the same tick (mirroring showChart's dance)
+                    // is the point of this whole function: unlike the lazy-tab path,
+                    // there is never a moment with two Data tabs on screen.
+                    refreshingTabs = true;
+                    try {
+                        resultHost.addTab(grid.content, "Data", { glyph: "table" });
+                        removeDataTab();
+                    } finally {
+                        refreshingTabs = false;
+                    }
+
+                    dataSlot = { content: grid.content, result };
+                    syncChartButton();
+
+                    if (oldDataTabWasActive) {
+                        tab.setActiveContent(grid.content);
+                    }
+                },
+                () => {
+                    // run()'s own catch handles the error banner/toast; just clear
+                    // the overlay and leave the last good grid in place — a failed
+                    // re-run never destroys a Data tab that already held good rows.
+                    overlay.hideOverlay();
+                },
+            );
         }
 
         /**
