@@ -7,6 +7,11 @@
 //
 //   * Data    — the read-only results grid (a query result has no PK and is
 //               never written back). Driven by Run; present for every rows result.
+//               Registered as a lazy tab (TabPanel.addTab's factory form) bound
+//               to Run's in-flight fetch: the tab and the library's own spinner
+//               appear immediately, covering both the network round trip and the
+//               grid construction, and the spinner is swapped for the grid once
+//               both finish. See refreshDataTab.
 //   * Chart   — a bar/line chart of the current Data rows over a config strip;
 //               opened/refreshed on demand by the Chart toolbar button (enabled
 //               only for a chartable result — >=1 row, >=1 numeric column) and
@@ -20,8 +25,13 @@
 // EXPLAIN no longer destroys the data view, and a re-run does not disturb an open
 // Chart/Explain tab. The pane appears with the first tab and vanishes with the
 // last (the Tab "empty" event). A non-row statement (INSERT/UPDATE/DDL) reports
-// its command tag and drops only the Data tab, leaving any Chart/Explain tab.
-// Errors funnel to onError.
+// its command tag and drops only the Data tab, leaving any Chart/Explain tab. A
+// re-run's fetch error or non-rows result never discards an already-loaded Data
+// tab — the old tab is only removed once the new fetch is confirmed to hold
+// rows, so a failed re-run always leaves the last good grid in place (just not
+// necessarily the active tab). Errors funnel to onError, a 3-second toast, and
+// a durable in-panel error banner (below the editor/result pane) that stays
+// until dismissed, a new run starts, or Clear is pressed.
 //
 // Two toolbar buttons run EXPLAIN and EXPLAIN ANALYZE on the editor's statement.
 // One Explain tab serves both — analyze only adds real timings — and its content
@@ -34,35 +44,39 @@
 // composition fallback). The Dock destroys `content` and every registered
 // child beneath it — each live tab view's CodeMirror view / chart / theme
 // subscription, and the main editor — when the tab closes, so this class
-// needs no `dispose` of its own. The one exception is the result pane: it is
-// deliberately kept alive and detached from the Split while no result is
-// shown (see hideResultPane), so nothing in the tab's subtree reaches it in
-// that state. `content` is a `QueryPanelContent`, a small `Container`
-// subclass whose `destructor()` override disposes it either way.
+// needs no `dispose` of its own. The two exceptions are the result pane and
+// the error banner: each is deliberately kept alive and detached from its
+// parent while hidden (see hideResultPane / hideErrorBanner), so nothing in
+// the tab's subtree reaches either one in that state. `content` is a
+// `QueryPanelContent`, a small `Container` subclass whose `destructor()`
+// override disposes both either way.
 
-import { Component, Container, Event } from "@jimka/typescript-ui/core";
-import { Placement }                     from "@jimka/typescript-ui/primitive";
-import { Border as BorderLayout, Split } from "@jimka/typescript-ui/layout";
-import { ToolBar }                       from "@jimka/typescript-ui/component/menubar";
-import { Spacer, TabPanel }              from "@jimka/typescript-ui/component/container";
-import { glyphButton, glyphMenuButton }  from "./glyphButton";
-import { CodeEditor }                    from "@jimka/typescript-ui/component/editor";
-import { Glyph }                         from "@jimka/typescript-ui/component/display";
-import { play }                          from "@jimka/typescript-ui/glyphs/solid/play";
-import { eraser }                        from "@jimka/typescript-ui/glyphs/solid/eraser";
-import { floppy_disk }                   from "@jimka/typescript-ui/glyphs/solid/floppy_disk";
-import { angle_up }                      from "@jimka/typescript-ui/glyphs/solid/angle_up";
-import { angle_down }                    from "@jimka/typescript-ui/glyphs/solid/angle_down";
-import { file_export }                   from "@jimka/typescript-ui/glyphs/solid/file_export";
-import { file_csv }                      from "@jimka/typescript-ui/glyphs/solid/file_csv";
-import { file_code }                     from "@jimka/typescript-ui/glyphs/solid/file_code";
-import { file_lines }                    from "@jimka/typescript-ui/glyphs/solid/file_lines";
-import { diagram_project }               from "@jimka/typescript-ui/glyphs/solid/diagram_project";
-import { flask }                         from "@jimka/typescript-ui/glyphs/solid/flask";
-import { sitemap }                       from "@jimka/typescript-ui/glyphs/solid/sitemap";
-import { wand_magic_sparkles }           from "@jimka/typescript-ui/glyphs/solid/wand_magic_sparkles";
-import { table }                         from "@jimka/typescript-ui/glyphs/solid/table";
-import { chart_simple }                  from "@jimka/typescript-ui/glyphs/solid/chart_simple";
+import { Component, Container, Event }          from "@jimka/typescript-ui/core";
+import { Placement }                            from "@jimka/typescript-ui/primitive";
+import { Border as BorderLayout, Split, HBox }  from "@jimka/typescript-ui/layout";
+import { ToolBar }                              from "@jimka/typescript-ui/component/menubar";
+import { Spacer, TabPanel }                     from "@jimka/typescript-ui/component/container";
+import { glyphButton, glyphMenuButton }         from "./glyphButton";
+import { CodeEditor }                           from "@jimka/typescript-ui/component/editor";
+import { Text }                                 from "@jimka/typescript-ui/component/input";
+import { Glyph }                                from "@jimka/typescript-ui/component/display";
+import { play }                                 from "@jimka/typescript-ui/glyphs/solid/play";
+import { eraser }                               from "@jimka/typescript-ui/glyphs/solid/eraser";
+import { floppy_disk }                          from "@jimka/typescript-ui/glyphs/solid/floppy_disk";
+import { angle_up }                             from "@jimka/typescript-ui/glyphs/solid/angle_up";
+import { angle_down }                           from "@jimka/typescript-ui/glyphs/solid/angle_down";
+import { file_export }                          from "@jimka/typescript-ui/glyphs/solid/file_export";
+import { file_csv }                             from "@jimka/typescript-ui/glyphs/solid/file_csv";
+import { file_code }                            from "@jimka/typescript-ui/glyphs/solid/file_code";
+import { file_lines }                           from "@jimka/typescript-ui/glyphs/solid/file_lines";
+import { diagram_project }                      from "@jimka/typescript-ui/glyphs/solid/diagram_project";
+import { flask }                                from "@jimka/typescript-ui/glyphs/solid/flask";
+import { sitemap }                              from "@jimka/typescript-ui/glyphs/solid/sitemap";
+import { wand_magic_sparkles }                  from "@jimka/typescript-ui/glyphs/solid/wand_magic_sparkles";
+import { table }                                from "@jimka/typescript-ui/glyphs/solid/table";
+import { chart_simple }                         from "@jimka/typescript-ui/glyphs/solid/chart_simple";
+import { circle_exclamation }                   from "@jimka/typescript-ui/glyphs/solid/circle_exclamation";
+import { xmark }                                from "@jimka/typescript-ui/glyphs/solid/xmark";
 import { QueryResultGrid, QueryResultChart } from "./QueryResultView";
 import { isChartable }                   from "../data/chartConfig";
 import { HistoryCursor }                 from "../data/historyCursor";
@@ -80,13 +94,21 @@ import {
     OLDER_QUERY_SHORTCUT, NEWER_QUERY_SHORTCUT,
 } from "../shell/queryShortcuts";
 import type { QueryExplainResult, QueryResult, QueryRowsResult } from "../contract";
-import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, CAUTION_COLOR, HISTORY_COLOR, NEUTRAL_COLOR } from "../theme";
+import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, CAUTION_COLOR, HISTORY_COLOR, NEUTRAL_COLOR, DESTRUCTIVE_COLOR } from "../theme";
 
-Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask, sitemap, wand_magic_sparkles, table, chart_simple);
+Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask, sitemap, wand_magic_sparkles, table, chart_simple, circle_exclamation, xmark);
 
 // The editor's starting height once the result pane is shown below it; the Split
 // gutter lets the user resize from there.
 const EDITOR_HEIGHT = 150;
+
+// The library's own error-notification wash (Notification/Dialog use the same
+// token — see typescript-ui's Theme.ts) rather than a hand-rolled tint off
+// DESTRUCTIVE_COLOR: it already tracks the active theme (including dark mode),
+// which a literal rgba() derived from this file's own app-level palette would
+// not. The fallback is ModernTheme's light-mode value, for a render that
+// somehow predates the theme CSS variables being set.
+const ERROR_BANNER_BG = "var(--ts-ui-notification-error-bg, rgba(244, 214, 214, 0.75))";
 
 /** Surface a short status message (row count / command tag / hint) to the user. */
 export type Notify = (message: string) => void;
@@ -142,27 +164,37 @@ export interface QueryPanelOptions {
 /**
  * The query panel's mountable root. Exists as a class rather than a bare
  * `Container` so it can override `destructor()`: the Dock destroys this
- * component when its tab closes, and the result pane is not always among
- * its children.
+ * component when its tab closes, and neither the result pane nor the error
+ * banner is always among its children.
  */
 class QueryPanelContent extends Container {
     private readonly _resultHost: TabPanel;
+    private readonly _getErrorBanner: () => Component | null;
 
-    /** @param resultHost - The result pane, which the panel detaches while hidden. */
-    constructor(resultHost: TabPanel) {
+    /**
+     * @param resultHost - The result pane, which the panel detaches while hidden.
+     * @param getErrorBanner - Returns the durable error banner (see
+     *   `ensureErrorBanner`), or null before the first failed run / after Dispose.
+     *   Late-bound because the banner is built lazily, well after this constructor
+     *   runs — a closure over the constructor's own `errorBanner` variable, not a
+     *   value captured at construction time.
+     */
+    constructor(resultHost: TabPanel, getErrorBanner: () => Component | null) {
         super({ layoutManager: new BorderLayout({ spacing: 0 }) });
 
-        this._resultHost = resultHost;
+        this._resultHost     = resultHost;
+        this._getErrorBanner = getErrorBanner;
     }
 
     /**
-     * `hideResultPane` removes the result pane from the Split while no result
-     * is shown, so the child recursion in `super.destructor()` cannot reach it
-     * then. Disposing it here covers both states — `dispose()` is idempotent,
-     * so the shown case is a harmless second pass.
+     * `hideResultPane`/`hideErrorBanner` remove the result pane / error banner from
+     * this component while hidden, so the child recursion in `super.destructor()`
+     * cannot reach either then. Disposing both here covers every state — `dispose()`
+     * is idempotent, so a still-shown pane/banner is just a harmless second pass.
      */
     protected destructor(): void {
         this._resultHost.dispose();
+        this._getErrorBanner()?.dispose();
 
         super.destructor();
     }
@@ -200,6 +232,22 @@ export class QueryPanel {
         // since ExplainDiagramPanel is a registered child of the result TabPanel
         // either way).
         let diagramSlot: { content: Component } | null = null;
+
+        // How many Data-tab lazy factories are currently in the strip awaiting their
+        // fetch — always 0 or 1 under a single run, but Ctrl/Cmd+Enter can fire a
+        // second run before the first's fetch resolves (the Run button disables
+        // mid-run, but the shortcut doesn't check it), so more than one can be
+        // in flight at once. See liveTabCount's doc comment for why this exists
+        // alongside it, and refreshDataTab for where it's incremented/decremented.
+        let pendingDataTabs = 0;
+
+        // The durable error banner for a failed run, built once on first use and
+        // reused (content replaced) on every later failure. Lives at the bottom of
+        // the whole panel (Placement.SOUTH), independent of resultHost's own
+        // shown/hidden state, so it works the same whether a Data tab exists or not.
+        let errorBanner: Component | null = null;
+        let errorBannerText: Text | null = null;
+        let errorBannerShown = false;
 
         // Raised around a programmatic closeTab so its "tabclose" emit is ignored by
         // the onTabClose handler — it exists purely to stop that handler's slot
@@ -265,7 +313,7 @@ export class QueryPanel {
         const olderButton = glyphButton("angle-up", HISTORY_COLOR, `Older query (${OLDER_QUERY_SHORTCUT})`, () => recallInEditor(true));
         const newerButton = glyphButton("angle-down", HISTORY_COLOR, `Newer query (${NEWER_QUERY_SHORTCUT})`, () => recallInEditor(false));
 
-        const panel = new QueryPanelContent(resultHost);
+        const panel = new QueryPanelContent(resultHost, () => errorBanner);
         panel.addComponent(new ToolBar({
             components: [runButton, saveButton, clearButton, formatButton, chartButton, explainButton, analyzeButton, diagramButton, exportButton, Spacer.flex(), olderButton, newerButton],
         }), { placement: Placement.NORTH });
@@ -340,6 +388,21 @@ export class QueryPanel {
                 removeTabSilently(diagramSlot.content);
                 diagramSlot = null;
             }
+        }
+
+        /**
+         * How many tabs are currently live in the result pane, across all four slots.
+         * Chart/Explain/Diagram are always added as already-built content, so their
+         * slot is populated the instant they're added — this count alone is their
+         * index. The Data tab is different: refreshDataTab's lazy factory occupies a
+         * strip position from the moment it's added, but doesn't populate `dataSlot`
+         * until (if ever) it resolves to rows — so a Data tab still awaiting its
+         * fetch is invisible to this count. `pendingDataTabs` (tracked alongside)
+         * covers exactly that gap; refreshDataTab adds it in, not this function,
+         * since only Data ever has one.
+         */
+        function liveTabCount(): number {
+            return [dataSlot, chartSlot, explainSlot, diagramSlot].filter(slot => slot !== null).length;
         }
 
         // Split the body so the editor starts at EDITOR_HEIGHT and the grid gets the
@@ -454,6 +517,16 @@ export class QueryPanel {
             queueMicrotask(syncExportToActiveTab);
         });
 
+        // A lazy Data-tab factory rejected (stale run, non-rows result, or a
+        // genuine fetch error — refreshDataTab's three throw sites) and the
+        // library has torn down its spinner tab and reselected a neighbor.
+        // Unlike "tabclose" above, closeEntry's reselection runs BEFORE
+        // failEntry emits "exception", so getActiveContent() is already
+        // current here — no microtask defer needed. Re-deriving from
+        // whichever tab ends up active is also correct (a no-op) for the
+        // stale-run case, since it only reads state.
+        tab.on("exception", () => syncExportToActiveTab());
+
         // Last tab gone (by user close or programmatic removal): drop the pane —
         // unless a refresh is mid-flight, where the emptied strip is transient (a
         // replacement tab is already queued for the next layout).
@@ -463,15 +536,34 @@ export class QueryPanel {
             }
         });
 
-        /** Reset the panel to its initial state: empty editor, no tabs, no result pane. */
+        /**
+         * Reset the panel to its initial state: empty editor, no tabs, no result pane.
+         *
+         * A run's Data tab is added optimistically, before its fetch resolves, so a
+         * Clear pressed mid-run can leave a still-building lazy entry behind that none
+         * of the four slots track — the library exposes no way to close an unbuilt
+         * entry directly (no closeTab-by-index/id, and cancelling the fetch itself is
+         * out of scope, see the plan's Non-Goals), so removeDataTab() alone cannot
+         * reach it. hideResultPane() is therefore called directly rather than left to
+         * the tab-count-driven "empty" event, so the pane disappears immediately
+         * regardless of that orphan entry. The entry itself stays inert until its
+         * promise settles, at which point ++runSeq below makes its own staleness check
+         * discard it via the library's normal lazy-tab failure teardown — reusing the
+         * same detached-but-alive resultHost this file already relies on between runs
+         * (see the header comment).
+         */
         function clear(): void {
+            ++runSeq; // invalidate any in-flight run — see the clear()/runSeq decision above
+
             editor.setValue("");
             removeDataTab();
             removeChartTab();
             removeDiagramTab();
-            removeExplainTab(); // the last removal empties the strip → "empty" → hideResultPane
+            removeExplainTab();
+            hideResultPane(); // covers an orphaned in-flight Data tab too — see doc comment
+            hideErrorBanner();
             setActiveExport(null);
-            syncChartButton();
+            setBusy(false); // re-enable run/explain/chart/diagram buttons in case a run was in flight
         }
 
         /**
@@ -506,7 +598,7 @@ export class QueryPanel {
         function syncToolbarButtons(): void {
             const hasSql = editor.getValue().trim() !== "";
 
-            clearButton.setEnabled(hasSql || resultShown);
+            clearButton.setEnabled(hasSql || resultShown || errorBannerShown);
             saveButton.setEnabled(onSave !== undefined && hasSql);
         }
 
@@ -518,6 +610,48 @@ export class QueryPanel {
         /** Enable the Explain-diagram button only while an Explain plan is on screen. */
         function syncDiagramButton(): void {
             diagramButton.setEnabled(explainSlot !== null);
+        }
+
+        /** Build the banner row on first use: warning glyph, wrapping message text, dismiss button. */
+        function ensureErrorBanner(): Component {
+            if (!errorBanner) {
+                const icon    = new Glyph("circle-exclamation", { foregroundColor: DESTRUCTIVE_COLOR });
+                const dismiss = glyphButton("xmark", NEUTRAL_COLOR, "Dismiss", () => hideErrorBanner());
+
+                errorBannerText = new Text("", { whiteSpace: "normal", truncate: false });
+
+                errorBanner = Container({ layoutManager: new HBox({ spacing: 8, stretching: true }) });
+                errorBanner.addComponent(icon);
+                errorBanner.addComponent(errorBannerText, { weight: 1 });
+                errorBanner.addComponent(dismiss);
+                errorBanner.setBackgroundColor(ERROR_BANNER_BG);
+            }
+
+            return errorBanner;
+        }
+
+        /** Show (or refresh) the error banner with `error`'s message. */
+        function showErrorBanner(error: unknown): void {
+            const banner = ensureErrorBanner();
+
+            errorBannerText!.setText(error instanceof Error ? error.message : String(error));
+
+            if (!errorBannerShown) {
+                panel.addComponent(banner, { placement: Placement.SOUTH });
+                errorBannerShown = true;
+                panel.doLayout();
+                syncToolbarButtons();
+            }
+        }
+
+        /** Hide the error banner (Dismiss, a new run starting, or Clear). A no-op when not showing. */
+        function hideErrorBanner(): void {
+            if (errorBannerShown) {
+                panel.removeComponent(errorBanner!);
+                errorBannerShown = false;
+                panel.doLayout();
+                syncToolbarButtons();
+            }
         }
 
         /**
@@ -642,27 +776,23 @@ export class QueryPanel {
             historyCursor = null;
             setBusy(true);
             notify("Running…");
+            hideErrorBanner();
+
+            const resultPromise = runQuery(sql);
+
+            refreshDataTab(resultPromise, seq);
 
             try {
-                const result = await runQuery(sql);
+                const result = await resultPromise;
 
                 if (seq === runSeq) {
-                    showResult(result);
+                    notify(resultStatusMessage(result));
                     onRun?.({ sql, timestamp: Date.now(), ok: true, rowCount: resultRowCount(result) });
-                    // Keep the caret in the editor after a run. showResult selects
-                    // the Data tab, and selecting a tab moves DOM focus to its strip
-                    // button (the roving tab index), so without this the keyboard
-                    // lands on the result strip — useless for the common "run, tweak,
-                    // re-run" loop. A freshly-added tab's activation is DEFERRED to the
-                    // next layout (its cell does not exist yet), so a synchronous
-                    // refocus here would be overridden by that later focus; reclaim it
-                    // after the batched layout instead. (Errors don't select a tab, so
-                    // they leave focus put.)
-                    Component.afterNextLayout(() => editor.focus());
                 }
             } catch (error) {
                 if (seq === runSeq) {
                     onError(error);
+                    showErrorBanner(error);
                     onRun?.({ sql, timestamp: Date.now(), ok: false, rowCount: 0 });
                 }
             } finally {
@@ -722,60 +852,126 @@ export class QueryPanel {
             }
         }
 
-        function showResult(result: QueryResult): void {
-            if (result.kind === "rows") {
-                showRowsResult(result);
-                notify(result.truncated
-                    ? `showing first ${result.rowCount} rows — result truncated`
-                    : `${result.rowCount} row(s)`);
-
-                return;
-            }
-
-            // No result set (INSERT/UPDATE/DDL): drop only the Data tab, LEAVE any
-            // Chart/Explain tab (each owned by its own action). If a tab survives it
-            // becomes the export source; if nothing is left the "empty" event has
-            // hidden the pane and export becomes null. (An explain result never reaches
-            // here — runExplainRun routes it to showPlan directly, which needs the
-            // source SQL this path lacks.)
-            removeDataTab();
-            syncExportToActiveTab();
-            syncChartButton(); // no Data result to chart now (also re-synced by setBusy)
-            notify(result.kind === "status" ? result.command || "OK" : "OK");
-        }
-
         /**
-         * Show a rows result in the Data tab. The library's Table virtual-scrolls its
-         * rows, so the whole result set renders regardless of size — no client display
-         * cap; the backend bounds the fetch and flags truncation (surfaced by the
-         * caller's status message). Run refreshes only the Data tab and leaves any
-         * Chart/Explain tab untouched; the Chart button (re)builds the Chart tab
-         * separately from the current Data result.
+         * Registers `run()`'s in-flight fetch as the Data tab's content source: adds a
+         * new lazy tab bound to `resultPromise` and selects it immediately, so the tab
+         * and its spinner appear before the fetch resolves — both the query and the
+         * grid construction happen behind that spinner. The factory awaits the SAME
+         * promise `run()` itself is awaiting, so this is one network round trip, not two.
          *
-         * @param result - The rows result to render.
+         * The prior Data tab (if any) is left completely alone until the factory
+         * confirms a rows result: only then is it safe to discard, so neither a fetch
+         * error nor a non-rows result on a re-run ever destroys a Data tab that already
+         * held good rows. A run superseded by a newer one before its fetch resolves
+         * discards itself the same way, via the runSeq check.
+         *
+         * Ctrl/Cmd+Enter can fire this a second time before the first call's factory
+         * has settled (the Run button disables mid-run, but the shortcut doesn't check
+         * it), so more than one lazy Data entry can be in the strip at once, each
+         * counted by `pendingDataTabs` until its own factory settles — see
+         * `liveTabCount`'s doc comment for why `insertIndex` needs both counts.
+         *
+         * @param resultPromise - The in-flight `runQuery(sql)` call this run started.
+         * @param seq - This run's `runSeq` snapshot, re-checked once the fetch resolves.
          */
-        function showRowsResult(result: QueryRowsResult): void {
-            const nextData = new QueryResultGrid(result);
-
+        function refreshDataTab(resultPromise: Promise<QueryResult>, seq: number): void {
             ensureResultPaneShown();
 
-            // Add the replacement, then remove the old tab, under refreshingTabs so the
-            // interim strip-drain (the new tab only enters the content list on the next
-            // layout) can't hide the pane. This keeps the pane in the Split and
-            // preserves the gutter position across a refresh.
-            refreshingTabs = true;
+            const insertIndex = liveTabCount() + pendingDataTabs;
 
-            try {
-                resultHost.addTab(nextData.content, "Data", { glyph: "table" });
-                removeDataTab();
-            } finally {
-                refreshingTabs = false;
-            }
+            pendingDataTabs++;
 
-            dataSlot = { content: nextData.content, result };
+            resultHost.addTab(async () => {
+                try {
+                    const result = await resultPromise;
 
-            tab.setActiveContent(nextData.content);
-            setActiveExport({ kind: "rows", result });
+                    if (seq !== runSeq) {
+                        // Superseded by a newer run before this one resolved. Touch
+                        // nothing — a newer run may already have installed its own
+                        // dataSlot, and this attempt's own tab is about to be torn
+                        // down by the library's normal lazy-tab failure path.
+                        throw new Error("superseded by a newer run");
+                    }
+
+                    if (result.kind !== "rows") {
+                        // Matches the file's existing rule (see the header comment): a
+                        // command-tag/DDL result drops the Data tab, leaving any Chart/
+                        // Explain tab. This attempt's own (still-spinning) tab is torn
+                        // down too, by the throw below — while it's still the selected
+                        // tab, so re-deriving the export here (before that teardown
+                        // reselects a surviving neighbor) would only ever see a
+                        // component-less entry and wrongly null the export. The
+                        // tab.on("exception") handler re-syncs it once the library has
+                        // actually reselected.
+                        removeDataTab();
+                        syncChartButton();
+                        throw new Error("statement returned no rows");
+                    }
+
+                    const grid = new QueryResultGrid(result);
+
+                    // Capture this BEFORE removeDataTab() below, which is the only
+                    // thing here that can move tab selection: if the user clicked the
+                    // old Data tab while this fetch was in flight (nothing disables
+                    // the tab strip mid-run, only the toolbar buttons), removing it
+                    // moves selection to its left neighbor via the library's own
+                    // reselection (Tab.selectNextContent) — a *different* tab becomes
+                    // active, and the export must follow it, not stay pinned to the
+                    // rows that tab is about to lose.
+                    const oldDataTabWasActive = dataSlot !== null && tab.getActiveContent() === dataSlot.content;
+
+                    removeDataTab(); // safe now — this run produced rows and won
+                    dataSlot = { content: grid.content, result };
+                    syncChartButton();
+
+                    if (oldDataTabWasActive) {
+                        // The tab removeDataTab() just closed was the active one, so
+                        // the library already reselected a neighbor synchronously,
+                        // above (Tab.selectNextContent's fallback: the closed tab's
+                        // *left* neighbor). Re-derive the export from wherever that
+                        // landed instead of leaving it pinned to the discarded old
+                        // tab's rows. Usually resolves to an already-built Chart/
+                        // Explain tab (or null, pane now empty) — the one edge case
+                        // where the fallback can land back on this run's own
+                        // still-building entry (the old Data tab was the *only* other
+                        // tab, at index 0) sees a null active component here and
+                        // correctly nulls the export rather than leaving it wrong; see
+                        // `## Implementation Notes` for why that residual case
+                        // self-heals on the next tab click rather than being chased
+                        // further.
+                        syncExportToActiveTab();
+                    }
+
+                    // Otherwise (the common case: this tab was already the active one
+                    // and stays that way, or some other tab was active and untouched
+                    // by removeDataTab()) deliberately do NOT set the export here.
+                    // `tab.setActiveTabIndex` (below run()'s call to this function)
+                    // already marked this entry "announce activation once built, if
+                    // still selected" (`Tab._onBarTabPressed`'s lazy-entry branch); the
+                    // library honors that once `grid.content` is installed, emitting
+                    // "activate" only if this tab is *still* the active one — which
+                    // the file's existing `tab.on("activate", () =>
+                    // syncExportToActiveTab())` handler (above) already turns into the
+                    // correct export. Calling syncExportToActiveTab() unconditionally
+                    // here instead would see this entry's own component as still null
+                    // (not installed until after this factory returns) and wrongly
+                    // null the export on every ordinary run, only for "activate" to
+                    // immediately correct it — a needless flicker this avoids.
+                    return grid.content;
+                } finally {
+                    // Settled (built or torn down) either way — no longer pending.
+                    pendingDataTabs--;
+                }
+            }, "Data", { glyph: "table" });
+
+            tab.setActiveTabIndex(insertIndex);
+
+            // Selecting a tab moves DOM focus to its strip button (the roving tab
+            // index); reclaim it for the editor once the freshly-added tab's cell
+            // exists (next layout), so the "run, tweak, re-run" loop keeps working
+            // without waiting for the fetch. Runs on every call, including one later
+            // found stale — the keystroke that triggered it is real either way.
+            Component.afterNextLayout(() => editor.focus());
         }
 
         /**
@@ -815,6 +1011,20 @@ export class QueryPanel {
          */
         function resultRowCount(result: QueryResult): number {
             return result.kind === "explain" ? 0 : result.rowCount;
+        }
+
+        /**
+         * The status-bar line for a completed run: row count (or a truncation note)
+         * for a rows result, else the command tag (or "OK" when the backend gives none).
+         */
+        function resultStatusMessage(result: QueryResult): string {
+            if (result.kind === "rows") {
+                return result.truncated
+                    ? `showing first ${result.rowCount} rows — result truncated`
+                    : `${result.rowCount} row(s)`;
+            }
+
+            return result.kind === "status" ? result.command || "OK" : "OK";
         }
 
         /**
