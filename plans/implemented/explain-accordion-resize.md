@@ -274,3 +274,27 @@ Read before starting:
 [^resize-pinning]: `resizePinnedSections` (`Accordion.ts:2181`) pins every open section whose `effectiveWeight` is `0` at its own stored `_resizeSizes` value, *provided* at least one open section is weighted (`flexible > 0`) and the pinned sections' total doesn't already exceed the open budget. If neither holds — no weighted section is open, or the pinned floors alone overrun the container — pinning is skipped and the whole open set falls back to a proportional rescale, still floored per-section at each one's own min via the same clamp loop `distributeWithinConstraints` always runs. So the floors in this plan matter in both the common (pinned) and the degenerate (all-proportional) case.
 
 [^tree-preferred-override]: `Tree.getPreferredSize()` (`Tree.ts:208`): `if (this.getPreferredSizeConstraint() !== null) return super.getPreferredSize();` — else it returns `{ width: DEFAULT_PREFERRED_WIDTH, height: this._flatRows.length * this.getRowHeight() }`. `getPreferredSizeConstraint()` reads the explicit `preferredSize` option/setter value, so calling `tree.setPreferredSize(...)` is what flips this from the row-count formula to the fixed value.
+
+---
+
+## Implementation Notes
+
+All ten Ordered Implementation Steps were followed verbatim, including the
+literal code/comment blocks steps 1, 2, 5, 6, 7 dictate. Step 10's regression
+greps still pass in spirit (each config change lands exactly once, and the
+zero-height `setMinSize` grep correctly finds nothing), but their **counts**
+run higher than the plan's stated expectations: `resizable: true` matches
+twice (the code line plus step 6's own mandated comment referencing it),
+`weight: 1` matches three times (the code line plus steps 1 and 2's mandated
+comments), `PLAN_TREE_MIN_HEIGHT` matches four times, and
+`PLAN_STEPS_MIN_HEIGHT` matches five times — one more each than stated,
+because steps 1, 2, 4, and 6's own mandated prose reiterates these tokens in
+English. This is a self-inconsistency in the plan's own verification text
+(the grep's expected counts were seemingly written before, or without
+accounting for, the cross-referencing prose those same steps require), not a
+codebase-drift incompatibility or a code defect — manual inspection confirms
+each constant is declared once and consumed in exactly the `setMinSize`/
+`setPreferredSize` calls the plan specifies, and `resizable`/`weight: 1` each
+appear exactly once in actual config. No code was changed to chase the
+stated counts, since doing so would mean stripping the plan's own mandated
+explanatory comments.

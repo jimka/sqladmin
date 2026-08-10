@@ -63,6 +63,28 @@ const LEFT_WIDTH = 320;
 // claim a section share the tree/steps sections need.
 const SUMMARY_HEIGHT = 88;
 
+// Plan tree's floor and target-until-fill height (px): four rows at the
+// library Tree's fixed 24px ROW_HEIGHT (mirrors treeExplorerView.ts's
+// TREE_MIN_HEIGHT — same Tree class, same derivation). Set as both the
+// section's minSize and preferredSize below: Tree.getPreferredSize reports
+// flatRows.length * ROW_HEIGHT (an ever-growing number after expandAll())
+// whenever no explicit preferredSize constraint is set, so leaving this
+// unset is what let Plan tree balloon past its siblings' budget. The
+// section's weight: 1 still grows it into all the leftover height once
+// resizable mode resolves the open budget — this constant only bounds what
+// Plan tree asks for, not what it renders at.
+const PLAN_TREE_MIN_HEIGHT = 96;
+
+// Plan steps' fixed height (px), mirroring the app's established 96px
+// accordion-section floor (treeExplorerView's TREE_MIN_HEIGHT,
+// PropertyValuePanel's PANEL_MIN_HEIGHT, QueriesView's SECTION_MIN_HEIGHT).
+// Set as both minSize and preferredSize, and carries no weight, so under
+// resizable mode it holds this px across a container resize instead of
+// growing or shrinking with the window or the plan's row count — the flat
+// steps table scrolls internally (Table's own VirtualScroller) for rows
+// beyond what this height shows.
+const PLAN_STEPS_MIN_HEIGHT = 96;
+
 // The flat plan-steps model, one field per column. Metric fields are numeric so a
 // header click sorts by magnitude, not lexically; the field *names* are the column
 // headers the table renders (a PlanStepRow is keyed by these names, so it doubles
@@ -122,8 +144,8 @@ class ExplainDiagramPanel extends Panel {
      *   `parseExplainSummary`); both shown as an en dash when absent.
      * @param layout - The tab's saved section open flags plus the toggle save
      *   hook (`controller.layout.bindAccordion("explainDiagram")`, threaded in
-     *   via QueryPanel). This accordion is not resizable, so only open state
-     *   persists.
+     *   via QueryPanel). The accordion is resizable — a dragged gutter's sizes
+     *   persist alongside each section's open flag.
      */
     constructor(roots: ExplainPlanNode[], summary: ExplainSummary, layout: AccordionLayoutBinding) {
         // Locals before super() — they are super()'s children (this is
@@ -138,6 +160,14 @@ class ExplainDiagramPanel extends Panel {
         // diagram→tree reverse selection.
         tree.expandAll();
 
+        // Bound Plan tree's own reported preferred height so it stops growing with
+        // the flattened row count (see Tree.getPreferredSize; PLAN_TREE_MIN_HEIGHT's
+        // comment above has the full reasoning). Its weight: 1 (below) still grows
+        // it to fill the accordion's leftover height; this only sets the floor and
+        // the shrink/seed baseline.
+        tree.setPreferredSize({ width: 0, height: PLAN_TREE_MIN_HEIGHT });
+        tree.setMinSize({ width: 0, height: PLAN_TREE_MIN_HEIGHT });
+
         // The flat steps table — built as a local so its row selection can be
         // wired to cross-select the tree + diagram (below).
         const stepsTable = buildStepsTable(roots);
@@ -146,17 +176,32 @@ class ExplainDiagramPanel extends Panel {
         // (data/layoutStore.ts); `open` reads them (or a saved override).
         const open = layout.loadOpen();
 
-        // The WEST info column: a Summary table over the plan tree over the flat
-        // steps table. The tree + steps sections share the column's leftover
-        // height (weight) so each scrolls internally; the summary stays pinned
-        // at its small fixed height.
+        // The WEST info column: a fixed-height Summary table over the plan Tree
+        // over a fixed-height flat Plan-steps table, with draggable gutters
+        // between every adjacent pair of open sections (resizable: true below).
+        // Only Plan tree carries a weight, so it alone absorbs the column's
+        // leftover height on an ordinary resize — expanding to fill available
+        // space and, once its own VirtualRowView-backed scroller is given less
+        // height than the flattened row count needs, scrolling internally rather
+        // than reporting an ever-growing preferred height. Summary and Plan steps
+        // stay pinned at their own fixed height (PLAN_STEPS_MIN_HEIGHT et al.)
+        // regardless of window size or the plan's row count; a user gutter-drag
+        // can still resize any of the three, floored at its own min.
         const accordion = new AccordionPanel({
             preferredSize: { width: LEFT_WIDTH, height: 0 },
             minSize      : { width: LEFT_WIDTH, height: 0 },
+            // Draggable gutters between adjacent open sections (up to two, once
+            // Plan steps is also open). Plan tree carries the accordion's only
+            // weight, so it alone absorbs leftover height on an ordinary resize;
+            // Summary and Plan steps hold their fixed height (see the min-floor
+            // constants above) unless the user drags a gutter, which can still
+            // resize any of the three — floored at its own min. See
+            // ## Architecture Decisions in explain-accordion-resize.md.
+            resizable: true,
             sections: [
                 { label: "Summary",    component: buildSummaryTable(summary), initiallyOpen: open[0] },
                 { label: "Plan tree",  component: tree,                       initiallyOpen: open[1], weight: 1 },
-                { label: "Plan steps", component: stepsTable,                 initiallyOpen: open[2], weight: 1 },
+                { label: "Plan steps", component: stepsTable,                 initiallyOpen: open[2] },
             ],
             onSectionToggle: layout.onToggle,
         });
@@ -179,6 +224,20 @@ class ExplainDiagramPanel extends Panel {
                 { component: diagram,   constraints: { placement: Placement.CENTER } },
             ],
         });
+
+        // Restore the last dragged section split, if any (a stale array is
+        // discarded by the library; the accordion falls back to its normal
+        // weight-seeded sizing instead). Unlike the sidebar rails, this panel is
+        // rebuilt on every Explain run — without this, a drag on one Explain tab
+        // would be forgotten the moment a new one opens (see ## Architecture
+        // Decisions in explain-accordion-resize.md).
+        const savedSizes = layout.loadSizes();
+
+        if (savedSizes !== null) {
+            accordion.getAccordion().applySectionSizes(savedSizes);
+        }
+
+        accordion.getAccordion().on("sectionresize", layout.onSizes);
 
         // Three-way cross-selection: a click in any of the three views (tree row,
         // diagram card, steps-table row) selects and reveals the matching entry in
@@ -267,8 +326,8 @@ class ExplainDiagramPanel extends Panel {
  * Build the Summary table: two rows (planning / execution time) with the metric
  * label on the left and its formatted value on the right. A MemoryStore-backed
  * {@link Table} (no column spec, so both fields show), pinned to a small fixed
- * height and relaxed min so the accordion section hugs it rather than reserving
- * the Table's default 100px floor.
+ * height and a real min floor equal to its own fixed height, so the accordion's
+ * resizable mode can pin it but never crush it.
  *
  * @param summary - The parsed top-level times.
  *
@@ -286,7 +345,7 @@ function buildSummaryTable(summary: ExplainSummary): Component {
     });
     const table = Table(store);
 
-    table.setMinSize({ width: 0, height: 0 });
+    table.setMinSize({ width: 0, height: SUMMARY_HEIGHT });
     table.setPreferredSize({ width: LEFT_WIDTH, height: SUMMARY_HEIGHT });
 
     return table;
@@ -296,7 +355,9 @@ function buildSummaryTable(summary: ExplainSummary): Component {
  * Build the flat Plan-steps table: one row per plan node in plan order, only
  * Action + Cost shown (the rest spec-hidden, user-revealable). Unsorted, so the
  * default order is plan order; a header click sorts numerically and clearing the
- * sort returns to plan order.
+ * sort returns to plan order. Pinned to `PLAN_STEPS_MIN_HEIGHT` (min and
+ * preferred) so the accordion's resizable mode holds it at a fixed, sane height
+ * and scrolls its rows internally rather than growing.
  *
  * @param roots - The parsed plan roots.
  *
@@ -307,9 +368,10 @@ function buildStepsTable(roots: ExplainPlanNode[]): Table {
     const store = new MemoryStore({ model, data: buildPlanStepsRows(roots), autoLoad: true });
     const table = Table(store, STEP_COLUMNS);
 
-    // Relax the Table's default 100×100 floor so the accordion can size the
-    // section to the column's height rather than the Table's minimum.
-    table.setMinSize({ width: 0, height: 0 });
+    // A real min floor (not the Table's default 100×100) so the accordion's
+    // resizable mode can pin this section but never crush it to zero.
+    table.setMinSize({ width: 0, height: PLAN_STEPS_MIN_HEIGHT });
+    table.setPreferredSize({ width: LEFT_WIDTH, height: PLAN_STEPS_MIN_HEIGHT });
 
     return table;
 }
