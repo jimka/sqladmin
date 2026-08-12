@@ -25,10 +25,12 @@ It is not hardened for exposure to the public internet:
 
 - **Object navigator** — walk databases, schemas, tables, and views; open a
   table to browse its rows.
-- **Data grid** — filter, sort, and page through table data; insert, update, and
-  delete rows (write actions are gated on the connected role's privileges).
-  Flip a wide table into a one-record-at-a-time field/value view and step
-  through the loaded rows with Previous/Next.
+- **Data grid** — sort and page through table data; insert, update, and delete
+  rows (write actions are gated on the connected role's privileges). A
+  per-column header filter row narrows what the server sends back, and a
+  toolbar quick-search field narrows the already-loaded rows live, with no
+  network request. Flip a wide table into a one-record-at-a-time field/value
+  view and step through the loaded rows with Previous/Next.
 - **SQL workspace** — run ad-hoc queries, `EXPLAIN` a statement, and save
   queries for reuse. Export query and table results to CSV or JSON. Flip a
   query's results into the same one-record-at-a-time field/value view as the
