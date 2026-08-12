@@ -1,7 +1,7 @@
 // The login / connection flow: a mandatory (non-dismissable) modal that gates
 // the shell behind authentication.
 //
-// It follows the app's dialog idiom (see FilterDialog): `await dialog.show()`
+// It follows the app's dialog idiom (see SqlPreviewDialog): `await dialog.show()`
 // resolves "confirm" when the user presses the primary "Sign in" button OR Enter
 // (the Dialog resolves Enter to the primary action for free), and the entered
 // values are read from the form AFTER the dialog closes. So there is no submit

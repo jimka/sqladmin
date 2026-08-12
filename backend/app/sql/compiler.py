@@ -119,6 +119,17 @@ class FilterCompiler:
 
         return quote_ident(field)
 
+    def _column(self, field: str, values: list[Any]) -> str:
+        """
+        The column expression to compare against. A text operand can only have
+        come from a string-typed model field, whose Postgres type may be text,
+        varchar, char, uuid, or numeric -- comparing the column's text form
+        makes every one of those valid.
+        """
+        ident = self._ident(field)
+
+        return ident + "::text" if values and all(isinstance(v, str) for v in values) else ident
+
     def _node(self, f: dict) -> str:
         """
         Compile one filter descriptor (recursing into composites) to SQL.
@@ -132,18 +143,32 @@ class FilterCompiler:
         t = f.get("type")
 
         if t in _COMPARATORS:
-            return f"{self._ident(f['field'])} {_COMPARATORS[t]} {self._bind(f['value'])}"
+            col = self._column(f["field"], [f["value"]])
 
-        if t in ("contains", "startsWith"):
-            col = self._ident(f["field"])
+            return f"{col} {_COMPARATORS[t]} {self._bind(f['value'])}"
+
+        if t in ("contains", "startsWith", "endsWith"):
+            # A LIKE/ILIKE operand is a string by construction, so this branch
+            # always casts, regardless of the column's own wire type.
+            col = self._ident(f["field"]) + "::text"
             pattern = _escape_like(str(f["value"]))
-            pattern = pattern + "%" if t == "startsWith" else f"%{pattern}%"
+            pattern = {"startsWith": pattern + "%", "endsWith": "%" + pattern}.get(t, f"%{pattern}%")
             op = "LIKE" if f.get("caseSensitive") else "ILIKE"
 
             return f"{col} {op} {self._bind(pattern)} ESCAPE '\\'"
 
         if t == "in":
-            return f"{self._ident(f['field'])} = ANY({self._bind(list(f['values']))})"
+            values = list(f["values"])
+            concrete = [v for v in values if v is not None]
+            has_null = len(concrete) < len(values)
+            col = self._column(f["field"], concrete)
+
+            if not concrete:
+                return f"{col} IS NULL" if has_null else "FALSE"
+
+            any_clause = f"{col} = ANY({self._bind(concrete)})"
+
+            return f"({col} IS NULL OR {any_clause})" if has_null else any_clause
 
         if t in ("and", "or"):
             parts = [p for p in (self._node(c) for c in f["filters"]) if p]

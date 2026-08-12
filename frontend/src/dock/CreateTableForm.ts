@@ -1,7 +1,9 @@
 // The CREATE TABLE dialog form: a table-name field plus an add/remove-row
-// column grid, mirroring FilterDialog's Grid idiom (see FilterDialog.ts). The
-// column rows themselves collect raw name/type/default/nullable/primaryKey
-// fields; readSpec() hands them to the pure buildCreateTableSpec helper.
+// column grid — a weighted Grid whose tracks share the dialog width (see
+// COLUMN_WEIGHT below), so the inputs stretch to fill it instead of sitting
+// squished at a fixed width. The column rows themselves collect raw
+// name/type/default/nullable/primaryKey fields; readSpec() hands them to the
+// pure buildCreateTableSpec helper.
 
 import { Panel, callable } from "@jimka/typescript-ui/core";
 import type { Component } from "@jimka/typescript-ui/core";
@@ -20,8 +22,9 @@ import { CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR } from "../theme";
 Glyph.register(plus, minus);
 
 // Row geometry: name/type/default share the dialog width by weight; the
-// nullable/PK checkboxes and the remove button are content-sized. Mirrors
-// FilterDialog's COLUMN_WEIGHT-style tracks, tuned for four extra fields.
+// nullable/PK checkboxes and the remove button are content-sized — the
+// weighted-Grid row idiom this app's dialogs use, tuned here for four
+// extra fields.
 const NAME_WEIGHT    = 130;
 const TYPE_WEIGHT    = 120;
 const DEFAULT_WEIGHT = 130;

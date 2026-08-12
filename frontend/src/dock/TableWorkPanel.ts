@@ -1,6 +1,7 @@
 // The dock work panel for one table: an inline ToolBar of glyph-only actions
 // over the live data grid — the record-view toggle and its Previous / Next
-// steppers at the far left, a separator, then Add / Delete / Save … Refresh.
+// steppers at the far left, a separator, then Add / Delete / Save, a quick-search
+// field and status label, a filter-row toggle, Export, and Refresh.
 //
 // The toolbar drives the store directly: load / add / remove / sync. Transport
 // errors surface as the store's 'exception'/'sync' events, wired to the
@@ -8,6 +9,14 @@
 // save-feedback go through the `notify` callback the controller supplies. The
 // table's structure opens in its own tab from the navigator's right-click menu
 // (see StructurePanel / SqlAdminController).
+//
+// Quick search (applyQuickSearch/syncQuickSearchStatus) is local: it narrows
+// which already-loaded rows the grid shows via `Table.setRowVisible`, with no
+// network request. The filter row (toggleFilterRow, shown/hidden via
+// `Table.setFilterRowVisible`) is remote: each committed keystroke there
+// writes into the store's filter state, which reloads page 1 from the server.
+// Both can be active at once — see quickSearchModel.ts and
+// plans/implemented/table-local-filter.md's Architecture Decisions.
 //
 // The record-view toggle flips the same grid to the library's rotated
 // (field/value) display mode via `Table.setDisplayMode` — no second grid, no
@@ -18,11 +27,13 @@
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the panel `extends
 // Container`, inlining its own Border frame directly (the same shape
-// RoleGrantsPanel inlines too). The sync handlers and `toggleRecordView`
-// are arrow-function fields — they're registered by reference on
-// `store`/`dataGrid`/`recordToggle` events, which would drop `this` if they
-// were plain methods. `buildColumnSpec`/`save_`/`missingRequiredFields`/
-// `confirmDelete`/`stepRecord` stay stateless module-level functions.
+// RoleGrantsPanel inlines too). The sync handlers, `toggleRecordView`,
+// `toggleFilterRow`, `applyQuickSearch`, and `syncQuickSearchStatus` are
+// arrow-function fields — they're registered by reference on
+// `store`/`dataGrid`/`recordToggle`/`filterToggle`/`quickSearchField` events,
+// which would drop `this` if they were plain methods. `buildColumnSpec`/
+// `save_`/`missingRequiredFields`/`confirmDelete`/`stepRecord` stay stateless
+// module-level functions.
 
 import { Container, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
@@ -30,6 +41,7 @@ import { Placement }                   from "@jimka/typescript-ui/primitive";
 import { ToolBar, ToolBarSeparator }   from "@jimka/typescript-ui/component/menubar";
 import { Button, ToggleButton }        from "@jimka/typescript-ui/component/button";
 import { Spacer }                      from "@jimka/typescript-ui/component/container";
+import { TextField, Text }             from "@jimka/typescript-ui/component/input";
 import { glyphButton, glyphToggleButton } from "./glyphButton";
 import { Table }                       from "@jimka/typescript-ui/component/table";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
@@ -44,9 +56,9 @@ import { table_list }                  from "@jimka/typescript-ui/glyphs/solid/t
 import { angle_left }                  from "@jimka/typescript-ui/glyphs/solid/angle_left";
 import { angle_right }                 from "@jimka/typescript-ui/glyphs/solid/angle_right";
 import type { ColumnMeta, TablePrivileges } from "../contract";
-import { openFilterDialog }            from "./FilterDialog";
 import { buildExportButton }           from "./exportButton";
-import { buildColumnSpec, missingRequiredFields } from "./tableWriteRules";
+import { buildColumnSpec, isFilterableColumn, missingRequiredFields } from "./tableWriteRules";
+import { matchesQuickSearch, quickSearchStatus } from "./quickSearchModel";
 import { stepIndex }                   from "./recordNavigation";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR, FILTER_ACTIVE_COLOR } from "../theme";
 
@@ -73,13 +85,19 @@ class TableWorkPanel extends Container {
     // The buttons the sync handlers toggle need to be reachable as fields.
     // addButton is no longer a fixed capability: syncAddEnabled toggles it
     // with the record-view state as well as with `privileges.insert`.
+    // quickSearchField/quickSearchStatusText back the local, network-free
+    // quick search; filterToggle shows/hides the library's remote header
+    // filter row, and canFilter caches whether any column offers a filter.
     private readonly addButton:     Button;
     private readonly deleteButton:  Button;
     private readonly saveButton:    Button;
-    private readonly filterButton:  Button;
+    private readonly filterToggle:  ToggleButton;
     private readonly recordToggle:  ToggleButton;
     private readonly prevButton:    Button;
     private readonly nextButton:    Button;
+    private readonly quickSearchField:      TextField;
+    private readonly quickSearchStatusText: Text;
+    private readonly canFilter:             boolean;
 
     constructor(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable, privileges: TablePrivileges) {
         // `this` is unavailable until after `super()`, so the grid and toolbar
@@ -99,7 +117,16 @@ class TableWorkPanel extends Container {
             privileges.delete ? "Delete row" : "Delete row (no delete permission)", () => void confirmDelete(store, dataGrid));
         const saveButton = glyphButton("save", PRIMARY_COLOR,
             canWrite ? "Save" : "Save (read-only — no write permission)", () => save_(store, columns, notify));
-        const filterButton = glyphButton("filter", PRIMARY_COLOR, "Filter rows", () => openFilterDialog(store, columns));
+
+        // Quick search: local, network-free row hiding over the loaded page
+        // (see quickSearchModel.ts). The filter toggle shows/hides the
+        // library's remote header filter row instead; canFilter caches
+        // whether any column is filterable at all, since a table with none
+        // disables the toggle outright.
+        const quickSearchField      = new TextField({ placeholder: "Quick search (loaded rows)" });
+        const quickSearchStatusText = new Text("");
+        const canFilter             = columns.some(isFilterableColumn);
+        const filterToggle          = glyphToggleButton("filter", PRIMARY_COLOR, "Filter row", false);
 
         // Record view: flips the grid to one record's field/value rows via
         // Table.setDisplayMode. The toggle's handler needs `this` (to re-sync
@@ -126,10 +153,13 @@ class TableWorkPanel extends Container {
                 addButton,
                 deleteButton,
                 saveButton,
-                // Flex spacer pushes the remaining view actions (Filter, Export,
-                // Refresh) to the far right, away from the edit actions.
+                // Flex spacer pushes the remaining view actions (quick search,
+                // Filter, Export, Refresh) to the far right, away from the edit
+                // actions.
                 Spacer.flex(),
-                filterButton,
+                quickSearchField,
+                quickSearchStatusText,
+                filterToggle,
                 exportButton,
                 // Refresh discards unsaved edits then reloads from the server. reject()
                 // must precede load(): load() replaces the records but leaves pending
@@ -149,19 +179,31 @@ class TableWorkPanel extends Container {
         this.addButton     = addButton;
         this.deleteButton  = deleteButton;
         this.saveButton    = saveButton;
-        this.filterButton  = filterButton;
+        this.filterToggle  = filterToggle;
         this.recordToggle  = recordToggle;
         this.prevButton    = prevButton;
         this.nextButton    = nextButton;
+        this.quickSearchField      = quickSearchField;
+        this.quickSearchStatusText = quickSearchStatusText;
+        this.canFilter             = canFilter;
 
         this.addComponent(toolbar, { placement: Placement.NORTH });
         this.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
 
-        // Tint the Filter button and mark its tooltip while any filter is active.
-        // 'filterchange' fires whenever the store's active-filter set changes (the
-        // dialog's Apply/Clear drive it through filterBy/clearFilter).
+        // filterToggle mirrors the header filter row's visibility, tint, and
+        // enabled state. 'filterchange' fires whenever the store's active-filter
+        // set changes (the header row's own debounced writes drive it).
         this.syncFilterActive();
         store.on("filterchange", this.syncFilterActive);
+        this.filterToggle.on("action", this.toggleFilterRow);
+
+        // Quick search narrows the loaded page live, with no network request;
+        // re-derive its status label whenever the loaded records change under it
+        // (an edit, or a fresh page from Refresh / a column-filter reload).
+        this.quickSearchField.on("change", this.applyQuickSearch);
+        this.syncQuickSearchStatus();
+        store.on("datachange", this.syncQuickSearchStatus);
+        store.on("load", this.syncQuickSearchStatus);
 
         // Add is no longer a fixed capability: it also disables while the
         // record view is showing, since only the grid can fill in a new row.
@@ -195,13 +237,22 @@ class TableWorkPanel extends Container {
         store.on("datachange", this.syncStepEnabled);
     }
 
-    // Registered by reference on `store` ("filterchange") — an arrow-function
-    // field so it keeps `this` when invoked as a callback.
+    // Registered by reference on `store` ("filterchange"), and called from
+    // toggleRecordView — the single writer for every visual state of
+    // filterToggle (selected, enabled, colour, description), so no two
+    // handlers race to set filterToggle's description.
     private syncFilterActive = (): void => {
-        const active = this.store.getActiveFilters().length > 0;
+        const rotated = this.dataGrid.getDisplayMode() === "rotated";
+        const active  = this.store.getActiveFilters().length > 0;
 
-        this.filterButton.setForegroundColor(active ? FILTER_ACTIVE_COLOR : PRIMARY_COLOR);
-        this.filterButton.setDescription(active ? "Filter rows (active)" : "Filter rows");
+        this.filterToggle.setSelected(this.dataGrid.isFilterRowVisible());
+        this.filterToggle.setEnabled(this.canFilter && !rotated);
+        this.filterToggle.setForegroundColor(active ? FILTER_ACTIVE_COLOR : PRIMARY_COLOR);
+        this.filterToggle.setDescription(
+            !this.canFilter ? "Filter row (no filterable columns)"
+            : rotated       ? "Switch to the grid view to use the filter row"
+            : active        ? "Filter row (filters active)"
+                            : "Filter row");
     };
 
     // Registered by reference on `store` ("datachange") — arrow-function field.
@@ -216,6 +267,46 @@ class TableWorkPanel extends Container {
         const hasLiveSelection = this.dataGrid.getSelectedRecords().some((r: ModelRecord) => live.has(r));
 
         this.deleteButton.setEnabled(this.privileges.delete && hasLiveSelection);
+    };
+
+    // Registered by reference on `filterToggle` ("action") — arrow-function
+    // field. ToggleButton has already flipped its own selected state by the
+    // time this runs, so isSelected() reads as the new intent.
+    private toggleFilterRow = (): void => {
+        this.dataGrid.setFilterRowVisible(this.filterToggle.isSelected());
+    };
+
+    // Registered by reference on `quickSearchField` ("change"), which
+    // TextInput fires on every keystroke from its native `input` listener —
+    // arrow-function field. Installs a fresh predicate each call; null when
+    // the query is empty clears the filter entirely. Local and network-free:
+    // it only ever decides which of the already-loaded rows are shown, never
+    // reloads the store (that's the filter row's job, via toggleFilterRow).
+    private applyQuickSearch = (): void => {
+        const query = this.quickSearchField.getValue().trim();
+
+        this.dataGrid.setRowVisible(query === "" ? null : (record: ModelRecord) => matchesQuickSearch(record, query));
+        this.syncQuickSearchStatus();
+    };
+
+    // Registered by reference on `store` ("datachange", "load") and called
+    // directly from applyQuickSearch — arrow-function field. Recomputes the
+    // label from the CURRENT query against whatever is loaded now; it never
+    // calls setRowVisible itself, since the predicate installed by
+    // applyQuickSearch re-evaluates against fresh records on every render pass.
+    private syncQuickSearchStatus = (): void => {
+        const query = this.quickSearchField.getValue().trim();
+
+        if (query === "") {
+            this.quickSearchStatusText.setText("");
+
+            return;
+        }
+
+        const loaded  = this.store.getRecords();
+        const matched = loaded.filter((r: ModelRecord) => matchesQuickSearch(r, query)).length;
+
+        this.quickSearchStatusText.setText(quickSearchStatus(matched, loaded.length, this.store.getTotalCount()));
     };
 
     // Registered by reference on `recordToggle` ("action") — arrow-function field.
@@ -233,6 +324,7 @@ class TableWorkPanel extends Container {
 
         this.syncAddEnabled();
         this.syncStepEnabled();
+        this.syncFilterActive();
     };
 
     // Only ever called as this.syncAddEnabled(), but stays an arrow field to

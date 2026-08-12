@@ -20,8 +20,7 @@
 // The Dialog exposes only three result codes ("confirm" | "cancel" | "close"),
 // and every dismiss gesture (Escape, backdrop, the always-present title-bar
 // close) resolves to "close". So: Execute = "confirm" (primary), Cancel =
-// "close" (shares the dismiss code, so dismissing == Cancel == do nothing) —
-// the same split FilterDialog uses.
+// "close" (shares the dismiss code, so dismissing == Cancel == do nothing).
 
 import { Panel }                   from "@jimka/typescript-ui/core";
 import type { Component }          from "@jimka/typescript-ui/core";
@@ -33,8 +32,8 @@ import type { DialogButtonConfig } from "@jimka/typescript-ui/overlay";
 import type { QueryStatusResult }  from "../contract";
 
 // A comfortable modal width for a structured DDL form plus the SQL preview
-// editor beneath it — the same order of magnitude as FilterDialog's
-// DIALOG_WIDTH (500), a bit wider to give the SQL editor room to breathe.
+// editor beneath it — a bit wider than this app's narrower dialogs (~500px)
+// to give the SQL editor room to breathe.
 const DEFAULT_DIALOG_WIDTH = 560;
 
 // The editor's placeholder height for the one layout pass before it has
@@ -55,8 +54,8 @@ const EDITOR_SEED_HEIGHT = 180;
 const SQL_PREVIEW_MAX_ROWS = 24;
 
 // Vertical gap between the form, the "Regenerate SQL" row, and the editor —
-// matches FilterDialog's ROW_SPACING order of magnitude for a consistent
-// dialog rhythm.
+// the same order of magnitude as this app's other dialog content spacing,
+// for a consistent dialog rhythm.
 const CONTENT_SPACING = 8;
 
 /** Options for {@link openSqlPreviewDialog}. */
@@ -108,16 +107,15 @@ export function openSqlPreviewDialog(options: SqlPreviewDialogOptions): void {
 /**
  * Build the dialog's content, seed the preview, and run the loop. Kept
  * separate from {@link openSqlPreviewDialog} so the public entry point stays
- * synchronous (void), matching FilterDialog's open/run split.
+ * synchronous (void) — this app's open/run dialog split.
  *
  * @param options - the phase's form, SQL generator, and execute/callbacks.
  */
 async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<void> {
     // Re-fit hook for the current Dialog. Wired to a real dialog only once
-    // showExecuteRetryLoop builds one — mirrors FilterDialog's own `resizer`
-    // object, needed here because the editor (and its "heightchange" listener)
-    // is built before any Dialog exists, and showExecuteRetryLoop rebuilds
-    // `dialog` again on every failed-execute retry.
+    // showExecuteRetryLoop builds one — needed because the editor (and its
+    // "heightchange" listener) is built before any Dialog exists, and
+    // showExecuteRetryLoop rebuilds `dialog` again on every failed-execute retry.
     const resizer = { fit: () => {} };
 
     const editor = new CodeEditor("", {
