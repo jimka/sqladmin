@@ -1,42 +1,90 @@
 ---
-touches-shared: [frontend/src/dock/TableWorkPanel.ts, README.md]
+touches-shared:
+  - frontend/src/dock/TableWorkPanel.ts
+  - frontend/src/dock/tableWriteRules.ts
+  - backend/app/sql/compiler.py
+  - README.md
 ---
 
-# Table Quick Search — Implementation Plan
+# Table Quick Search & Column Filters — Implementation Plan
 
 ## Overview
 
-[`TableWorkPanel.ts`](frontend/src/dock/TableWorkPanel.ts) already has a *remote* filter: the toolbar's Filter button opens [`FilterDialog.ts`](frontend/src/dock/FilterDialog.ts), which builds `FilterDescriptor`s and applies them through the store's `filterBy()` — a network round trip that re-queries the backend and reloads the grid. This plan adds a second, independent **quick search**: a plain text field in the same toolbar that narrows the grid to rows already loaded in the browser, live, with no network request. The two coexist — quick search never touches the remote filter's mechanism, and clearing one has no effect on the other (see _Architecture Decisions_).
+The Data tab's grid gets two new ways to narrow what it shows, and loses one old one.
 
-The work is split across two dependencies this plan states but does not build. First, a small new method on the library's `Table` component, `setRowVisible`, is a **prerequisite**: no row-visibility mechanism exists in `@jimka/typescript-ui` today (confirmed by reading `Table`/`Body`/`ColumnConfig`), and the app-side alternative — swapping the grid to a wrapping `MemoryStore` — has real hazards on a live, editable, paginated store (see the "Row hiding requires a new library primitive" decision below). This plan specifies that method's exact required shape and stops there; building it is `typescript-ui`-repo work, out of scope here. Second, this plan composes with [`plans/table-record-detail-view.md`](plans/table-record-detail-view.md), a sibling plan (not yet implemented) that adds three of its own buttons to this same toolbar for a rotated single-record view. Every toolbar decision below accounts for that plan's layout so the two compose regardless of which lands first.
+**Quick search** is new app code: a plain text field in the panel toolbar that hides rows already loaded in the browser, live, with no network request. It is built on the library's `Table.setRowVisible(predicate)`, a display-only row filter that never touches the store.
 
-Once the library method exists, the app-side change is small: a new pure module, `frontend/src/dock/quickSearchModel.ts`, plus a handful of additions to `frontend/src/dock/TableWorkPanel.ts`.
+**Column filters** are a library feature this plan switches on: a header filter row with one text input plus an operator picker per column, hidden until the user asks for it. Each committed keystroke writes a `FilterDescriptor` into the store, which — because every store in this app is paginated — **reloads page 1 from the server**. Column filters are therefore a *remote* mechanism, mechanically the same kind of thing as the Filter button this app ships today.
+
+Because both write into the same store filter state, they cannot both stay. The toolbar's Filter button and its modal [`FilterDialog.ts`](frontend/src/dock/FilterDialog.ts) are **replaced** by the header filter row, and the Filter glyph becomes a toggle that shows and hides that row (see _Architecture Decisions_). Quick search is unaffected by the swap — it is local, and composes with whatever the remote filter has fetched.
+
+Three files carry most of the work: a new pure module `frontend/src/dock/quickSearchModel.ts`, the panel [`TableWorkPanel.ts`](frontend/src/dock/TableWorkPanel.ts), and the backend's [`compiler.py`](backend/app/sql/compiler.py), which must learn the descriptor shapes the library's filter row emits and it cannot compile today.
 
 ---
 
 ## Architecture Decisions
 
-### No existing quick-search precedent in this app — a new, narrowly-scoped pattern
+### Quick search is local; column filters are remote
 
-Searched for a comparable client-side text filter elsewhere in the app — the navigator tree, the saved-queries list (`QueriesView.ts`), the start page, and the command palette backlog item in `TODO.md` — and grepped the whole frontend for `toLowerCase().includes(`, `SearchField`, and similar. None exists.[^precedent-search] This plan therefore states its own matching rule from scratch rather than following an in-app convention; the surrounding mechanics (pure DOM-free helper module, arrow-function event handlers, toolbar-embedded non-button inputs) do follow existing precedent, cited in each decision below.
+Quick search decides which of the **already-loaded** rows the grid renders. Column filters decide which rows the **server sends**. Both can be active at once: the visible rows are whatever the quick-search text matches among whatever the server returned. Clearing one never clears the other.
 
-### Quick search and the remote Filter are independent, and neither can be built from the other
+The store's own filter API cannot express a network-free filter. `AbstractStore.applyFilterChange()` reloads whenever `remoteFilter` **or** `pageSize` is set, and [`stores.ts:36`](frontend/src/data/stores.ts#L36)'s `buildStore` passes `pageSize: PAGE_SIZE` into every `AjaxStore` unconditionally.[^filter-always-reloads] So quick search goes through `Table.setRowVisible`, and column filters go through the store.
 
-They stay two separate controls with two separate states: remote Filter controls what the server sends; quick search controls what the grid shows among rows already received. Both can be active at once — the visible rows are whatever matches the quick search among whatever the remote filter already fetched — and clearing one never clears the other.
+### The header filter row replaces the Filter dialog
 
-Reusing the store's own `filterBy()`/`clearFilter()` for a "local-only" filter was considered and rejected: `AbstractStore.applyFilterChange()` always triggers a page-1 reload whenever `remoteFilter` **or** `pageSize` is set (`reload = this._remoteFilter || this._pageSize != null`), and `frontend/src/data/stores.ts:36`'s `buildStore` passes `pageSize: PAGE_SIZE` (100, defined at line 16) into every `AjaxStore` unconditionally.[^filterby-always-reloads] So every store this panel uses reloads on any `filterBy` call regardless of `remoteFilter`, making the store's filter API structurally unable to express a network-free filter.
+The toolbar's Filter button stops opening [`FilterDialog.ts`](frontend/src/dock/FilterDialog.ts) and becomes a `ToggleButton` that calls `Table.setFilterRowVisible(...)`. `FilterDialog.ts`, [`filterModel.ts`](frontend/src/dock/filterModel.ts), and `frontend/tests/dock/filterModel.test.ts` are deleted.
 
-The toolbar's existing `filterButton` tint (`FILTER_ACTIVE_COLOR`, driven by `store.on("filterchange", this.syncFilterActive)` at [`TableWorkPanel.ts:149`](frontend/src/dock/TableWorkPanel.ts#L149)) is untouched and keeps reflecting only the remote filter's state. Quick search gets no equivalent color-tint indicator — see "No shared active-state indicator" below.
+Keeping both entry points is not possible with the library's public API.[^why-replace-dialog] `FilterDialog`'s Apply and Clear both call `store.clearFilter()`, which wipes every active filter — including the header row's own slots, each keyed by its column's field name — and there is no way to clear only the dialog's. And the header row deliberately never reconstructs its input text from a descriptor someone else wrote, so a dialog-set filter on a column would leave that column's input blank over filtered data.
 
-### Local search narrows only the currently loaded rows; it never force-loads the rest of the table
+The dialog's original justification has also expired. Its own header comment says it was "chosen over an inline per-column filter row because the library's header / column geometry is not an app seam", citing [`plans/implemented/grid-filter-sort.md`](plans/implemented/grid-filter-sort.md), whose Architecture Decisions rejected a filter row for exactly that reason. The library now exposes one.
 
-`AjaxStore` never holds more than one page: `ingestRaw` (`AbstractStore.ts:605-613`) replaces `_allRecords` wholesale on every `load()` rather than appending, and `buildStore` sets `pageSize: 100` with no `PaginationBar` wired into this panel (the sibling plan's own Non-Goals confirm this: adding one is separate, future work). So at any moment the store holds at most 100 rows, however many the table has server-side.
+### Only number, string, and boolean columns are filterable
 
-Decision: quick search searches exactly `store.getRecords()` — whatever is currently loaded — and never forces a bulk load to search the whole table.[^why-not-force-load] When the server holds more rows than are loaded (`store.getTotalCount()` exceeds the loaded count), the status label states this plainly rather than silently searching a partial set (see "Public API" and "Internal Structure").
+[`buildColumnSpec`](frontend/src/dock/tableWriteRules.ts#L42) marks a column `filterable` when its `wireType` is `number`, `string`, or `boolean`. `isoString`, `json`, `jsonArray`, and `base64` columns get no filter input.[^why-filterable-subset]
 
-### Matching rule: case-insensitive substring, across every loaded primitive field
+The app cannot narrow *which operators* a filterable column offers — the library derives them from the model field's type alone (`ColumnFilter.ts`'s `columnFilterOperators`, line 83). Gating whole columns is the only lever this app has.
 
-For a non-empty query, a record matches if **any** field's value, lower-cased and stringified, contains the lower-cased query as a substring. Only primitive field values (`string`, `number`, `boolean`) participate; `null`/`undefined` are skipped, and so is any field whose value is a JS object — which, after `Field.convertValue`'s ingestion-time coercion (`Field.ts:190-200`), is exactly the `date`/`datetime`/`time` fields (coerced to real `Date` objects, not left as raw ISO strings) and the `json`/`jsonArray` fields (parsed objects/arrays).[^why-skip-objects] A blank or whitespace-only query is treated as empty (matches every row — no filter applied).
+| `wireType` | Model `FieldType` ([`buildModel.ts:10`](frontend/src/data/buildModel.ts#L10)) | Filterable? | Operators the header then offers |
+|---|---|---|---|
+| `number` | `number` | yes | equals, not equals, `>`, `≥`, `<`, `≤`, is empty, is not empty |
+| `string` | `string` | yes | contains, starts with, ends with, equals, not equals, is empty, is not empty |
+| `boolean` | `boolean` | yes | equals, not equals, is empty, is not empty |
+| `base64` | `string` | **no** | — |
+| `isoString` | `datetime` | **no** | — |
+| `json` / `jsonArray` | `auto` | **no** | — |
+
+### The SQL compiler compares a column's text form when the operand is text
+
+[`FilterCompiler._node`](backend/app/sql/compiler.py#L118) gains one rule: when the value bound for a comparison is a Python `str`, the column is compared as `"col"::text`; otherwise it is compared natively.[^why-text-cast]
+
+| Descriptor | Compiled fragment |
+|---|---|
+| `{type: "eq", field: "name", value: "ada"}` | `"name"::text = $1` |
+| `{type: "eq", field: "id", value: 42}` | `"id" = $1` |
+| `{type: "eq", field: "active", value: true}` | `"active" = $1` |
+| `{type: "contains", field: "id", value: "4"}` | `"id"::text ILIKE $1 ESCAPE '\'` |
+
+Without the rule, a `contains` filter on a `uuid` or `numeric` column (both `wireType: "string"`, both offered `contains` by the header) fails in Postgres — there is no `ILIKE` operator for those types.
+
+### The SQL compiler learns `endsWith` and null-bearing `in`
+
+Two more descriptor shapes the header row emits and the compiler rejects today:
+
+- **`endsWith`** joins the existing `contains` / `startsWith` branch with a `%value` pattern. Unhandled today, it raises `ValidationError` → HTTP 422.
+- **`in` with nulls in `values`.** "Is empty" compiles to `{type: "in", field, values: [null, undefined, ""]}` (`undefined` arrives as `null` over JSON), and "is not empty" wraps that in `not`. `= ANY(...)` never matches `NULL`, so the current branch silently misses every null row.
+
+| Field | `values` | Compiled fragment |
+|---|---|---|
+| `name` | `[null, null, ""]` | `("name"::text IS NULL OR "name"::text = ANY($1))`, `$1 = [""]` |
+| `id` | `[1, 2, 3]` | `"id" = ANY($1)`, `$1 = [1, 2, 3]` |
+| `name` | `[null]` | `"name" IS NULL` |
+| `name` | `[]` | `FALSE` |
+
+The `::text` decision above applies here too: the cast is used when every non-null value is a `str`.
+
+### Quick search matches a case-insensitive substring across every loaded primitive field
+
+For a non-empty query, a record matches if **any** field's value, lower-cased and stringified, contains the lower-cased query. Only `string`, `number`, and `boolean` values participate; `null`/`undefined` are skipped, and so is any value that is a JS object — after `Field.convertValue`'s ingestion-time coercion that means the `date`/`datetime`/`time` fields (real `Date` objects) and the `json`/`jsonArray` fields (parsed objects and arrays).[^why-skip-objects] A blank or whitespace-only query matches every row.
 
 Worked example, table `customers(name string, email string, signup_count number, active boolean, created_at isoString, metadata json)`:
 
@@ -50,64 +98,49 @@ Worked example, table `customers(name string, email string, signup_count number,
 | `"smith"` | `metadata` (json) | `{"nickname":"Smith"}` | **no** (excluded) | — |
 | `""` (empty) | — | — | — | every loaded row matches |
 
-A record matches the query if it matches on **any** field — the `customers` row above matches `"smith"` because `name` matches, even though every other field does not.
+A record matches if it matches on **any** field — the `customers` row above matches `"smith"` on `name` alone.
 
-### Row hiding requires a new library primitive — `setRowVisible` on `Table`
+### Quick search never force-loads the rest of the table
 
-No row-visibility mechanism exists in `@jimka/typescript-ui` today. `ColumnConfig`'s `cellReadOnly`/`rowReadOnly` (`ColumnConfig.ts:137,312`) are **write-permission** predicates — they mark cells non-editable, they never remove a row from rendering — confirmed by reading where `_rowReadOnly` is actually consulted (`Body.ts:1372`), which only ever decides whether a cell's editor opens, never whether the row renders. Reading through the rest of `Body.ts`, every other appearance of `visible`/`hidden` turns out to be about **hidden columns**, not rows.
+`AjaxStore` holds at most one page: `ingestRaw` replaces `_allRecords` wholesale on every `load()`, and `buildStore` sets `pageSize: 100` with no `PaginationBar` in this panel. Quick search searches exactly `store.getRecords()` and never triggers a bulk load.[^why-not-force-load] When the server holds more rows than are loaded, the status label says so rather than silently searching a partial set.
 
-**Swapping the grid to a wrapping store was considered and rejected.** `Table.setStore()` exists (`Table.ts:439`) and `frontend/src/dock/QueryResultView.ts:64` already builds a `MemoryStore` over a loaded row array — but for a different, read-only case (a static query result, `rowReadOnly: () => true`). Reusing that shape for `TableWorkPanel`'s live, editable, paginated grid has two concrete hazards:
+### Quick-search logic lives in a DOM-free module
 
-1. **Add/Delete/Save would target the wrong store.** `TableWorkPanel`'s `store: AjaxStore` field ([`TableWorkPanel.ts:56`](frontend/src/dock/TableWorkPanel.ts#L56)) is fixed at construction and is what `addButton`/`confirmDelete`/`save_` all call `.add()`/`.remove()`/`.sync()` on directly — never `dataGrid.getStore()`. Swapping `dataGrid`'s bound store to a filtered `MemoryStore` on every keystroke would leave the grid rendering the `MemoryStore` while writes kept landing on the (now-invisible) `AjaxStore`: a row added via the Add button would never appear in the filtered grid, and its pending edit would look lost.
-2. **`setStore()` is a heavy, disruptive call.** It re-resolves every column from the new store's model, clears column widths, and ends in a full layout pass (`Table.ts:439-472`) — built for an occasional, deliberate store change, not something to run on every keystroke of a search box.
+`matchesQuickSearch` and `quickSearchStatus` go in a new `frontend/src/dock/quickSearchModel.ts`, mirroring [`tableWriteRules.ts`](frontend/src/dock/tableWriteRules.ts) — a pure module split out of `TableWorkPanel.ts` so vitest's node environment can cover it, because `TableWorkPanel.ts`'s top-level imports touch `document` at module-load time.
 
-**The library already has the right internal seam, just not exposed.** `Body.getVisibleRecords()` (`Body.ts:353-364`) is a documented "subclassing seam" — its default implementation returns `this._store.getRecords()`, and `TreeBody` already overrides it to return "its depth-flattened, expansion-aware visible subtree." The concept of "the rows actually rendered can be a filtered view of the store's records" is already load-bearing library architecture; it is only missing a public, consumer-facing hook.
+### The toolbar gains a text field, which no toolbar in this app has today
 
-**Stated prerequisite** (not built by this plan — `typescript-ui`-repo work):
+Every `ToolBar` in `frontend/src` currently holds only buttons, separators, and spacers.[^toolbar-input-precedent] The library documents non-button children as supported (`ToolBar.md`: "Children can be any `Component`"), so `quickSearchField` and its status label go straight into the existing bar rather than into a second strip.
 
-```ts
-// On Table (packages/lib/src/typescript/lib/component/table/Table.ts)
-setRowVisible(predicate: ((record: ModelRecord) => boolean) | null): this;
-```
+Left-to-right order after this plan: record-view toggle, Previous, Next, separator, Add, Delete, Save, `Spacer.flex()`, **quick-search field, quick-search status**, filter-row toggle, Export, Refresh. The two new components are inserted immediately after `Spacer.flex()` at [`TableWorkPanel.ts:131`](frontend/src/dock/TableWorkPanel.ts#L131); `filterToggle` takes `filterButton`'s existing slot.
 
-Required contract, so this plan's app-side steps are correct once the method exists:
+### One method owns every visual state of the filter toggle
 
-1. Filters which loaded records the grid renders/scrolls through while `getDisplayMode() === "normal"`; `null` clears it (show every loaded record). Mirrors `Body.setRowReadOnly`'s predicate shape (`Body.ts:583`) but must be **public and live** — unlike `rowReadOnly`, which is spec/construction-only and explicitly marked "not for consumer use," this predicate has to change on every keystroke, so a construction-time-only field cannot serve it.[^why-live-setter]
-2. Never touches `store.getRecords()`, `getSelectedRecords()`, or `hasPendingChanges()` — display-only, so a hidden row's pending edit and selection survive untouched (see "Add/Delete/Save are unaffected" below).
-3. Has no effect while `getDisplayMode() === "rotated"` — the mode `plans/table-record-detail-view.md` adds, which renders one field/value row per source *column* for a single displayed record, not one row per source *record*. `Table.ts:396-404` already establishes this exact precedent for `rowReadOnly`: the rotated `bindView` call hardcodes `() => true` in place of the spec's predicate, because that predicate is written against source records and the rotated projection's rows are a different model entirely, so the source predicate does not apply to them. `setRowVisible`'s predicate must be neutralized the same way for the same reason.
-4. Re-evaluates automatically on the same rebind triggers `rowReadOnly`'s doc comment already lists (scroll, `'datachange'`, column show/hide) — the app calls `setRowVisible` again only when the query text changes, never on a store reload.
+`syncFilterActive` is the single writer for the filter toggle's selected state, enabled state, colour, and description. It runs at construction, on the store's `'filterchange'`, and at the end of `toggleRecordView`.
 
-### Local filtering and the record/rotated view are orthogonal
+Giving the rotated-mode gating its own sync method — the shape `syncAddEnabled` uses for the Add button — would put two writers on one button's `setDescription`, and whichever ran last would win.
 
-`plans/table-record-detail-view.md` adds a rotated single-record view (toggle + Previous/Next) to this same toolbar. Per the `setRowVisible` contract above (point 3), the quick-search predicate has no effect once that view is active — the rotated projection always shows the full field/value breakdown of whichever record is displayed, regardless of the grid's current search text. Previous/Next, per that plan's own `stepRecord`/`syncStepEnabled` (its `Internal Structure`), read `dataGrid.getStore().getRecords()` directly — the full loaded set — so stepping is unaffected by whatever quick search currently hides in grid view.
+### Rotated mode neutralizes both mechanisms, and the library already does it
 
-Decision: **do not coordinate the two.** The quick-search field stays enabled and typable while record view is active; typing has no visible effect until the user switches back to grid view, where the narrowed result is already in effect. Making record view respect the search text would mean either the stepper reading the search predicate too — a new coupling between two independently authored plans, whichever lands second — or moving quick search into the store layer, which the "Row hiding requires a new library primitive" decision above already rejected. Neither is worth it for a feature neither plan currently needs.
+`Table.setRowVisible`'s predicate has no effect while `getDisplayMode() === "rotated"` — the projection's rows are one per source *field* of one record, not one per record. The filter row collapses in rotated mode too: the projection's columns are built from an internal spec that declares no `filterable`, so `Header.hasFilterRow()` returns `false` and the row drops to zero height. Both restore on return to grid view.
 
-Consequently, this plan needs no toggle control. `table-record-detail-view.md` proposes a `glyphToggleButton` helper for its own record-view toggle; quick search is a free-text field, not a binary mode switch, so that helper is not used here.
+This plan therefore adds no coordination code. It does disable the filter toggle while rotated, mirroring how `syncAddEnabled` disables Add, so a control that cannot show its effect does not look broken.
 
-### Toolbar placement: anchored to `Spacer.flex()`, not to a sibling-plan button
+### Neither mechanism needs an app-side debounce
 
-`table-record-detail-view.md` inserts its three new buttons "immediately after `Spacer.flex()` and before `filterButton`" ([`TableWorkPanel.ts:99`](frontend/src/dock/TableWorkPanel.ts#L99)) — it does not consume the spacer itself, so the gap it creates is still available. This plan inserts `quickSearchField` and its status label the same way: **immediately after `Spacer.flex()`**, ahead of whatever already follows it.
+Quick search filters at most `PAGE_SIZE` (100) loaded records over a handful of fields per keystroke — well under a millisecond, so no throttle is added.[^no-debounce] The header filter row already debounces its own keystrokes 200 ms before writing to the store (`Header.onFilterCellChange`), and applies immediately on an operator pick, Enter, or Escape. This app adds no debounce logic for either.
 
-Anchoring to the spacer (a component that exists today, in the unmodified file) rather than to `recordToggle` (a component that only exists once the sibling plan lands) makes the two plans' insertions order-independent: whichever plan is implemented second still finds `Spacer.flex()` and inserts next to it, landing the newer control closest to the spacer and pushing the earlier one one slot right. Either implementation order produces the same final left-to-right order: `Spacer.flex()`, quick search, [record-view toggle, Previous, Next — once that plan lands], Filter, Export, Refresh.[^toolbar-order-footnote]
+### Add, Delete, and Save are unaffected
 
-### No shared active-state indicator — the field's own text is the indicator
+`setRowVisible` is display-only: it never touches `store.getRecords()`, `getSelectedRecords()`, or `hasPendingChanges()`. A row hidden by quick search keeps its selection and its pending edit. `confirmDelete`, `save_`, `syncDeleteEnabled`, and `syncSaveEnabled` need no changes.
 
-`filterButton` is an icon-only glyph button with no room to show its own state except by tinting its color (`FILTER_ACTIVE_COLOR`); a text field does not have that problem; the typed text is already visible. Decision: quick search gets no color-tint or icon-badge indicator of its own. Its live status label (see "Public API") shows the match count whenever the field is non-empty, which doubles as the "search is active" signal.
-
-### Add/Delete/Save are unaffected
-
-Per the `setRowVisible` contract's point 2, hiding a row from the grid never changes `store.getRecords()`/`getSelectedRecords()`/`hasPendingChanges()`. So: a row selected before the search text hides it stays selected, and its pending edit is untouched; `confirmDelete`, `save_`, `syncDeleteEnabled`, and `syncSaveEnabled` ([`TableWorkPanel.ts:157-168`](frontend/src/dock/TableWorkPanel.ts#L157)) need no changes and are not touched by this plan.
-
-### No debounce
-
-`matchesQuickSearch` is O(field count) per record, and the store holds at most `PAGE_SIZE` (100) records (`frontend/src/data/stores.ts:16`) — filtering the whole loaded page on every keystroke is well under a millisecond. No debounce or throttle is added.[^no-debounce-footnote]
+A column filter *does* reload the page, which discards loaded records — exactly as the filter dialog does today, and as Refresh does. That is unchanged behaviour, not something this plan introduces.
 
 ---
 
 ## Public API
 
-The library-side prerequisite (`Table.setRowVisible`) is specified above, under "Row hiding requires a new library primitive" — it is **not** implemented by this plan. Everything below is this app's own new code.
+Nothing here is exported to a consumer — every new symbol is app-internal. One new module, one new helper on an existing module, and one changed backend behaviour.
 
 ```ts
 // frontend/src/dock/quickSearchModel.ts — new module
@@ -143,30 +176,54 @@ export function quickSearchStatus(matchedCount: number, loadedCount: number, tot
 
 `loadedCount === 1` uses `"row"`; otherwise `"rows"`. The "more on the server" clause appears only when `totalCount !== undefined && totalCount > loadedCount`, and its count is always `totalCount - loadedCount`.
 
+```ts
+// frontend/src/dock/tableWriteRules.ts — new export alongside isRequiredColumn
+
+/**
+ * Whether this column gets a filter input in the grid's header filter row.
+ * True for the wire types the SQL filter compiler can bind: number, string,
+ * and boolean.
+ */
+export function isFilterableColumn(column: ColumnMeta): boolean;
+```
+
+Library methods this plan calls, all already shipped:
+
+```ts
+// Table (packages/lib/src/typescript/lib/component/table/Table.ts)
+setRowVisible(predicate: ((record: ModelRecord) => boolean) | null): this;   // :442
+setFilterRowVisible(visible: boolean): this;                                  // :691
+isFilterRowVisible(): boolean;                                                // :677
+```
+
 ---
 
 ## Internal Structure
 
-`TableWorkPanel`'s new members. Both handlers are arrow-function fields — `applyQuickSearch` is registered by reference on `quickSearchField`'s `"change"` event and `syncQuickSearchStatus` on the store's `"datachange"`/`"load"` events, so both must keep `this` per convention (c) in [`frontend/COMPONENT_CONVENTIONS.md`](frontend/COMPONENT_CONVENTIONS.md).
+### `TableWorkPanel` — new and changed members
+
+`filterButton: Button` becomes `filterToggle: ToggleButton`. Every new handler is an arrow-function field: each is registered by reference on a store, grid, or button event and would drop `this` as a plain method (convention (c) in [`frontend/COMPONENT_CONVENTIONS.md`](frontend/COMPONENT_CONVENTIONS.md)).
 
 ```ts
-// New fields, alongside filterButton:
+// Fields, alongside the existing button block:
 private readonly quickSearchField:      TextField;
 private readonly quickSearchStatusText: Text;
+private readonly filterToggle:          ToggleButton;   // replaces filterButton
+private readonly canFilter:             boolean;        // any column filterable at all
 ```
 
 ```ts
-// New pre-super() locals, built alongside filterButton:
+// Pre-super() locals, built alongside the other toolbar controls:
 const quickSearchField      = new TextField({ placeholder: "Quick search (loaded rows)" });
 const quickSearchStatusText = new Text("");
+const canFilter             = columns.some(isFilterableColumn);
+const filterToggle          = glyphToggleButton("filter", PRIMARY_COLOR, "Filter row", false);
 ```
 
 ```ts
-// New arrow-function fields, alongside syncDeleteEnabled:
-
-// Registered on quickSearchField ("change") — fires on every keystroke
-// (TextInput's native `input` listener). Installs a fresh predicate on every
-// call; passing null when the query is empty clears the filter entirely.
+// Registered on quickSearchField ("change"), which TextInput fires on every
+// keystroke from its native `input` listener. Installs a fresh predicate each
+// call; null when the query is empty clears the filter entirely.
 private applyQuickSearch = (): void => {
     const query = this.quickSearchField.getValue().trim();
 
@@ -174,12 +231,10 @@ private applyQuickSearch = (): void => {
     this.syncQuickSearchStatus();
 };
 
-// Registered on `store` ("datachange", "load") as well as called directly
-// from applyQuickSearch. Recomputes the status label from the CURRENT query
-// against whatever is currently loaded — it does not touch setRowVisible,
-// since the predicate installed by applyQuickSearch keeps re-evaluating
-// itself against fresh loaded records on its own (see the setRowVisible
-// contract's point 4).
+// Registered on `store` ("datachange", "load") and called directly from
+// applyQuickSearch. Recomputes the label from the CURRENT query against
+// whatever is loaded now; it never calls setRowVisible, because the installed
+// predicate re-evaluates itself against fresh records on every render pass.
 private syncQuickSearchStatus = (): void => {
     const query = this.quickSearchField.getValue().trim();
 
@@ -194,48 +249,149 @@ private syncQuickSearchStatus = (): void => {
 
     this.quickSearchStatusText.setText(quickSearchStatus(matched, loaded.length, this.store.getTotalCount()));
 };
+
+// Registered on filterToggle ("action"). ToggleButton has already flipped its
+// own selected state by the time this runs, so it reads as the new intent.
+private toggleFilterRow = (): void => {
+    this.dataGrid.setFilterRowVisible(this.filterToggle.isSelected());
+};
 ```
 
-Post-`super()` wiring, alongside the existing filter-wiring block:
+`syncFilterActive` replaces its current body — the single writer for every visual state of `filterToggle`:
 
 ```ts
+// Registered on `store` ("filterchange"), and called from toggleRecordView.
+private syncFilterActive = (): void => {
+    const rotated = this.dataGrid.getDisplayMode() === "rotated";
+    const active  = this.store.getActiveFilters().length > 0;
+
+    this.filterToggle.setSelected(this.dataGrid.isFilterRowVisible());
+    this.filterToggle.setEnabled(this.canFilter && !rotated);
+    this.filterToggle.setForegroundColor(active ? FILTER_ACTIVE_COLOR : PRIMARY_COLOR);
+    this.filterToggle.setDescription(
+        !this.canFilter ? "Filter row (no filterable columns)"
+        : rotated       ? "Switch to the grid view to use the filter row"
+        : active        ? "Filter row (filters active)"
+                        : "Filter row");
+};
+```
+
+Post-`super()` wiring, replacing the existing filter-wiring block at [`TableWorkPanel.ts:160`](frontend/src/dock/TableWorkPanel.ts#L160):
+
+```ts
+this.syncFilterActive();
+store.on("filterchange", this.syncFilterActive);
+this.filterToggle.on("action", this.toggleFilterRow);
+
 this.quickSearchField.on("change", this.applyQuickSearch);
 this.syncQuickSearchStatus();
 store.on("datachange", this.syncQuickSearchStatus);
 store.on("load", this.syncQuickSearchStatus);
 ```
 
-`store.on("load", …)` is needed in addition to `"datachange"` because `load()` (`AbstractStore.ts:314-363`) — the path Refresh takes — only emits `'load'`, not `'datachange'`.
+`store.on("load", …)` is needed in addition to `"datachange"`: `load()` — the path Refresh and every column-filter reload take — emits only `'load'`.
+
+`toggleRecordView` gains one line, next to its existing `syncAddEnabled()` / `syncStepEnabled()` calls:
+
+```ts
+this.syncFilterActive();
+```
+
+### `compiler.py` — `FilterCompiler._node`
+
+Three edits, all inside the existing method. `_column` is the one new helper, shared by every branch:
+
+```python
+def _column(self, field: str, values: list[Any]) -> str:
+    """
+    The column expression to compare against. A text operand can only have
+    come from a string-typed model field, whose Postgres type may be text,
+    varchar, char, uuid, or numeric — comparing the column's text form makes
+    every one of those valid.
+    """
+    ident = self._ident(field)
+
+    return ident + "::text" if values and all(isinstance(v, str) for v in values) else ident
+```
+
+- **Comparators** (`eq`/`neq`/`gt`/`gte`/`lt`/`lte`): `f"{self._column(f['field'], [f['value']])} {_COMPARATORS[t]} {self._bind(f['value'])}"`.
+- **Pattern match**: add `endsWith` to the `("contains", "startsWith")` tuple, with `pattern = "%" + pattern` for it. This branch always casts — `self._ident(field) + "::text"` — because a `LIKE`/`ILIKE` operand is a string by construction.
+- **`in`**: split `values` into nulls and non-nulls, then emit per the table under _Architecture Decisions_.
+
+```python
+if t == "in":
+    values   = list(f["values"])
+    concrete = [v for v in values if v is not None]
+    has_null = len(concrete) < len(values)
+    col      = self._column(f["field"], concrete)
+
+    if not concrete:
+        return f"{col} IS NULL" if has_null else "FALSE"
+
+    any_clause = f"{col} = ANY({self._bind(concrete)})"
+
+    return f"({col} IS NULL OR {any_clause})" if has_null else any_clause
+```
 
 ---
 
 ## Ordered Implementation Steps
 
-1. **Gate check.** Run `grep -rl "setRowVisible" frontend/node_modules/@jimka/typescript-ui/dist/lib/*.js`. If it finds nothing, **stop** — this plan is blocked on the library-side prerequisite in `## Architecture Decisions`; do not build an app-side workaround (e.g. do not fall back to the rejected `MemoryStore`-swap approach). Resume once the symlinked/installed library exposes the method.
+### Gate
 
-2. **Create `frontend/tests/dock/quickSearchModel.test.ts`**, test-first, mirroring [`frontend/tests/dock/tableWriteRules.test.ts`](frontend/tests/dock/tableWriteRules.test.ts)'s duck-typed-record-fixture style. Cover every row of the `matchesQuickSearch` worked example table and the `quickSearchStatus` worked-cases table above, plus: whitespace-only query treated as empty, `"SMITH"` matching `"john smith"` (case-insensitivity), and a `null`/`undefined`-valued field never matching a non-empty query. Run `cd frontend && npm test` — fails to import a module that does not exist yet.
+1. **Check the installed library build.** Run `grep -rl "setRowVisible\|setFilterRowVisible" frontend/node_modules/@jimka/typescript-ui/dist/lib/*.js`. If either symbol is missing, **stop and tell the user**: both shipped in the `typescript-ui` repo (commits `13e39f2d` and `6e5ce972`) but are not in the published `0.5.0` this app installs, so the app must be pointed at a local build (symlink override) or a later release first. Do not build an app-side substitute for either.
 
-3. **Create `frontend/src/dock/quickSearchModel.ts`** implementing `matchesQuickSearch` and `quickSearchStatus` per `## Public API`. Give the module a header comment stating why it is split out (pure logic, DOM-free, node-vitest — same reason as `tableWriteRules.ts`, since `TableWorkPanel.ts`'s top-level imports touch `document`). Run `npm test` — green.
+### Backend — the SQL compiler
 
-4. **`frontend/src/dock/TableWorkPanel.ts` — imports.** Add `TextField, Text` to the existing `@jimka/typescript-ui/component/input` import (add the import if it doesn't already exist in this file). Add `matchesQuickSearch, quickSearchStatus` from `./quickSearchModel`. No new glyphs are needed.
+2. **`backend/tests/test_compiler.py`**, test-first, in the existing `FilterCompiler` section. Add cases for: every row of the `::text` table and the `in` table under _Architecture Decisions_; `endsWith` producing `%value` with wildcards escaped; `not` wrapping a null-bearing `in`. Run `cd backend && poetry run python -m pytest tests/test_compiler.py` — red.
 
-5. **`TableWorkPanel.ts` — fields.** Add `quickSearchField: TextField` and `quickSearchStatusText: Text` to the field block at [lines 63-65](frontend/src/dock/TableWorkPanel.ts#L63), alongside `filterButton`. Extend the block's leading comment to name the two new fields (if `table-record-detail-view.md` has already landed and rewritten this comment for its own fields, extend that version additively rather than reverting it).
+3. **`backend/app/sql/compiler.py`** — add the `_column` helper and apply the three `_node` edits per `## Internal Structure`. Run the same pytest command — green. Then `poetry run python -m pytest` — the whole suite still passes.
 
-6. **`TableWorkPanel.ts` — pre-`super()` locals.** Build `quickSearchField` and `quickSearchStatusText` per `## Internal Structure`, right after the `filterButton` local at [line 85](frontend/src/dock/TableWorkPanel.ts#L85).
+### Quick search
 
-7. **`TableWorkPanel.ts` — toolbar order.** Insert `quickSearchField, quickSearchStatusText` into the `components` array at [line 99](frontend/src/dock/TableWorkPanel.ts#L99), immediately after `Spacer.flex()` — ahead of whatever component array entry currently follows it (`filterButton` today; `recordToggle` if `table-record-detail-view.md` has already landed). See "Toolbar placement" above for why anchoring to the spacer, not to a named sibling button, keeps this order-independent.
+4. **Create `frontend/tests/dock/quickSearchModel.test.ts`**, test-first, mirroring [`frontend/tests/dock/tableWriteRules.test.ts`](frontend/tests/dock/tableWriteRules.test.ts)'s duck-typed-record-fixture style. Cover every row of both worked-example tables above, plus the extra cases listed in `## Expected Behaviour`. Run `cd frontend && npm test` — fails to import a module that does not exist yet.
 
-8. **`TableWorkPanel.ts` — post-`super()` wiring.** Assign the two new fields alongside the existing ones. Add the wiring block from `## Internal Structure` (the `"change"` listener, the initial `syncQuickSearchStatus()` call, and the two `store.on(...)` registrations) next to the existing filter-wiring block at [lines 124-128](frontend/src/dock/TableWorkPanel.ts#L124).
+5. **Create `frontend/src/dock/quickSearchModel.ts`** implementing `matchesQuickSearch` and `quickSearchStatus` per `## Public API`. Give the module a header comment stating why it is split out (pure, DOM-free, node-vitest — the same reason `tableWriteRules.ts` gives). Run `npm test` — green.
 
-9. **`TableWorkPanel.ts` — handlers.** Add `applyQuickSearch` and `syncQuickSearchStatus` as arrow-function fields after `syncDeleteEnabled` ([line 163](frontend/src/dock/TableWorkPanel.ts#L163)), per `## Internal Structure`.
+### Column filterability
 
-10. **`TableWorkPanel.ts` — header comment.** Extend the file's opening block to mention the quick-search field and its two handlers, the same way it already lists `syncFilterActive`/`syncSaveEnabled`/`syncDeleteEnabled`.
+6. **`frontend/src/dock/tableWriteRules.ts`** — add and export `isFilterableColumn` per `## Public API`, and set `filterable: isFilterableColumn(c)` on each entry `buildColumnSpec` maps at [line 45](frontend/src/dock/tableWriteRules.ts#L45). Extend `buildColumnSpec`'s doc comment with one sentence naming the filterable wire types.
 
-11. **Checkpoint.** `cd frontend && npm run typecheck && npm test`. A typecheck failure on `dataGrid.setRowVisible` at this point means the symlinked library build does not actually have the method yet, despite step 1's grep — re-check step 1 rather than working around the type error.
+7. **`frontend/tests/dock/tableWriteRules.test.ts`** — add cases for `isFilterableColumn` (one per wire type) and for `buildColumnSpec` carrying `filterable` through.
 
-12. **`README.md`.** Extend the "Data grid" highlight ([line 28](README.md#L28)) to mention the local quick search alongside filter/sort/page. If `table-record-detail-view.md` has already landed and extended this same line for its own feature, append to that wording rather than overwrite it.
+### Panel wiring
 
-13. **Manual verification** — per `## Verification`.
+8. **`TableWorkPanel.ts` — imports.** Add `TextField, Text` from `@jimka/typescript-ui/component/input` (a new import line). Add `matchesQuickSearch, quickSearchStatus` from `./quickSearchModel`, and `isFilterableColumn` to the existing `./tableWriteRules` import at [line 49](frontend/src/dock/TableWorkPanel.ts#L49). Delete the `openFilterDialog` import at [line 47](frontend/src/dock/TableWorkPanel.ts#L47). `Button` stays imported (Add/Delete/Save still use it); `ToggleButton` is already imported.
+
+9. **`TableWorkPanel.ts` — fields.** In the block at [lines 73-82](frontend/src/dock/TableWorkPanel.ts#L73), rename `filterButton: Button` to `filterToggle: ToggleButton` and add `quickSearchField`, `quickSearchStatusText`, and `canFilter` per `## Internal Structure`. Extend the block's leading comment to name them.
+
+10. **`TableWorkPanel.ts` — pre-`super()` locals.** Replace the `filterButton` local at [line 102](frontend/src/dock/TableWorkPanel.ts#L102) with the four locals from `## Internal Structure`. `glyphToggleButton` is already imported.
+
+11. **`TableWorkPanel.ts` — toolbar order.** In the `components` array, insert `quickSearchField, quickSearchStatusText` immediately after `Spacer.flex()` at [line 131](frontend/src/dock/TableWorkPanel.ts#L131), and replace `filterButton` at [line 132](frontend/src/dock/TableWorkPanel.ts#L132) with `filterToggle`.
+
+12. **`TableWorkPanel.ts` — post-`super()` wiring.** Assign the new fields alongside the existing ones, then replace the filter-wiring block at [lines 160-164](frontend/src/dock/TableWorkPanel.ts#L160) with the block from `## Internal Structure`.
+
+13. **`TableWorkPanel.ts` — handlers.** Replace `syncFilterActive`'s body ([lines 198-205](frontend/src/dock/TableWorkPanel.ts#L198)) with the version in `## Internal Structure`. Add `toggleFilterRow`, `applyQuickSearch`, and `syncQuickSearchStatus` as arrow-function fields after `syncDeleteEnabled` ([line 219](frontend/src/dock/TableWorkPanel.ts#L219)). Add the `this.syncFilterActive();` call to `toggleRecordView` beside its existing sync calls ([line 234](frontend/src/dock/TableWorkPanel.ts#L234)).
+
+14. **`TableWorkPanel.ts` — header comment.** Update the opening block ([lines 1-25](frontend/src/dock/TableWorkPanel.ts#L1)): the toolbar now carries a quick-search field and a filter-row toggle instead of a Filter button; name the two new handlers the way it already names `syncFilterActive` / `syncSaveEnabled` / `syncDeleteEnabled`, and say in one sentence that quick search is local and the filter row is remote.
+
+15. **Checkpoint.** `cd frontend && npm run typecheck && npm test`. A typecheck failure on `setRowVisible`/`setFilterRowVisible` means step 1's gate was mis-read — go back to it rather than working around the type error.
+
+### Remove the filter dialog
+
+16. **Delete** `frontend/src/dock/FilterDialog.ts`, `frontend/src/dock/filterModel.ts`, and `frontend/tests/dock/filterModel.test.ts`.
+
+17. **Retarget the surviving comment references.** `grep -rn "FilterDialog\|filterModel" frontend/src frontend/tests` finds explanatory comments in [`LoginDialog.ts:4`](frontend/src/shell/LoginDialog.ts#L4), [`CreateTableForm.ts:2,24`](frontend/src/dock/CreateTableForm.ts#L2), and [`SqlPreviewDialog.ts:24,36,58,111,117`](frontend/src/dock/SqlPreviewDialog.ts#L24). Point each at a surviving example: `CreateTableForm` for the weighted-`Grid` row idiom, `SqlPreviewDialog` for the `await dialog.show()` idiom, the open/run split, and the `resizer` handle. Re-run the grep — expect zero matches.
+
+18. **Checkpoint.** `cd frontend && npm run typecheck && npm test`.
+
+### Docs
+
+19. **`README.md`** — extend the "Data grid" highlight ([lines 27-31](README.md#L27)) to name the two new controls: a per-column header filter row (server-side) and a quick search over the loaded page (client-side).
+
+20. **`LIBRARY_NOTES.md`** — add one entry only if step 21's manual case 12 fails; see `## Documentation Impact`.
+
+21. **Manual verification** — per `## Verification`.
 
 ---
 
@@ -246,7 +402,18 @@ store.on("load", this.syncQuickSearchStatus);
 | Create | `frontend/src/dock/quickSearchModel.ts` |
 | Create | `frontend/tests/dock/quickSearchModel.test.ts` |
 | Modify | `frontend/src/dock/TableWorkPanel.ts` |
+| Modify | `frontend/src/dock/tableWriteRules.ts` |
+| Modify | `frontend/tests/dock/tableWriteRules.test.ts` |
+| Modify | `frontend/src/shell/LoginDialog.ts` (comment only) |
+| Modify | `frontend/src/dock/CreateTableForm.ts` (comments only) |
+| Modify | `frontend/src/dock/SqlPreviewDialog.ts` (comments only) |
+| Modify | `backend/app/sql/compiler.py` |
+| Modify | `backend/tests/test_compiler.py` |
 | Modify | `README.md` |
+| Modify | `LIBRARY_NOTES.md` — **only if** manual case 12 fails (see `## Documentation Impact`) |
+| Delete | `frontend/src/dock/FilterDialog.ts` |
+| Delete | `frontend/src/dock/filterModel.ts` |
+| Delete | `frontend/tests/dock/filterModel.test.ts` |
 
 ---
 
@@ -254,51 +421,74 @@ store.on("load", this.syncQuickSearchStatus);
 
 ### Unit-testable — `quickSearchModel.ts` (`frontend/tests/dock/quickSearchModel.test.ts`)
 
-- Every row of the `matchesQuickSearch` worked example table under "Matching rule" above.
-- Every row of the `quickSearchStatus` worked-cases table under `## Public API` above.
-- `matchesQuickSearch`: case-insensitivity (`"SMITH"` matches a record with `name: "John Smith"`); a whitespace-only query (`"   "`) matches every record, same as `""`; a record whose only matching field is `null`/`undefined` does not match a non-empty query; a record with no fields at all (`getData()` returns `{}`) matches only the empty query.
-- `quickSearchStatus`: `loadedCount === 1` renders `"row"` (singular); every other count renders `"rows"`; the "more on the server" clause is present exactly when `totalCount !== undefined && totalCount > loadedCount`, and absent when `totalCount === loadedCount` or `totalCount === undefined`.
+- Every row of the `matchesQuickSearch` worked-example table under _Architecture Decisions_.
+- Every row of the `quickSearchStatus` worked-cases table under `## Public API`.
+- `matchesQuickSearch`: `"SMITH"` matches a record with `name: "John Smith"`; a whitespace-only query (`"   "`) matches every record, same as `""`; a record whose only matching field is `null` or `undefined` does not match a non-empty query; a record with no fields at all (`getData()` returns `{}`) matches only the empty query.
+- `quickSearchStatus`: `loadedCount === 1` renders `"row"`, every other count renders `"rows"`; the "more on the server" clause is present exactly when `totalCount !== undefined && totalCount > loadedCount`.
+
+### Unit-testable — `tableWriteRules.ts` (`frontend/tests/dock/tableWriteRules.test.ts`)
+
+- `isFilterableColumn` returns `true` for `number`, `string`, `boolean`; `false` for `isoString`, `json`, `jsonArray`, `base64`.
+- `buildColumnSpec` sets `filterable` on each column entry to that column's `isFilterableColumn` result.
+
+### Unit-testable — `FilterCompiler` (`backend/tests/test_compiler.py`)
+
+- Every row of the `::text` table and the `in` table under _Architecture Decisions_.
+- `endsWith`: `{type: "endsWith", field: "name", value: "a%b"}` compiles to `"name"::text ILIKE $1 ESCAPE '\'` with `params == [r"%a\%b"]`.
+- `not` wrapping a null-bearing `in` on `name` compiles to `NOT (("name"::text IS NULL OR "name"::text = ANY($1)))`.
+- A string operand still binds as `$n` and is never interpolated (the existing injection-safety cases keep passing unchanged).
 
 ### Manual — the Data tab of an open table
 
-Use a table with more server-side rows than `PAGE_SIZE` (100) for the "more on the server" cases, and a small table for the rest.
+Use a table with more than 100 server-side rows for the "more on the server" cases, and a small table for the rest.
 
-1. **Live narrowing, no network.** Typing in the quick-search field narrows the grid immediately; the browser devtools network panel shows no new request while typing.
-2. **Clearing restores everything.** Emptying the field re-shows every currently loaded row.
-3. **Zero matches.** A query matching nothing empties the grid and the status label reads `"0 of {loaded} loaded rows"`, plus the "more on the server" clause on a table with more rows than loaded.
-4. **Composes with remote Filter.** With a remote filter applied (via the Filter button) and a quick-search query also active, the grid shows rows matching both. Clearing the quick-search field restores every remotely-filtered row; separately clearing the remote filter (via FilterDialog's Clear) leaves the quick-search query and its narrowing untouched.
-5. **Selection and pending edits survive hiding.** Select a row, edit a cell (Save enables), then type a query that hides that row: Save stays enabled and the edit is not lost. Clear the query: the row reappears still selected, still with its pending edit.
-6. **Delete still targets a hidden-then-cleared row correctly.** Same setup as case 5, but Delete instead of edit: confirming still queues the correct record.
-7. **Refresh re-applies the same query.** With a query active, press Refresh: the grid reloads and immediately re-narrows to the same query text against the fresh loaded set; the status label updates to the new counts.
-8. **No "more on the server" clause when everything is loaded.** On a table with fewer rows than `PAGE_SIZE`, the status label never shows the parenthetical, regardless of query.
-9. **Record view is unaffected (once `table-record-detail-view.md` lands).** With a quick-search query narrowing the grid, toggle into record view: the full record is shown, and Previous/Next step through every loaded record, not just the ones the query currently matches. Toggling back to grid view re-shows the narrowed set.
+1. **Quick search narrows live, with no network.** Typing in the quick-search field narrows the grid immediately; devtools' network panel shows no new request while typing.
+2. **Clearing quick search restores everything.** Emptying the field re-shows every loaded row.
+3. **Zero quick-search matches.** A query matching nothing empties the grid; the status label reads `"0 of {loaded} loaded rows"`, plus the "more on the server" clause on a big table.
+4. **No "more on the server" clause when everything is loaded.** On a table with fewer than 100 rows the parenthetical never appears.
+5. **Selection and pending edits survive hiding.** Select a row, edit a cell (Save enables), then type a query that hides it: Save stays enabled and the edit is intact. Clear the query — the row returns, still selected, still dirty.
+6. **Filter-row toggle.** Pressing the toolbar's Filter glyph shows the header filter row; pressing it again hides the row and clears every filter it applied, and the grid reloads unfiltered.
+7. **A column filter hits the server.** Typing in a column's filter input issues one request roughly 200 ms after the last keystroke, with a `filter=` query param; pressing Enter issues it at once. The toolbar's Filter glyph turns the active colour.
+8. **"Ends with" works.** Pick "Ends with" on a text column and type a suffix: matching rows come back, with no 422 in the network panel.
+9. **"Is empty" matches nulls.** On a nullable text column, "Is empty" returns the rows whose value is `NULL` as well as the empty-string ones; "Is not empty" returns exactly the complement.
+10. **Contains on a non-text column.** Type into the filter input of a `uuid` or `numeric` column ("contains"): matching rows come back, with no 500.
+11. **Non-filterable columns have no input.** A `timestamptz`, `json`, or `bytea` column's filter cell is blank — no text input, no operator button.
+12. **Caret keys inside the quick-search field.** With text in the field, press ArrowLeft / ArrowRight mid-string: the caret must move. If focus jumps to a neighbouring toolbar button instead, the toolbar is eating the caret keys — that is a library defect, not something to patch here; see `## Potential Challenges`.
+13. **Quick search composes with a column filter.** With a column filter narrowing the server result and a quick-search query also active, the grid shows rows matching both. Clearing the quick-search field restores every server-filtered row; clearing the column filter leaves the quick-search text and its narrowing in place.
+14. **Refresh re-applies the quick-search query.** With a query active, press Refresh: the grid reloads and re-narrows to the same text against the fresh page; the status label updates.
+15. **Record view.** With a quick-search query narrowing the grid, toggle into record view: the filter row collapses, the Filter glyph greys out, the full record is shown, and Previous/Next step through every loaded record — not only the matches. Toggle back: the filter row and the narrowed grid both return, and the Filter glyph re-enables.
+16. **A table with no filterable columns.** Open a table whose columns are all `json` / `timestamptz` / `bytea` (create one in the test database if none exists): the Filter glyph is disabled and its tooltip says so. Quick search still works.
 
 ---
 
 ## Verification
 
-- `cd frontend && npm run typecheck` — clean (requires the library prerequisite to be present; see step 1).
-- `cd frontend && npm test` — the new `quickSearchModel` suite passes with the rest.
+- `cd backend && poetry run python -m pytest` — clean, including the new `FilterCompiler` cases.
+- `cd frontend && npm run typecheck` — clean (needs step 1's library build).
+- `cd frontend && npm test` — the new `quickSearchModel` suite and the extended `tableWriteRules` suite pass with the rest.
+- `grep -rn "FilterDialog\|filterModel" frontend/src frontend/tests` — zero matches.
 - `grep -rn "setRowVisible" frontend/src/` — exactly one call site, inside `applyQuickSearch`.
-- `grep -rn "quickSearchField\|quickSearchStatusText" frontend/src/dock/TableWorkPanel.ts` — both appear in the field block, the pre-`super()` locals, the toolbar's `components` array, and the post-`super()` wiring.
-- Manual: the 9 cases above, driven through the running app (see the `verify` skill). Entry point: navigator → a small table's Data tab for cases 1-8 excluding the "more on the server" half of case 3 and case 8's own table; a table with more than 100 rows for the "more on the server" cases.
+- `grep -rn "setFilterRowVisible" frontend/src/` — exactly one call site, inside `toggleFilterRow`.
+- Manual: the 16 cases above, driven through the running app (see the `verify` skill). Entry point: navigator → a table's Data tab. Cases 3, 4, and 16 need specific tables (>100 rows, <100 rows, and an all-`json` / `timestamptz` / `bytea` table respectively); the rest run on any table with a mix of text, numeric, and nullable columns.
 
 ---
 
 ## Documentation Impact
 
-- **`README.md`** — the "Data grid" highlight lists filter/sort/page; add local quick search to it (see step 12's note on composing with `table-record-detail-view.md`'s own edit to the same line).
-- **`TODO.md`** — no existing backlog bullet describes this feature (grepped for "search"/"filter"; the only hits are the already-shipped Filter button and an unrelated command-palette bullet), so nothing to rewrite.
-- **`LIBRARY_NOTES.md`** — no entry. That file logs bugs and papercuts hit while *using* the library, not library capabilities the app would like to see — the same reasoning `align-with-library-post-0.4.1.md`'s Documentation Impact gives for its own two changes.
+- **`README.md`** — the "Data grid" highlight lists filter/sort/page; name the header filter row and the quick search (step 19).
+- **`LIBRARY_NOTES.md`** — one entry **only if manual case 12 fails**: `ToolBar`'s roving-tabindex keydown handler calls `preventDefault()` on ArrowLeft/ArrowRight for any keydown in its subtree, which would steal caret movement from a text child. File it under the 🐞🔎 legend with the reproduction and the pointer to `ToolBar.ts`'s constructor. Nothing to log if the caret behaves.
+- **`TODO.md`** — no existing backlog bullet describes either feature (grepped for "search" and "filter"), so nothing to rewrite.
 - **`CHANGELOG.md`** — no entry; written at release time, not in feature work (established by `plans/implemented/content-derived-column-sizing.md` and `plans/implemented/elkjs-0-12-upgrade.md`).
 
 ---
 
 ## Potential Challenges
 
-- **The gate in step 1 can pass today and fail tomorrow, or vice versa.** The library prerequisite does not exist in the currently symlinked build (confirmed by grep during this plan's investigation); `/implement` must actually run the step 1 check against the build present at implementation time, not assume either outcome.
-- **A wrong library implementation would silently break case 9.** If `setRowVisible`'s eventual implementation does *not* neutralize the predicate in rotated mode (contrary to the stated contract's point 3), record view's Previous/Next would start skipping rows the grid's quick search currently hides — case 9 in `## Expected Behaviour` is exactly the check that would catch this; if it fails, the fix belongs in the library, not a `TableWorkPanel.ts` workaround.
-- **ToolBar's default overflow is `"clip"`.** On a narrow window, a growing toolbar (this plan's field plus `table-record-detail-view.md`'s three buttons) can clip. No fix is scoped here — this matches every other toolbar in the app today, none of which handles narrow-viewport overflow specially.
+- **The library build gate can pass or fail depending on how the app is installed.** Neither `setRowVisible` nor `setFilterRowVisible` is in the published `0.5.0` in `frontend/node_modules` today; step 1 must be run against the build present at implementation time, not assumed.
+- **`ToolBar` may eat the quick-search field's caret keys.** The bar registers a subtree `keydown` listener that `preventDefault()`s ArrowLeft/ArrowRight to move roving focus, and no library toolbar in this app has ever held a text child. Manual case 12 is the check; if it fails, the fix belongs in `typescript-ui` (skip the roving move when the keydown target is a text-entry control), logged per `## Documentation Impact`. Do not add an app-side `stopPropagation` workaround.
+- **Casting a column to `::text` gives up index use for equality filters.** Accepted: `ILIKE` never used a plain btree index anyway, and `ListRowsQuery`'s `count(*) OVER()` already walks the whole matching set.
+- **The filter toggle can disagree with the row once, after a right-click toggle.** The header's own context menu also toggles the filter row and emits no event, so toggling it there leaves the toolbar button showing the old state. One press of the button reconciles them (the library call is idempotent), and `syncFilterActive` re-reads `isFilterRowVisible()` on the next `'filterchange'`.
+- **`ToolBar`'s default overflow is `"clip"`.** The bar now holds a text field and a status label as well as ten buttons, so a narrow window can clip it. No fix is scoped here — this matches every other toolbar in the app.
 
 ---
 
@@ -307,43 +497,50 @@ Use a table with more server-side rows than `PAGE_SIZE` (100) for the "more on t
 | File | Why |
 |---|---|
 | [`frontend/src/dock/TableWorkPanel.ts`](frontend/src/dock/TableWorkPanel.ts) | The panel being changed; its arrow-field handler style and pre-`super()` local pattern must be followed exactly. |
-| [`frontend/src/dock/FilterDialog.ts`](frontend/src/dock/FilterDialog.ts) / [`frontend/src/dock/filterModel.ts`](frontend/src/dock/filterModel.ts) | The remote-filter mechanism this plan stays independent of — read to confirm quick search touches none of its code paths. |
-| [`frontend/src/dock/QueryResultView.ts:64`](frontend/src/dock/QueryResultView.ts#L64) | The `MemoryStore`-over-loaded-rows precedent this plan explicitly does **not** reuse; read it to see why (static read-only data, not a live editable paginated store). |
-| [`frontend/src/dock/tableWriteRules.ts`](frontend/src/dock/tableWriteRules.ts) / [`frontend/tests/dock/tableWriteRules.test.ts`](frontend/tests/dock/tableWriteRules.test.ts) | The DOM-free pure-module-plus-test convention `quickSearchModel.ts` follows, including the duck-typed `RecordLike` interface pattern. |
-| [`frontend/src/data/stores.ts`](frontend/src/data/stores.ts) | `PAGE_SIZE`, `remoteSort`, `remoteFilter` — the configuration every "loaded vs. total" decision in this plan rests on. |
-| [`plans/table-record-detail-view.md`](plans/table-record-detail-view.md) | The sibling plan whose toolbar additions and rotated-mode mechanics this plan must compose with — read in full before touching the toolbar. |
-| `../typescript-ui/packages/lib/src/typescript/lib/data/AbstractStore.ts` (`getRecords`/`getAll` ~622-633, `applyFilterChange` ~1526-1542, `applyView` ~1821-1855, `getTotalCount` ~483-491) | The loaded-vs-total and reload-on-filter mechanics this plan's decisions rest on. |
-| `../typescript-ui/packages/lib/src/typescript/lib/component/table/Body.ts` (`getVisibleRecords` ~353-364, `setRowReadOnly` ~571-587) | The existing subclassing seam and the naming/doc convention the new library API should extend. |
-| `../typescript-ui/packages/lib/src/typescript/lib/component/table/Table.ts` (`setDisplayMode` ~388-409, `setStore` ~439-472) | The rotated-mode neutralization precedent `setRowVisible` must follow, and the `setStore` hazards that ruled out the store-swap alternative. |
-| `../typescript-ui/packages/lib/src/typescript/lib/component/table/ColumnConfig.ts` (~280-312) | `rowReadOnly`'s doc-comment convention, mirrored (with the live-setter difference noted) by the stated `setRowVisible` prerequisite. |
-| `../typescript-ui/packages/lib/src/typescript/lib/data/Field.ts` (~160-209) | `convertValue`/`convertByType` — confirms `date`/`datetime`/`time` fields are `Date` objects by the time `ModelRecord.getData()` returns them, which is why the matching rule excludes them. |
+| [`frontend/src/dock/FilterDialog.ts`](frontend/src/dock/FilterDialog.ts) / [`frontend/src/dock/filterModel.ts`](frontend/src/dock/filterModel.ts) | The mechanism being deleted — read `applyFilters` ([FilterDialog.ts:181](frontend/src/dock/FilterDialog.ts#L181)) to see the `clearFilter()`-then-`filterBy` shape that cannot coexist with the header row's keyed slots. |
+| [`plans/implemented/grid-filter-sort.md`](plans/implemented/grid-filter-sort.md) | Where the dialog was chosen over a filter row, and why that reason no longer holds. |
+| [`frontend/src/dock/tableWriteRules.ts`](frontend/src/dock/tableWriteRules.ts) / [`frontend/tests/dock/tableWriteRules.test.ts`](frontend/tests/dock/tableWriteRules.test.ts) | The DOM-free pure-module-plus-test convention `quickSearchModel.ts` follows, including the duck-typed `RecordLike` interface; also the home of `isFilterableColumn`. |
+| [`frontend/src/data/buildModel.ts`](frontend/src/data/buildModel.ts) | The `wireType` → `FieldType` map that decides which operators each column's filter cell offers. |
+| [`frontend/src/data/stores.ts`](frontend/src/data/stores.ts) | `PAGE_SIZE`, `remoteSort`, `remoteFilter` — every "loaded vs. total" and "does this reload" claim rests on these. |
+| [`frontend/src/dock/glyphButton.ts`](frontend/src/dock/glyphButton.ts) | `glyphToggleButton`, the helper the filter toggle uses; `recordToggle` is the in-file precedent for wiring one. |
+| [`backend/app/sql/compiler.py`](backend/app/sql/compiler.py) / [`backend/tests/test_compiler.py`](backend/tests/test_compiler.py) | The compiler being extended and its test conventions (`conftest.col` fixtures, `where`/`params` assertions). |
+| `../typescript-ui/packages/lib/src/typescript/lib/component/table/Table.ts` (`setRowVisible` 442, `isFilterRowVisible` 677, `setFilterRowVisible` 691, `setDisplayMode` 394, `showColumnMenu` 1274) | The two shipped entry points, the rotated-mode neutralization, and the context-menu route that can desync the toolbar toggle. |
+| `../typescript-ui/packages/lib/src/typescript/lib/component/table/Header.ts` (`hasFilterRow` 404, `setFilterRowVisible` 421, `clearFilterRowState` 444, `onFilterCellChange` 946, `applyPendingFilter` 987, `onStoreFilterChange` 1024) | The filter row's own debounce, its clear-on-hide rule, and its refusal to rebuild input text from an externally-set descriptor. |
+| `../typescript-ui/packages/lib/src/typescript/lib/component/table/ColumnFilter.ts` (`columnFilterOperators` 83, `buildColumnFilter` 189) | Which operators each field type offers, and the exact descriptors they produce — the input contract for the backend compiler changes. |
+| `../typescript-ui/packages/lib/src/typescript/lib/data/AbstractStore.ts` (`getActiveFilters` 1460, `filterBy` 1522, `setFilter` 1547, `applyFilterChange` 1577, `clearFilter` 1604) | Keyed vs. anonymous filter slots, the shared reload rule, and the absence of any way to clear only one kind. |
+| `../typescript-ui/packages/lib/src/typescript/lib/component/menubar/ToolBar.ts` (constructor keydown handler ~166-180) | The roving-tabindex arrow-key interception behind manual case 12. |
 
 ---
 
 ## Non-Goals
 
-- **Implementing `Table.setRowVisible` in `@jimka/typescript-ui`.** Library-repo work; this plan states its required shape as a prerequisite and stops there.
-- **Force-loading the whole table to search rows beyond the current page.** Rejected under "Local search narrows only the currently loaded rows" — defeats server pagination, and no bulk-load API is wired into this panel's store.
-- **A leading search-glyph or a clear ("×") button on the field.** The library's `TextField` has no built-in affix slot; a plain field with a placeholder is enough.
-- **Coordinating quick search with the record/rotated view's Previous/Next reach.** Explicitly orthogonal — see "Local filtering and the record/rotated view are orthogonal."
-- **Matching against `Date`/JSON-typed column values.** Excluded by the matching rule; searching those columns' *formatted* display text (rather than a raw stringification) would need each column's own cell formatter — the same reason `table-record-detail-view.md` rejects `PropertyValuePanel`'s naive stringification for its own feature.
-- **Debouncing input.** Rejected — see "No debounce."
-- **Highlighting the matched substring inside grid cells.** A visual enhancement, not requested; the status label's match count is the only feedback this plan adds.
+- **Keeping the modal filter dialog alongside the header row.** Rejected — see "The header filter row replaces the Filter dialog".
+- **Two filter conditions on the same column** (e.g. `balance > 10 AND balance < 20`). The header row holds one filter per column, keyed by field name. The dialog could express it; nothing else in the app can, and no user has asked.
+- **Filtering `isoString`, `json`, `jsonArray`, or `base64` columns.** Excluded from `filterable` — the operand the library would bind for them has no safe or useful SQL form. A date filter wants a picker, not a free-text cell; that is separate work.
+- **Force-loading the whole table so quick search can reach rows beyond the current page.** Rejected — defeats server pagination, and no bulk-load API is wired into this panel's store.
+- **Quick-search matching against `Date` or JSON column values.** Excluded by the matching rule; searching their *formatted* display text would need each column's own cell formatter.
+- **Coordinating quick search or the filter row with the record/rotated view's Previous/Next reach.** Both are neutralized while rotated by the library itself; Previous/Next keep stepping the full loaded set.
+- **Debouncing anything in this app.** The filter row debounces itself; quick search needs none.
+- **A leading search glyph or a clear ("×") button on the quick-search field.** The library's `TextField` has no affix slot; a placeholder is enough.
+- **Highlighting the matched substring inside grid cells.** The status label's match count is the only feedback this plan adds.
+- **Any `typescript-ui` change.** Both library features are already shipped. If manual case 12 exposes the `ToolBar` caret-key defect, it is logged for a separate library fix, not patched here.
 
 ---
 
 ## Notes
 
-[^precedent-search]: Searched `frontend/src` for `toLowerCase().includes(`, `toLowerCase().startsWith(`, `SearchField`, `SearchInput`, `quickfilter`, and `quick-filter` (all case-insensitive) — no matches. Also read `frontend/src/navigator/NavigatorTree.ts`, `frontend/src/shell/QueriesView.ts`, and `frontend/src/shell/StartPage.ts` directly for any inline filter box — none of the three has one. The command-palette backlog item in `TODO.md` ("Command palette / keyboard-driven actions") is unbuilt, so it establishes no convention either.
+[^filter-always-reloads]: `AbstractStore.applyFilterChange()` (`AbstractStore.ts:1577`) opens with `const reload = this._remoteFilter || this._pageSize != null;` and, when `reload` is true, sets `this._page = 1` and calls `void this.load()` after rebuilding the local view. `setFilter` (`:1547`), `filterBy` (`:1522`), `filter`, and `clearFilter` (`:1604`) all funnel through it, so they share identical reload behaviour. `buildStore` ([`stores.ts:36`](frontend/src/data/stores.ts#L36)) always passes `pageSize: PAGE_SIZE` (100, [line 16](frontend/src/data/stores.ts#L16)), so `reload` is unconditionally true for every store this panel uses — there is no way to call any of them without a page-1 server round trip.
 
-[^filterby-always-reloads]: `AbstractStore.applyFilterChange()` (`AbstractStore.ts:1526-1542`): `const reload = this._remoteFilter || this._pageSize != null;` and, when `reload` is true, `this._page = 1` plus `void this.load()` after the local view rebuild. `frontend/src/data/stores.ts:36`'s `buildStore` always passes `pageSize: PAGE_SIZE` (100, defined at line 16) into every `AjaxStore` this panel uses, so `reload` is `true` unconditionally regardless of `remoteFilter`'s value — there is no way to call `filterBy`/`filter`/`clearFilter` on this store without triggering a page-1 reload.
+[^why-replace-dialog]: Three findings, in order of weight. **(1)** `FilterDialog.applyFilters` ([`FilterDialog.ts:181`](frontend/src/dock/FilterDialog.ts#L181)) calls `store.clearFilter()` before re-applying, and Clear calls it alone. `clearFilter()` empties the whole `_activeFilters` map, keyed column-filter slots included, and `AbstractStore` exposes no way to clear only the anonymous `Symbol()`-keyed ones (`getActiveFilters()` returns descriptors, never their keys), so the dialog cannot be taught to leave the header row alone. **(2)** Even a dialog rewritten to write per-column keyed slots would desync: `Header.onStoreFilterChange` (`Header.ts:1024`) only ever *drops* a cached filter-cell state whose descriptor has disappeared, and its doc comment says it deliberately never reconstructs text from a descriptor (a temporal descriptor holds a `Date`, and formatting it back would rewrite what the user typed). A dialog-set filter would leave that column's input blank over filtered data. **(3)** The dialog silently loses filters it cannot represent: `conditionsFromFilters` maps only the eight descriptor types the dialog itself emits, so an `endsWith`, `isEmpty` (`in`), or `isNotEmpty` (`not`) column filter would be seeded into no row and then dropped by the `clearFilter()` on Apply. The alternative direction — keep the dialog and do not enable the filter row — was rejected because the row is the more capable and more discoverable of the two, and is what `plans/implemented/grid-filter-sort.md` wanted in the first place.
 
-[^why-not-force-load]: A bulk "load every row, then search" mode was considered. It would need either a new store method (none exists — `AbstractStore` has no "load all pages" operation) or a client-side loop calling `nextPage()` until exhausted, which reintroduces exactly the async, multi-request complexity that `table-record-detail-view.md`'s own footnote on its Previous/Next design already rejected for a different feature (record-view stepping) on this same store. It would also make "quick search" silently expensive on a million-row table — the opposite of "instant feedback."
+[^why-filterable-subset]: `isoString` maps to `FieldType "datetime"`, whose operators parse the typed text into a JS `Date`; that crosses the wire as an ISO string and asyncpg refuses a `str` for a `timestamptz`/`date`/`time` parameter. `json`/`jsonArray` map to `"auto"`, which offers the string operators — `ILIKE` has no `jsonb` overload, and an equality test against a rendered JSON string is meaningless. `base64` maps to `"string"` and would technically compile, but filtering a `bytea` blob by substring is not a feature anyone wants; it is excluded with the rest. Quick search's own exclusions differ slightly (it does search `base64` values, since they are already plain strings by then) — the two rules answer different questions and are deliberately not unified.
 
-[^why-skip-objects]: Confirmed via `AbstractModel.createRecord` (`AbstractModel.ts:215`), which runs every field through `field.convertValue(value, source)` before constructing the `ModelRecord` — so `ModelRecord.getData()` (`ModelRecord.ts:489-491`) returns already-coerced values, not raw wire JSON. `Field.ts`'s `convertByType` (`Field.ts:190-200`) coerces `date`/`datetime`/`time` to a real `Date` instance. Stringifying a `Date` (`String(new Date(...))`) produces a verbose, locale-dependent representation the user never typed and would not think to search for, and stringifying a parsed JSON object produces `"[object Object]"` — both are worse than not matching at all, so both are excluded by the same `typeof value === "object"` check rather than given a bespoke (and inevitably wrong) stringification.
+[^why-text-cast]: A string operand can only reach the compiler from a model field the frontend typed as `string`, which covers Postgres `text`, `varchar`, `char`, `uuid`, and `numeric` (see `WireType.STRING`'s comment in `backend/app/contract.py`). Of those, only the character types accept `ILIKE` at all, and `numeric` rejects a `str` bind for `=`. Casting the *column* rather than the parameter keeps the user's typed text as the literal being matched, which is what "contains" and "equals" mean to someone typing into a filter cell. The alternative — a table of Postgres type names that are LIKE-safe, consulted per column — was rejected: it needs `ColumnMeta.data_type` threaded into every branch and has to be kept in step with Postgres's type list, for a benefit (index use on `=` over a `text` column) that `count(*) OVER()` already spends.
 
-[^toolbar-order-footnote]: Verified against `table-record-detail-view.md`'s own step 7, which inserts its three buttons "immediately after `Spacer.flex()` and before `filterButton`" — the same anchor this plan uses, not a position relative to any button this plan introduces. Because both plans describe their insertion relative to the spacer rather than to each other's controls, applying either plan's diff first still leaves a valid, unambiguous insertion point for the other.
+[^why-skip-objects]: `AbstractModel.createRecord` runs every field through `field.convertValue(value, source)` before constructing the `ModelRecord`, so `ModelRecord.getData()` returns already-coerced values, not raw wire JSON. `Field.convertByType` coerces `date`/`datetime`/`time` to a real `Date`. Stringifying a `Date` produces a verbose, locale-dependent form the user never typed and would not think to search for; stringifying a parsed JSON object produces `"[object Object]"`. Both are worse than not matching, so one `typeof value === "object"` check excludes both rather than giving either a bespoke — and inevitably wrong — stringification.
 
-[^why-live-setter]: `rowReadOnly` is declared once in the `ColumnSpec` passed to `Table`'s constructor and forwarded into `Body` via `bindView`/`setRowReadOnly` at construction and display-mode switches only (`Table.ts:255,404,1142`) — there is no public path to change it after the fact, and `Body.setRowReadOnly`'s own doc comment says so explicitly ("Internal wiring called by Table — not for consumer use"). That is fine for a value fixed at table-build time (a table's read-only rule does not change while it's open), but quick search's predicate changes on every keystroke, so the new method must be an ordinary public instance method the app calls repeatedly, not a construction-time option.
+[^why-not-force-load]: A "load every row, then search" mode would need either a new store method (`AbstractStore` has no load-all-pages operation) or a client-side `nextPage()` loop, which reintroduces the multi-request async complexity `plans/implemented/table-record-detail-view.md` already rejected for record-view stepping on this same store. It would also make a control called "quick search" silently expensive on a million-row table.
 
-[^no-debounce-footnote]: Revisit only if a future change makes this panel load more than `PAGE_SIZE` rows into memory at once (e.g. an eventual "load all" mode) — not the case today, and not proposed by this plan (see `## Non-Goals`).
+[^toolbar-input-precedent]: Checked every `ToolBar` construction in `frontend/src`: `TableWorkPanel`, `QueryPanel`, `QueryResultView`, `RoleGrantsPanel`, `SequenceInfoPanel`, `definitionEditor`, and `ActivityBar`. All hold only `Button`/`ToggleButton`/`MenuButton`, `ToolBarSeparator`, and `Spacer`. The app's other inputs (`diagramShell`'s combos and checkboxes) live in side panels, not bars. Per `pattern-conformance.md` this is a new pattern for the app, justified by the library documenting it rather than by an in-app example.
+
+[^no-debounce]: Revisit only if a future change loads more than `PAGE_SIZE` rows into this panel at once (e.g. an eventual "load all" mode) — not the case today, and not proposed here.
