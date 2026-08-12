@@ -24,8 +24,13 @@
 // (field/value) display mode via `Table.setDisplayMode` — no second grid, no
 // app-side projection. The mode is read-only, so it never affects Save; only
 // Add changes meaning between the two views, since it needs the grid to fill
-// in a new row. Previous/Next step `store.getRecords()` — the loaded page —
-// clamped at both ends by the pure `stepIndex` helper.
+// in a new row. Previous/Next step `store.getRecords()` narrowed to whatever
+// currently matches the live quick-search query (`recordNavigation.ts`'s
+// `visibleRecords`), then clamped at both ends by the pure `stepIndex`
+// helper — so stepping skips non-matching records. A record already
+// displayed when the query narrows past it stays displayed until the user
+// steps away: `visibleRecords(...).indexOf(current)` simply misses it (-1),
+// which `stepIndex` treats the same as "nothing displayed yet".
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the panel `extends
 // Container`, inlining its own Border frame directly (the same shape
@@ -59,7 +64,7 @@ import type { ColumnMeta, TablePrivileges } from "../contract";
 import { buildExportButton }           from "./exportButton";
 import { buildColumnSpec, missingRequiredFields } from "./tableWriteRules";
 import { matchesQuickSearch, quickSearchStatus } from "./quickSearchModel";
-import { stepIndex }                   from "./recordNavigation";
+import { stepIndex, visibleRecords }   from "./recordNavigation";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR } from "../theme";
 
 Glyph.register(refresh, plus, minus, save, table_list, angle_left, angle_right);
@@ -125,8 +130,8 @@ class TableWorkPanel extends Container {
         // Add and the steppers), which is unavailable here, so it is wired
         // after super() returns. The steppers only need the `dataGrid` local.
         const recordToggle = glyphToggleButton("table-list", PRIMARY_COLOR, "Record view (one record as field/value rows)", false);
-        const prevButton   = glyphButton("angle-left",  PRIMARY_COLOR, "Previous record", () => stepRecord(dataGrid, -1));
-        const nextButton   = glyphButton("angle-right", PRIMARY_COLOR, "Next record",     () => stepRecord(dataGrid, 1));
+        const prevButton   = glyphButton("angle-left",  PRIMARY_COLOR, "Previous record", () => stepRecord(dataGrid, -1, quickSearchField.getValue().trim()));
+        const nextButton   = glyphButton("angle-right", PRIMARY_COLOR, "Next record",     () => stepRecord(dataGrid, 1, quickSearchField.getValue().trim()));
 
         // The full-relation export runs server-side (it streams the whole table, not
         // the grid's loaded page), so it stays correct regardless of paging, sort, or
@@ -241,11 +246,15 @@ class TableWorkPanel extends Container {
     // the query is empty clears the filter entirely. Local and network-free:
     // it only ever decides which of the already-loaded rows are shown, never
     // reloads the store (that's the grid's own header filter row's job).
+    // Also re-syncs the steppers: their enabled state depends on the query
+    // too (see syncStepEnabled), and only 'selection'/'datachange' would
+    // otherwise trigger a re-check, lagging behind what was just typed.
     private applyQuickSearch = (): void => {
         const query = this.quickSearchField.getValue().trim();
 
         this.dataGrid.setRowVisible(query === "" ? null : (record: ModelRecord) => matchesQuickSearch(record, query));
         this.syncQuickSearchStatus();
+        this.syncStepEnabled();
     };
 
     // Registered by reference on `store` ("datachange", "load") and called
@@ -296,11 +305,19 @@ class TableWorkPanel extends Container {
         this.addButton.setDescription(rotated ? "Switch to the grid view to add a row" : "");
     };
 
-    // Registered by reference on both `dataGrid` ("selection") and `store`
-    // ("datachange") — arrow-function field.
+    // Registered by reference on `dataGrid` ("selection"), `store`
+    // ("datachange"), and called directly from applyQuickSearch (the query
+    // is also part of the enabled/disabled calculation) — arrow-function
+    // field. Steps through `visibleRecords` — the currently matching
+    // records — not the full loaded set, so Previous/Next disable exactly
+    // when there is no matching neighbour to step to. A displayed record
+    // that no longer matches the query is simply absent from that filtered
+    // list (indexOf returns -1), which stepIndex treats like "nothing
+    // displayed yet" rather than an error.
     private syncStepEnabled = (): void => {
         const rotated = this.dataGrid.getDisplayMode() === "rotated";
-        const records = this.store.getRecords();
+        const query   = this.quickSearchField.getValue().trim();
+        const records = visibleRecords(this.store.getRecords(), query);
         const current = this.dataGrid.getSelectedRecord();
         const index   = current ? records.indexOf(current) : -1;
 
@@ -347,12 +364,20 @@ async function confirmDelete(store: AjaxStore, dataGrid: Table): Promise<void> {
 
 /**
  * Step the record view's displayed record by `delta` positions within the
- * loaded, filtered/sorted records, clamped at both ends. A stateless helper
- * so it can be wired from the Previous/Next buttons while they are still
- * pre-`super()` locals, closing over `dataGrid` alone (no `this`).
+ * loaded, filtered/sorted records that currently match `query` (see
+ * `visibleRecords`), clamped at both ends — so Previous/Next skip records
+ * the live quick-search query doesn't match. A stateless helper so it can be
+ * wired from the Previous/Next buttons while they are still pre-`super()`
+ * locals, closing over `dataGrid` alone (no `this`); `query` is read live at
+ * click time by the caller (`quickSearchField.getValue().trim()`), not
+ * captured stale at construction.
+ *
+ * @param dataGrid - the table whose displayed record steps.
+ * @param delta - -1 for the previous record, 1 for the next.
+ * @param query - the current quick-search text; blank matches every record.
  */
-function stepRecord(dataGrid: Table, delta: number): void {
-    const records = dataGrid.getStore().getRecords();
+function stepRecord(dataGrid: Table, delta: number, query: string): void {
+    const records = visibleRecords(dataGrid.getStore().getRecords(), query);
     const current = dataGrid.getSelectedRecord();
     const target  = stepIndex(current ? records.indexOf(current) : -1, delta, records.length);
 

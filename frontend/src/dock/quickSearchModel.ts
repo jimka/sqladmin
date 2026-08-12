@@ -4,8 +4,8 @@
 // time, which the project's node-environment test runner has no stand-in for
 // — see vitest.config.ts, and tableWriteRules.ts for the same split).
 
-/** The subset of a ModelRecord's API this module reads. */
-interface RecordLike {
+/** The subset of a ModelRecord's API this module (and recordNavigation.ts) reads. */
+export interface RecordLike {
     getData(): Record<string, unknown>;
 }
 
