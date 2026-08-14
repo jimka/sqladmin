@@ -179,7 +179,7 @@ class RelationDiagramPanel extends DiagramShell {
     };
 
     private rebuildLegend = (): void => {
-        this.legend.removeAllComponents();
+        this.legend.disposeAllComponents();
 
         for (const n of this.base.nodes) {
             this.legend.addComponent(legendRow(n, this.root.id, this.hidden, this.applyFilter));

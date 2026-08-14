@@ -126,8 +126,9 @@ export function legendRow(
 
 /**
  * Fill a legend column with one row per node in `base`, the root's row locked
- * shown. Clears the column and adds nothing when `rootId` is null — an
- * unrooted view draws the whole graph and has nothing to hide against.
+ * shown. Disposes the previous rows (not just detaches them, which would leak
+ * their listeners) and adds nothing when `rootId` is null — an unrooted view
+ * draws the whole graph and has nothing to hide against.
  *
  * @param legend - The legend column to refill.
  * @param base - The graph whose nodes get a row.
@@ -142,7 +143,7 @@ export function fillLegend(
     hidden: Set<string>,
     applyFilter: () => void,
 ): void {
-    legend.removeAllComponents();
+    legend.disposeAllComponents();
 
     if (rootId === null) {
         return;

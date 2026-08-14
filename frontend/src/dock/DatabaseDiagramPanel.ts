@@ -194,7 +194,7 @@ class DatabaseDiagramPanel extends DiagramShell {
 
     // Rebuild the per-schema legend rows from the full schema set.
     private rebuildLegend = (): void => {
-        this.legend.removeAllComponents();
+        this.legend.disposeAllComponents();
 
         for (const schema of this.schemaNames) {
             this.legend.addComponent(schemaLegendRow(schema, this.hiddenSchemas, this.applyFilter));
