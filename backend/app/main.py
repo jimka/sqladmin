@@ -52,6 +52,7 @@ from .operations import (
     ExplainQueryCommand,
     ExportRowsQuery,
     FunctionDefinitionQuery,
+    IndexDetailQuery,
     InsertRowCommand,
     ListColumnsQuery,
     ListConstraintsQuery,
@@ -96,6 +97,7 @@ from .operations import (
     ViewDefinitionQuery,
     assemble_database_graph,
     assemble_schema_graph,
+    flatten_schema_indexes,
 )
 from .static import mount_static
 
@@ -324,6 +326,28 @@ async def types(
         await op.apply()
 
         return op.get_result()
+
+
+@app.get("/api/{connection_id}/{database}/{schema}/indexes")
+async def indexes(
+    connection_id: str, database: str, schema: str,
+    session: Session = Depends(require_session),
+) -> list[dict]:
+    """
+    List every index in a schema, spanning every table — the navigator's flat,
+    schema-wide Indexes category. Reuses ``SchemaIndexesQuery`` (already built
+    for the ``/graph`` routes) rather than a new per-list query.
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/indexes``.
+
+    Returns:
+        ``[{name, definition, unique, primary, table}]``.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = SchemaIndexesQuery(c, schema)
+        await op.apply()
+
+        return flatten_schema_indexes(op.get_result())
 
 
 @app.get("/api/{connection_id}/{database}/{schema}/dependencies")
@@ -570,6 +594,33 @@ async def sequence_detail(
     """
     async with session_pool_for(session, connection_id).acquire() as c:
         op = SequenceDetailQuery(c, TableRef(database, schema, table))
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.get("/api/{connection_id}/{database}/{schema}/{name}/index")
+async def index_detail(
+    connection_id: str, database: str, schema: str, name: str,
+    session: Session = Depends(require_session),
+) -> dict:
+    """
+    Report one index's full definition, unique/primary flags, and owning
+    table (pg_indexes/pg_index), for the Indexes-category info tab.
+
+    Route: ``GET /api/{connection_id}/{database}/{schema}/{name}/index``.
+    The ``{name}`` path segment carries the index name (the per-object route
+    namespace is generic — see ``sequence_detail``).
+
+    Raises:
+        NotFound: if no index by that name exists (mapped to 404).
+
+    Returns:
+        ``{name, definition, unique, primary, table}`` — see
+        ``IndexDetailQuery.get_result``.
+    """
+    async with session_pool_for(session, connection_id).acquire() as c:
+        op = IndexDetailQuery(c, TableRef(database, schema, name))
         await op.apply()
 
         return op.get_result()

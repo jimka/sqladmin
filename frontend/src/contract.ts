@@ -3,7 +3,7 @@
 
 export type DbObjectKind =
     | "database" | "schema" | "table" | "view" | "materializedView" | "sequence"
-    | "function" | "type";
+    | "function" | "type" | "index";
 
 /** Identifies a database object the navigator can act on. */
 export interface DbObjectRef {
@@ -21,6 +21,8 @@ export interface DbObjectRef {
      *  CREATE/DROP need the real `"function" | "procedure"` routine kind to
      *  emit the right keyword. Unset for every other kind. */
     isProcedure?: boolean;
+    /** The owning table's name, set only on an index leaf (kind: "index"). */
+    table?: string;
 }
 
 /**
@@ -477,6 +479,16 @@ export interface IndexMeta {
     definition: string; // full CREATE INDEX … text (indexdef)
     unique: boolean;
     primary: boolean; // backs the primary key
+}
+
+/** One index's full detail — used by both the schema-wide Indexes list and
+ *  the info tab's per-index fetch on open (IndexDetailQuery). */
+export interface IndexDetail {
+    name: string;
+    definition: string;
+    unique: boolean;
+    primary: boolean;
+    table: string;
 }
 
 /** One non-FK constraint (primary key / unique / check). */

@@ -552,3 +552,20 @@ def assemble_database_graph(
         })
 
     return [{"schema": schema, "tables": tables_by_schema[schema]} for schema in sorted(tables_by_schema)]
+
+
+def flatten_schema_indexes(rows: list[dict]) -> list[dict]:
+    """
+    Flatten ``SchemaIndexesQuery``'s ``{schema, table, payload}`` rows into the
+    navigator's Indexes-category wire shape, backing the schema-wide
+    ``/indexes`` route. Reuses ``SchemaIndexesQuery`` rather than a new
+    per-list ``Query`` class (see the plan's Architecture Decisions).
+
+    Args:
+        rows: ``SchemaIndexesQuery.get_result()``'s rows.
+
+    Returns:
+        ``[{name, definition, unique, primary, table}]``, preserving input
+        order (``SchemaIndexesQuery`` already orders by schema, table, name).
+    """
+    return [{**row["payload"], "table": row["table"]} for row in rows]

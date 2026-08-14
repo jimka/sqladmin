@@ -14,10 +14,11 @@ import { layer_group }  from "@jimka/typescript-ui/glyphs/solid/layer_group";
 import { arrow_up_1_9 } from "@jimka/typescript-ui/glyphs/solid/arrow_up_1_9";
 import { code }         from "@jimka/typescript-ui/glyphs/solid/code";
 import { cube }         from "@jimka/typescript-ui/glyphs/solid/cube";
+import { magnifying_glass } from "@jimka/typescript-ui/glyphs/solid/magnifying_glass";
 import type { DbObjectKind } from "../contract";
 import { OBJECT_KINDS }      from "./objectKinds";
 
-Glyph.register(database, folder, table, eye, layer_group, arrow_up_1_9, code, cube);
+Glyph.register(database, folder, table, eye, layer_group, arrow_up_1_9, code, cube, magnifying_glass);
 
 /**
  * The registered glyph name for each object kind, built from the

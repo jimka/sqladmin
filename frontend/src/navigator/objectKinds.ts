@@ -46,6 +46,10 @@ export const OBJECT_KINDS: readonly ObjectKindInfo[] = [
     // false for both.
     { kind: "function", glyph: "code", categoryLabel: "Functions", isRelation: false },
     { kind: "type", glyph: "cube", categoryLabel: "Types", isRelation: false },
+    // index (navigator-indexes-category phase): a flat, schema-wide listed leaf
+    // like a sequence — it opens a read-only info tab, not a Dock data tab, so
+    // isRelation stays false.
+    { kind: "index", glyph: "magnifying-glass", categoryLabel: "Indexes", isRelation: false },
 ];
 
 /**

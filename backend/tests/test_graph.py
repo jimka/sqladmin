@@ -2,7 +2,9 @@
 The bulk schema/database graph module: the five schema/database-wide queries'
 pure ``get_result()`` mappings (offline, ``_raw`` set by hand, mirroring
 ``test_table_structure.py``) and the two pure ``assemble_*`` helpers that
-group their flat rows into the frontend's per-table / per-schema shape.
+group their flat rows into the frontend's per-table / per-schema shape. Also
+covers ``flatten_schema_indexes``, the navigator's schema-wide Indexes-category
+pure helper that reuses ``SchemaIndexesQuery``'s rows.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from app.operations.graph import (
     SchemaTablesQuery,
     assemble_database_graph,
     assemble_schema_graph,
+    flatten_schema_indexes,
 )
 from tests.conftest import NO_CONN
 
@@ -239,6 +242,45 @@ def test_assemble_database_graph_includes_schema_with_zero_foreign_keys() -> Non
     result = assemble_database_graph(tables, [], [], [])
 
     assert result == [{"schema": "public", "tables": [{"name": "customers", "structure": {"indexes": [], "constraints": [], "foreignKeys": []}}]}]
+
+
+# --- flatten_schema_indexes -------------------------------------------------
+
+def test_flatten_schema_indexes_flattens_schema_table_payload_rows() -> None:
+    rows = [
+        {
+            "schema": "public", "table": "customers",
+            "payload": {
+                "name": "customers_pkey",
+                "definition": "CREATE UNIQUE INDEX customers_pkey ON public.customers USING btree (id)",
+                "unique": True, "primary": True,
+            },
+        },
+    ]
+
+    assert flatten_schema_indexes(rows) == [
+        {
+            "name": "customers_pkey",
+            "definition": "CREATE UNIQUE INDEX customers_pkey ON public.customers USING btree (id)",
+            "unique": True, "primary": True,
+            "table": "customers",
+        },
+    ]
+
+
+def test_flatten_schema_indexes_preserves_input_order() -> None:
+    rows = [
+        {"schema": "public", "table": "orders", "payload": {"name": "orders_pkey", "definition": "d1", "unique": True, "primary": True}},
+        {"schema": "public", "table": "customers", "payload": {"name": "customers_pkey", "definition": "d2", "unique": True, "primary": True}},
+    ]
+
+    result = flatten_schema_indexes(rows)
+
+    assert [r["name"] for r in result] == ["orders_pkey", "customers_pkey"]
+
+
+def test_flatten_schema_indexes_empty() -> None:
+    assert flatten_schema_indexes([]) == []
 
 
 def test_assemble_database_graph_keeps_same_named_tables_in_different_schemas_distinct() -> None:

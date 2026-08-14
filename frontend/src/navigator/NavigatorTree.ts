@@ -24,7 +24,7 @@ import { sitemap }                              from "@jimka/typescript-ui/glyph
 import { share_nodes }                          from "@jimka/typescript-ui/glyphs/solid/share_nodes";
 import { circle_nodes }                         from "@jimka/typescript-ui/glyphs/solid/circle_nodes";
 import type { DbObjectKind, DbObjectRef }       from "../contract";
-import { getFunctions, getObjects, getSchemas, getTypes } from "../data/api";
+import { getFunctions, getIndexes, getObjects, getSchemas, getTypes } from "../data/api";
 import { TreeExpansionPersistence }             from "../data/treeExpansion";
 import { KIND_GLYPH }                           from "./objectGlyphs";
 import { isRelationKind, objectCategories }     from "./objectKinds";
@@ -45,17 +45,20 @@ Glyph.register(plus, pencil, trash, arrows_rotate, play, sitemap, share_nodes, c
 
 /**
  * One object leaf, merged from whichever endpoint supplied it: `/objects`
- * (table/view/materializedView/sequence) or the function-type-ddl phase's
+ * (table/view/materializedView/sequence), the function-type-ddl phase's
  * dedicated `/functions`/`/types` (a function's identity signature has no
  * home in `/objects`' flat `{name, kind}` shape — see
- * plans/implemented/function-type-ddl.md's listing decision). Both optional
- * fields are set only on a function leaf.
+ * plans/implemented/function-type-ddl.md's listing decision), or the
+ * navigator-indexes-category phase's `/indexes` (an index's owning table,
+ * for its tree label). `signature`/`isProcedure` are set only on a function
+ * leaf; `table` only on an index leaf.
  */
 interface DbObject {
     name: string;
     kind: DbObjectKind;
     signature?: string;
     isProcedure?: boolean;
+    table?: string;
 }
 
 /**
@@ -160,6 +163,14 @@ class NavigatorTree extends Tree implements ExplorerTree {
                 return;
             }
 
+            // An index has no rows either — double-click opens its read-only
+            // info tab, mirroring the sequence branch above.
+            if (ref && ref.kind === "index") {
+                void this.controller.openIndex(ref, node);
+
+                return;
+            }
+
             if (ref && isRelation(ref.kind)) {
                 void this.controller.openTable(ref, node);
             }
@@ -234,19 +245,20 @@ function schemaNode(conn: string, database: string, schema: string): TreeNode {
 }
 
 /**
- * Fetch a schema's tables/views/matviews/sequences (`/objects`) and its
- * functions/procedures and types (`/functions`/`/types`) in parallel, and
- * merge them into one `DbObject[]` — the same combined list `categoryNode`
- * groups by kind regardless of which endpoint supplied a given object, so a
- * function/type leaf flows through the identical category/glyph/`isRelation`
- * pipeline a sequence leaf already does (see the function-type-ddl plan's
- * listing decision).
+ * Fetch a schema's tables/views/matviews/sequences (`/objects`), its
+ * functions/procedures and types (`/functions`/`/types`), and its schema-wide
+ * indexes (`/indexes`) in parallel, and merge them into one `DbObject[]` —
+ * the same combined list `categoryNode` groups by kind regardless of which
+ * endpoint supplied a given object, so a function/type/index leaf flows
+ * through the identical category/glyph/`isRelation` pipeline a sequence leaf
+ * already does (see the function-type-ddl plan's listing decision).
  */
 async function loadObjects(conn: string, database: string, schema: string): Promise<TreeNode[]> {
-    const [objects, functions, types] = await Promise.all([
+    const [objects, functions, types, indexes] = await Promise.all([
         getObjects(conn, database, schema),
         getFunctions(conn, database, schema),
         getTypes(conn, database, schema),
+        getIndexes(conn, database, schema),
     ]);
 
     const combined: DbObject[] = [
@@ -255,6 +267,7 @@ async function loadObjects(conn: string, database: string, schema: string): Prom
             name: f.name, kind: "function" as const, signature: f.signature, isProcedure: f.isProcedure,
         })),
         ...types.map(t => ({ name: t.name, kind: "type" as const })),
+        ...indexes.map(i => ({ name: i.name, kind: "index" as const, table: i.table })),
     ];
 
     return OBJECT_CATEGORIES
@@ -288,8 +301,8 @@ function categoryNode(
 
 /**
  * Build one object leaf node carrying its DbObjectRef on `data`. A
- * function's `signature`/`isProcedure` are carried onto the ref only when
- * present (a function leaf) — every other kind omits them.
+ * function's `signature`/`isProcedure` and an index's `table` are carried
+ * onto the ref only when present — every other kind omits them.
  */
 function objectLeaf(o: DbObject, conn: string, database: string, schema: string): TreeNode {
     return {
@@ -298,6 +311,7 @@ function objectLeaf(o: DbObject, conn: string, database: string, schema: string)
             connectionId: conn, database, schema, name: o.name, kind: o.kind,
             ...(o.signature !== undefined ? { signature: o.signature } : {}),
             ...(o.isProcedure !== undefined ? { isProcedure: o.isProcedure } : {}),
+            ...(o.table !== undefined ? { table: o.table } : {}),
         } satisfies DbObjectRef,
     };
 }
@@ -306,11 +320,17 @@ function objectLeaf(o: DbObject, conn: string, database: string, schema: string)
  * The tree label for an object leaf. A function/procedure shows its argument
  * signature — `total_orders(p_customer_id integer)`, `total_orders()` — so two
  * overloads of one name are visibly distinct in the tree; the ref still
- * carries the bare `name`. Every other kind shows its plain name.
+ * carries the bare `name`. An index shows its owning table — `idx_name (on
+ * orders)` — since the Indexes category is flat across every table in the
+ * schema. Every other kind shows its plain name.
  */
 function leafLabel(o: DbObject): string {
     if (o.kind === "function") {
         return `${o.name}(${o.signature ?? ""})`;
+    }
+
+    if (o.kind === "index") {
+        return `${o.name} (on ${o.table ?? "?"})`;
     }
 
     return o.name;

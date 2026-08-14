@@ -11,7 +11,7 @@ describe("OBJECT_KINDS", () => {
         const kinds = OBJECT_KINDS.map(k => k.kind);
 
         expect(kinds).toEqual([
-            "database", "schema", "table", "view", "materializedView", "sequence", "function", "type",
+            "database", "schema", "table", "view", "materializedView", "sequence", "function", "type", "index",
         ]);
     });
 
@@ -29,8 +29,8 @@ describe("OBJECT_KINDS", () => {
         expect(schema?.categoryLabel).toBeUndefined();
     });
 
-    it("gives table/view/materializedView/sequence/function/type a category label", () => {
-        for (const kind of ["table", "view", "materializedView", "sequence", "function", "type"] as const) {
+    it("gives table/view/materializedView/sequence/function/type/index a category label", () => {
+        for (const kind of ["table", "view", "materializedView", "sequence", "function", "type", "index"] as const) {
             expect(OBJECT_KINDS.find(k => k.kind === kind)?.categoryLabel).toBeDefined();
         }
     });
@@ -43,12 +43,13 @@ describe("isRelationKind", () => {
         expect(isRelationKind("materializedView")).toBe(true);
     });
 
-    it("is false for database, schema, sequence, function, and type", () => {
+    it("is false for database, schema, sequence, function, type, and index", () => {
         expect(isRelationKind("database")).toBe(false);
         expect(isRelationKind("schema")).toBe(false);
         expect(isRelationKind("sequence")).toBe(false);
         expect(isRelationKind("function")).toBe(false);
         expect(isRelationKind("type")).toBe(false);
+        expect(isRelationKind("index")).toBe(false);
     });
 
     it("is false for undefined", () => {
@@ -65,6 +66,7 @@ describe("objectCategories", () => {
             { label: "Sequences", kind: "sequence" },
             { label: "Functions", kind: "function" },
             { label: "Types", kind: "type" },
+            { label: "Indexes", kind: "index" },
         ]);
     });
 });

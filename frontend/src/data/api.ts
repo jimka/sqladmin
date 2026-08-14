@@ -25,6 +25,7 @@ import type {
     DropTypeSpec,
     FunctionDefinition,
     FunctionListItem,
+    IndexDetail,
     IndexSpec,
     RefreshMatviewSpec,
     RenameSchemaSpec,
@@ -200,6 +201,15 @@ export function getTypes(
     return getJson(`/api/${connectionId}/${database}/${schema}/types`);
 }
 
+/** The navigator's Indexes category level — every index across every table in the schema. */
+export function getIndexes(
+    connectionId: string,
+    database    : string,
+    schema      : string,
+): Promise<IndexDetail[]> {
+    return getJson(`/api/${connectionId}/${database}/${schema}/indexes`);
+}
+
 /** View/matview dependency edges for a schema (view -> underlying relation). */
 export function getDependencies(
     connectionId: string,
@@ -261,6 +271,13 @@ export function getSequenceDetail(ref: DbObjectRef): Promise<SequenceDetail> {
     const url = `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/sequence`;
 
     return getJson<SequenceDetail>(url);
+}
+
+/** Fetch one index's full definition, flags, and owning table (IndexDetailQuery). */
+export function getIndexDetail(ref: DbObjectRef): Promise<IndexDetail> {
+    const url = `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/index`;
+
+    return getJson<IndexDetail>(url);
 }
 
 /**
