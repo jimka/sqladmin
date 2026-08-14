@@ -1,13 +1,17 @@
 """
 Postgres/asyncpg -> wire-contract mapping.
 
-Two pure helpers:
+Pure helpers:
   * ``pg_type_to_wire`` — at introspection time, picks the ``WireType`` a column's
     values will arrive as (recorded in ``ColumnMeta.wire_type``).
   * ``rows_to_wire`` / ``to_wire_value`` — at read/write time, map each native
     asyncpg value into its contract scalar.
+  * ``from_wire_value`` — the inverse, for a write payload's column values.
+  * ``from_wire_filter_operand`` — maps a FILTER comparison operand to the
+    Python value asyncpg binds, which for a temporal column differs from what
+    ``from_wire_value`` binds for a write.
 
-Neither touches a database, so both are trivially unit-testable.
+None touches a database, so all are trivially unit-testable.
 """
 
 from __future__ import annotations
@@ -46,6 +50,10 @@ _STRING_TYPES = frozenset(
 # temporal type (date / time / datetime) an ISO string is parsed into.
 _DATE_TYPES = frozenset({"date"})
 _TIME_TYPES = frozenset({"time", "time without time zone", "time with time zone", "timetz"})
+# The two members of _TIME_TYPES that carry an offset. Checked BEFORE
+# _TIME_TYPES, which contains them as well.
+_TIMETZ_TYPES = frozenset({"time with time zone", "timetz"})
+_TIMESTAMPTZ_TYPES = frozenset({"timestamp with time zone", "timestamptz"})
 
 
 def pg_type_to_wire(data_type: str) -> WireType:
@@ -204,6 +212,68 @@ def from_wire_value(value: Any, column: ColumnMeta) -> Any:
         return base64.b64decode(value)
 
     return value
+
+
+def _to_utc(moment: datetime.datetime) -> datetime.datetime:
+    """
+    An aware datetime converted to UTC; a naive one returned unchanged (it
+    carries no offset to convert).
+    """
+    return moment.astimezone(datetime.timezone.utc) if moment.tzinfo else moment
+
+
+def from_wire_filter_operand(value: Any, column: ColumnMeta) -> Any:
+    """
+    Map one wire scalar to the Python value asyncpg binds for a FILTER
+    comparison against ``column``.
+
+    A temporal column's filter operand always arrives as a full ISO-8601
+    instant: the grid's filter cell parses the typed text into a JS ``Date``,
+    and ``JSON.stringify`` emits ``Date.toISOString()``. It is mapped to the
+    Python type that keeps the comparison exact, which is NOT always the type
+    ``from_wire_value`` binds for a write:
+
+      * ``timestamp with time zone`` -> aware ``datetime`` (as for a write)
+      * ``timestamp without time zone`` -> naive ``datetime``, the instant's
+        UTC wall clock
+      * ``date`` -> naive ``datetime``, NOT a ``date``: truncating would
+        collapse the header row's minute-wide equality range to an empty one.
+        ``FilterCompiler`` compares such a column as ``"col"::timestamp``.
+      * ``time with time zone`` -> aware ``time``; the rest of the ``time``
+        family -> naive ``time``
+
+    Every non-temporal column returns ``value`` unchanged. Those operands are
+    compared as text (``FilterCompiler._column`` casts the column), which is
+    what lets a partial ``uuid`` or a plain-digit ``numeric`` operand match at
+    all; ``from_wire_value``'s write-path coercion to ``UUID`` / ``Decimal``
+    would reject or over-narrow it.
+
+    Args:
+        value: the wire scalar from the decoded ``filter=`` query param.
+        column: the column the operand is compared against.
+
+    Raises:
+        ValueError: if the operand is not a parseable ISO-8601 instant.
+
+    Returns:
+        The Python value to bind for this comparison.
+    """
+    if column.wire_type is not WireType.ISO_STRING or not isinstance(value, str):
+        return value
+
+    moment = _to_utc(_parse_iso_datetime(value))
+    data_type = column.data_type.lower()
+
+    if data_type in _TIMETZ_TYPES:
+        return moment.timetz()
+
+    if data_type in _TIME_TYPES:
+        return moment.replace(tzinfo=None).time()
+
+    if data_type in _TIMESTAMPTZ_TYPES:
+        return moment
+
+    return moment.replace(tzinfo=None)
 
 
 def rows_to_wire(rows: Iterable[dict], columns: list[ColumnMeta]) -> list[dict]:

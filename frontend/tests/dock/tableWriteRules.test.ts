@@ -95,6 +95,12 @@ describe("buildColumnSpec", () => {
             { field: "b", readOnly: false, required: false, filterable: true },
         ]);
     });
+
+    it("marks an isoString column filterable", () => {
+        const spec = buildColumnSpec([column({ name: "created_at", wireType: "isoString" })], true);
+
+        expect(spec.columns).toEqual([{ field: "created_at", readOnly: false, required: false, filterable: true }]);
+    });
 });
 
 describe("isFilterableColumn", () => {
@@ -102,11 +108,11 @@ describe("isFilterableColumn", () => {
         return column({ wireType });
     }
 
-    it.each<WireType>(["number", "string", "boolean"])("is true for wireType %s", wireType => {
+    it.each<WireType>(["number", "string", "boolean", "isoString"])("is true for wireType %s", wireType => {
         expect(isFilterableColumn(withWireType(wireType))).toBe(true);
     });
 
-    it.each<WireType>(["isoString", "json", "jsonArray", "base64"])("is false for wireType %s", wireType => {
+    it.each<WireType>(["json", "jsonArray", "base64"])("is false for wireType %s", wireType => {
         expect(isFilterableColumn(withWireType(wireType))).toBe(false);
     });
 });
