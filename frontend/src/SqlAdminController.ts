@@ -39,6 +39,7 @@ import { buildRelationGraph, relationNodeId }                                   
 import { buildSelectSql, buildRoutineCallSql, routineCallIsComplete }                                                                                                                              from "./data/sql";
 import { buildStore }                                                                                                                                                                              from "./data/stores";
 import { TableWorkPanel }                                                                                                                                                                          from "./dock/TableWorkPanel";
+import type { TableViewOptions }                                                                                                                                                                   from "./dock/TableWorkPanel";
 import { StructurePanel }                                                                                                                                                                          from "./dock/StructurePanel";
 import type { StructureActions, StructureRefresh }                                                                                                                                                from "./dock/StructurePanel";
 import { openSqlPreviewDialog }                                                                                                                                                                    from "./dock/SqlPreviewDialog";
@@ -429,8 +430,12 @@ export class SqlAdminController {
      * It may also be a still-pending `Promise` — an in-progress navigator reveal
      * (see `openReferencedTable`) — so a slow reveal never delays the tab itself;
      * it is awaited alongside the table's own fetch instead of gating it.
+     *
+     * @param view - The view-mode properties a route can request (record view,
+     *   a focused record). Ignored on the view/matview branch above, which
+     *   opens a query tab instead of a `TableWorkPanel`.
      */
-    async openTable(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>): Promise<void> {
+    async openTable(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>, view?: TableViewOptions): Promise<void> {
         // A view/matview has no editable data surface, so it opens as an auto-run
         // browse query on the shared QueryPanel rather than a dedicated data panel.
         // A query panel has no pagination, so the seed carries buildSelectSql's
@@ -480,7 +485,7 @@ export class SqlAdminController {
             }
 
             const notify = (message: string): void => { this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: ${message}`); };
-            const panel = new TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format), privileges);
+            const panel = new TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format), privileges, view);
 
             // Not awaited: the panel already exists, so TablePanel's own store-driven
             // spinner covers the row load, and load()'s rejection is already surfaced by
@@ -1869,8 +1874,10 @@ export class SqlAdminController {
      * @param _node - The relation's navigator node; accepted for call-site parity
      *   with the other open methods but unused (the diagram tab is not tracked in
      *   _openPanels).
+     * @param depth - A `DEPTH_CHOICES` entry (see `depthChoices.ts`) the Depth
+     *   control opens at; anything else opens at the default.
      */
-    async openRelationDiagram(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
+    async openRelationDiagram(ref: DbObjectRef, _node?: TreeNode, depth?: string): Promise<void> {
         const id = this.relationDiagramPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
@@ -1912,6 +1919,7 @@ export class SqlAdminController {
                     name        : table,
                     kind        : "table",
                 }, event),
+                depth,
             );
         });
     }
@@ -2022,8 +2030,10 @@ export class SqlAdminController {
      * @param ref - The relation to root at (kind table/view/matview; name set).
      * @param _node - The relation's navigator node; accepted for call-site
      *   parity with the other open methods but unused.
+     * @param depth - A `DEPTH_CHOICES` entry (see `depthChoices.ts`) the Depth
+     *   control opens at; anything else opens at the default.
      */
-    async openRelationDependencyGraph(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
+    async openRelationDependencyGraph(ref: DbObjectRef, _node?: TreeNode, depth?: string): Promise<void> {
         const id = this.relationDependencyPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
@@ -2070,6 +2080,7 @@ export class SqlAdminController {
                     name        : nd.name,
                     kind        : nd.kind,
                 }, event),
+                depth,
             );
         });
     }
@@ -2136,8 +2147,10 @@ export class SqlAdminController {
      * @param ref - The relation to root at (kind table; name set).
      * @param _node - The relation's navigator node; accepted for call-site
      *   parity with the other open methods but unused.
+     * @param depth - A `DEPTH_CHOICES` entry (see `depthChoices.ts`) the Depth
+     *   control opens at; anything else opens at the default.
      */
-    async openRelationInheritanceGraph(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
+    async openRelationInheritanceGraph(ref: DbObjectRef, _node?: TreeNode, depth?: string): Promise<void> {
         const id = this.relationInheritancePanelId(ref);
 
         if (this.dock.focusPanel(id)) {
@@ -2184,6 +2197,7 @@ export class SqlAdminController {
                     name        : nd.name,
                     kind        : nd.kind,
                 }, event),
+                depth,
             );
         });
     }
@@ -2853,8 +2867,10 @@ export class SqlAdminController {
      * open a table tab.
      *
      * @param name - The role to root the graph at.
+     * @param depth - A `DEPTH_CHOICES` entry (see `depthChoices.ts`) the Depth
+     *   control opens at; anything else opens at the default.
      */
-    async openRoleMembershipDiagram(name: string): Promise<void> {
+    async openRoleMembershipDiagram(name: string, depth?: string): Promise<void> {
         const id = this.roleMembershipDiagramPanelId(name);
 
         if (this.dock.focusPanel(id)) {
@@ -2876,7 +2892,7 @@ export class SqlAdminController {
 
             this.statusBar.setMessage(`${this._statusScope} · ${name}: membership (${full.nodes.length} roles)`);
 
-            return RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName));
+            return RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName), undefined, depth);
         });
     }
 

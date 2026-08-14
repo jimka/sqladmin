@@ -23,7 +23,8 @@ import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/componen
 import { rootedDiagram, applyHide, withDepthBadges } from "../data/relationDiagram";
 import type { RelationNodeData } from "../data/buildRelationGraph";
 import { relationGraphNodeRenderer } from "./RelationGraphPanel";
-import { DiagramShell, legendRow, DEFAULT_DEPTH } from "./diagramShell";
+import { DiagramShell, legendRow } from "./diagramShell";
+import { depthChoice, depthFromChoice } from "./depthChoices";
 import { JunctionDiagramView } from "./JunctionDiagramView";
 
 /**
@@ -44,23 +45,27 @@ class RootedRelationGraphPanel extends DiagramShell {
      * @param onSelect - Invoked with the activated node's RelationNodeData.
      * @param onContextMenu - Invoked with a right-clicked node's RelationNodeData
      *   and the originating event.
+     * @param initialDepth - The `DEPTH_CHOICES` entry the Depth control opens
+     *   at (see `depthChoices.ts`); anything else opens at the default.
      */
     constructor(
         full: DiagramData,
         root: DiagramNodeData,
         onSelect: (node: RelationNodeData) => void,
         onContextMenu?: (node: RelationNodeData, event: MouseEvent) => void,
+        initialDepth?: string,
     ) {
         // Locals before super() — they are super()'s children (this is
         // unavailable until super() returns).
-        const base = withDepthBadges(rootedDiagram(full, root, "both", DEFAULT_DEPTH), full.edges, "both");
+        const depth = depthChoice(initialDepth);
+        const base  = withDepthBadges(rootedDiagram(full, root, "both", depthFromChoice(depth)), full.edges, "both");
         const view = JunctionDiagramView({
             data: base,
             nodeRenderer: relationGraphNodeRenderer(root.id),
             initialFocusNode: root.id,
         });
 
-        super({ view, fixedRoot: true, root: root.id });
+        super({ view, fixedRoot: true, root: root.id, initialDepth: depth });
 
         this.full = full;
         this.root = root;

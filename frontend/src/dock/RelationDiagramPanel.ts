@@ -31,8 +31,9 @@ import { applyCoverageStyle }       from "../data/fkCardinality";
 import { columnEmphasis }           from "../data/columnEmphasis";
 import { TableCardNode }            from "./TableCardNode";
 import { attachFkEdgeTooltip }      from "./edgeTooltip";
-import { DiagramShell, legendRow, DEFAULT_DEPTH } from "./diagramShell";
+import { DiagramShell, legendRow }  from "./diagramShell";
 import type { DiagramShellConfig } from "./diagramShell";
+import { depthChoice, depthFromChoice } from "./depthChoices";
 import { JunctionDiagramView }      from "./JunctionDiagramView";
 
 /**
@@ -61,16 +62,19 @@ class RelationDiagramPanel extends DiagramShell {
      * @param onContextMenu - Invoked with a right-clicked node's table name and
      *   the originating event; omitted callers get no context menu (e.g. the
      *   role-membership graph, whose nodes are roles, not database objects).
+     * @param initialDepth - The `DEPTH_CHOICES` entry the Depth control opens
+     *   at (see `depthChoices.ts`); anything else opens at the default.
      */
     constructor(full: DiagramData, root: DiagramNodeData, onSelectTable: (table: string) => void,
-                onContextMenu?: (table: string, event: MouseEvent) => void) {
+                onContextMenu?: (table: string, event: MouseEvent) => void, initialDepth?: string) {
         // Locals before super() — they are super()'s children (this is
         // unavailable until super() returns). `selectColumn` is re-pointed to
         // the real handler once `this` exists (DiagramView's constructor calls
         // nodeRenderer during its own super() cascade, so the renderer must
         // not touch `this`); it can only ever be invoked by a user click, long
         // after that.
-        const base = withDepthBadges(rootedDiagram(full, root, "both", DEFAULT_DEPTH), full.edges, "both");
+        const depth = depthChoice(initialDepth);
+        const base  = withDepthBadges(rootedDiagram(full, root, "both", depthFromChoice(depth)), full.edges, "both");
         const cards = new Map<string, TableCardNode>();
         let selectColumn: (nodeId: string, column: string) => void = () => {};
 
@@ -100,6 +104,7 @@ class RelationDiagramPanel extends DiagramShell {
                     components   : [coverageControl, new Text("Highlight FKs without a covering index")],
                 }),
             ],
+            initialDepth: depth,
         };
 
         super(config);
