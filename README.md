@@ -36,7 +36,8 @@ It is not hardened for exposure to the public internet:
   query's results into the same one-record-at-a-time field/value view as the
   data grid, with Previous/Next to step through the returned rows.
 - **Structure & definitions** — inspect columns, view a view's definition, and
-  read a table's `GRANT`s.
+  read a table's `GRANT`s. Each inspector tab has a Refresh button (also
+  Alt+R) that re-reads the object from the database.
 - **Diagrams** — schema-overview, per-schema, relation, and role
   grant/membership diagrams, laid out automatically with [elkjs](https://github.com/kieler/elkjs).
 - **Roles explorer** — browse roles, their memberships, and their grants.

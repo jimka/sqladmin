@@ -36,9 +36,15 @@ export class FunctionDefinitionPanel {
      * @param onSave - writes the editor's current text back to the database;
      *   the controller executes it verbatim (see
      *   SqlAdminController.openFunctionDefinition).
+     * @param onRefresh - re-fetches the routine's definition and reseeds the
+     *   editor, discarding any unsaved edit with no confirmation prompt.
      */
-    constructor(definition: string, onSave: (newDefinition: string) => void | Promise<void>) {
-        const editor = new DefinitionEditor(definition, onSave);
+    constructor(
+        definition: string,
+        onSave: (newDefinition: string) => void | Promise<void>,
+        onRefresh: () => void,
+    ) {
+        const editor = new DefinitionEditor(definition, onSave, onRefresh);
 
         this.content = Container({ layoutManager: new Border({ spacing: 0 }) });
         this.content.addComponent(editor.toolbar, { placement: Placement.NORTH });

@@ -40,7 +40,7 @@ import { buildSelectSql, buildRoutineCallSql, routineCallIsComplete }           
 import { buildStore }                                                                                                                                                                              from "./data/stores";
 import { TableWorkPanel }                                                                                                                                                                          from "./dock/TableWorkPanel";
 import { StructurePanel }                                                                                                                                                                          from "./dock/StructurePanel";
-import type { StructureActions }                                                                                                                                                                  from "./dock/StructurePanel";
+import type { StructureActions, StructureRefresh }                                                                                                                                                from "./dock/StructurePanel";
 import { openSqlPreviewDialog }                                                                                                                                                                    from "./dock/SqlPreviewDialog";
 import { CreateTableForm }                                                                                                                                                                         from "./dock/CreateTableForm";
 import { RenameTableForm }                                                                                                                                                                         from "./dock/RenameTableForm";
@@ -178,6 +178,10 @@ interface OpenPanel {
     store?: AjaxStore;
     columns?: ColumnMeta[];
     detail?: string;
+    // Set only by the five storeless detail tabs (structure, definition,
+    // function definition, sequence, index) — what `refreshActive` dispatches
+    // to instead of the store-reload path. Never set alongside `store`.
+    refresh?: () => void;
 }
 
 /** A recently opened table, kept with its node so the start page can re-open it. */
@@ -347,11 +351,18 @@ export class SqlAdminController {
 
         // Switching tabs syncs the navigator selection and the status bar to the
         // now-active panel, and records the active panel id so the Query-menu
-        // export targets it. A null payload means no panel is focused.
+        // export targets it. A null payload means no panel is focused — the
+        // library emits it only from recomputeFocusAfterClose, when no frame
+        // remains (never when DOM focus merely leaves the dock) — so clearing
+        // `_activePanelId` here can't affect Query-menu export targeting on an
+        // ordinary tab switch. Clearing it also keeps a closed-last-tab Alt+R
+        // from invoking a refresh closure holding a torn-down panel.
         this.dock.on("focus", (e: DockPanelEvent | null) => {
             if (e) {
                 this._activePanelId = e.id;
                 this.syncToPanel(e.id);
+            } else {
+                this._activePanelId = null;
             }
         });
 
@@ -574,14 +585,20 @@ export class SqlAdminController {
                 this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: definition saved`);
             };
 
-            panel = new DefinitionPanel(definition, columns, onSave, this.layout.bindSplit("definition"));
+            const refresh = (): void => void this.refreshPanel(ref, async () => {
+                const [freshDefinition, freshColumns] = await this.fetchDefinitionAndColumns(ref);
+
+                panel.reload(freshDefinition, freshColumns);
+            });
+
+            panel = new DefinitionPanel(definition, columns, onSave, refresh, this.layout.bindSplit("definition"));
 
             // No `columns` field here: unlike the structure tab (keyed by
             // structurePanelId, whose `columns` backs structureColumns()), the
             // definition tab's columns are only ever read by the DefinitionPanel
             // itself, which already holds its own copy — nothing looks this
             // entry up by definitionPanelId.
-            this._openPanels.set(id, { ref, node: node ?? null, detail: "definition" });
+            this._openPanels.set(id, { ref, node: node ?? null, detail: "definition", refresh });
             this.syncToPanel(id);
 
             return panel.content;
@@ -599,6 +616,29 @@ export class SqlAdminController {
         const [definitionResult, columns] = await Promise.all([getViewDefinition(ref), getColumns(ref)]);
 
         return [definitionResult.definition, columns];
+    }
+
+    /**
+     * Run one of the five detail tabs' Refresh: re-fetch and reseed via
+     * `reload`, then report the outcome — the shared success/error wording
+     * every Refresh button uses, so the five call sites don't drift apart.
+     * Never rejects, so every call site may write `void this.refreshPanel(...)`.
+     *
+     * @param ref - The tab's own object, for the status message and a failed
+     *   fetch's error label.
+     * @param reload - The caller's fetch-and-reseed body; its own errors (a
+     *   dropped/renamed object, a network failure) are caught here.
+     */
+    private async refreshPanel(ref: DbObjectRef, reload: () => Promise<void>): Promise<void> {
+        try {
+            await reload();
+        } catch (err) {
+            this.notifyError(new Error(`failed to refresh: ${this.errorMessage(err)}`), ref);
+
+            return;
+        }
+
+        this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: refreshed`);
     }
 
     /**
@@ -644,10 +684,19 @@ export class SqlAdminController {
             const detail = detailResult.value;
             const roles  = rolesResult.status === "fulfilled" ? rolesResult.value.map(r => r.name) : [];
 
-            this._openPanels.set(id, { ref, node: resolvedNode ?? null, detail: "info" });
+            // Read by `refresh` only after a click, which always happens after
+            // this variable is assigned just below — the forward reference is
+            // safe (mirrors openDefinition/openFunctionDefinition's `panel`).
+            let panel: SequenceInfoPanel;
+
+            const refresh = (): void => void this.refreshPanel(ref, async () => {
+                panel.reload(await getSequenceDetail(ref));
+            });
+
+            this._openPanels.set(id, { ref, node: resolvedNode ?? null, detail: "info", refresh });
             this.syncToPanel(id);
 
-            return SequenceInfoPanel(detail, {
+            panel = new SequenceInfoPanel(detail, {
                 schema:       ref.schema!,
                 name:         ref.name!,
                 roles,
@@ -657,6 +706,7 @@ export class SqlAdminController {
                 reloadDetail: () => getSequenceDetail(ref),
                 onStatus:     m => this.statusBar.setMessage(`${this._statusScope} · ${m}`),
                 onError:      m => this.notifyError(new Error(m), ref),
+                onRefresh:    refresh,
                 onOpenOwner:  (schema, table) => this.openReferencedStructure({
                     connectionId: ref.connectionId,
                     database    : ref.database,
@@ -665,6 +715,8 @@ export class SqlAdminController {
                     kind        : "table",
                 }),
             });
+
+            return panel;
         });
     }
 
@@ -699,10 +751,19 @@ export class SqlAdminController {
         }, async () => {
             const [detail, resolvedNode] = await Promise.all([getIndexDetail(ref), Promise.resolve(node)]);
 
-            this._openPanels.set(id, { ref, node: resolvedNode ?? null, detail: "info" });
+            // Read by `refresh` only after a click, which always happens after
+            // this variable is assigned just below — the forward reference is
+            // safe (mirrors openDefinition/openFunctionDefinition's `panel`).
+            let panel: IndexInfoPanel;
+
+            const refresh = (): void => void this.refreshPanel(ref, async () => {
+                panel.reload(await getIndexDetail(ref));
+            });
+
+            this._openPanels.set(id, { ref, node: resolvedNode ?? null, detail: "info", refresh });
             this.syncToPanel(id);
 
-            return IndexInfoPanel(detail, {
+            panel = new IndexInfoPanel(detail, {
                 schema: ref.schema!,
                 onOpenTable: (schema, table) => this.openReferencedStructure({
                     connectionId: ref.connectionId,
@@ -711,7 +772,10 @@ export class SqlAdminController {
                     name        : table,
                     kind        : "table",
                 }),
+                onRefresh: refresh,
             });
+
+            return panel;
         });
     }
 
@@ -743,10 +807,71 @@ export class SqlAdminController {
                 getColumns(ref), getStructure(ref), Promise.resolve(node),
             ]);
 
-            this._openPanels.set(id, { ref, node: resolvedNode ?? null, columns, detail: "structure" });
+            // Read by `refresh`/the section refreshes only after a click, which
+            // always happens after this variable is assigned just below — the
+            // forward reference is safe (mirrors openDefinition/
+            // openFunctionDefinition's `panel`).
+            let panel: StructurePanel;
+
+            // The whole-tab refresh backs Alt+R / View → Refresh (see
+            // refreshActive): it re-fetches everything and reseeds all four
+            // sections via `panel.reload`, exactly as before this tab grew
+            // per-section Refresh tools.
+            const refresh = (): void => void this.refreshPanel(ref, async () => {
+                const [freshColumns, freshStructure] = await Promise.all([getColumns(ref), getStructure(ref)]);
+                const entry = this._openPanels.get(id);
+
+                panel.reload(freshColumns, freshStructure);
+
+                // structureColumns(ref) reads this cache to build the constraint/index
+                // dialogs' column checklists — it must track the refreshed columns.
+                if (entry) {
+                    entry.columns = freshColumns;
+                }
+            });
+
+            // The four per-section refreshes back each section header's own
+            // Refresh tool (StructureRefresh). Indexes/Constraints/Foreign
+            // Keys all read the same getStructure(ref) endpoint — each still
+            // re-fetches the whole payload (there is no narrower endpoint) but
+            // reseeds only its own section, so a click on one section's
+            // Refresh never visibly touches the other two sourced from that
+            // endpoint (see the plan's per-section-refresh Architecture
+            // Decision for why this is worth the redundant fetch).
+            const refreshColumns = (): void => void this.refreshPanel(ref, async () => {
+                const freshColumns = await getColumns(ref);
+                const entry = this._openPanels.get(id);
+
+                panel.reloadColumns(freshColumns);
+
+                if (entry) {
+                    entry.columns = freshColumns;
+                }
+            });
+
+            const refreshIndexes = (): void => void this.refreshPanel(ref, async () => {
+                panel.reloadIndexes((await getStructure(ref)).indexes);
+            });
+
+            const refreshConstraints = (): void => void this.refreshPanel(ref, async () => {
+                panel.reloadConstraints((await getStructure(ref)).constraints);
+            });
+
+            const refreshForeignKeys = (): void => void this.refreshPanel(ref, async () => {
+                panel.reloadForeignKeys((await getStructure(ref)).foreignKeys);
+            });
+
+            const sectionRefresh: StructureRefresh = {
+                onRefreshColumns:     refreshColumns,
+                onRefreshIndexes:     refreshIndexes,
+                onRefreshConstraints: refreshConstraints,
+                onRefreshForeignKeys: refreshForeignKeys,
+            };
+
+            this._openPanels.set(id, { ref, node: resolvedNode ?? null, columns, detail: "structure", refresh });
             this.syncToPanel(id);
 
-            return StructurePanel(columns, structure, (refSchema, refTable) =>
+            panel = new StructurePanel(columns, structure, (refSchema, refTable) =>
                 this.openReferencedTable({
                     connectionId: ref.connectionId,
                     database    : ref.database,
@@ -759,7 +884,9 @@ export class SqlAdminController {
                     schema      : seqSchema,
                     name        : seqName,
                     kind        : "sequence",
-                }), this.layout.bindAccordion("structure"), this.structureActionsFor(ref));
+                }), sectionRefresh, this.layout.bindAccordion("structure"), this.structureActionsFor(ref));
+
+            return panel;
         });
     }
 
@@ -1316,9 +1443,13 @@ export class SqlAdminController {
                 this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: definition saved`);
             };
 
-            panel = new FunctionDefinitionPanel(definition.definition, onSave);
+            const refresh = (): void => void this.refreshPanel(ref, async () => {
+                panel.reload((await getFunctionDefinition(ref, signature)).definition);
+            });
 
-            this._openPanels.set(id, { ref, node: node ?? null, detail: "definition" });
+            panel = new FunctionDefinitionPanel(definition.definition, onSave, refresh);
+
+            this._openPanels.set(id, { ref, node: node ?? null, detail: "definition", refresh });
             this.syncToPanel(id);
 
             return panel.content;
@@ -1488,10 +1619,11 @@ export class SqlAdminController {
 
     /**
      * The structure tab's own columns for a table, from the open-panel
-     * registry (populated by `openStructure`) — the source the Constraints/
-     * Indexes forms build their column checklists from. Empty when the
-     * structure tab isn't open (a toolbar action can't run without it, so
-     * this is defensive, not an expected path).
+     * registry (populated by `openStructure` and kept current by its
+     * Refresh) — the source the Constraints/Indexes forms build their
+     * column checklists from. Empty when the structure tab isn't open (a
+     * toolbar action can't run without it, so this is defensive, not an
+     * expected path).
      *
      * @param ref - The table whose structure tab to read.
      */
@@ -2827,16 +2959,26 @@ export class SqlAdminController {
     }
 
     /**
-     * Refresh the active work tab if it is a reloadable data grid: reload the
-     * table's or view's store from the server, discarding a table's unsaved edits
-     * first (mirroring the grid's own Refresh button — a read-only view has no
-     * edits to reject). A no-op when the focused tab has no store (a query, a
-     * role's grants, a structure/definition tab, or the empty start page), so
-     * "refresh the current view" simply does nothing when there is nothing to
-     * reload. Wired to the Alt+R accelerator.
+     * Refresh the active work tab. Two reloadable shapes: the five storeless
+     * detail tabs (structure, definition, function definition, sequence,
+     * index) dispatch to their own registered `refresh` closure, which
+     * re-fetches and reseeds via the panel's `reload` and reports its own
+     * outcome (see `refreshPanel`); a data grid instead reloads its table's
+     * or view's store from the server, discarding a table's unsaved edits
+     * first (mirroring the grid's own Refresh button — a read-only view has
+     * no edits to reject). A no-op when the focused tab has neither (a
+     * query, a role's grants, or the empty start page), so "refresh the
+     * current view" simply does nothing when there is nothing to reload.
+     * Wired to the Alt+R accelerator.
      */
     refreshActive(): void {
         const entry = this._activePanelId ? this._openPanels.get(this._activePanelId) : undefined;
+
+        if (entry?.refresh) {
+            entry.refresh();
+
+            return;
+        }
 
         if (!entry?.store) {
             return;
