@@ -49,6 +49,8 @@ function propertyRows(ref: DbObjectRef, columns?: ColumnMeta[]): PropertyValueRo
             return functionRows(ref);
         case "type":
             return typeRows(ref);
+        case "index":
+            return indexRows(ref);
     }
 }
 
@@ -101,6 +103,22 @@ function typeRows(ref: DbObjectRef): PropertyValueRow[] {
     ];
 }
 
+/**
+ * Rows for an index leaf: identity plus its owning table. Not a relation
+ * (`isRelation: false` in the object-kind registry) — the Indexes category is
+ * a flat, schema-wide list, so its "table" here is the fact that ties a leaf
+ * back to the relation it belongs to.
+ */
+function indexRows(ref: DbObjectRef): PropertyValueRow[] {
+    return [
+        { property: "Name", value: ref.name ?? "—" },
+        { property: "Schema", value: ref.schema ?? "—" },
+        { property: "Database", value: ref.database ?? "—" },
+        { property: "Type", value: "Index" },
+        { property: "Table", value: ref.table ?? "—" },
+    ];
+}
+
 /** Human-readable Type label for a relation kind (table/view/materialized view). */
 export function relationTypeLabel(kind: DbObjectRef["kind"]): string {
     if (kind === "view") {
@@ -116,6 +134,13 @@ export function relationTypeLabel(kind: DbObjectRef["kind"]): string {
     // Type line reads "Sequence" rather than falling through to "Table".
     if (kind === "sequence") {
         return "Sequence";
+    }
+
+    // Not a relation kind either, but panelTooltip calls this for every open
+    // tab including the index info tab, so the Type line reads "Index"
+    // rather than falling through to "Table".
+    if (kind === "index") {
+        return "Index";
     }
 
     return "Table";

@@ -38,7 +38,8 @@ export type ObjectMenuActions = Pick<SqlAdminController,
     | "createTable" | "createView" | "createMaterializedView" | "createSequence"
     | "createType" | "createFunction"
     | "dropSequence" | "dropFunction" | "editType" | "dropType"
-    | "exportTable">;
+    | "exportTable"
+    | "openIndex" | "openReferencedStructure">;
 
 /**
  * Build the schema node's own menu: its identity actions (rename/drop) above a
@@ -95,6 +96,20 @@ function typeMenuItems(ref: DbObjectRef, actions: ObjectMenuActions): MenuItemCo
     return [
         { text: "Edit", glyph: "pencil", action: () => void actions.editType(ref) },
         { text: "Drop", glyph: "trash", action: () => actions.dropType(ref) },
+    ];
+}
+
+/**
+ * Build an index leaf's small menu: show its info, or jump to its owning
+ * table's Structure tab — no DDL actions (CREATE/DROP INDEX already live on
+ * StructurePanel's Indexes section; duplicating them here is out of scope).
+ */
+function indexMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: TreeNode): MenuItemConfig[] {
+    return [
+        { text: "Show info", glyph: "magnifying-glass", action: () => void actions.openIndex(ref, node) },
+        { text: "Open table", glyph: "table-columns", action: () => actions.openReferencedStructure({
+            connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name: ref.table, kind: "table",
+        }) },
     ];
 }
 
@@ -210,6 +225,10 @@ export function buildObjectMenuItems(
 
     if (ref.kind === "type") {
         return typeMenuItems(ref, actions);
+    }
+
+    if (ref.kind === "index") {
+        return indexMenuItems(ref, actions, node);
     }
 
     if (!isRelationKind(ref.kind)) {

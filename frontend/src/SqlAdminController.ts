@@ -26,6 +26,7 @@ import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                  
 import type { AlterColumnAction, ColumnMeta, ConstraintKind, DbObjectRef, FunctionDefinition, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TypeDefinition } from "./contract";
 import { executeDdl, getColumns, getDatabaseGraph, getDependencies, getFunctionDefinition, getInheritance, getRoleDetail, getRoles, getSchemaGraph, getSchemas, getTablePrivileges, getTypeDefinition, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewAlterTypeAddValue, previewConstraint, previewCreateCompositeType, previewCreateEnumType, previewCreateFunction, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropFunction, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropType, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema, previewReplaceMatview, previewSequenceOwner, runExplain, runQuery, tableExportUrl } from "./data/api";
 import { getSequenceDetail }                                                                                                                                                                       from "./data/api";
+import { getIndexDetail }                                                                                                                                                                          from "./data/api";
 import { exportQueryResult }                                                                                                                                                                       from "./dock/exportQueryResult";
 import { exportExplainPlan }                                                                                                                                                                       from "./dock/exportExplainResult";
 import type { ActiveExport }                                                                                                                                                                       from "./data/explain";
@@ -62,6 +63,7 @@ import { buildDropFunctionSpec, buildDropTypeSpec }                             
 import { DefinitionPanel }                                                                                                                                                                         from "./dock/DefinitionPanel";
 import { FunctionDefinitionPanel }                                                                                                                                                                 from "./dock/FunctionDefinitionPanel";
 import { SequenceInfoPanel }                                                                                                                                                                       from "./dock/SequenceInfoPanel";
+import { IndexInfoPanel }                                                                                                                                                                          from "./dock/IndexInfoPanel";
 import { DocumentationPanel }                                                                                                                                                                      from "./dock/DocumentationPanel";
 import { QueryPanel }                                                                                                                                                                              from "./dock/QueryPanel";
 import { RoleGrantsPanel }                                                                                                                                                                         from "./dock/RoleGrantsPanel";
@@ -656,6 +658,53 @@ export class SqlAdminController {
                 onStatus:     m => this.statusBar.setMessage(`${this._statusScope} · ${m}`),
                 onError:      m => this.notifyError(new Error(m), ref),
                 onOpenOwner:  (schema, table) => this.openReferencedStructure({
+                    connectionId: ref.connectionId,
+                    database    : ref.database,
+                    schema,
+                    name        : table,
+                    kind        : "table",
+                }),
+            });
+        });
+    }
+
+    /**
+     * Open a read-only info tab for an index — its owning table, unique/primary
+     * flags, and full CREATE INDEX text, deduping by index-info-panel id. The
+     * tab opens at once behind the library's spinner; behind it, the detail is
+     * fetched fresh (matching openSequence/openFunctionDefinition/openStructure
+     * — see the plan's fetch-fresh-on-open decision) and passed to an
+     * IndexInfoPanel wired with the "open table" callback. A failed detail
+     * fetch closes the tab it opened, reported through notifyError. An index
+     * has no rows and no editable fields, so unlike openTable this has no
+     * store to register, and unlike openSequence the panel needs no dispose
+     * (see IndexInfoPanel).
+     *
+     * `node` may be a still-pending `Promise` — an in-progress navigator reveal
+     * — awaited alongside the detail fetch rather than gating the tab.
+     */
+    async openIndex(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>): Promise<void> {
+        const id = this.indexInfoPanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        this.openAsyncPanel({
+            id,
+            title  : ref.name ?? id,
+            glyph  : "magnifying-glass",
+            tooltip: this.panelTooltip(ref),
+            ref,
+        }, async () => {
+            const [detail, resolvedNode] = await Promise.all([getIndexDetail(ref), Promise.resolve(node)]);
+
+            this._openPanels.set(id, { ref, node: resolvedNode ?? null, detail: "info" });
+            this.syncToPanel(id);
+
+            return IndexInfoPanel(detail, {
+                schema: ref.schema!,
+                onOpenTable: (schema, table) => this.openReferencedStructure({
                     connectionId: ref.connectionId,
                     database    : ref.database,
                     schema,
@@ -2851,6 +2900,11 @@ export class SqlAdminController {
     /** Stable id for a sequence's info tab, distinct from any relation tab. */
     private sequenceInfoPanelId(ref: DbObjectRef): string {
         return `${this.panelId(ref)}::sequence`;
+    }
+
+    /** Stable id for an index's info tab, distinct from any relation tab. */
+    private indexInfoPanelId(ref: DbObjectRef): string {
+        return `${this.panelId(ref)}::index`;
     }
 
     /**

@@ -2,19 +2,26 @@
 ListIndexesQuery / ListConstraintsQuery / ListForeignKeysQuery: the pure
 get_result() transforms backing the combined ``/structure`` endpoint. Each is
 exercised offline by setting ``_raw`` by hand (no database), mirroring the
-role-detail test style.
+role-detail test style. IndexDetailQuery (the single-index info-tab fetch)
+follows the same offline style, plus its NotFound-on-empty case, mirroring
+test_sequence_detail.py.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from app.contract import TableRef
+from app.errors import NotFound
 from app.operations import (
+    IndexDetailQuery,
     ListConstraintsQuery,
     ListForeignKeysQuery,
     ListIndexesQuery,
 )
 from tests.conftest import TABLE, NO_CONN
+
+_INDEX = TableRef("sqladmin", "public", "customers_pkey")
 
 
 def test_indexes_pass_through_with_booleans() -> None:
@@ -159,6 +166,36 @@ def test_get_result_before_apply_raises() -> None:
         ListIndexesQuery(NO_CONN, TABLE),
         ListConstraintsQuery(NO_CONN, TABLE),
         ListForeignKeysQuery(NO_CONN, TABLE),
+        IndexDetailQuery(NO_CONN, TABLE),
     ):
         with pytest.raises(RuntimeError):
             op.get_result()
+
+
+def test_index_detail_maps_raw_row_to_contract_shape() -> None:
+    op = IndexDetailQuery(NO_CONN, _INDEX)
+    op._raw = [
+        {
+            "name": "customers_pkey",
+            "definition": "CREATE UNIQUE INDEX customers_pkey ON public.customers USING btree (id)",
+            "unique": True,
+            "primary": True,
+            "table_name": "customers",
+        },
+    ]
+
+    assert op.get_result() == {
+        "name": "customers_pkey",
+        "definition": "CREATE UNIQUE INDEX customers_pkey ON public.customers USING btree (id)",
+        "unique": True,
+        "primary": True,
+        "table": "customers",
+    }
+
+
+def test_index_detail_raises_not_found_when_absent() -> None:
+    op = IndexDetailQuery(NO_CONN, _INDEX)
+    op._raw = []
+
+    with pytest.raises(NotFound):
+        op.get_result()

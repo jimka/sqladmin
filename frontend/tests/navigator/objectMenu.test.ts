@@ -32,6 +32,7 @@ function stubActions(): ObjectMenuActions {
         createType: vi.fn(), createFunction: vi.fn(),
         dropSequence: vi.fn(), dropFunction: vi.fn(), editType: vi.fn(), dropType: vi.fn(),
         exportTable: vi.fn(),
+        openIndex: vi.fn(), openReferencedStructure: vi.fn(),
     } as unknown as ObjectMenuActions;
 }
 
@@ -61,6 +62,10 @@ function functionRef(isProcedure: boolean): DbObjectRef {
 
 function typeRef(): DbObjectRef {
     return { connectionId: CONN, database: DB, schema: SCHEMA, name: "ty1", kind: "type" };
+}
+
+function indexRef(): DbObjectRef {
+    return { connectionId: CONN, database: DB, schema: SCHEMA, name: "idx1", kind: "index", table: "t1" };
 }
 
 function databaseRef(): DbObjectRef {
@@ -149,6 +154,26 @@ describe("buildObjectMenuItems", () => {
         const items = buildObjectMenuItems(typeRef(), stubActions());
 
         expect(itemLabels(items)).toEqual(["Edit", "Drop"]);
+    });
+
+    it("builds an index's menu: show info, open table", () => {
+        const items = buildObjectMenuItems(indexRef(), stubActions());
+
+        expect(itemLabels(items)).toEqual(["Show info", "Open table"]);
+    });
+
+    it("dispatches an index menu's actions to the matching controller method", () => {
+        const ref = indexRef();
+        const actions = stubActions();
+        const items = buildObjectMenuItems(ref, actions);
+
+        items.find(i => i.text === "Show info")?.action?.();
+        expect(actions.openIndex).toHaveBeenCalledWith(ref, undefined);
+
+        items.find(i => i.text === "Open table")?.action?.();
+        expect(actions.openReferencedStructure).toHaveBeenCalledWith({
+            connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name: ref.table, kind: "table",
+        });
     });
 
     it("returns [] for a database ref (and any other unhandled kind)", () => {

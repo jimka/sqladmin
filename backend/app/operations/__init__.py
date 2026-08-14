@@ -49,6 +49,7 @@ from .graph import (
     SchemaTablesQuery,
     assemble_database_graph,
     assemble_schema_graph,
+    flatten_schema_indexes,
 )
 from .insert_row import InsertRowCommand
 from .list_columns import ListColumnsQuery
@@ -66,6 +67,7 @@ from .run_query import RunQueryCommand
 from .sequence_detail import SequenceDetailQuery
 from .table_privileges import TablePrivilegesQuery
 from .table_structure import (
+    IndexDetailQuery,
     ListConstraintsQuery,
     ListForeignKeysQuery,
     ListIndexesQuery,
@@ -93,6 +95,7 @@ __all__ = [
     "RoleMembershipsQuery",
     "RolePrivilegesQuery",
     "ListIndexesQuery",
+    "IndexDetailQuery",
     "ListConstraintsQuery",
     "ListForeignKeysQuery",
     "SchemaTablesQuery",
@@ -102,6 +105,7 @@ __all__ = [
     "SchemaForeignKeysQuery",
     "assemble_schema_graph",
     "assemble_database_graph",
+    "flatten_schema_indexes",
     "InsertRowCommand",
     "UpdateRowCommand",
     "DeleteRowCommand",

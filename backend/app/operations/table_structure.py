@@ -15,6 +15,7 @@ from typing import Any
 import asyncpg
 
 from ..contract import TableRef
+from ..errors import NotFound
 from .base import Query
 
 # Map the single-char referential-action codes Postgres stores in
@@ -93,6 +94,76 @@ class ListIndexesQuery(Query):
             }
             for r in self._raw
         ]
+
+
+class IndexDetailQuery(Query):
+    """
+    One index's full ``CREATE INDEX`` text, unique/primary flags, and owning
+    table, located by schema + index name alone (backs the Indexes-category
+    info tab, opened fresh per index rather than trusting the navigator's
+    cached schema-wide list — see the same-shaped ``SequenceDetailQuery``).
+    """
+
+    # Keyed by index name instead of table name (ListIndexesQuery's filter),
+    # with the owning table name added to the SELECT list. `table` is aliased
+    # `table_name` here — the wire key `table` is reserved for the mapped
+    # result, since `TABLE` is a reserved SQL keyword.
+    _SQL = """
+        SELECT
+            i.indexname     AS name,
+            i.indexdef      AS definition,
+            ix.indisunique  AS unique,
+            ix.indisprimary AS primary,
+            i.tablename     AS table_name
+        FROM pg_indexes i
+        JOIN pg_class ic     ON ic.relname = i.indexname
+        JOIN pg_namespace n  ON n.oid = ic.relnamespace
+        JOIN pg_index ix     ON ix.indexrelid = ic.oid
+        WHERE i.schemaname = $1 AND i.indexname = $2 AND n.nspname = $1
+    """
+
+    def __init__(self, conn: asyncpg.Connection, index: TableRef) -> None:
+        """
+        Capture the connection and the index to introspect (``index.name``
+        holds the index's own name, not a table's — mirrors how
+        ``SequenceDetailQuery`` reuses ``TableRef.name`` for a sequence).
+        """
+        self._conn: asyncpg.Connection = conn
+        self._index: TableRef = index
+        self._raw: Sequence[Mapping[str, Any]] | None = None
+
+    async def apply(self) -> None:
+        """
+        Fetch the detail row (zero or one row) for the index.
+        """
+        self._raw = await self._conn.fetch(self._SQL, self._index.schema, self._index.name)
+
+    def get_result(self) -> dict:
+        """
+        Return the index's definition, flags, and owning table.
+
+        Raises:
+            RuntimeError: if called before ``apply()``.
+            NotFound: if no index by that name exists.
+
+        Returns:
+            ``{name, definition, unique, primary, table}``.
+        """
+        if self._raw is None:
+            raise RuntimeError("get_result() called before apply()")
+
+        if not self._raw:
+            raise NotFound(f"Index '{self._index.schema}.{self._index.name}' not found")
+
+        row = self._raw[0]
+
+        return {
+            "name": row["name"],
+            "definition": row["definition"],
+            "unique": bool(row["unique"]),
+            "primary": bool(row["primary"]),
+            "table": row["table_name"],
+        }
 
 
 class ListConstraintsQuery(Query):

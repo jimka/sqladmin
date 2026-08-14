@@ -31,11 +31,6 @@ Deferred features and known issues. Implemented work lives in
 - **Backend-persisted, shareable saved queries** — supersede or complement the
   localStorage store once user support lands.
 
-### Schema depth
-- **More navigator object types** — indexes-as-objects. (Sequences shipped in
-  `schema-sequence-ddl`; functions/procedures and types shipped in
-  `function-type-ddl`.)
-
 ### Connections / platform
 - **Connection-management UI** — add/switch connections (activates the
   `connectionId` route/registry seam from `tsui-sql-admin.md`); needs auth/session
