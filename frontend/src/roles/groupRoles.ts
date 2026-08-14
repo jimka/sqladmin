@@ -6,6 +6,7 @@
 
 import type { TreeNode }    from "@jimka/typescript-ui/component/tree";
 import type { RoleSummary } from "../contract";
+import type { NodeKey }     from "../data/treeExpansion";
 
 /**
  * The `data` payload on a group-parent row. A role leaf carries its role-name
@@ -62,3 +63,9 @@ export function groupRoles(roles: RoleSummary[]): TreeNode[] {
 function roleLeaf(role: RoleSummary): TreeNode {
     return { label: role.name, data: role.name };
 }
+
+/** The Roles tree's {@link NodeKey}: a group parent's stable section name, or a leaf's role name. */
+export const roleNodeKey: NodeKey = node =>
+    typeof node.data === "string"
+        ? node.data
+        : (node.data as RoleGroupData | undefined)?.section ?? node.label;

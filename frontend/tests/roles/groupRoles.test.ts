@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { groupRoles } from "../../src/roles/groupRoles";
+import { groupRoles, roleNodeKey } from "../../src/roles/groupRoles";
 import type { RoleGroupData } from "../../src/roles/groupRoles";
 import type { RoleSummary } from "../../src/contract";
+import type { TreeNode } from "@jimka/typescript-ui/component/tree";
 
 function role(overrides: Partial<RoleSummary> = {}): RoleSummary {
     return {
@@ -66,5 +67,27 @@ describe("groupRoles", () => {
         ]);
 
         expect(groups.children?.map(c => c.label)).toEqual(["zeta", "alpha"]);
+    });
+});
+
+describe("roleNodeKey", () => {
+    it("a group parent built by groupRoles yields its bare section name, not its counted label", () => {
+        const [usersGroup] = groupRoles([role({ name: "sqladmin", canLogin: true })]);
+
+        expect(usersGroup.label).toBe("Users (1)");
+        expect(roleNodeKey(usersGroup)).toBe("Users");
+    });
+
+    it("a role leaf yields its role-name string", () => {
+        const [usersGroup] = groupRoles([role({ name: "sqladmin", canLogin: true })]);
+        const leaf = usersGroup.children![0];
+
+        expect(roleNodeKey(leaf)).toBe("sqladmin");
+    });
+
+    it("a node with no data falls back to its label", () => {
+        const node: TreeNode = { label: "orphan" };
+
+        expect(roleNodeKey(node)).toBe("orphan");
     });
 });

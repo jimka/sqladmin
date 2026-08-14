@@ -25,6 +25,7 @@ import { share_nodes }                          from "@jimka/typescript-ui/glyph
 import { circle_nodes }                         from "@jimka/typescript-ui/glyphs/solid/circle_nodes";
 import type { DbObjectKind, DbObjectRef }       from "../contract";
 import { getFunctions, getObjects, getSchemas, getTypes } from "../data/api";
+import { TreeExpansionPersistence }             from "../data/treeExpansion";
 import { KIND_GLYPH }                           from "./objectGlyphs";
 import { isRelationKind, objectCategories }     from "./objectKinds";
 import { showObjectMenu }                       from "./objectMenu";
@@ -107,6 +108,7 @@ class NavigatorTree extends Tree implements ExplorerTree {
     // covers only DOM-less callers that omit it; in-app it is always set.
     private readonly database:   string;
     private readonly contextMenu = Menu();
+    private readonly _expansion: TreeExpansionPersistence;
 
     constructor(controller: SqlAdminController) {
         super();
@@ -182,6 +184,10 @@ class NavigatorTree extends Tree implements ExplorerTree {
         // Let the controller drive selection when a dock tab is focused.
         this.controller.setNavigator(this);
 
+        this._expansion = new TreeExpansionPersistence(this, controller.layout.bindTreeExpansion("database"));
+        this.on("expand",   this._expansion.save);
+        this.on("collapse", this._expansion.save);
+
         // (Re)load the top-level schemas; the lazy object levels reload on their
         // next expansion. Used for the initial load.
         this.refresh();
@@ -194,14 +200,17 @@ class NavigatorTree extends Tree implements ExplorerTree {
     // reference, which would lose `this` if it were a plain method.
     refresh = (): void => {
         void loadSchemas(this.conn, this.database)
-            .then(nodes => {
+            .then(async nodes => {
                 this.setNodes(nodes);
+
+                const restored = await this._expansion.restore();
 
                 // A single-schema database: expand that lone schema immediately so
                 // its category folders show without an extra click. nodes[0] IS
                 // that schema's own TreeNode (see schemaNode below); expandNode
                 // loads its children via the node's loadChildren if not cached yet.
-                if (nodes.length === 1) {
+                // Skipped once the user has expansion state of their own.
+                if (!restored && nodes.length === 1) {
                     this.expandNode(nodes[0]);
                 }
             })

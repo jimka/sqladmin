@@ -1,9 +1,10 @@
 // Per-user (not per-connection) localStorage layer for the app's `Split` gutter
-// positions and `Accordion` section open/collapsed state, one key per layout
-// site. Unlike NotesStore/QueryHistoryStore/SavedQueryStore, layout is a
-// property of the user's window, not of the database being viewed — so the key
-// carries the `<user>` segment but no `connectionId`, and one user's layout
-// never bleeds into another's on a shared browser.
+// positions, `Accordion` section open/collapsed state, and a Database/Roles
+// tree's expanded nodes, one key per layout site. Unlike
+// NotesStore/QueryHistoryStore/SavedQueryStore, layout is a property of the
+// user's window, not of the database being viewed — so the key carries the
+// `<user>` segment but no `connectionId`, and one user's layout never bleeds
+// into another's on a shared browser.
 //
 // The app and the library split the restore validation: the library owns
 // *fit* (exact length, per-index unit against the live layout, finite
@@ -29,6 +30,9 @@ export type SplitSite = "shell" | "query" | "definition";
 
 /** A persisted Accordion site. The string is the key segment under `sqladmin.layout.`. */
 export type AccordionSite = "database" | "roles" | "queries" | "structure" | "explainDiagram";
+
+/** A persisted tree-expansion site. The string is the key segment under `sqladmin.layout.`. */
+export type TreeSite = "database" | "roles";
 
 // Default open flags per Accordion site, in section order; the array length is
 // also the site's section count. These mirror the `initiallyOpen` literals the
@@ -59,6 +63,7 @@ interface StoredLayout {
     sizes?:     LayoutSize[];
     collapsed?: number[];
     open?:      boolean[];
+    expanded?:  string[][];
 }
 
 /** One Split site's saved layout plus its save hooks, shaped to wire straight onto Split's events. */
@@ -83,6 +88,14 @@ export interface AccordionLayoutBinding {
     onSizes:   (sizes: LayoutSize[]) => void;
     /** Persist one section's open flag. Wire to `Accordion`'s `sectiontoggle`. */
     onToggle:  (index: number, open: boolean) => void;
+}
+
+/** One tree's saved expanded-node paths plus its save hook. */
+export interface TreeExpansionBinding {
+    /** The saved paths; `[]` when explicitly saved empty, `null` when never saved or not an array. */
+    loadExpanded: () => string[][] | null;
+    /** Persist the complete set of expanded paths, replacing any previous one. */
+    onExpanded:   (paths: string[][]) => void;
 }
 
 /** Whether one parsed entry is a well-formed {@link LayoutSize}. */
@@ -157,6 +170,32 @@ function readCollapsed(values: unknown): number[] {
     );
 }
 
+/** Whether one parsed entry is a well-formed key path: a non-empty array of strings. */
+function isKeyPath(value: unknown): value is string[] {
+    return Array.isArray(value) && value.length > 0 && value.every(s => typeof s === "string");
+}
+
+/**
+ * The saved expanded-node paths, or null when never saved or not an array.
+ *
+ * Individual malformed entries are dropped rather than rejecting the whole
+ * array, since each path stands alone — unlike `readSizes`, where one bad
+ * entry invalidates the set the library restores as a unit.
+ *
+ * @param values - The parsed `expanded` field, of unknown shape.
+ *
+ * @returns The well-formed paths, or `null` when `values` itself is not an array.
+ */
+function readExpanded(values: unknown): string[][] | null {
+    if (!Array.isArray(values)) {
+        return null;
+    }
+
+    return (values as unknown[])
+        .filter(isKeyPath)
+        .map(path => [...path]);
+}
+
 /** Per-user (not per-connection) UI layout persistence, one key per site. */
 export class LayoutStore {
     private readonly _storage: KeyValueStore;
@@ -205,6 +244,23 @@ export class LayoutStore {
             loadOpen : () => readOpen(this._read(site).open, defaults),
             onSizes  : sizes => this._write(site, { sizes }),
             onToggle : (index, open) => this._saveOpenSection(site, index, open, defaults),
+        };
+    }
+
+    /**
+     * Bind one tree's saved expansion: loader plus a save hook that replaces the
+     * complete set. Unlike `bindSplit`/`bindAccordion`'s per-index merges, the
+     * caller here always has the tree's whole expanded set in hand, so there is
+     * nothing to merge with.
+     *
+     * @param site - The tree-expansion site to bind.
+     *
+     * @returns The site's binding.
+     */
+    bindTreeExpansion(site: TreeSite): TreeExpansionBinding {
+        return {
+            loadExpanded: () => readExpanded(this._read(site).expanded),
+            onExpanded  : paths => this._write(site, { expanded: paths }),
         };
     }
 
