@@ -232,3 +232,112 @@ describe("LayoutStore — bindAccordion", () => {
         expect(layout.loadOpen()).toEqual([true, false, false, false]);
     });
 });
+
+describe("LayoutStore — bindTreeExpansion", () => {
+    it("loadExpanded() on empty storage returns null", () => {
+        const layout = new LayoutStore("u", fakeStorage()).bindTreeExpansion("database");
+
+        expect(layout.loadExpanded()).toBeNull();
+    });
+
+    it("onExpanded() then loadExpanded() round-trips the same nested array", () => {
+        const layout = new LayoutStore("u", fakeStorage()).bindTreeExpansion("database");
+        const paths  = [["public"], ["public", "Tables"]];
+
+        layout.onExpanded(paths);
+
+        expect(layout.loadExpanded()).toEqual(paths);
+    });
+
+    it("onExpanded([]) then loadExpanded() returns [], not null — an explicit empty save is distinguishable from never having saved", () => {
+        const layout = new LayoutStore("u", fakeStorage()).bindTreeExpansion("database");
+
+        layout.onExpanded([]);
+
+        expect(layout.loadExpanded()).toEqual([]);
+    });
+
+    it("stores under the same key sqladmin.layout.<user>.<site> bindAccordion(site) uses, no extra segment", () => {
+        const storage = fakeStorage();
+        const layout  = new LayoutStore("u", storage).bindTreeExpansion("database");
+
+        layout.onExpanded([["public"]]);
+
+        expect(storage.map.has("sqladmin.layout.u.database")).toBe(true);
+    });
+
+    it("writing expansion leaves sizes/open intact, and writing accordion state leaves expanded intact", () => {
+        const storage    = fakeStorage();
+        const store      = new LayoutStore("u", storage);
+        const accordion  = store.bindAccordion("database");
+        const expansion  = store.bindTreeExpansion("database");
+
+        accordion.onSizes([{ unit: "ratio", value: 1 }]);
+        accordion.onToggle(0, true);
+        expansion.onExpanded([["public"]]);
+
+        expect(JSON.parse(storage.map.get("sqladmin.layout.u.database")!)).toEqual({
+            sizes: [{ unit: "ratio", value: 1 }], open: [true, true], expanded: [["public"]],
+        });
+
+        expansion.onExpanded([["sales"]]);
+        expect(accordion.loadSizes()).toEqual([{ unit: "ratio", value: 1 }]);
+        expect(accordion.loadOpen()).toEqual([true, true]);
+
+        accordion.onToggle(1, false);
+        expect(expansion.loadExpanded()).toEqual([["sales"]]);
+    });
+
+    it("a second onExpanded replaces the array rather than merging into it", () => {
+        const layout = new LayoutStore("u", fakeStorage()).bindTreeExpansion("database");
+
+        layout.onExpanded([["public"], ["sales"]]);
+        layout.onExpanded([["sales"]]);
+
+        expect(layout.loadExpanded()).toEqual([["sales"]]);
+    });
+
+    it("malformed entries are dropped, the well-formed ones survive", () => {
+        const storage = fakeStorage();
+        storage.map.set("sqladmin.layout.u.database", JSON.stringify({
+            expanded: [["public"], "nope", [], [1], ["a", 2]],
+        }));
+
+        expect(new LayoutStore("u", storage).bindTreeExpansion("database").loadExpanded()).toEqual([["public"]]);
+    });
+
+    it("a non-array expanded value loads as null", () => {
+        const storage = fakeStorage();
+        const layout  = new LayoutStore("u", storage).bindTreeExpansion("database");
+
+        storage.map.set("sqladmin.layout.u.database", JSON.stringify({ expanded: "nope" }));
+        expect(layout.loadExpanded()).toBeNull();
+
+        storage.map.set("sqladmin.layout.u.database", JSON.stringify({ expanded: 5 }));
+        expect(layout.loadExpanded()).toBeNull();
+
+        storage.map.set("sqladmin.layout.u.database", JSON.stringify({ expanded: {} }));
+        expect(layout.loadExpanded()).toBeNull();
+    });
+
+    it("corrupt JSON loads as null without throwing; a later write repairs the blob", () => {
+        const storage = fakeStorage();
+        storage.map.set("sqladmin.layout.u.database", "{not json");
+        const layout = new LayoutStore("u", storage).bindTreeExpansion("database");
+
+        expect(layout.loadExpanded()).toBeNull();
+
+        layout.onExpanded([["public"]]);
+        expect(layout.loadExpanded()).toEqual([["public"]]);
+    });
+
+    it("\"database\" and \"roles\" do not cross-read", () => {
+        const store    = new LayoutStore("u", fakeStorage());
+        const database = store.bindTreeExpansion("database");
+        const roles    = store.bindTreeExpansion("roles");
+
+        database.onExpanded([["public"]]);
+
+        expect(roles.loadExpanded()).toBeNull();
+    });
+});

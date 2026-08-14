@@ -19,7 +19,8 @@ import { user_group }                from "@jimka/typescript-ui/glyphs/solid/use
 import { gears }                     from "@jimka/typescript-ui/glyphs/solid/gears";
 import type { SqlAdminController }   from "../SqlAdminController";
 import type { ExplorerTree }         from "../navigator/NavigatorTree";
-import { groupRoles }                from "./groupRoles";
+import { TreeExpansionPersistence }  from "../data/treeExpansion";
+import { groupRoles, roleNodeKey }   from "./groupRoles";
 import type { RoleGroupData }        from "./groupRoles";
 
 // Leaf rows use the single-user glyph; the group parents carry their own glyph
@@ -41,6 +42,7 @@ function roleRowGlyph(node: TreeNode): string {
 class RolesTree extends Tree implements ExplorerTree {
     private readonly controller: SqlAdminController;
     private readonly contextMenu = Menu();
+    private readonly _expansion: TreeExpansionPersistence;
 
     constructor(controller: SqlAdminController) {
         super();
@@ -96,6 +98,10 @@ class RolesTree extends Tree implements ExplorerTree {
             ]);
         });
 
+        this._expansion = new TreeExpansionPersistence(this, controller.layout.bindTreeExpansion("roles"), roleNodeKey);
+        this.on("expand",   this._expansion.save);
+        this.on("collapse", this._expansion.save);
+
         // (Re)load the role list; used for the initial load.
         this.refresh();
     }
@@ -103,17 +109,20 @@ class RolesTree extends Tree implements ExplorerTree {
     // (Re)load the role list; used for the initial load and the refresh tool.
     // setNodes collapses every group, so afterwards we reveal the first login
     // role to expand the "Users" section by default — the real users sit up
-    // front while the noisy Groups / Predefined sections stay collapsed. A
-    // public arrow-function field: refreshTool/bindRefreshShortcut hold this by
-    // reference, which would lose `this` if it were a plain method.
+    // front while the noisy Groups / Predefined sections stay collapsed. Skipped
+    // once the user has expansion state of their own. A public arrow-function
+    // field: refreshTool/bindRefreshShortcut hold this by reference, which
+    // would lose `this` if it were a plain method.
     refresh = (): void => {
         void this.controller.loadRoles()
-            .then(roles => {
+            .then(async roles => {
                 this.setNodes(groupRoles(roles));
+
+                const restored = await this._expansion.restore();
 
                 const firstUser = roles.find(role => role.canLogin);
 
-                if (firstUser) {
+                if (!restored && firstUser) {
                     void this.revealByPredicate(data => data === firstUser.name);
                 }
             })

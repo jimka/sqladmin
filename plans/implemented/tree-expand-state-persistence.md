@@ -576,6 +576,88 @@ sqladmin publishes no API docs, so there is no doc site, barrel, or catalog to u
 
 ---
 
+## Implementation Notes
+
+- **Manual-verify coverage.** All eight of the running-app cases (28-35) were
+  driven live against a from-source backend via the chrome-devtools MCP
+  browser, not skipped:
+  - **28** bundles two claims and both were driven, against `sqladmin` (8
+    schemas): expanded `sales` and its `Tables` group, confirmed the exact
+    `{"expanded":[["sales"],["sales","Tables"]]}` blob, reloaded, and
+    confirmed the identical shape restored. The scroll claim was checked
+    separately at a shrunk 1200×380 viewport: with `sales` expanded, the
+    virtualized row list had scrolled far enough that `analytics` (the
+    first schema) was no longer in the rendered DOM row set (`hr` led
+    instead); after reload, the restored tree's first rendered row was
+    `analytics` again — confirming the restore does not preserve or
+    re-apply the pre-reload scroll offset, it lands at the top.
+  - **29** has two independent claims and both were driven separately, since
+    `sqladmin`'s 8 schemas can only exercise the first: collapsing everything
+    on `sqladmin` persisted `{"expanded":[]}` and reloaded to a fully
+    collapsed tree; separately, on the single-schema `postgres` database,
+    the lone `public` schema was collapsed (confirming the same
+    `{"expanded":[]}` save), then reloaded — `public` stayed collapsed
+    rather than being auto-expanded, which is the `restored === true &&
+    nodes.length === 1` combination the guard at
+    `frontend/src/navigator/NavigatorTree.ts:213` exists for.
+  - **30** (first-run default expansion still runs with no saved state) was
+    driven in a **fresh isolated browser context** (no prior storage at all,
+    not just a cleared one) against `postgres` (single schema `public`):
+    the lone schema auto-expanded, and the Roles rail's default "Users"
+    reveal still ran.
+  - **31** (a non-"Users" group restores, and "Users" is not re-opened by
+    the default reveal) was driven by expanding "Groups", collapsing
+    "Users", confirming the saved set was `[["Groups"]]`, and reloading:
+    "Groups" stayed expanded and "Users" stayed collapsed.
+  - **32** (count-independent identity) was driven by expanding "Users (7)",
+    running `CREATE ROLE tree_verify_role LOGIN;`, refreshing the Roles rail
+    to "Users (8)", and reloading: the group was still restored under its
+    new count.
+  - **33** (the Refresh tool preserves expansion) was driven on the Database
+    rail with `public`/`Tables` expanded: clicking Refresh re-fetched and
+    kept both expanded instead of collapsing.
+  - **34** (a dropped schema is pruned, not just skipped) was driven by
+    creating `tree_verify_schema`, expanding it (confirmed in the saved set
+    alongside `public`/`Tables`), dropping it via the navigator's context
+    menu, and confirming the tree refreshed without it and the storage blob
+    shrank back to just `{"expanded":[["public"],["public","Tables"]]}` —
+    the vanished schema did not linger in storage.
+  - **35** (the Local Storage window) was driven from the Tools menu: the
+    `expanded` field showed beside `sizes`/`open` under `layout > <user> >
+    database`, and "Clear SQLAdmin data" removed the whole key, confirmed by
+    reading `localStorage` directly (empty afterwards).
+  - Test roles/schemas created for cases 32 and 34 (`tree_verify_role`,
+    `tree_verify_schema`) were dropped again before finishing, so the
+    verification left no residue in the shared dev database.
+
+- **Deviation: `restore()`'s closing save no longer prunes a path that failed
+  to expand.** `## Internal Structure`'s `restore()` sketch calls the plain
+  `save()` unconditionally after the walk loop, which — because `save()`
+  rebuilds the stored array wholesale from `getExpandedNodes()` — silently
+  dropped a path whose `expandNodeAsync` call rejected (a transient load
+  failure) exactly like a path whose node is genuinely gone. That directly
+  contradicts this doc's own "Potential Challenges" claim, two sections
+  below: "Because saving is suspended during the restore, the failed path
+  stays in storage and is retried on the next load" — the sketched code and
+  that claim cannot both hold, since the sketch has no way to tell "gone"
+  apart from "failed to load" once the walk loop finishes.
+  `frontend/src/data/treeExpansion.ts`'s `_expandPath` now returns
+  `"expanded" | "missing" | "failed"` instead of `void`, and `restore()`
+  collects every path whose outcome is `"failed"` into a `retryable` array
+  passed to a new private `_write(retain)` helper (`save()` becomes
+  `_write([])`), which appends `retain` verbatim to the freshly computed set
+  rather than letting it be silently reconstructed away. A path that resolves
+  `"missing"` is still dropped, matching case 24 and the "Potential
+  Challenges" storage-size reasoning, which assumes a schema that vanishes
+  from the tree also vanishes from storage. Pinned by
+  `frontend/tests/data/treeExpansion.test.ts`'s "the final save retains (does
+  not prune) a path whose expansion failed, unlike a path whose node is gone"
+  — which fails against the original sketch's `save()`-based code (verified
+  by temporarily reverting the fix) and passes with the fix, including a
+  second `restore()` call (a fresh `TreeExpansionPersistence` over the same
+  binding, standing in for the next page load) that confirms the retained
+  path is retried, not just kept inert in storage.
+
 ## Notes
 
 [^library-not-scoped]: The project routes a missing capability into the library rather than working around it app-side, and `plans/align-with-library-post-0.4.1.md` is the recent precedent for an app plan written against library API that exists in the symlinked build but not in a published npm version. `frontend/node_modules/@jimka/typescript-ui` is a symlink to `/home/jika/typescript/typescript-ui/packages/lib`, so the app builds against that repo's `dist/lib` directly. An app-side alternative does exist and was rejected: the app could mirror the expanded set itself from a `"expand"`/`"collapse"` event pair and drive the restore as a state machine advanced by each `"expand"` event, needing no `getExpandedNodes()` and no `expandNodeAsync()`. That mirror drifts the moment anything expands without an event — `setNodes()` clears `_expandedNodes` silently, and `revealByPredicate` expands ancestors directly — and the event-driven restore has no way to notice that a path stalled on a failed load. Reading the tree's own truth at save time and awaiting each expansion removes both failure modes for two small additions.
