@@ -14,8 +14,13 @@ from typing import Any
 
 from ..contract import ColumnMeta
 from ..errors import ValidationError
+from ..wire import from_wire_filter_operand
 
 _COMPARATORS = {"eq": "=", "neq": "<>", "gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
+# A `date` column is compared against an instant rather than truncated to a
+# day -- see `from_wire_filter_operand`. The cast also pins the bound
+# parameter's type, which a bare `"day" >= $1` would infer as `date`.
+_INSTANT_CAST_TYPES = frozenset({"date"})
 
 
 def quote_ident(name: str) -> str:
@@ -78,10 +83,10 @@ class FilterCompiler:
 
     def __init__(self, filters: list[dict] | None, columns: list[ColumnMeta]) -> None:
         """
-        Capture the filter descriptors and the legal identifier set.
+        Capture the filter descriptors and the legal column set.
         """
         self._filters: list[dict] = filters or []
-        self._allowed: set[str] = {c.name for c in columns}
+        self._columns: dict[str, ColumnMeta] = {c.name: c for c in columns}
         self._params: list[Any] = []
 
     def compile(self) -> tuple[str, list[Any]]:
@@ -107,6 +112,20 @@ class FilterCompiler:
 
         return f"${len(self._params)}"
 
+    def _meta(self, field: str) -> ColumnMeta:
+        """
+        Validate a field against the column set and return its metadata.
+
+        Raises:
+            ValidationError: if the field is not a known column.
+        """
+        column = self._columns.get(field)
+
+        if column is None:
+            raise ValidationError(f"Unknown filter column '{field}'")
+
+        return column
+
     def _ident(self, field: str) -> str:
         """
         Validate a field against the column set and return its quoted form.
@@ -114,10 +133,29 @@ class FilterCompiler:
         Raises:
             ValidationError: if the field is not a known column.
         """
-        if field not in self._allowed:
-            raise ValidationError(f"Unknown filter column '{field}'")
+        return quote_ident(self._meta(field).name)
 
-        return quote_ident(field)
+    def _operand(self, field: str, value: Any) -> Any:
+        """
+        The Python value to bind for a comparison against ``field``.
+
+        Raises:
+            ValidationError: if the field is unknown, or the operand cannot be
+                mapped to the column's type.
+        """
+        column = self._meta(field)
+
+        try:
+            return from_wire_filter_operand(value, column)
+        except (ValueError, TypeError) as e:
+            raise ValidationError(f"Invalid filter value for column '{field}': {e}")
+
+    def _instant_cast(self, field: str) -> str:
+        """
+        The cast that makes a `date` column comparable to a filter operand's
+        full instant, or '' for every other column.
+        """
+        return "::timestamp" if self._meta(field).data_type.lower() in _INSTANT_CAST_TYPES else ""
 
     def _column(self, field: str, values: list[Any]) -> str:
         """
@@ -143,9 +181,11 @@ class FilterCompiler:
         t = f.get("type")
 
         if t in _COMPARATORS:
-            col = self._column(f["field"], [f["value"]])
+            field = f["field"]
+            value = self._operand(field, f["value"])
+            col = self._column(field, [value]) + self._instant_cast(field)
 
-            return f"{col} {_COMPARATORS[t]} {self._bind(f['value'])}"
+            return f"{col} {_COMPARATORS[t]} {self._bind(value)}"
 
         if t in ("contains", "startsWith", "endsWith"):
             # A LIKE/ILIKE operand is a string by construction, so this branch

@@ -4,6 +4,8 @@ Pure SQL-compiler tests: quote_ident, FilterCompiler, OrderCompiler.
 
 from __future__ import annotations
 
+import datetime
+
 import pytest
 
 from app.contract import WireType
@@ -12,6 +14,12 @@ from app.sql.compiler import FilterCompiler, OrderCompiler, quote_ident
 from tests.conftest import col
 
 COLS = [col("id", WireType.NUMBER, pk=True), col("name"), col("balance"), col("active", WireType.BOOLEAN)]
+UTC = datetime.timezone.utc
+TEMPORAL_COLS = [
+    col("id", WireType.NUMBER, pk=True),
+    col("created_at", WireType.ISO_STRING, data_type="timestamp with time zone"),
+    col("day", WireType.ISO_STRING, data_type="date"),
+]
 
 
 # --- quote_ident ----------------------------------------------------------
@@ -275,3 +283,131 @@ def test_filter_not_wraps_null_bearing_in() -> None:
 
     assert where == 'WHERE NOT (("name"::text IS NULL OR "name"::text = ANY($1)))'
     assert params == [["x"]]
+
+
+# --- temporal columns (FilterCompiler._operand / _instant_cast) ------------
+#
+# A timestamptz/timestamp/time column's filter operand is converted from the
+# wire's ISO-8601 instant into the Python temporal type asyncpg binds -- see
+# from_wire_filter_operand. A `date` column is additionally compared as
+# "col"::timestamp rather than truncated, so the header row's minute-wide
+# equality range matches instead of matching nothing -- see "A `date` column
+# is compared as an instant, not truncated to a day" in the plan.
+
+
+@pytest.mark.parametrize(
+    "ftype,op",
+    [("eq", "="), ("neq", "<>"), ("gt", ">"), ("gte", ">="), ("lt", "<"), ("lte", "<=")],
+)
+def test_filter_comparators_on_timestamptz_column(ftype: str, op: str) -> None:
+    where, params = FilterCompiler(
+        [{"type": ftype, "field": "created_at", "value": "2026-06-28T12:04:00.000Z"}], TEMPORAL_COLS
+    ).compile()
+
+    assert where == f'WHERE "created_at" {op} $1'
+    assert params == [datetime.datetime(2026, 6, 28, 12, 4, tzinfo=UTC)]
+
+
+@pytest.mark.parametrize(
+    "ftype,op",
+    [("eq", "="), ("neq", "<>"), ("gt", ">"), ("gte", ">="), ("lt", "<"), ("lte", "<=")],
+)
+def test_filter_comparators_on_date_column_cast_to_timestamp(ftype: str, op: str) -> None:
+    where, params = FilterCompiler(
+        [{"type": ftype, "field": "day", "value": "2026-06-28T00:00:00.000Z"}], TEMPORAL_COLS
+    ).compile()
+
+    assert where == f'WHERE "day"::timestamp {op} $1'
+    assert params == [datetime.datetime(2026, 6, 28, 0, 0)]
+
+
+def test_filter_equals_range_on_date_column() -> None:
+    # The header row builds "Equals" on a temporal column as a half-open
+    # range one minute wide, not a single `eq`.
+    where, params = FilterCompiler(
+        [
+            {
+                "type": "and",
+                "filters": [
+                    {"type": "gte", "field": "day", "value": "2026-06-28T00:00:00.000Z"},
+                    {"type": "lt", "field": "day", "value": "2026-06-28T00:01:00.000Z"},
+                ],
+            }
+        ],
+        TEMPORAL_COLS,
+    ).compile()
+
+    assert where == 'WHERE ("day"::timestamp >= $1 AND "day"::timestamp < $2)'
+    assert params == [datetime.datetime(2026, 6, 28, 0, 0), datetime.datetime(2026, 6, 28, 0, 1)]
+
+
+def test_filter_equals_range_on_timestamptz_column() -> None:
+    where, params = FilterCompiler(
+        [
+            {
+                "type": "and",
+                "filters": [
+                    {"type": "gte", "field": "created_at", "value": "2026-06-28T12:04:00.000Z"},
+                    {"type": "lt", "field": "created_at", "value": "2026-06-28T12:05:00.000Z"},
+                ],
+            }
+        ],
+        TEMPORAL_COLS,
+    ).compile()
+
+    assert where == 'WHERE ("created_at" >= $1 AND "created_at" < $2)'
+    assert params == [
+        datetime.datetime(2026, 6, 28, 12, 4, tzinfo=UTC),
+        datetime.datetime(2026, 6, 28, 12, 5, tzinfo=UTC),
+    ]
+
+
+def test_filter_at_least_on_date_column() -> None:
+    where, params = FilterCompiler(
+        [{"type": "gte", "field": "day", "value": "2026-06-28T00:00:00.000Z"}], TEMPORAL_COLS
+    ).compile()
+
+    assert where == 'WHERE "day"::timestamp >= $1'
+    assert params == [datetime.datetime(2026, 6, 28, 0, 0)]
+
+
+def test_filter_contains_on_timestamptz_column_still_casts_to_text() -> None:
+    # The pattern branch is unchanged: it always casts to ::text and binds a
+    # plain string, whatever the column's Postgres type.
+    where, params = FilterCompiler(
+        [{"type": "contains", "field": "created_at", "value": "2026-06"}], TEMPORAL_COLS
+    ).compile()
+
+    assert where == r"""WHERE "created_at"::text ILIKE $1 ESCAPE '\'"""
+    assert params == ["%2026-06%"]
+
+
+def test_filter_is_empty_on_nullable_timestamptz_column() -> None:
+    where, params = FilterCompiler(
+        [{"type": "in", "field": "created_at", "values": [None, None, ""]}], TEMPORAL_COLS
+    ).compile()
+
+    assert where == 'WHERE ("created_at"::text IS NULL OR "created_at"::text = ANY($1))'
+    assert params == [[""]]
+
+
+def test_filter_is_not_empty_on_nullable_timestamptz_column() -> None:
+    where, params = FilterCompiler(
+        [{"type": "not", "filter": {"type": "in", "field": "created_at", "values": [None, None, ""]}}],
+        TEMPORAL_COLS,
+    ).compile()
+
+    assert where == 'WHERE NOT (("created_at"::text IS NULL OR "created_at"::text = ANY($1)))'
+    assert params == [[""]]
+
+
+def test_filter_unparseable_temporal_operand_raises_validation_error() -> None:
+    with pytest.raises(ValidationError):
+        FilterCompiler([{"type": "eq", "field": "created_at", "value": "not-a-date"}], TEMPORAL_COLS).compile()
+
+
+def test_filter_unknown_column_still_raises_validation_error_with_temporal_columns() -> None:
+    # Regression: the _meta refactor (FilterCompiler now keeps ColumnMeta, not
+    # just names) must not change this behaviour or its message.
+    with pytest.raises(ValidationError, match="Unknown filter column 'ghost'"):
+        FilterCompiler([{"type": "eq", "field": "ghost", "value": 1}], TEMPORAL_COLS).compile()

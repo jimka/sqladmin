@@ -13,7 +13,7 @@ import pytest
 import uuid
 
 from app.contract import WireType
-from app.wire import from_wire_value, pg_type_to_wire, rows_to_wire, to_wire_value
+from app.wire import from_wire_filter_operand, from_wire_value, pg_type_to_wire, rows_to_wire, to_wire_value
 from tests.conftest import col
 
 
@@ -167,3 +167,92 @@ def test_from_wire_base64_to_bytes() -> None:
 def test_from_wire_json_to_text() -> None:
     # asyncpg binds json/jsonb columns from a JSON text string.
     assert from_wire_value({"a": 1}, col("doc", WireType.JSON, data_type="jsonb")) == '{"a": 1}'
+
+
+UTC = datetime.timezone.utc
+
+
+@pytest.mark.parametrize(
+    "data_type,wire_value,expected",
+    [
+        ("timestamp with time zone", "2026-06-28T12:04:00.000Z", datetime.datetime(2026, 6, 28, 12, 4, tzinfo=UTC)),
+        ("timestamp without time zone", "2026-06-28T12:04:00.000Z", datetime.datetime(2026, 6, 28, 12, 4)),
+        ("date", "2026-06-28T00:00:00.000Z", datetime.datetime(2026, 6, 28, 0, 0)),
+        ("time without time zone", "1970-01-01T09:30:00.000Z", datetime.time(9, 30)),
+        ("time with time zone", "1970-01-01T09:30:00.000Z", datetime.time(9, 30, tzinfo=UTC)),
+    ],
+)
+def test_from_wire_filter_operand_temporal_types(data_type: str, wire_value: str, expected: object) -> None:
+    column = col("t", WireType.ISO_STRING, data_type=data_type)
+
+    assert from_wire_filter_operand(wire_value, column) == expected
+
+
+def test_from_wire_filter_operand_date_keeps_time_of_day() -> None:
+    # A `date` column's operand is compared as an instant, not truncated to a
+    # day -- see FilterCompiler's `::timestamp` cast.
+    result = from_wire_filter_operand("2026-06-28T12:04:59.110Z", col("d", WireType.ISO_STRING, data_type="date"))
+
+    assert result == datetime.datetime(2026, 6, 28, 12, 4, 59, 110000)
+    assert result.tzinfo is None
+
+
+def test_from_wire_filter_operand_timestamptz_normalizes_to_utc() -> None:
+    result = from_wire_filter_operand(
+        "2026-06-28T14:04:00+02:00",
+        col("created_at", WireType.ISO_STRING, data_type="timestamp with time zone"),
+    )
+
+    assert result == datetime.datetime(2026, 6, 28, 12, 4, tzinfo=UTC)
+
+
+def test_from_wire_filter_operand_time_without_tz_is_naive() -> None:
+    result = from_wire_filter_operand(
+        "1970-01-01T09:30:00.000Z", col("opens_at", WireType.ISO_STRING, data_type="time without time zone")
+    )
+
+    assert result == datetime.time(9, 30)
+    assert result.tzinfo is None
+
+
+def test_from_wire_filter_operand_time_with_tz_is_aware() -> None:
+    result = from_wire_filter_operand(
+        "1970-01-01T09:30:00.000Z", col("opens_at", WireType.ISO_STRING, data_type="time with time zone")
+    )
+
+    assert result == datetime.time(9, 30, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "wire_type,data_type,value",
+    [
+        (WireType.NUMBER, "integer", 10),
+        (WireType.BOOLEAN, "boolean", True),
+        (WireType.STRING, "text", "ada"),
+        (WireType.STRING, "uuid", "1234"),
+        (WireType.STRING, "numeric", "10"),
+    ],
+)
+def test_from_wire_filter_operand_passes_non_temporal_columns_through(
+    wire_type: WireType, data_type: str, value: object
+) -> None:
+    # Regression guard: from_wire_filter_operand must NOT reuse
+    # from_wire_value's write-path coercion, which would reject a partial
+    # uuid or over-narrow a numeric string to Decimal.
+    result = from_wire_filter_operand(value, col("x", wire_type, data_type=data_type))
+
+    assert result == value
+    assert type(result) is type(value)
+
+
+def test_from_wire_filter_operand_none_on_temporal_column_returns_none() -> None:
+    assert from_wire_filter_operand(None, col("d", WireType.ISO_STRING, data_type="date")) is None
+
+
+def test_from_wire_filter_operand_non_string_on_temporal_column_passes_through() -> None:
+    assert from_wire_filter_operand(10, col("d", WireType.ISO_STRING, data_type="date")) == 10
+
+
+def test_from_wire_filter_operand_unparseable_text_raises_value_error() -> None:
+    with pytest.raises(ValueError):
+        from_wire_filter_operand("not-a-date", col("d", WireType.ISO_STRING, data_type="date"))
