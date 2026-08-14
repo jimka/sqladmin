@@ -45,7 +45,7 @@ import { Placement }                   from "@jimka/typescript-ui/primitive";
 import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
 import { Button }                      from "@jimka/typescript-ui/component/button";
 import { Checkbox, ComboBox, Link, Text, TextField } from "@jimka/typescript-ui/component/input";
-import { LabeledFieldSet }             from "@jimka/typescript-ui/component/container";
+import { LabeledFieldSet, Spacer }     from "@jimka/typescript-ui/component/container";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
 import { MemoryStore, Model }          from "@jimka/typescript-ui/data";
 import { save }                        from "@jimka/typescript-ui/glyphs/solid/save";
@@ -207,7 +207,10 @@ class SequenceInfoPanel extends Container {
 
         const saveButton = glyphButton("save", PRIMARY_COLOR, "Save", () => this.handleSave());
         const refreshButton = glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", () => deps.onRefresh());
-        const toolbar = new ToolBar({ components: [saveButton, refreshButton] });
+        // Flex spacer pushes Refresh to the far right, away from Save — the
+        // same edit-actions-left/Refresh-far-right grouping TableWorkPanel's
+        // data-grid toolbar uses.
+        const toolbar = new ToolBar({ components: [saveButton, Spacer.flex(), refreshButton] });
 
         super({ layoutManager: new BorderLayout({ spacing: 0 }) });
 

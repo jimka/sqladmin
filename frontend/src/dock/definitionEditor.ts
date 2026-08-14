@@ -10,6 +10,7 @@
 // `onSave`/`onRefresh`; this class carries no view/function specifics.
 
 import { ToolBar }    from "@jimka/typescript-ui/component/menubar";
+import { Spacer }     from "@jimka/typescript-ui/component/container";
 import { Button }     from "@jimka/typescript-ui/component/button";
 import { CodeEditor } from "@jimka/typescript-ui/component/editor";
 import { Glyph }      from "@jimka/typescript-ui/component/display";
@@ -77,8 +78,11 @@ export class DefinitionEditor {
         };
 
         this._saveButton = glyphButton("save", PRIMARY_COLOR, "Save", handleSave);
+        // Flex spacer pushes Refresh to the far right, away from Save — the
+        // same edit-actions-left/Refresh-far-right grouping TableWorkPanel's
+        // data-grid toolbar uses.
         this.toolbar = new ToolBar({
-            components: [this._saveButton, glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", onRefresh)],
+            components: [this._saveButton, Spacer.flex(), glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", onRefresh)],
         });
 
         // Enable Save only once the definition is edited; seeding starts it disabled.

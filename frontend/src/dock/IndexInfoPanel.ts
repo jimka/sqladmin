@@ -21,7 +21,7 @@ import { Border as BorderLayout }      from "@jimka/typescript-ui/layout";
 import { Placement }                   from "@jimka/typescript-ui/primitive";
 import { ToolBar }                     from "@jimka/typescript-ui/component/menubar";
 import { Link, Text }                  from "@jimka/typescript-ui/component/input";
-import { LabeledFieldSet }             from "@jimka/typescript-ui/component/container";
+import { LabeledFieldSet, Spacer }     from "@jimka/typescript-ui/component/container";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
 import { CodeEditor }                  from "@jimka/typescript-ui/component/editor";
 import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
@@ -93,8 +93,11 @@ class IndexInfoPanel extends Container {
         // CodeEditor construction for the EXPLAIN plan pane.
         const editor = new CodeEditor(detail.definition, { language: "sql", readOnly: true });
 
+        // Flex spacer pushes Refresh to the far right rather than leaving it
+        // pinned at the toolbar's left edge — matches the other four tabs'
+        // Refresh placement.
         const toolbar = new ToolBar({
-            components: [glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", () => deps.onRefresh())],
+            components: [Spacer.flex(), glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", () => deps.onRefresh())],
         });
 
         // The fieldset and editor sit in a nested Border below the toolbar —
