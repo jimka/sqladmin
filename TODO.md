@@ -18,6 +18,12 @@ Deferred features and known issues. Implemented work lives in
   a JSON / large-text value in full (the record view's value column is
   width-capped by the library).
 - **Copy-as** — cell / row / `INSERT` statement.
+- **`date`/`time` columns are modelled as the library's `datetime` field
+  type** (`buildModel.ts:14`), so a `date` cell renders a time of day it does
+  not have, and west of UTC it renders the previous day. Mapping those two
+  Postgres types to the library's `date` / `time` field types would fix the
+  display and the editor together; it is a separate change with a grid-wide
+  blast radius.
 
 ### Query workflow
 - **Multi-statement execution + transaction control** (BEGIN/COMMIT, run selection).
