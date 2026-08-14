@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildColumnSpec, isRequiredColumn, missingRequiredFields } from "../../src/dock/tableWriteRules";
-import type { ColumnMeta } from "../../src/contract";
+import { buildColumnSpec, isFilterableColumn, isRequiredColumn, missingRequiredFields } from "../../src/dock/tableWriteRules";
+import type { ColumnMeta, WireType } from "../../src/contract";
 
 function column(overrides: Partial<ColumnMeta> = {}): ColumnMeta {
     return {
@@ -49,8 +49,8 @@ describe("buildColumnSpec", () => {
         const spec = buildColumnSpec([column({ name: "a" }), column({ name: "b" })], false);
 
         expect(spec.columns).toEqual([
-            { field: "a", readOnly: true, required: false },
-            { field: "b", readOnly: true, required: false },
+            { field: "a", readOnly: true, required: false, filterable: true },
+            { field: "b", readOnly: true, required: false, filterable: true },
         ]);
     });
 
@@ -58,8 +58,8 @@ describe("buildColumnSpec", () => {
         const spec = buildColumnSpec([column({ name: "a" }), column({ name: "b", isGenerated: true })], true);
 
         expect(spec.columns).toEqual([
-            { field: "a", readOnly: false, required: false },
-            { field: "b", readOnly: true, required: false },
+            { field: "a", readOnly: false, required: false, filterable: true },
+            { field: "b", readOnly: true, required: false, filterable: true },
         ]);
     });
 
@@ -67,24 +67,47 @@ describe("buildColumnSpec", () => {
         const columns = [column({ name: "email", nullable: false }), column({ name: "note" })];
 
         expect(buildColumnSpec(columns, true).columns).toEqual([
-            { field: "email", readOnly: false, required: true },
-            { field: "note", readOnly: false, required: false },
+            { field: "email", readOnly: false, required: true, filterable: true },
+            { field: "note", readOnly: false, required: false, filterable: true },
         ]);
 
         expect(buildColumnSpec(columns, false).columns).toEqual([
-            { field: "email", readOnly: true, required: true },
-            { field: "note", readOnly: true, required: false },
+            { field: "email", readOnly: true, required: true, filterable: true },
+            { field: "note", readOnly: true, required: false, filterable: true },
         ]);
     });
 
     it("marks a generated NOT-NULL column read-only but not required", () => {
         const spec = buildColumnSpec([column({ name: "id", nullable: false, isGenerated: true })], true);
 
-        expect(spec.columns).toEqual([{ field: "id", readOnly: true, required: false }]);
+        expect(spec.columns).toEqual([{ field: "id", readOnly: true, required: false, filterable: true }]);
     });
 
     it("opts the data grid into content-derived column sizing", () => {
         expect(buildColumnSpec([column()], true).autoSizeColumns).toBe(true);
+    });
+
+    it("carries isFilterableColumn's result through as each entry's filterable flag", () => {
+        const columns = [column({ name: "a", wireType: "json" }), column({ name: "b", wireType: "number" })];
+
+        expect(buildColumnSpec(columns, true).columns).toEqual([
+            { field: "a", readOnly: false, required: false, filterable: false },
+            { field: "b", readOnly: false, required: false, filterable: true },
+        ]);
+    });
+});
+
+describe("isFilterableColumn", () => {
+    function withWireType(wireType: WireType): ColumnMeta {
+        return column({ wireType });
+    }
+
+    it.each<WireType>(["number", "string", "boolean"])("is true for wireType %s", wireType => {
+        expect(isFilterableColumn(withWireType(wireType))).toBe(true);
+    });
+
+    it.each<WireType>(["isoString", "json", "jsonArray", "base64"])("is false for wireType %s", wireType => {
+        expect(isFilterableColumn(withWireType(wireType))).toBe(false);
     });
 });
 

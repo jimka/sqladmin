@@ -27,6 +27,18 @@ export function isRequiredColumn(column: ColumnMeta): boolean {
     return !column.nullable && !column.isGenerated && !column.hasDefault;
 }
 
+/** The wire types the backend's FilterCompiler can bind a filter value for. */
+const FILTERABLE_WIRE_TYPES: ReadonlySet<ColumnMeta["wireType"]> = new Set(["number", "string", "boolean"]);
+
+/**
+ * Whether this column gets a filter input in the grid's header filter row.
+ * True for the wire types the SQL filter compiler can bind: number, string,
+ * and boolean.
+ */
+export function isFilterableColumn(column: ColumnMeta): boolean {
+    return FILTERABLE_WIRE_TYPES.has(column.wireType);
+}
+
 /**
  * Build the data grid's column spec. Cells are inline-editable by default;
  * generated columns are marked read-only since the DB assigns their values
@@ -37,7 +49,8 @@ export function isRequiredColumn(column: ColumnMeta): boolean {
  * wins over the outline, so a grid without UPDATE shows asterisks but no outlines.
  * The grid is generated from a live schema and declares no widths, so its
  * `string`/`auto` columns size themselves from the loaded page rather than
- * sharing the viewport equally (`autoSizeColumns`).
+ * sharing the viewport equally (`autoSizeColumns`). Only `number`/`string`/
+ * `boolean` columns get a header filter input (`isFilterableColumn`).
  */
 export function buildColumnSpec(columns: ColumnMeta[], canUpdate: boolean): ColumnSpec {
     return {
@@ -46,6 +59,7 @@ export function buildColumnSpec(columns: ColumnMeta[], canUpdate: boolean): Colu
             field: c.name,
             readOnly: !canUpdate || c.isGenerated,
             required: isRequiredColumn(c),
+            filterable: isFilterableColumn(c),
         })),
     };
 }

@@ -8,6 +8,41 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎 `ToolBar`'s roving-tabindex keydown handler steals arrow keys from a text child
+
+Found running the `table-local-filter` plan's manual verification, case 12 (caret
+keys inside the toolbar's new quick-search field — the first text input any
+`ToolBar` in this app has ever hosted). Typing text into `TableWorkPanel`'s
+quick-search `TextField`, then pressing ArrowLeft/ArrowRight to move the caret
+within the field, instead moves toolbar roving focus to a neighbouring button —
+the caret never moves. Repro (confirmed live): focus the quick-search field with
+non-empty text, press ArrowLeft — focus jumps to the toolbar's last button
+(Refresh); press ArrowRight from the field — focus jumps to the toolbar's first
+button (Record view), wrapping around in both directions.
+
+**Root cause confirmed by reading the library, not guessed.** `ToolBar`'s
+constructor registers a *subtree* keydown listener
+([`ToolBar.ts:165-179`](../typescript-ui/packages/lib/src/typescript/lib/component/menubar/ToolBar.ts#L165))
+via `Event.addSubtreeListener(this, "keydown", this._onKeyDown)` — subtree, so it
+fires for a keydown anywhere inside the bar, including inside a child
+`TextField`'s native `<input>`. The handler unconditionally calls
+`e.preventDefault()` and moves the roving-tabindex focus whenever `e.key` is
+`ArrowLeft`/`ArrowRight` (horizontal orientation) or `ArrowUp`/`ArrowDown`
+(vertical) — it never checks whether the event's target is itself a text-entry
+control that wants those keys for caret movement instead of toolbar navigation.
+
+**Not worked around in the app.** Per the `table-local-filter` plan's "Potential
+Challenges", the fix belongs in the library (skip the roving-focus move when the
+keydown's target is inside a text-entry control), not an app-side
+`stopPropagation` on the quick-search field — that would just mask the same
+defect for every future toolbar text child.
+
+**Verify:** put a `TextField` inside a `ToolBar`, focus it with non-empty text
+and the caret mid-string, press ArrowLeft/ArrowRight: the caret must move;
+today, toolbar roving focus moves instead and the caret stays put.
+
+---
+
 ## 🐞🔎 `Markdown` renders a trailing link-reference-definition block as literal text
 
 Found manually verifying the new Changelog dialog (the `changelog-dialog` plan)
