@@ -57,14 +57,16 @@ export class DefinitionPanel {
      * @param onSave - writes the editor's current text back to the database;
      *   the controller builds the CREATE OR REPLACE VIEW / matview
      *   DROP+CREATE from it (see SqlAdminController.openDefinition).
+     * @param onRefresh - re-fetches the definition and columns and reseeds
+     *   both, discarding any unsaved edit with no confirmation prompt.
      * @param layout - the tab's saved Split geometry plus its save hooks
      *   (`controller.layout.bindSplit("definition")`); both panes exist from
      *   construction, so the saved sizes/collapse apply via the Split's own
      *   options.
      */
     constructor(definition: string, columns: ColumnMeta[], onSave: (newDefinition: string) => void | Promise<void>,
-                layout: SplitLayoutBinding) {
-        const editor = new DefinitionEditor(definition, onSave);
+                onRefresh: () => void, layout: SplitLayoutBinding) {
+        const editor = new DefinitionEditor(definition, onSave, onRefresh);
         const { grid: columnsGrid, store: columnsStore } = buildColumnsGrid(columns);
 
         const columnsSection = Container({

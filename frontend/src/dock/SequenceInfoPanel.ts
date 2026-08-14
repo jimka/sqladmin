@@ -49,6 +49,7 @@ import { LabeledFieldSet }             from "@jimka/typescript-ui/component/cont
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
 import { MemoryStore, Model }          from "@jimka/typescript-ui/data";
 import { save }                        from "@jimka/typescript-ui/glyphs/solid/save";
+import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
 import type { AlterSequenceSpec, DdlPreview, QueryStatusResult, SequenceDetail, SequenceOwnerSpec } from "../contract";
 import { diffSequenceSpecs }           from "./ddlSpecs";
 import type { EditedSequenceValues, SequenceEditSpecs } from "./ddlSpecs";
@@ -57,7 +58,7 @@ import { glyphButton }                 from "./glyphButton";
 import { openSqlPreviewDialog }        from "./SqlPreviewDialog";
 import { MUTED_TEXT_COLOR, PRIMARY_COLOR } from "../theme";
 
-Glyph.register(save);
+Glyph.register(save, refresh);
 
 /** The `name`-only model backing the Data type / Owner combo stores. */
 const NAME_MODEL = new Model({ fields: [{ name: "name", type: "string" }] });
@@ -92,6 +93,9 @@ export interface SequenceInfoPanelDeps {
 
     /** Report a short status message (e.g. a no-op Save, a successful alter). */
     onStatus: (message: string) => void;
+
+    /** Re-fetch this sequence's detail and reseed the form, discarding any unsaved edit. */
+    onRefresh: () => void;
 
     /**
      * Open the Structure tab of the table whose column owns this sequence.
@@ -202,7 +206,8 @@ class SequenceInfoPanel extends Container {
         formHost.addComponent(form);
 
         const saveButton = glyphButton("save", PRIMARY_COLOR, "Save", () => this.handleSave());
-        const toolbar = new ToolBar({ components: [saveButton] });
+        const refreshButton = glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", () => deps.onRefresh());
+        const toolbar = new ToolBar({ components: [saveButton, refreshButton] });
 
         super({ layoutManager: new BorderLayout({ spacing: 0 }) });
 
@@ -332,13 +337,23 @@ class SequenceInfoPanel extends Container {
 
     /** After a successful execute: reload the detail and refresh the form in place. */
     private async handleSuccess(): Promise<void> {
-        const detail = await this._deps.reloadDetail();
+        this.reload(await this._deps.reloadDetail());
+        this._deps.onStatus(`${this._deps.name}: altered`);
+    }
 
+    /**
+     * Reseed every field from a freshly (re-)fetched detail and reset the
+     * Save baseline — called after a successful Save (via {@link
+     * handleSuccess}) and by the controller after a successful Refresh, so
+     * the panel simply reflects the sequence's current state in place.
+     *
+     * @param detail - the freshly re-fetched sequence detail.
+     */
+    reload(detail: SequenceDetail): void {
         this._detail = detail;
         this._baseline = detailToEditedValues(detail);
         this.seedFields(detail);
         this.syncSaveEnabled();
-        this._deps.onStatus(`${this._deps.name}: altered`);
     }
 }
 
