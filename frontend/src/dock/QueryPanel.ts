@@ -1032,7 +1032,12 @@ export class QueryPanel {
                     syncChartButton();
 
                     if (oldDataTabWasActive) {
+                        // setActiveContent moves DOM focus to the new tab's strip
+                        // button (roving focus), same as the synchronous select at
+                        // this function's top — reclaim it for the editor the same
+                        // way once the swapped-in tab's cell exists (next layout).
                         tab.setActiveContent(grid.content);
+                        Component.afterNextLayout(() => editor.focus());
                     }
                 },
                 () => {
