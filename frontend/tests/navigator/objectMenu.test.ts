@@ -25,7 +25,6 @@ function stubActions(): ObjectMenuActions {
         openSequence: vi.fn(), openFunctionDefinition: vi.fn(), executeFunction: vi.fn(),
         openRelationDiagram: vi.fn(), openRelationDependencyGraph: vi.fn(), openRelationInheritanceGraph: vi.fn(),
         openSchemaDiagram: vi.fn(), openSchemaDependencyGraph: vi.fn(), openSchemaInheritanceGraph: vi.fn(),
-        openDatabaseDiagram: vi.fn(),
         renameTable: vi.fn(), dropTable: vi.fn(), dropRelation: vi.fn(), refreshMaterializedView: vi.fn(),
         renameSchema: vi.fn(), dropSchema: vi.fn(),
         createTable: vi.fn(), createView: vi.fn(), createMaterializedView: vi.fn(), createSequence: vi.fn(),
@@ -129,7 +128,7 @@ describe("buildObjectMenuItems", () => {
         expect(submenuItems(createSubmenu)).toHaveLength(7);
 
         const showSubmenu = items.find(i => i.text === "Show");
-        expect(submenuItems(showSubmenu)).toHaveLength(4);
+        expect(submenuItems(showSubmenu).map(i => i.text)).toEqual(["Dependency graph", "Inheritance graph", "Schema diagram"]);
     });
 
     it("builds a sequence's menu: show info, drop", () => {

@@ -32,7 +32,6 @@ export type ObjectMenuActions = Pick<SqlAdminController,
     | "openSequence" | "openFunctionDefinition" | "executeFunction"
     | "openRelationDiagram" | "openRelationDependencyGraph" | "openRelationInheritanceGraph"
     | "openSchemaDiagram" | "openSchemaDependencyGraph" | "openSchemaInheritanceGraph"
-    | "openDatabaseDiagram"
     | "renameTable" | "dropTable" | "dropRelation" | "refreshMaterializedView"
     | "renameSchema" | "dropSchema"
     | "createTable" | "createView" | "createMaterializedView" | "createSequence"
@@ -62,7 +61,6 @@ function schemaMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: Tr
             { text: "View", action: () => void actions.createView(ref) },
         ] } },
         { text: "Show", glyph: "diagram-project", submenu: { label: "Show", items: [
-            { text: "Database diagram", glyph: "circle-nodes",   action: () => void actions.openDatabaseDiagram({ connectionId: ref.connectionId, database: ref.database, kind: "database" }) },
             { text: "Dependency graph", glyph: "share-nodes",    action: () => void actions.openSchemaDependencyGraph(ref, node) },
             { text: "Inheritance graph", glyph: "sitemap",        action: () => void actions.openSchemaInheritanceGraph(ref, node) },
             { text: "Schema diagram", glyph: "diagram-project", action: () => void actions.openSchemaDiagram(ref, node) },

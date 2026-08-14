@@ -9,6 +9,7 @@ import { callable } from "@jimka/typescript-ui/core";
 import { NavigatorTree }           from "../navigator/NavigatorTree";
 import { TreeExplorerView }        from "./treeExplorerView";
 import { createSchemaTool }        from "./createSchemaTool";
+import { showDatabaseDiagramTool } from "./showDatabaseDiagramTool";
 import type { SqlAdminController } from "../SqlAdminController";
 
 /** The Database explorer view (Navigator + Properties accordion). */
@@ -24,11 +25,18 @@ class DatabaseExplorerView extends TreeExplorerView {
             explorer:       NavigatorTree(controller),
             treeLabel:      "Database",
             treeGlyph:      "database",
-            treeTools:      [createSchemaTool(() => controller.createSchema({
-                connectionId: controller.connectionId,
-                database:     controller.database,
-                kind:         "database",
-            }))],
+            treeTools:      [
+                createSchemaTool(() => controller.createSchema({
+                    connectionId: controller.connectionId,
+                    database:     controller.database,
+                    kind:         "database",
+                })),
+                showDatabaseDiagramTool(() => void controller.openDatabaseDiagram({
+                    connectionId: controller.connectionId,
+                    database:     controller.database,
+                    kind:         "database",
+                })),
+            ],
             inspector:      controller.properties.component,
             inspectorLabel: "Properties",
             layout:         controller.layout.bindAccordion("database"),
