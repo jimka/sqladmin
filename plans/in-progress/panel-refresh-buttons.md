@@ -16,7 +16,7 @@ touches-shared:
 
 Five dock tabs currently show a snapshot fetched when they opened, with no way to re-read it: the table Structure tab ([`frontend/src/dock/StructurePanel.ts:95`](frontend/src/dock/StructurePanel.ts#L95)), the view/matview Definition tab ([`DefinitionPanel.ts:47`](frontend/src/dock/DefinitionPanel.ts#L47)), the function/procedure Definition tab ([`FunctionDefinitionPanel.ts:28`](frontend/src/dock/FunctionDefinitionPanel.ts#L28)), the Sequence info tab ([`SequenceInfoPanel.ts:108`](frontend/src/dock/SequenceInfoPanel.ts#L108)), and the Index info tab ([`IndexInfoPanel.ts:40`](frontend/src/dock/IndexInfoPanel.ts#L40)). Re-opening a tab only focuses it ([`SqlAdminController.ts:728`](frontend/src/SqlAdminController.ts#L728)), so today the only way to see fresh data is to close the tab and open it again.
 
-This plan gives each of the five a toolbar Refresh button that re-fetches the tab's data and reseeds the panel in place. The Structure and Index tabs get a toolbar for the first time; the other three gain a second button beside their existing Save. The Structure, Index, and Sequence panels gain a public `reload(...)` — the two definition panels already have one — and the controller's five `open*` methods each register a refresh closure on their `_openPanels` entry ([`SqlAdminController.ts:175`](frontend/src/SqlAdminController.ts#L175)).
+This plan gives each of the five a Refresh control that re-fetches the tab's data and reseeds the panel in place. The Index tab gets a toolbar for the first time; the other three (excluding Structure) gain a second button beside their existing Save. **Structure is the exception** — see the "Structure's Refresh is per-section" Architecture Decision below, an override applied mid-implementation: instead of one tab-level toolbar button, each of Structure's four accordion sections carries its own header Refresh tool. The Structure, Index, and Sequence panels gain a public `reload(...)` — the two definition panels already have one — and the controller's five `open*` methods each register a refresh closure on their `_openPanels` entry ([`SqlAdminController.ts:175`](frontend/src/SqlAdminController.ts#L175)).
 
 Registering that closure also makes the existing Alt+R accelerator and the View → Refresh menu item work on all five tabs, since both call `refreshActive()` ([`SqlAdminController.ts:2838`](frontend/src/SqlAdminController.ts#L2838)), which today no-ops for any tab without a data store.
 
@@ -36,9 +36,17 @@ All five Refresh buttons are built with `glyphButton("refresh", PRIMARY_COLOR, "
 
 `OpenPanel` gains an optional `refresh?: () => void`, each `open*` method sets it, and `refreshActive()` calls it when present. No panel binds its own keyboard shortcut.[^route-through-refresh-active]
 
-### The Structure tab gets a tab-level NORTH toolbar, not an accordion section tool
+### Structure's Refresh is per-section, not a tab-level toolbar (override)
 
-`StructurePanel`'s root changes from `Panel` (the scroll host) to `Container` with a `Border` layout: a one-button `ToolBar` NORTH, and the existing `autoScroll` VBox `Panel` — accordion and all — moved into CENTER. This is the exact shape `SequenceInfoPanel` already has ([`SequenceInfoPanel.ts:201-226`](frontend/src/dock/SequenceInfoPanel.ts#L201)): `Container`/`Border` root, `ToolBar` NORTH, `Panel({ layoutManager: new VBox(), autoScroll: "auto" })` CENTER.[^structure-toolbar-not-section-tool]
+**This overrides the plan's original decision** (kept below, struck through in spirit, as [^structure-toolbar-not-section-tool] records) **— applied mid-implementation at the user's explicit request, scoped to `StructurePanel.ts` only.** The other four panels (`DefinitionPanel`, `FunctionDefinitionPanel`, `SequenceInfoPanel`, `IndexInfoPanel`) keep the single toolbar Refresh button exactly as originally planned and already built.
+
+Instead of a tab-level NORTH toolbar, each of the four accordion sections (Columns, Indexes, Constraints, Foreign Keys) carries its own glyph-only Refresh tool in that section's header `tools` slot — the same slot already used for the add/alter/drop DDL launchers when `actions` is passed, with Refresh now **always present** in that slot regardless of `actions` (a read-only structure tab still wants each section refreshable). `StructurePanel`'s root stays `extends Panel` (the scroll host), unchanged from before this plan — there is no toolbar to make room for, so the Container/Border/ToolBar restructuring the plan originally specified for this file never happens.
+
+Clicking one section's Refresh tool re-fetches and reseeds **only that section's own grid**. `getStructure(ref)` returns indexes, constraints, and foreign keys together in one payload — there is no narrower per-facet endpoint — so refreshing, say, just Indexes still re-fetches the whole `TableStructure` response under the hood, but the Constraints and Foreign Keys sections are deliberately left untouched: only the fetched `.indexes` slice reaches `panel.reloadIndexes(...)`, and the rest of the response is discarded. This trades a redundant round-trip's unused two-thirds for a predictable rule — "the section you clicked is the only one that visibly changes" — rather than surprising the user with sibling grids updating (and losing their selection) from a click they didn't make on them. The Columns section's own Refresh (`getColumns(ref)`, a genuinely separate endpoint) has no such waste, and it still keeps `_openPanels[structurePanelId].columns` in sync — the same correctness trap the original single-button design already had to handle (see the Internal Structure section's `refreshColumns` closure).
+
+Alt+R and View → Refresh keep working on the Structure tab exactly as they did under the original design: `_openPanels`' `refresh` entry (see the next Architecture Decision) is unchanged — it still re-fetches columns and structure together and calls the whole-tab `panel.reload(...)`, which now simply calls the four `reload*` methods in turn. So the keyboard/menu path means "refresh everything in this tab," and the four new per-section buttons are additional, more targeted, click-only affordances on top of it — not a replacement for the whole-tab path.
+
+`glyphButton("refresh", …)` (not `refreshTool` from `shell/refreshTool.ts`, despite that helper's own header literally describing "a glyph-only refresh button for an accordion section header") is still what builds each section's button, for a reason specific to this placement: `refreshTool`'s label is hardcoded to `"Refresh (Alt+R)"`, which would be actively misleading here — Alt+R refreshes the *whole tab*, not the one section the button sits on. Each section's button instead reads e.g. `"Refresh columns"` / `"Refresh indexes"` / `"Refresh constraints"` / `"Refresh foreign keys"` — accurate, and consistent with how every other tool in this file (`Add column`, `Drop index`, …) is already built via `glyphButton`.
 
 ### Refresh discards unsaved edits without asking, and is always enabled
 
@@ -93,23 +101,36 @@ export function foreignKeyRows(foreignKeys: ForeignKeyMeta[]): ForeignKeyRow[];
 
 ### `frontend/src/dock/StructurePanel.ts`
 
+**Per the per-section-refresh override** (see Architecture Decisions), `StructurePanel` stays `extends Panel` — no toolbar, no Container/Border restructuring — and its single `onRefresh: () => void` becomes a bundle of four per-section callbacks:
+
 ```ts
-class StructurePanel extends Container {           // was: extends Panel
+export interface StructureRefresh {
+    onRefreshColumns(): void;
+    onRefreshIndexes(): void;
+    onRefreshConstraints(): void;
+    onRefreshForeignKeys(): void;
+}
+
+class StructurePanel extends Panel {               // unchanged from the pre-plan codebase
     constructor(
         columns: ColumnMeta[],
         structure: TableStructure,
         onOpenReferenced: (refSchema: string, refTable: string) => void,
         onOpenSequence: OpenSequenceHandler,
-        onRefresh: () => void,                     // new, 5th positional
+        refresh: StructureRefresh,                  // new, 5th positional — one callback per section
         layout: AccordionLayoutBinding,
         actions?: StructureActions,
     );
 
-    reload(columns: ColumnMeta[], structure: TableStructure): void;   // new
+    reload(columns: ColumnMeta[], structure: TableStructure): void;        // new — whole tab (Alt+R / View → Refresh)
+    reloadColumns(columns: ColumnMeta[]): void;                            // new — Columns section's own Refresh
+    reloadIndexes(indexes: IndexMeta[]): void;                             // new — Indexes section's own Refresh
+    reloadConstraints(constraints: ConstraintMeta[]): void;                // new — Constraints section's own Refresh
+    reloadForeignKeys(foreignKeys: ForeignKeyMeta[]): void;                // new — Foreign Keys section's own Refresh
 }
 ```
 
-Backing fields for `reload`: `_columns: ColumnMeta[]` (mutable — the Columns section tools resolve a selected row against it), plus one `StructureGrid` per section (`_columnsSection`, `_indexesSection`, `_constraintsSection`, `_foreignKeysSection`).
+`reload` is now implemented in terms of the four `reload*` methods (each also callable on its own). Backing fields: `_columns: ColumnMeta[]` (mutable — the Columns section tools resolve a selected row against it), plus one `StructureGrid` per section (`_columnsSection`, `_indexesSection`, `_constraintsSection`, `_foreignKeysSection`) — unchanged from the original single-button design.
 
 ### `frontend/src/dock/IndexInfoPanel.ts`
 
@@ -256,33 +277,46 @@ function reseed(section: StructureGrid, rows: object[]): void {
 
 `buildColumnsGrid`'s exported `ColumnsGrid` ([`columnsGrid.ts:24`](frontend/src/dock/columnsGrid.ts#L24)) has the identical shape, so it assigns to a `StructureGrid` field with no cast.
 
-```ts
-reload(columns: ColumnMeta[], structure: TableStructure): void {
-    this._columns = columns;
+**Per the per-section-refresh override**, each section gets its own reseed method, and `reload` is their whole-tab composition:
 
-    reseed(this._columnsSection,     toColumnRows(columns));
-    reseed(this._indexesSection,     structure.indexes);
-    reseed(this._constraintsSection, constraintRows(structure.constraints));
-    reseed(this._foreignKeysSection, foreignKeyRows(structure.foreignKeys));
+```ts
+reloadColumns(columns: ColumnMeta[]): void {
+    this._columns = columns;
+    reseed(this._columnsSection, toColumnRows(columns));
+}
+reloadIndexes(indexes: IndexMeta[]): void {
+    reseed(this._indexesSection, indexes);
+}
+reloadConstraints(constraints: ConstraintMeta[]): void {
+    reseed(this._constraintsSection, constraintRows(constraints));
+}
+reloadForeignKeys(foreignKeys: ForeignKeyMeta[]): void {
+    reseed(this._foreignKeysSection, foreignKeyRows(foreignKeys));
+}
+reload(columns: ColumnMeta[], structure: TableStructure): void {
+    this.reloadColumns(columns);
+    this.reloadIndexes(structure.indexes);
+    this.reloadConstraints(structure.constraints);
+    this.reloadForeignKeys(structure.foreignKeys);
 }
 ```
 
 ### `StructurePanel` — the Columns tools read `_columns` lazily
 
-`buildColumnsTools` currently closes over the `columns` array passed at construction, which `reload` replaces — a captured array would leave Alter/Drop resolving a selected row against the pre-refresh column list. Its first parameter becomes a getter:
+`buildColumnsTools` currently closes over the `columns` array passed at construction, which `reloadColumns` replaces — a captured array would leave Alter/Drop resolving a selected row against the pre-refresh column list. Its first parameter becomes a getter, and (per the override) it also takes the section's own refresh callback and makes `actions` optional, since the Refresh tool must build even when this tab has no DDL launchers at all:
 
 ```ts
-function buildColumnsTools(currentColumns: () => ColumnMeta[], grid: Table, actions: StructureActions): Button[]
+function buildColumnsTools(currentColumns: () => ColumnMeta[], grid: Table, onRefresh: () => void, actions?: StructureActions): Button[]
 ```
 
-called from the section config as `buildColumnsTools(() => this._columns, columnsGrid, actions)`, and internally as `selectedColumn(currentColumns(), grid)`. `this._columns` is assigned immediately after `super()` returns, before the accordion is built, so the getter is valid from the first click.
+called from the section config as `buildColumnsTools(() => this._columns, columnsGrid, refresh.onRefreshColumns, actions)`, and internally as `selectedColumn(currentColumns(), grid)`. `this._columns` is assigned immediately after `super()` returns, before the accordion is built, so the getter is valid from the first click. `buildIndexesTools`/`buildConstraintsTools`/`buildForeignKeysTools` take the same `(grid, onRefresh, actions?)` shape (minus `currentColumns`, which only Columns needs) — each returns `[refreshButton]` alone when `actions` is omitted, or its DDL buttons followed by `refreshButton` when `actions` is supplied.
 
 ### The five refresh closures
 
 Each lives inside its `open*` method's async body, before the `_openPanels.set(...)` that registers it.
 
 ```ts
-// openStructure
+// openStructure — the whole-tab refresh (Alt+R / View → Refresh), unchanged by the override
 const refresh = (): void => void this.refreshPanel(ref, async () => {
     const [freshColumns, freshStructure] = await Promise.all([getColumns(ref), getStructure(ref)]);
     const entry = this._openPanels.get(id);
@@ -295,6 +329,42 @@ const refresh = (): void => void this.refreshPanel(ref, async () => {
         entry.columns = freshColumns;
     }
 });
+
+// openStructure — the four per-section refreshes (per-section-refresh override).
+// Indexes/Constraints/Foreign Keys each re-fetch the whole getStructure(ref)
+// payload (there is no narrower endpoint) but reseed only their own section —
+// see the Architecture Decision for why the unused two-thirds are discarded
+// rather than applied for free.
+const refreshColumns = (): void => void this.refreshPanel(ref, async () => {
+    const freshColumns = await getColumns(ref);
+    const entry = this._openPanels.get(id);
+
+    panel.reloadColumns(freshColumns);
+
+    if (entry) {
+        entry.columns = freshColumns;
+    }
+});
+
+const refreshIndexes = (): void => void this.refreshPanel(ref, async () => {
+    panel.reloadIndexes((await getStructure(ref)).indexes);
+});
+
+const refreshConstraints = (): void => void this.refreshPanel(ref, async () => {
+    panel.reloadConstraints((await getStructure(ref)).constraints);
+});
+
+const refreshForeignKeys = (): void => void this.refreshPanel(ref, async () => {
+    panel.reloadForeignKeys((await getStructure(ref)).foreignKeys);
+});
+
+// The four are bundled and passed as StructurePanel's 5th positional argument:
+const sectionRefresh: StructureRefresh = {
+    onRefreshColumns:     refreshColumns,
+    onRefreshIndexes:     refreshIndexes,
+    onRefreshConstraints: refreshConstraints,
+    onRefreshForeignKeys: refreshForeignKeys,
+};
 
 // openDefinition
 const refresh = (): void => void this.refreshPanel(ref, async () => {
@@ -407,20 +477,21 @@ const refresh = (): void => void this.refreshPanel(ref, async () => {
 
 ### Manual verification (UI, focus, and network — outside the node vitest harness)
 
-5. **Structure tab.** Open a table's Structure tab. The tab now shows a one-button toolbar above the accordion, with a glyph-only Refresh button. Add a column to the table from another client, click Refresh: the Columns section shows the new column without the tab closing, reopening, or moving in the tab strip. The Indexes, Constraints, and Foreign Keys sections re-read from the same click.
-6. **Structure tab, open sections preserved.** Expand Constraints, collapse Columns, click Refresh: the open/collapsed state is unchanged.
-7. **Structure tab, selection cleared.** Select a row in Columns, click Refresh: the selection clears and the Alter/Drop header tools return to disabled.
-8. **Structure tab, DDL dialogs see refreshed columns.** After a Refresh that added a column, open the Constraints section's "Add constraint ▸ Unique" dialog: the new column appears in its column checklist.
-9. **Index tab.** Open an index's info tab. It now has a toolbar above the fieldset. Click Refresh: the definition, Unique, Primary, and Table rows re-read; the tab stays open.
-10. **View definition tab.** Open a view's Definition tab, type an edit into the editor (Save enables), click Refresh: the editor reverts to the server's definition with no prompt, and Save disables again. The Columns grid re-reads too.
-11. **Function definition tab.** Same as case 10, without a Columns grid.
-12. **Sequence tab.** Open a sequence's info tab, change Increment (Save enables), click Refresh: every field reseeds from the server and Save disables.
-13. **Success message.** Any successful Refresh writes `<database> · <object name>: refreshed` to the status bar.
-14. **Failure leaves the tab alone.** Drop the object from another client, then click Refresh: an error toast reading `<name>: failed to refresh: <detail>` appears, the status bar shows the error, and the tab stays open still showing its last-good data. Contrast the open-time fetch failure, which closes the tab.
-15. **Alt+R.** With any of the five tabs focused — including with the caret inside a definition `CodeEditor` — Alt+R performs the same Refresh as the button.
-16. **View → Refresh.** The menu bar's View → Refresh item does the same on all five tabs.
-17. **Data grid unaffected.** With a table's data tab focused, Alt+R still discards pending edits and reloads the store, and the status bar still reports `<database> · <object name>: refreshed`.
-18. **No open tab.** Close every tab, press Alt+R: nothing happens and no error appears.
+5. **Structure tab, per-section Refresh.** Open a table's Structure tab. Each of the four section headers (Columns, Indexes, Constraints, Foreign Keys) carries its own glyph-only Refresh tool — always present, whether or not this tab has DDL `actions`. Add a column to the table from another client, click **only the Columns section's own** Refresh: the Columns section shows the new column without the tab closing, reopening, or moving in the tab strip. The Indexes, Constraints, and Foreign Keys sections' grids are untouched by that click — no rows change and no selection is dropped in them — even though Indexes/Constraints/Foreign Keys all share the same `getStructure` fetch under the hood.
+6. **Structure tab, open sections preserved.** Expand Constraints, collapse Columns, click any one section's Refresh: the open/collapsed state of all four sections is unchanged.
+7. **Structure tab, selection cleared — only in the clicked section.** Select a row in Columns and a row in Indexes, click the Columns section's own Refresh: the Columns selection clears and its Alter/Drop header tools return to disabled, while the Indexes row stays selected. Clicking the Indexes section's own Refresh next clears that selection instead.
+8. **Structure tab, DDL dialogs see refreshed columns.** After clicking the Columns section's own Refresh (having added a column from another client), open the Constraints section's "Add constraint ▸ Unique" dialog: the new column appears in its column checklist.
+9. **Structure tab, Alt+R / View → Refresh still refresh everything.** With the Structure tab focused, press Alt+R (or use View → Refresh): all four sections re-read together in one go, exactly like any other tab's whole-tab Refresh — distinct from, and not replaced by, the four per-section tools in cases 5-8.
+10. **Index tab.** Open an index's info tab. It now has a toolbar above the fieldset. Click Refresh: the definition, Unique, Primary, and Table rows re-read; the tab stays open.
+11. **View definition tab.** Open a view's Definition tab, type an edit into the editor (Save enables), click Refresh: the editor reverts to the server's definition with no prompt, and Save disables again. The Columns grid re-reads too.
+12. **Function definition tab.** Same as case 11, without a Columns grid.
+13. **Sequence tab.** Open a sequence's info tab, change Increment (Save enables), click Refresh: every field reseeds from the server and Save disables.
+14. **Success message.** Any successful Refresh — a Structure section's own tool, Structure's Alt+R/View→Refresh, or any of the other four tabs' Refresh button — writes `<database> · <object name>: refreshed` to the status bar.
+15. **Failure leaves the tab alone.** Drop the object from another client, then click Refresh (any tab; for Structure, any one section's tool): an error toast reading `<name>: failed to refresh: <detail>` appears, the status bar shows the error, and the tab stays open still showing its last-good data. Contrast the open-time fetch failure, which closes the tab.
+16. **Alt+R.** With any of the five tabs focused — including with the caret inside a definition `CodeEditor` — Alt+R performs a Refresh: the tab-wide one for Structure (case 9), the single button's for the other four.
+17. **View → Refresh.** The menu bar's View → Refresh item does the same on all five tabs.
+18. **Data grid unaffected.** With a table's data tab focused, Alt+R still discards pending edits and reloads the store, and the status bar still reports `<database> · <object name>: refreshed`.
+19. **No open tab.** Close every tab, press Alt+R: nothing happens and no error appears.
 
 ---
 
@@ -429,7 +500,7 @@ const refresh = (): void => void this.refreshPanel(ref, async () => {
 - `cd frontend && npm run typecheck` — clean. Every changed constructor has exactly one call site, all in `SqlAdminController.ts`; a missed one surfaces here as an arity error.
 - `cd frontend && npm test` — the new `structureRows.test.ts` green, the rest of the suite unchanged (`menuItems.test.ts` imports only the `StructureActions` *type* from `StructurePanel.ts`, which is untouched).
 - `grep -rn 'new DefinitionEditor(' frontend/src/` — two matches, both passing three arguments.
-- Manual smoke per `## Expected Behaviour` cases 5-18. Entry point: the navigator's WEST sidebar against the seeded demo database — any indexed table (e.g. `sales.products`) for the Structure and Index tabs, any seeded view or materialized view for the definition tab, any `*_id_seq` for the sequence tab, and any function under a schema's Functions category for the function tab. Cases 5, 8, and 14 need a second client (a SQL workspace tab in the same session is enough) to change the object behind the tab's back.
+- Manual smoke per `## Expected Behaviour` cases 5-19. Entry point: the navigator's WEST sidebar against the seeded demo database — any indexed table (e.g. `sales.products`) for the Structure and Index tabs, any seeded view or materialized view for the definition tab, any `*_id_seq` for the sequence tab, and any function under a schema's Functions category for the function tab. Cases 5, 8, and 15 need a second client (a SQL workspace tab in the same session is enough) to change the object behind the tab's back.
 
 ---
 
@@ -446,16 +517,18 @@ const refresh = (): void => void this.refreshPanel(ref, async () => {
 
 - **`selectRecord(null)` may not emit `"selection"`.** If it does not, a section's Alter/Drop tools could stay visually enabled after a Refresh. They are already guarded (`if (record)` / `if (column)` in each handler), so a click is a harmless no-op rather than a wrong-target DDL. Manual case 7 is the check; if it fails, gate the buttons off `grid.getSelectedRecord()` inside the handlers rather than adding an event workaround.
 - **`IndexInfoPanel`'s NORTH placement is already taken** by its fieldset. Rather than add a second component at the same `Border` placement, step 6 moves the fieldset into a nested `Border` in CENTER — the shape `DefinitionPanel` already uses (toolbar NORTH of `content`, body CENTER).
-- **Losing the root `Panel`'s content inset.** `Container` has no inset while `Panel` defaults to 4px (`COMPONENT_CONVENTIONS.md` (a)). `StructurePanel`'s inset must move to the inner scroll-host `Panel`, or the accordion will sit flush against the tab edge. Step 8e keeps the `Panel` for exactly this reason.
-- **Refreshing a renamed or dropped object.** The tab is keyed by the object's name, so after a rename the re-fetch 404s. That surfaces as `failed to refresh: <backend detail>` and the tab keeps its last-good contents — the intended outcome, not a bug to guard against.
+- **Losing the root `Panel`'s content inset — moot under the per-section-refresh override.** This challenge only existed under the plan's original toolbar design, where `StructurePanel` would have moved from `extends Panel` to `extends Container` (`Container` has no inset while `Panel` defaults to 4px, `COMPONENT_CONVENTIONS.md` (a)). The override keeps `StructurePanel` on `extends Panel` — no toolbar, no root-layout change, so the inset was never at risk. `IndexInfoPanel`, which *does* still gain a toolbar, is unaffected: it already `extends Container` from before this plan, so it never had a `Panel` inset to lose.
+- **Refreshing a renamed or dropped object.** The tab is keyed by the object's name, so after a rename the re-fetch 404s. That surfaces as `failed to refresh: <backend detail>` and the tab keeps its last-good contents — the intended outcome, not a bug to guard against. For Structure's per-section refreshes this applies per click, not per tab: a rename mid-session fails whichever section's Refresh is clicked next, same message, same "leave it alone" outcome.
 - **A definition tab's Save baseline after Refresh.** `DefinitionEditor.reload` sets `_baseline` before `setValue`, so `syncDirty` sees a clean editor and disables Save. Any change to that ordering silently leaves Save enabled on unmodified text.
+- **Structure's per-section refresh wastes two-thirds of the `getStructure` payload on three of its four buttons.** Accepted deliberately (see the per-section-refresh Architecture Decision) — the alternative, silently reseeding Constraints/Foreign Keys "for free" whenever Indexes is clicked (or vice versa), was judged more surprising than the redundant round trip is costly.
 
 ---
 
 ## Critical Files
 
 - [`frontend/src/dock/TableWorkPanel.ts:70`](frontend/src/dock/TableWorkPanel.ts#L70) and [`:166`](frontend/src/dock/TableWorkPanel.ts#L166) — the existing dock-tab Refresh button and its glyph registration; the precedent every new button copies.
-- [`frontend/src/dock/SequenceInfoPanel.ts:201-226`](frontend/src/dock/SequenceInfoPanel.ts#L201) — the `Container`/`Border` root + `ToolBar` NORTH + `autoScroll` `Panel` CENTER shape `StructurePanel` adopts, and (line 204) the pre-`super()` arrow that reads `this` only at click time, which `IndexInfoPanel`'s table link copies.
+- [`frontend/src/dock/SequenceInfoPanel.ts:201-226`](frontend/src/dock/SequenceInfoPanel.ts#L201) — the `Container`/`Border` root + `ToolBar` NORTH + `autoScroll` `Panel` CENTER shape `IndexInfoPanel` adopts (line 204's pre-`super()` arrow, which reads `this` only at click time, is what `IndexInfoPanel`'s table link copies). **Not** what `StructurePanel` adopts — see the per-section-refresh override, which keeps `StructurePanel` on its original `extends Panel` root.
+- [`frontend/src/shell/refreshTool.ts:17`](frontend/src/shell/refreshTool.ts#L17) and [`frontend/src/shell/treeExplorerView.ts:91`](frontend/src/shell/treeExplorerView.ts#L91) — the existing "refresh tool in an `AccordionSectionConfig`'s `tools` slot" precedent the per-section-refresh override's *placement* follows, even though its `glyphButton`-not-`refreshTool` *construction* choice still diverges (see that Architecture Decision's last paragraph).
 - [`frontend/src/dock/definitionEditor.ts`](frontend/src/dock/definitionEditor.ts) — the shared toolbar both definition panels mount, and the `_baseline`/`syncDirty` gating a Refresh resets.
 - [`frontend/src/dock/columnsGrid.ts:24`](frontend/src/dock/columnsGrid.ts#L24) and [`frontend/src/dock/columnSequence.ts`](frontend/src/dock/columnSequence.ts) — the `{ grid, store }` reseed-handle idiom and the DOM-free row-mapping module `structureRows.ts` mirrors.
 - [`frontend/src/SqlAdminController.ts:2838`](frontend/src/SqlAdminController.ts#L2838) — `refreshActive`, the single dispatcher behind both Alt+R and View → Refresh.
@@ -475,6 +548,24 @@ const refresh = (): void => void this.refreshPanel(ref, async () => {
 
 ---
 
+## Implementation Notes
+
+**Mid-implementation scope change, Structure tab only.** After the plan's original design (one tab-level NORTH toolbar Refresh button, identical in shape to the other four tabs) was fully implemented, typechecked, tested, and manually verified, the user asked — specific to `StructurePanel.ts`, leaving the other four panels untouched — for per-section Refresh tools instead: one glyph-only Refresh in each of the four accordion sections' own header, always present regardless of `actions`, each refreshing only its own section. This is a direct reversal of the plan's "Structure tab gets a tab-level NORTH toolbar, not an accordion section tool" Architecture Decision (see [^structure-toolbar-not-section-tool] and the decision that now supersedes it), applied here rather than deferred to a follow-up plan, per the user's explicit instruction to fold it into this branch.
+
+What changed, concretely:
+
+- `StructurePanel` reverted to `extends Panel` (its pre-plan root) — the toolbar/`Container`/`Border` restructuring built for the original design was removed in full, not layered around.
+- The single `onRefresh: () => void` constructor parameter became `refresh: StructureRefresh`, a bundle of four callbacks (`onRefreshColumns`/`onRefreshIndexes`/`onRefreshConstraints`/`onRefreshForeignKeys`), one per section.
+- `reload(columns, structure)` — still the method Alt+R / View → Refresh drive via the controller's existing whole-tab `refresh` closure, unchanged in `openStructure` — is now implemented as the composition of four new methods, `reloadColumns`/`reloadIndexes`/`reloadConstraints`/`reloadForeignKeys`, each of which also stands alone as a per-section refresh's target.
+- `SqlAdminController.openStructure` gained four new closures (`refreshColumns`/`refreshIndexes`/`refreshConstraints`/`refreshForeignKeys`), each routed through the existing `refreshPanel` helper unmodified, bundled into a `StructureRefresh` object passed as `StructurePanel`'s 5th constructor argument. The pre-existing whole-tab `refresh` closure and its registration on `_openPanels` are untouched.
+- `buildColumnsTools`/`buildIndexesTools`/`buildConstraintsTools`/`buildForeignKeysTools` each gained an `onRefresh: () => void` parameter and made `actions` optional (`actions?: StructureActions`, was required) — every section's tools array now always includes a trailing Refresh button, built via `glyphButton("refresh", …)` (not `refreshTool` — see the Architecture Decision override's last paragraph for why its hardcoded `"Refresh (Alt+R)"` label doesn't fit this placement).
+- No change was needed to `structureRows.ts`, its test, `definitionEditor.ts`, `DefinitionPanel.ts`, `FunctionDefinitionPanel.ts`, `SequenceInfoPanel.ts`, or `IndexInfoPanel.ts` — the override was scoped to `StructurePanel.ts` and `SqlAdminController.ts`'s `openStructure` alone, exactly as instructed. `structureRows.test.ts`'s existing coverage of `constraintRows`/`foreignKeyRows` still fully covers the only pure logic this file exports; the new logic (button assembly, which tools array gets which callbacks) lives in `StructurePanel.ts` itself, which — per the established convention this plan already relied on for the same file (see [^structure-rows-module]) — registers glyphs at import scope and so is unreachable from the node vitest harness; it is covered by manual verification instead (cases 5-9), consistent with every other DOM-touching change in this plan.
+- Manual verification cases 5-8 were rewritten for the per-section behaviour, and a new case 9 was added for the whole-tab Alt+R/View→Refresh path, which this override deliberately preserves unchanged; downstream cases renumbered accordingly (`## Expected Behaviour`, `## Verification`).
+
+The `Ordered Implementation Steps` section (step 8's Container/Border/ToolBar restructuring, step 12's single-`refresh`-argument wiring) is left as originally written — a historical record of the plan the worker actually followed up to the point of this override — rather than rewritten to describe the final shape; the Architecture Decisions, Public API, Internal Structure, and Expected Behaviour sections are the authoritative description of what shipped.
+
+---
+
 ## Notes
 
 [^in-place-not-reopen]: The alternative was to reuse `refreshStructure` ([`SqlAdminController.ts:1511`](frontend/src/SqlAdminController.ts#L1511)), which removes the panel and re-runs `openStructure`. It was rejected on three counts: it would destroy the panel from inside its own button's click handler; the reopened tab is appended to the end of the tab strip, so the tab the user is looking at visibly jumps; and it silently no-ops when the entry has no navigator `node`, which happens for a tab opened from a foreign-key or "Owned by column" link. In-place reload also matches what the other four panels need anyway — two of them (`DefinitionPanel`, `FunctionDefinitionPanel`) already have a `reload` doing exactly this after a Save.
@@ -483,7 +574,7 @@ const refresh = (): void => void this.refreshPanel(ref, async () => {
 
 [^route-through-refresh-active]: The alternative was `bindRefreshShortcut(this, onRefresh)` ([`refreshTool.ts:33`](frontend/src/shell/refreshTool.ts#L33)) on each panel, which scopes Alt+R to the focused subtree. It was rejected because it fixes only the keyboard chord: the menu bar's View → Refresh item ([`SqlAdminShell.ts:407`](frontend/src/shell/SqlAdminShell.ts#L407)) calls `controller.refreshActive()` directly and would keep no-opping on these tabs, leaving the menu item and its own advertised shortcut doing different things. Routing through `refreshActive` fixes both from one place, needs no per-panel keyboard wiring, and reuses the `_openPanels` registry the controller already keeps per tab. The document-level accelerator reaches these tabs even while a `CodeEditor` has focus: it is a bubble-phase `document` listener and the library's dispatcher only stops propagation when a focused component actually consumed the key (`SqlAdminShell.ts:153-156`).
 
-[^structure-toolbar-not-section-tool]: Hanging `refreshTool` off an `AccordionSectionConfig`'s `tools` slot — the shape `treeExplorerView.ts:91` uses — was rejected because all four sections are seeded from a single `getColumns` + `getStructure` fetch, so one Refresh necessarily reloads all four. Putting it on one section would imply it refreshes only that facet; putting it on all four would fire four redundant, identical fetches. The section `tools` slots are already spoken for by per-facet add/alter/drop launchers, which genuinely are section-scoped. A whole-tab action belongs in a whole-tab toolbar, which is what every other dock work panel has.
+[^structure-toolbar-not-section-tool]: **Superseded — see "Structure's Refresh is per-section, not a tab-level toolbar (override)" above.** This footnote records the plan's *original* reasoning for rejecting a per-section tool, kept for history rather than deleted. Hanging `refreshTool` off an `AccordionSectionConfig`'s `tools` slot — the shape `treeExplorerView.ts:91` uses — was rejected because all four sections are seeded from a single `getColumns` + `getStructure` fetch, so one Refresh necessarily reloads all four. Putting it on one section would imply it refreshes only that facet; putting it on all four would fire four redundant, identical fetches. The section `tools` slots are already spoken for by per-facet add/alter/drop launchers, which genuinely are section-scoped. A whole-tab action belongs in a whole-tab toolbar, which is what every other dock work panel has. **What changed:** the user explicitly asked for per-section granularity after seeing the toolbar-only shape built — "putting it on one section would imply it refreshes only that facet" turned out to be exactly the wanted behaviour, not a footgun; the "redundant fetches" cost was judged acceptable (a `getStructure` re-fetch is cheap, and only Indexes/Constraints/Foreign Keys share the endpoint at all); and `refreshTool` still isn't used for the section buttons even under the reversed decision, because its hardcoded `"Refresh (Alt+R)"` label would misstate what the button does at this granularity (see the override's last paragraph).
 
 [^discard-silently]: This matches the data grid's Refresh, which runs `store.reject(); void store.load();` with no prompt ([`TableWorkPanel.ts:166`](frontend/src/dock/TableWorkPanel.ts#L166)), and `refreshActive`'s own doc, which describes "discarding a table's unsaved edits first" as the intended contract. Keeping Refresh enabled while dirty is the point: an edit the user wants to abandon is exactly when Refresh is most useful, and a Refresh that disables itself the moment you touch the editor is a button that stops working when you need it. A confirmation dialog was rejected for the same reason it was rejected on the data grid — it would make the app's two Refresh buttons behave differently for no gain.
 
