@@ -8,6 +8,27 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️✅ Tree exposed no way to observe or read back its expanded set
+
+Persisting which nodes are expanded in the Database and Roles rail trees
+(plan `tree-expand-state-persistence`) needed to read a tree's current
+expanded set at save time and to await a lazy node's expansion during
+restore. `Tree` tracked expansion in a private `_expandedNodes` set with no
+public getter, its `TreeEvent` union carried no expand/collapse member, and
+`expandNode(node)` returned `this` with no way to know when a lazy node's
+`loadChildren` had resolved.
+
+Fixed in the library: `Tree` gained `getExpandedNodes()`, `expandNodeAsync()`
+(resolving once a lazy node's children have loaded and the expansion has
+committed), and `"expand"`/`"collapse"` `TreeEvent` members firing after an
+expansion or collapse commits. Adopted here: `TreeExpansionPersistence`
+(`data/treeExpansion.ts`) reads `getExpandedNodes()` to build the saved path
+set and awaits `expandNodeAsync()` while walking a saved path back open;
+`NavigatorTree` and `RolesTree` each wire its `save` hook to `"expand"` and
+`"collapse"`.
+
+---
+
 ## 🐞🔎 `ToolBar`'s roving-tabindex keydown handler steals arrow keys from a text child
 
 Found running the `table-local-filter` plan's manual verification, case 12 (caret
