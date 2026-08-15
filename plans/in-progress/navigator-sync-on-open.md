@@ -571,3 +571,52 @@ Run against the seeded demo database (`db/init/*.sql`) with `npm run dev`. Type 
 [^no-schema-guard]: `NavigatorTree` is rooted at schemas — the app connects to one database per session, so there is no database node — and `revealByPredicate` walks depth first, calling `loadChildren` on each branch it descends. A search for `{kind: "database"}` therefore visits every schema, issues that schema's four introspection requests (`/objects`, `/functions`, `/types`, `/indexes`), and returns null. On the seeded demo database that is a dozen wasted requests at boot for the one route that can never match. The guard keys on `schema` rather than on `kind === "database"` so any future schema-less ref is covered by the same rule.
 
 [^roles-focus-sync]: The framing that `RolesTree`'s missing focus sync shares a root cause with the navigator's was checked against the code and only half holds. The shared half is real and fixed here: `RolesTree` had no ready signal and was never registered with the controller, so nothing could drive its selection at all. The other half is a different defect. `openRoleGrants`, `openRoleGrantsDiagram`, and `openRoleMembershipDiagram` never call `_openPanels.set` — the registry entry requires a `DbObjectRef`, and a role is a bare name — so `syncToPanel` returns at its first line for every role tab, and the dock's `"focus"` listener has nothing to read. Fixing that means a parallel registry (`Map<panelId, roleName>`) written by all three openers and read by the focus listener. That is a self-contained change with no bearing on the deep-linking symptoms this plan addresses, so it stays out.
+
+---
+
+## Implementation Notes
+
+Two departures from the plan as written, both mechanical; the design landed as
+specified.
+
+**A fifth route handler needed a `ref` local, not four.** `## The route table's
+reveal calls` names four handlers that build their ref inline — `/database/diagram`,
+`sequence`, `index`, `function` — because those four build an object *literal* as
+a call argument. The relation handler `/schema/:schema/{table,view,matview}/:name`
+also builds its ref inline, as a `relationRef(controller, kind, …)` **call**
+rather than a literal, so it needed the same extraction: without it the reveal
+and the open would each call `relationRef` and build two separate refs. It now
+holds a `const ref = relationRef(…)` local exactly like its `/:view` sibling.
+
+**Three of the plan's verification greps count comment lines, so their expected
+numbers read high.** The structural intent each one encodes holds; only the
+literal counts differ:
+
+| Check | Plan expects | Actual | Why |
+|---|---|---|---|
+| `grep -c "revealByPredicate" src/SqlAdminController.ts` | 2 | 4 | 2 call sites (the two new helpers, as intended) plus 2 prose mentions in doc comments — one pre-existing on `openReferencedTable`, one new in `selectObject`'s guard comment |
+| `grep -c "controller.selectObject(" src/shell/appRouter.ts` | 7 | 8 | 7 statements, plus the new file-header paragraph naming the call |
+| `grep -c "controller.selectRole(" src/shell/appRouter.ts` | 2 | 3 | 2 statements, plus the same header paragraph |
+
+Counting statements only (`grep -n` and discarding comment lines) gives the
+plan's 2 / 7 / 2 exactly. The comments were kept: dropping them to satisfy a
+grep would cost more than the check is worth.
+
+**Manual verification.** All 15 cases in `## Expected Behaviour` → *Manual
+verification* were driven in-browser against the seeded demo database, and all
+15 passed with no console errors or warnings. Two are worth recording because
+they pin the parts no unit test reaches:
+
+- **Case 5** measured 8 schemas in the tree and exactly one `/objects` request
+  on `/database/diagram` — that one from the restored expansion, not from a
+  reveal. Without the `!ref.schema` guard the reveal would have crawled all
+  eight (≈32 introspection requests).
+- **Case 14** is the decisive evidence for `LoadSignal`: firing the navigator's
+  Refresh tool and immediately clicking a foreign-key link left the target
+  selected. Before this change that reveal resolved against the pre-refresh node
+  set, which `setNodes` had already replaced, so `selectNode` no-opped.
+
+Case 6 was additionally run against the *second* overload's signature: the tab
+opened `price_with_tax(p_price numeric, p_rate numeric)` while the navigator
+selected the first `price_with_tax(…)` leaf — confirming the signature-blind
+reveal the Non-Goals describe.
