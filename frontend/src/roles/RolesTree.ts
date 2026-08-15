@@ -20,6 +20,7 @@ import { gears }                     from "@jimka/typescript-ui/glyphs/solid/gea
 import type { SqlAdminController }   from "../SqlAdminController";
 import type { ExplorerTree }         from "../navigator/NavigatorTree";
 import { TreeExpansionPersistence }  from "../data/treeExpansion";
+import { LoadSignal }                from "../data/loadSignal";
 import { groupRoles, roleNodeKey }   from "./groupRoles";
 import type { RoleGroupData }        from "./groupRoles";
 
@@ -43,6 +44,7 @@ class RolesTree extends Tree implements ExplorerTree {
     private readonly controller: SqlAdminController;
     private readonly contextMenu = Menu();
     private readonly _expansion: TreeExpansionPersistence;
+    private readonly _loaded: LoadSignal = new LoadSignal();
 
     constructor(controller: SqlAdminController) {
         super();
@@ -98,6 +100,9 @@ class RolesTree extends Tree implements ExplorerTree {
             ]);
         });
 
+        // Let the controller drive selection when a role is opened.
+        this.controller.setRolesTree(this);
+
         this._expansion = new TreeExpansionPersistence(this, controller.layout.bindTreeExpansion("roles"), roleNodeKey);
         this.on("expand",   this._expansion.save);
         this.on("collapse", this._expansion.save);
@@ -114,6 +119,8 @@ class RolesTree extends Tree implements ExplorerTree {
     // field: refreshTool/bindRefreshShortcut hold this by reference, which
     // would lose `this` if it were a plain method.
     refresh = (): void => {
+        this._loaded.arm();
+
         void this.controller.loadRoles()
             .then(async roles => {
                 this.setNodes(groupRoles(roles));
@@ -123,11 +130,26 @@ class RolesTree extends Tree implements ExplorerTree {
                 const firstUser = roles.find(role => role.canLogin);
 
                 if (!restored && firstUser) {
-                    void this.revealByPredicate(data => data === firstUser.name);
+                    // Awaited, not fired and forgotten: the signal must settle
+                    // only once this default reveal has finished scrolling, or a
+                    // waiting reveal of its own can land first and then be
+                    // scrolled away from by this one.
+                    await this.revealByPredicate(data => data === firstUser.name);
                 }
             })
-            .catch(error => this.controller.notifyError(error));
+            .catch(error => this.controller.notifyError(error))
+            // After the whole chain, and after the .catch so the signal settles
+            // on the failure path too — see NavigatorTree.refresh.
+            .finally(() => this._loaded.settle());
     };
+
+    /**
+     * @returns A promise resolving once {@link refresh}'s load chain has
+     * finished; an already-resolved one when no load is running.
+     */
+    whenLoaded(): Promise<void> {
+        return this._loaded.whenSettled();
+    }
 }
 
 const RolesTreeCallable = callable(RolesTree);
