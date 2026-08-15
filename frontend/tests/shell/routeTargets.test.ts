@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { RELATION_KINDS, relationView, schemaView, roleView, routeFlag } from "../../src/shell/routeTargets";
+import { RELATION_KINDS, ROLE_BUCKETS, relationView, schemaView, roleView, routeFlag } from "../../src/shell/routeTargets";
 
 describe("RELATION_KINDS", () => {
     it("has exactly three entries, one per relation kind", () => {
@@ -10,6 +10,12 @@ describe("RELATION_KINDS", () => {
         expect(RELATION_KINDS).toContainEqual({ segment: "table", kind: "table" });
         expect(RELATION_KINDS).toContainEqual({ segment: "view", kind: "view" });
         expect(RELATION_KINDS).toContainEqual({ segment: "matview", kind: "materializedView" });
+    });
+});
+
+describe("ROLE_BUCKETS", () => {
+    it("has exactly three entries, in RolesTree's Users/Groups/Predefined order", () => {
+        expect(ROLE_BUCKETS).toEqual(["user", "group", "predefined"]);
     });
 });
 
@@ -63,7 +69,7 @@ describe("roleView", () => {
         expect(roleView("grants-diagram")).toBe("grants-diagram");
     });
 
-    it("rejects \"grants\" — the bare /role/:role route is the grants tab", () => {
+    it("rejects \"grants\" — the bare /role/{user,group,predefined}/:role route is the grants tab", () => {
         expect(roleView("grants")).toBeNull();
     });
 });

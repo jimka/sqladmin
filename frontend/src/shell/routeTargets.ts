@@ -1,9 +1,10 @@
 // The URL vocabulary appRouter.ts registers against: which relation kinds
-// have a path segment, which trailing segment names which alternative view
-// for a relation/schema/role route, and how a query parameter parses as a
-// boolean flag. Kept free of library imports (only a type import from
-// ../contract) so it loads under the project's node-environment vitest —
-// mirroring recordNavigation.ts's and depthChoices.ts's own DOM-free split.
+// and role buckets have a path segment, which trailing segment names which
+// alternative view for a relation/schema/role route, and how a query
+// parameter parses as a boolean flag. Kept free of library imports (only a
+// type import from ../contract) so it loads under the project's
+// node-environment vitest — mirroring recordNavigation.ts's and
+// depthChoices.ts's own DOM-free split.
 
 import type { DbObjectKind } from "../contract";
 
@@ -22,6 +23,18 @@ export const RELATION_KINDS: readonly RelationRoute[] = [
     { segment: "view",    kind: "view" },
     { segment: "matview", kind: "materializedView" },
 ];
+
+/**
+ * The three role buckets a route can address, mirroring RolesTree's own
+ * Users/Groups/Predefined navigator sections. Not validated against a role's
+ * actual classification at consume time — see the plan's Architecture
+ * Decisions: the roles list has not loaded when a route is applied, so there
+ * is nothing to validate against, and any bucket opens the same role by name.
+ */
+export const ROLE_BUCKETS = ["user", "group", "predefined"] as const;
+
+/** One of the three URL segments a role route's bucket prefix can be. */
+export type RoleBucket = typeof ROLE_BUCKETS[number];
 
 /** The alternative views a relation route's trailing segment can name. */
 export type RelationView = "structure" | "definition" | "diagram" | "dependencies" | "inheritance";
@@ -51,7 +64,7 @@ const ROLE_VIEWS: readonly RoleView[] = ["grants-diagram", "membership"];
  * `segment` as a view `kind` supports, or null when it is neither a known
  * view name nor valid for `kind`.
  *
- * @param kind - The relation kind the route's first segment named.
+ * @param kind - The relation kind the route's object-kind segment named.
  * @param segment - The route's trailing segment.
  * @returns The matching view, or null.
  */

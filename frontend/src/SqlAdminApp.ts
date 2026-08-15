@@ -1,10 +1,10 @@
 // SQLAdmin app bootstrap: bring up the UI runtime, gate on authentication
 // (recover an existing session or show the login dialog), then build the
 // controller (mediator), mount the shell, and start the Router so a deep
-// link (e.g. /table/sales/customers?record=42) opens its view on load. The
-// connection id comes from the authenticated session, not a hardcoded
-// default. Absent a deep link, the Dock starts empty; tables are opened by
-// selecting them in the navigator.
+// link (e.g. /schema/sales/table/customers?record=42) opens its view on
+// load. The connection id comes from the authenticated session, not a
+// hardcoded default. Absent a deep link, the Dock starts empty; tables are
+// opened by selecting them in the navigator.
 
 import { Body }                 from "@jimka/typescript-ui/core";
 import { Fit }                  from "@jimka/typescript-ui/layout";
