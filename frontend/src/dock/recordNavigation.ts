@@ -1,9 +1,11 @@
-// The record-view stepper's pure logic, split out so it can be unit-tested
-// without pulling in the library's DOM-backed component classes
+// The table work panel's pure record-lookup logic, split out so it can be
+// unit-tested without pulling in the library's DOM-backed component classes
 // (TableWorkPanel.ts's top-level imports touch `document` at module-load
 // time, which the project's node-environment test runner has no stand-in for
 // — see vitest.config.ts). Mirrors tableWriteRules.ts, which exists for the
-// same reason.
+// same reason. Not only the record-view stepper's logic any more: also holds
+// findRecordByKey, which resolves a route's `?record=` request to a loaded
+// record by primary-key value.
 //
 // `visibleRecords` and `stepIndex` are deliberately separate: `stepIndex` is
 // pure arithmetic over an index and a count, with no notion of quick search;
@@ -51,4 +53,26 @@ export function stepIndex(currentIndex: number, delta: number, count: number): n
     const target = Math.min(Math.max(currentIndex + delta, 0), count - 1);
 
     return target === currentIndex ? null : target;
+}
+
+/** The minimum a record must expose to be addressed by its primary-key value. */
+export interface KeyedRecord {
+    getId(): unknown;
+}
+
+/**
+ * The first record whose primary-key value stringifies to `key`, or undefined
+ * when none does. A record with no primary key (`getId()` undefined or null)
+ * never matches.
+ *
+ * @param records - The loaded records to search, in their original order.
+ * @param key - The primary-key value from the route's `record` parameter.
+ * @returns The matching record, or undefined.
+ */
+export function findRecordByKey<T extends KeyedRecord>(records: T[], key: string): T | undefined {
+    return records.find(record => {
+        const id = record.getId();
+
+        return id !== undefined && id !== null && String(id) === key;
+    });
 }

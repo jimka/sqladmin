@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stepIndex, visibleRecords } from "../../src/dock/recordNavigation";
+import { stepIndex, visibleRecords, findRecordByKey } from "../../src/dock/recordNavigation";
 
 /** A minimal stand-in for a ModelRecord, satisfying only what these tests read. */
 function record(data: Record<string, unknown>) {
@@ -13,6 +13,11 @@ function nameContains(query: string): (r: ReturnType<typeof record>) => boolean 
     const needle = query.trim().toLowerCase();
 
     return needle === "" ? () => true : r => String(r.getData().name).toLowerCase().includes(needle);
+}
+
+/** A minimal stand-in for a ModelRecord, satisfying only what findRecordByKey reads. */
+function keyed(id: unknown) {
+    return { getId: () => id };
 }
 
 describe("stepIndex", () => {
@@ -121,5 +126,45 @@ describe("Previous/Next stepping composed with a live quick-search query", () =>
     it("re-enables once the query widens to include a neighbour again", () => {
         expect(targetIndex(all, alice, "Alice", 1)).toBeNull();
         expect(targetIndex(all, alice, "a", 1)).not.toBeNull();
+    });
+});
+
+describe("findRecordByKey", () => {
+    it("finds the record whose numeric id stringifies to the key", () => {
+        const [one, two, three] = [keyed(1), keyed(2), keyed(3)];
+
+        expect(findRecordByKey([one, two, three], "2")).toBe(two);
+    });
+
+    it("finds the record whose text id matches the key", () => {
+        const [a, b] = [keyed("a"), keyed("b")];
+
+        expect(findRecordByKey([a, b], "b")).toBe(b);
+    });
+
+    it("returns undefined when no record's id matches", () => {
+        expect(findRecordByKey([keyed(1), keyed(2)], "9")).toBeUndefined();
+    });
+
+    it("returns the first matching record when ids collide", () => {
+        const [first, second] = [keyed(1), keyed(1)];
+
+        expect(findRecordByKey([first, second], "1")).toBe(first);
+    });
+
+    it("never matches a record with an undefined id", () => {
+        expect(findRecordByKey([keyed(undefined)], "undefined")).toBeUndefined();
+    });
+
+    it("never matches a record with a null id", () => {
+        expect(findRecordByKey([keyed(null)], "null")).toBeUndefined();
+    });
+
+    it("returns undefined for an empty record list", () => {
+        expect(findRecordByKey([], "1")).toBeUndefined();
+    });
+
+    it("returns undefined for an empty key", () => {
+        expect(findRecordByKey([keyed(1)], "")).toBeUndefined();
     });
 });

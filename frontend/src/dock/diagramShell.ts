@@ -9,9 +9,12 @@
 // RoleGrantsDiagramPanel open selectable. ExplainDiagramPanel does not extend
 // this shell — it has its own accordion column and a query plan's one true
 // root. Subclasses override rootingChanged/pruneChanged to re-derive their own
-// graph state; the shell owns the root, the depth vocabulary (DEPTH_CHOICES,
-// the All sentinel, depthFromChoice), and the column assembly, since those
-// have to agree across every subclass. See
+// graph state; the shell owns the root, the Depth control (seeded from an
+// `initialDepth` config value via depthChoices.ts's depthChoice), and the
+// column assembly, since those have to agree across every subclass. The depth
+// vocabulary itself (DEPTH_CHOICES, the All sentinel, depthFromChoice) lives
+// in depthChoices.ts, kept DOM-free so it can be unit-tested under the
+// project's node-environment vitest (see depthChoices.ts's own header). See
 // plans/implemented/diagram-shell-optional-root.md for the unification
 // rationale, and plans/implemented/diagram-depth-limit-and-expand-indicator.md
 // for the original control-column extraction.
@@ -33,19 +36,7 @@ import type { DiagramView } from "@jimka/typescript-ui/component/diagram";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import type { TraversalDirection } from "../data/relationDiagram";
 import { rootChoices } from "../data/relationDiagram";
-
-/** The `Depth` choice meaning an unbounded walk. */
-export const DEPTH_ALL = "All";
-
-/** Depth choices offered by the control, in order. Capped at 3 hops before
- *  `All` because deeper walks quickly pull in most of the schema and defeat
- *  the point of a rooted view. */
-export const DEPTH_CHOICES = ["1", "2", "3", DEPTH_ALL];
-
-/** The depth every rooted diagram opens at — one hop keeps the first cut
- *  readable, the root plus its direct neighbours, not the whole transitive
- *  closure. The user widens it via the Depth control. */
-export const DEFAULT_DEPTH = 1;
+import { DEPTH_CHOICES, DEFAULT_DEPTH, depthChoice, depthFromChoice } from "./depthChoices";
 
 /** The root selector's sentinel item: no root chosen, so the whole graph shows. */
 export const ROOT_NONE = "(none)";
@@ -53,16 +44,6 @@ export const ROOT_NONE = "(none)";
 // Fixed width of the WEST side panel: enough for a checkbox plus a typical
 // table name without stealing canvas width from the diagram.
 const LEGEND_WIDTH = 220;
-
-/**
- * The hop limit a `Depth` choice means.
- *
- * @param choice - A `DEPTH_CHOICES` entry.
- * @returns The hop count, or `Number.POSITIVE_INFINITY` for `DEPTH_ALL`.
- */
-export function depthFromChoice(choice: string): number {
-    return choice === DEPTH_ALL ? Number.POSITIVE_INFINITY : Number(choice);
-}
 
 /**
  * A caption stacked above its control. Vertical (not side-by-side) so a caption
@@ -164,6 +145,9 @@ export interface DiagramShellSlots {
     rootedControls?: Component[];
     /** Controls inside the hideable block, below the prune row (the relation diagram's coverage row). */
     extraControls?: Component[];
+    /** The `DEPTH_CHOICES` entry the Depth control opens at; normalized through
+     *  `depthChoice`, so an unrecognized value opens at the default. */
+    initialDepth?: string;
 }
 
 /** A panel whose root never changes: no `Root …` row is built, and a root is required. */
@@ -249,7 +233,8 @@ class DiagramShell extends Panel {
             value: "both",
         });
 
-        const depthControl = ComboBox({ items: DEPTH_CHOICES, value: String(DEFAULT_DEPTH) });
+        const initialDepth = depthChoice(config.initialDepth);
+        const depthControl = ComboBox({ items: DEPTH_CHOICES, value: initialDepth });
         const pruneControl = Checkbox({ value: false });
 
         const rootedBlock = Panel({
@@ -294,6 +279,12 @@ class DiagramShell extends Panel {
         this.rootControl = rootControl;
         this.rootedBlock = rootedBlock;
         this.rootId      = initialRoot;
+
+        // Overwrites the field initializer's default, which cannot see
+        // `config` (it runs immediately after super() returns, before the
+        // rest of this constructor body). depthChoice guarantees indexOf
+        // finds initialDepth, so this is never -1.
+        this.depthIndex = DEPTH_CHOICES.indexOf(initialDepth);
 
         // Reads only this shell's own fields, so no subclass field is touched
         // before the subclass body has run.

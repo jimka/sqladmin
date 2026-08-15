@@ -35,6 +35,10 @@ Deferred features and known issues. Implemented work lives in
 - **Connection-management UI** — add/switch connections (activates the
   `connectionId` route/registry seam from `tsui-sql-admin.md`); needs auth/session
   thinking.
+- **Shareable link UI** — a "Copy link" action (context menu / toolbar) that
+  builds the URL for the focused tab, plus keeping the address bar in step as
+  the user navigates. `router-deep-linking` only resolves an incoming URL;
+  generating one is a deliberate non-goal there.
 
 ### Polish
 - **Dark theme** — the theme system already has a classic/default toggle.

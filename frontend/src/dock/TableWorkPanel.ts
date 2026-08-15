@@ -39,6 +39,13 @@
 // steps away: `visibleRecords(...).indexOf(current)` simply misses it (-1),
 // which `stepIndex` treats the same as "nothing displayed yet".
 //
+// The panel can also open pre-seeded by a route's view-mode request (rotated,
+// a focused record, or both — see TableViewOptions): the record toggle's
+// initial state and Add's initial gating both read from `view?.rotated`, and
+// a requested record is focused once the store's first page loads via
+// `focusRecord`/`findRecordByKey` (see recordNavigation.ts). Both are
+// independent of each other and of quick search.
+//
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the panel `extends
 // Container`, inlining its own Border frame directly (the same shape
 // RoleGrantsPanel inlines too). The sync handlers, `toggleRecordView`,
@@ -71,7 +78,7 @@ import type { ColumnMeta, TablePrivileges } from "../contract";
 import { buildExportButton }           from "./exportButton";
 import { buildColumnSpec, missingRequiredFields } from "./tableWriteRules";
 import { quickSearchStatus }           from "./quickSearchModel";
-import { stepIndex, visibleRecords }   from "./recordNavigation";
+import { stepIndex, visibleRecords, findRecordByKey } from "./recordNavigation";
 import { quickSearchFields, matchesQuery } from "./gridQuickSearch";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR } from "../theme";
 
@@ -82,6 +89,14 @@ export type Notify = (message: string) => void;
 
 /** Export the whole relation server-side (the streaming full-table export). */
 export type ExportTable = (format: "csv" | "json") => void;
+
+/** How a table's data tab should open — the view-mode properties a route can request. */
+export interface TableViewOptions {
+    /** Open in the rotated (one record as field/value rows) display mode. */
+    rotated?: boolean;
+    /** Primary-key value of the record to select once the first page has loaded. */
+    record?: string;
+}
 
 /**
  * The dock work panel hosting a table's data grid: a toolbar (NORTH) over the
@@ -114,7 +129,7 @@ class TableWorkPanel extends Container {
     private readonly nextButton:       Button;
     private readonly quickSearchField: TextField;
 
-    constructor(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable, privileges: TablePrivileges) {
+    constructor(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable, privileges: TablePrivileges, view?: TableViewOptions) {
         // `this` is unavailable until after `super()`, so the grid and toolbar
         // buttons are built as locals first.
         const dataGrid = Table(store, buildColumnSpec(columns, privileges.update));
@@ -145,7 +160,7 @@ class TableWorkPanel extends Container {
         // Table.setDisplayMode. The toggle's handler needs `this` (to re-sync
         // Add and the steppers), which is unavailable here, so it is wired
         // after super() returns. The steppers only need the `dataGrid` local.
-        const recordToggle = glyphToggleButton("table-list", PRIMARY_COLOR, "Record view (one record as field/value rows)", false);
+        const recordToggle = glyphToggleButton("table-list", PRIMARY_COLOR, "Record view (one record as field/value rows)", view?.rotated === true);
         const prevButton   = glyphButton("angle-left",  PRIMARY_COLOR, "Previous record", () => stepRecord(dataGrid, searchFields, -1, quickSearchField.getValue().trim()));
         const nextButton   = glyphButton("angle-right", PRIMARY_COLOR, "Next record",     () => stepRecord(dataGrid, searchFields, 1, quickSearchField.getValue().trim()));
 
@@ -241,6 +256,19 @@ class TableWorkPanel extends Container {
         this.syncStepEnabled();
         dataGrid.on("selection", this.syncStepEnabled);
         store.on("datachange", this.syncStepEnabled);
+
+        // Apply the route's requested view mode last, so the two sync calls
+        // below act on the final state rather than being immediately
+        // superseded by the listener wiring above.
+        if (view?.rotated === true) {
+            this.dataGrid.setDisplayMode("rotated");
+            this.syncAddEnabled();
+            this.syncStepEnabled();
+        }
+
+        if (view?.record !== undefined && view.record !== "") {
+            this.focusRecord(view.record);
+        }
     }
 
     // Registered by reference on `store` ("datachange") — arrow-function field.
@@ -340,6 +368,41 @@ class TableWorkPanel extends Container {
         this.prevButton.setEnabled(rotated && stepIndex(index, -1, records.length) !== null);
         this.nextButton.setEnabled(rotated && stepIndex(index,  1, records.length) !== null);
     };
+
+    /**
+     * Select the record whose primary key is `key` once the store's first page
+     * arrives, then stop listening — a later Refresh must not re-target the grid
+     * behind the user. Reports through `notify` when no loaded record matches,
+     * which is what a record outside the first page looks like from here.
+     *
+     * @param key - The primary-key value from the route's `record` parameter.
+     */
+    private focusRecord(key: string): void {
+        const onLoad = (): void => {
+            this.store.off("load", onLoad);
+
+            const target = findRecordByKey(this.store.getRecords(), key);
+
+            if (!target) {
+                // Deferred a macrotask (not called inline): AbstractStore.load()
+                // emits "load" synchronously, one microtask turn before its own
+                // returned promise resolves — so SqlAdminController.openTable's
+                // `store.load().then(() => this.syncToPanel(id))` always runs
+                // after this handler and would otherwise clobber this message
+                // with syncToPanel's own "N rows" status line. setTimeout(0)
+                // waits for the whole pending microtask queue (however many
+                // hops the load chain has) to drain first, so this message is
+                // the one still showing once the tab has settled.
+                setTimeout(() => this.notify(`no loaded record has key ${key}`), 0);
+
+                return;
+            }
+
+            this.dataGrid.selectRecord(target);
+        };
+
+        this.store.on("load", onLoad);
+    }
 }
 
 /**
