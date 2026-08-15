@@ -11,14 +11,21 @@
 // (see StructurePanel / SqlAdminController).
 //
 // Quick search (applyQuickSearch/syncQuickSearchStatus) is local: it narrows
-// which already-loaded rows the grid shows via `Table.setRowVisible`, with no
-// network request, and reports its match count through the shared `notify`
-// status line rather than a dedicated toolbar label. The grid's own header
-// filter row (toggled from its right-click context menu, via
+// which already-loaded rows the grid shows via the library's own
+// `Table.setQuickSearch`, with no network request. Matching runs against each
+// cell's displayed text (`Table.getCellText`) rather than the record's raw
+// stored value, so a formatted date/time/datetime or combo column matches the
+// same way it renders. The status line's match count and the record-view
+// stepper (`stepRecord`/`syncStepEnabled`) need to know which records
+// currently match too, and the grid exposes no query for that, so
+// `quickSearchFields`/`matchesQuery` below recompute it from the same public
+// pieces `Table.setQuickSearch` itself uses (`getCellText` plus the column's
+// default Contains-filterable scope) — never from the raw record. The grid's
+// own header filter row (toggled from its right-click context menu, via
 // `Table.setFilterRowVisible`) is remote: each committed keystroke there
 // writes into the store's filter state, which reloads page 1 from the server.
-// Both can be active at once — see quickSearchModel.ts and
-// plans/implemented/table-local-filter.md's Architecture Decisions.
+// Both can be active at once — see plans/implemented/table-local-filter.md's
+// Architecture Decisions.
 //
 // The record-view toggle flips the same grid to the library's rotated
 // (field/value) display mode via `Table.setDisplayMode` — no second grid, no
@@ -49,7 +56,7 @@ import { Button, ToggleButton }        from "@jimka/typescript-ui/component/butt
 import { Spacer }                      from "@jimka/typescript-ui/component/container";
 import { TextField }                   from "@jimka/typescript-ui/component/input";
 import { glyphButton, glyphToggleButton } from "./glyphButton";
-import { Table }                       from "@jimka/typescript-ui/component/table";
+import { Table, columnFilterOperators } from "@jimka/typescript-ui/component/table";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
 import { Dialog, DialogButtons }       from "@jimka/typescript-ui/overlay";
 import type { AjaxStore, ModelRecord } from "@jimka/typescript-ui/data";
@@ -63,7 +70,7 @@ import { angle_right }                 from "@jimka/typescript-ui/glyphs/solid/a
 import type { ColumnMeta, TablePrivileges } from "../contract";
 import { buildExportButton }           from "./exportButton";
 import { buildColumnSpec, missingRequiredFields } from "./tableWriteRules";
-import { matchesQuickSearch, quickSearchStatus } from "./quickSearchModel";
+import { quickSearchStatus }           from "./quickSearchModel";
 import { stepIndex, visibleRecords }   from "./recordNavigation";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR } from "../theme";
 
@@ -120,8 +127,8 @@ class TableWorkPanel extends Container {
         const saveButton = glyphButton("save", PRIMARY_COLOR,
             canWrite ? "Save" : "Save (read-only — no write permission)", () => save_(store, columns, notify));
 
-        // Quick search: local, network-free row hiding over the loaded page
-        // (see quickSearchModel.ts). Its match-count status is reported
+        // Quick search: local, network-free row hiding over the loaded page,
+        // via Table.setQuickSearch. Its match-count status is reported
         // through `notify` rather than a dedicated toolbar label.
         const quickSearchField = new TextField({ placeholder: "Quick search (loaded rows)" });
 
@@ -250,9 +257,7 @@ class TableWorkPanel extends Container {
     // too (see syncStepEnabled), and only 'selection'/'datachange' would
     // otherwise trigger a re-check, lagging behind what was just typed.
     private applyQuickSearch = (): void => {
-        const query = this.quickSearchField.getValue().trim();
-
-        this.dataGrid.setRowVisible(query === "" ? null : (record: ModelRecord) => matchesQuickSearch(record, query));
+        this.dataGrid.setQuickSearch(this.quickSearchField.getValue().trim());
         this.syncQuickSearchStatus();
         this.syncStepEnabled();
     };
@@ -273,8 +278,10 @@ class TableWorkPanel extends Container {
             return;
         }
 
+        const needle  = query.toLowerCase();
+        const fields  = quickSearchFields(this.dataGrid);
         const loaded  = this.store.getRecords();
-        const matched = loaded.filter((r: ModelRecord) => matchesQuickSearch(r, query)).length;
+        const matched = loaded.filter((r: ModelRecord) => matchesQuery(this.dataGrid, fields, r, needle)).length;
 
         this.notify(quickSearchStatus(matched, loaded.length, this.store.getTotalCount()));
     };
@@ -316,8 +323,9 @@ class TableWorkPanel extends Container {
     // displayed yet" rather than an error.
     private syncStepEnabled = (): void => {
         const rotated = this.dataGrid.getDisplayMode() === "rotated";
-        const query   = this.quickSearchField.getValue().trim();
-        const records = visibleRecords(this.store.getRecords(), query);
+        const needle  = this.quickSearchField.getValue().trim().toLowerCase();
+        const fields  = quickSearchFields(this.dataGrid);
+        const records = visibleRecords(this.store.getRecords(), (r: ModelRecord) => matchesQuery(this.dataGrid, fields, r, needle));
         const current = this.dataGrid.getSelectedRecord();
         const index   = current ? records.indexOf(current) : -1;
 
@@ -363,6 +371,40 @@ async function confirmDelete(store: AjaxStore, dataGrid: Table): Promise<void> {
 }
 
 /**
+ * The field names `Table.setQuickSearch` searches when called with no
+ * explicit field list — every resolved, visible column offering a Contains
+ * filter operator. Mirrors the library's own (private) default field scope
+ * via the same public pieces it's built from, so the status-line match count
+ * and the record stepper stay in step with what the grid itself shows/hides.
+ * sqladmin never hides a column, so "visible" here is every column.
+ *
+ * @param dataGrid - the table whose default search scope to compute.
+ * @returns the field names to test.
+ */
+function quickSearchFields(dataGrid: Table): string[] {
+    return dataGrid.getColumns()
+        .filter(c => c.isFilterable() && columnFilterOperators(c.getField().getType()).includes("contains"))
+        .map(c => c.getField().getName());
+}
+
+/**
+ * Whether `record` matches an active quick search: `needle` found in any of
+ * `fields`' displayed cell text, resolved through the grid's own
+ * `Table.getCellText` — so a date/time/datetime or combo column matches the
+ * same way it renders, not its raw stored value. An empty `needle` matches
+ * every record.
+ *
+ * @param dataGrid - the table to resolve each field's displayed text through.
+ * @param fields - the field names to test (see `quickSearchFields`).
+ * @param record - the record to test.
+ * @param needle - the trimmed, lower-cased search text.
+ * @returns whether any of `fields`' displayed text contains `needle`.
+ */
+function matchesQuery(dataGrid: Table, fields: string[], record: ModelRecord, needle: string): boolean {
+    return needle === "" || fields.some(f => dataGrid.getCellText(f, record).toLowerCase().includes(needle));
+}
+
+/**
  * Step the record view's displayed record by `delta` positions within the
  * loaded, filtered/sorted records that currently match `query` (see
  * `visibleRecords`), clamped at both ends — so Previous/Next skip records
@@ -377,7 +419,9 @@ async function confirmDelete(store: AjaxStore, dataGrid: Table): Promise<void> {
  * @param query - the current quick-search text; blank matches every record.
  */
 function stepRecord(dataGrid: Table, delta: number, query: string): void {
-    const records = visibleRecords(dataGrid.getStore().getRecords(), query);
+    const needle  = query.toLowerCase();
+    const fields  = quickSearchFields(dataGrid);
+    const records = visibleRecords(dataGrid.getStore().getRecords(), (r: ModelRecord) => matchesQuery(dataGrid, fields, r, needle));
     const current = dataGrid.getSelectedRecord();
     const target  = stepIndex(current ? records.indexOf(current) : -1, delta, records.length);
 

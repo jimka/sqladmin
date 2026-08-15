@@ -3,46 +3,13 @@
 // (TableWorkPanel.ts's top-level imports touch `document` at module-load
 // time, which the project's node-environment test runner has no stand-in for
 // — see vitest.config.ts, and tableWriteRules.ts for the same split).
-
-/** The subset of a ModelRecord's API this module (and recordNavigation.ts) reads. */
-export interface RecordLike {
-    getData(): Record<string, unknown>;
-}
-
-/**
- * Whether `record` matches a quick-search query: case-insensitive substring,
- * across every primitive (string/number/boolean) field. An empty or
- * whitespace-only query matches every record.
- *
- * @param record - the loaded record to test.
- * @param query - the raw quick-search text (not yet trimmed/lower-cased).
- * @returns whether any primitive field of `record` contains `query`.
- */
-export function matchesQuickSearch(record: RecordLike, query: string): boolean {
-    const needle = query.trim().toLowerCase();
-
-    if (needle === "") {
-        return true;
-    }
-
-    return Object.values(record.getData()).some(value => fieldMatches(value, needle));
-}
-
-/**
- * Whether one field's value contains the (already trimmed, lower-cased)
- * needle. Only string/number/boolean values participate — `null`/`undefined`
- * are skipped, and so is any value that is a JS object, which after
- * `Field.convertValue`'s ingestion-time coercion means `Date` values
- * (date/datetime/time fields) and parsed JSON objects/arrays (json/jsonArray
- * fields): stringifying either produces text the user never typed.
- */
-function fieldMatches(value: unknown, needle: string): boolean {
-    if (value === null || value === undefined || typeof value === "object") {
-        return false;
-    }
-
-    return String(value).toLowerCase().includes(needle);
-}
+//
+// The matching itself is no longer reimplemented here: TableWorkPanel.ts
+// delegates row-hiding to the library's own `Table.setQuickSearch`, which
+// matches against each cell's displayed text (via `Table.getCellText`)
+// rather than the record's raw stored values — so a date/time/datetime
+// column matches the same way it renders, which a raw-value substring test
+// never could. Only the status-line formatting stays here.
 
 /**
  * Format the quick-search status line: how many of the currently loaded rows

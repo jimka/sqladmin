@@ -7,30 +7,27 @@
 //
 // `visibleRecords` and `stepIndex` are deliberately separate: `stepIndex` is
 // pure arithmetic over an index and a count, with no notion of quick search;
-// `visibleRecords` narrows the record list quick search would apply, so
-// TableWorkPanel.ts's `stepRecord`/`syncStepEnabled` compose the two
-// (`stepIndex(visibleRecords(records, query).indexOf(current), delta,
-// ...)`) to make Previous/Next skip records the current quick-search query
-// doesn't match — see quickSearchModel.ts's `matchesQuickSearch`, which
-// `visibleRecords` filters through.
-
-import { matchesQuickSearch } from "./quickSearchModel";
-import type { RecordLike }    from "./quickSearchModel";
+// `visibleRecords` narrows the record list to whatever a caller-supplied
+// predicate accepts, so TableWorkPanel.ts's `stepRecord`/`syncStepEnabled`
+// compose the two (`stepIndex(visibleRecords(records, matches).indexOf(current),
+// delta, ...)`) to make Previous/Next skip records the current quick-search
+// query doesn't match. The predicate itself lives in TableWorkPanel.ts, built
+// against the grid's own `Table.getCellText` — matching what the library's
+// `Table.setQuickSearch` hides/shows — rather than here, since testing it
+// needs no DOM-backed `Table` at all.
 
 /**
- * The loaded records that currently match `query`, in their original order —
- * the subset Previous/Next should step through. A blank/whitespace-only
- * query matches every record (see `matchesQuickSearch`), so passing one
- * through unconditionally is safe and returns `records` filtered to itself.
- * Generic (rather than typed directly to `ModelRecord`) so the duck-typed
- * stand-in `quickSearchModel.test.ts`'s own tests use also satisfies it.
+ * The loaded records for which `matches` returns true, in their original
+ * order — the subset Previous/Next should step through. Generic so the
+ * duck-typed stand-ins `recordNavigation.test.ts` uses also satisfy it.
  *
  * @param records - the loaded records (unfiltered).
- * @param query - the raw quick-search text (not yet trimmed/lower-cased).
- * @returns the records matching `query`.
+ * @param matches - the current quick-search predicate; a caller with no
+ *   active search passes a predicate that always returns `true`.
+ * @returns the records `matches` accepts.
  */
-export function visibleRecords<T extends RecordLike>(records: T[], query: string): T[] {
-    return records.filter(r => matchesQuickSearch(r, query));
+export function visibleRecords<T>(records: T[], matches: (record: T) => boolean): T[] {
+    return records.filter(matches);
 }
 
 /**

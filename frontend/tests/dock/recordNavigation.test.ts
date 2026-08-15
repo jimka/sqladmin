@@ -1,9 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { stepIndex, visibleRecords } from "../../src/dock/recordNavigation";
 
-/** A minimal stand-in for a ModelRecord, satisfying only what matchesQuickSearch reads. */
+/** A minimal stand-in for a ModelRecord, satisfying only what these tests read. */
 function record(data: Record<string, unknown>) {
     return { getData: () => data };
+}
+
+/** A `visibleRecords` predicate matching TableWorkPanel.ts's own `matchesQuery`: a
+ * case-insensitive substring test against the record's `name` field, or "matches
+ * everything" for a blank query — standing in for the grid's displayed-text match. */
+function nameContains(query: string): (r: ReturnType<typeof record>) => boolean {
+    const needle = query.trim().toLowerCase();
+
+    return needle === "" ? () => true : r => String(r.getData().name).toLowerCase().includes(needle);
 }
 
 describe("stepIndex", () => {
@@ -47,19 +56,19 @@ describe("visibleRecords", () => {
     const carol = record({ name: "Carol Ann" });
 
     it("returns every record, in order, for a blank query", () => {
-        expect(visibleRecords([alice, bob, carol], "")).toEqual([alice, bob, carol]);
+        expect(visibleRecords([alice, bob, carol], nameContains(""))).toEqual([alice, bob, carol]);
     });
 
     it("returns every record for a whitespace-only query, same as blank", () => {
-        expect(visibleRecords([alice, bob, carol], "   ")).toEqual([alice, bob, carol]);
+        expect(visibleRecords([alice, bob, carol], nameContains("   "))).toEqual([alice, bob, carol]);
     });
 
     it("narrows to the records matching the query, preserving original order", () => {
-        expect(visibleRecords([alice, bob, carol], "a")).toEqual([alice, carol]);
+        expect(visibleRecords([alice, bob, carol], nameContains("a"))).toEqual([alice, carol]);
     });
 
     it("returns an empty array when nothing matches", () => {
-        expect(visibleRecords([alice, bob, carol], "zzz")).toEqual([]);
+        expect(visibleRecords([alice, bob, carol], nameContains("zzz"))).toEqual([]);
     });
 });
 
@@ -72,7 +81,7 @@ describe("visibleRecords", () => {
 // code (which stays untested here per this file's header comment).
 describe("Previous/Next stepping composed with a live quick-search query", () => {
     function targetIndex(records: ReturnType<typeof record>[], current: ReturnType<typeof record> | null, query: string, delta: number): number | null {
-        const filtered = visibleRecords(records, query);
+        const filtered = visibleRecords(records, nameContains(query));
 
         return stepIndex(current ? filtered.indexOf(current) : -1, delta, filtered.length);
     }
@@ -86,7 +95,7 @@ describe("Previous/Next stepping composed with a live quick-search query", () =>
     it("Next skips a non-matching record in the middle of the loaded set", () => {
         // "a" matches alice, carol, dave but not bob; stepping Next from alice
         // must land on carol, not bob.
-        const filtered = visibleRecords(all, "a");
+        const filtered = visibleRecords(all, nameContains("a"));
         const target   = targetIndex(all, alice, "a", 1);
 
         expect(target).not.toBeNull();
@@ -97,7 +106,7 @@ describe("Previous/Next stepping composed with a live quick-search query", () =>
         // bob no longer matches "a"; his index in the filtered list is -1,
         // which stepIndex treats like "nothing displayed yet" rather than an
         // error — landing on the first matching record.
-        const filtered = visibleRecords(all, "a");
+        const filtered = visibleRecords(all, nameContains("a"));
         const target   = targetIndex(all, bob, "a", 1);
 
         expect(target).not.toBeNull();
