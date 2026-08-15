@@ -31,8 +31,10 @@ It is not hardened for exposure to the public internet:
   `/schema/<schema>/diagram` a schema's ER diagram,
   `/role/user/<role>/membership` a role's membership graph. An
   unauthenticated visitor is prompted to sign in first, then lands on the
-  requested view. Links are read on load only — the address bar does not yet
-  follow in-app navigation.
+  requested view. A deep link also brings the object's sidebar view forward
+  and selects the object in its tree, so the navigator (or the roles tree)
+  shows where the opened tab sits. Links are read on load only — the address
+  bar does not yet follow in-app navigation.
 - **Data grid** — sort and page through table data; insert, update, and delete
   rows (write actions are gated on the connected role's privileges). A
   per-column header filter row narrows what the server sends back, and a

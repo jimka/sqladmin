@@ -22,6 +22,8 @@ import { user }                                                                 
 import type { TreeNode }                                                                                                                                                                           from "@jimka/typescript-ui/component/tree";
 import type { ExplorerTree }                                                                                                                                                                       from "./navigator/NavigatorTree";
 import { showObjectMenu }                                                                                                                                                                          from "./navigator/objectMenu";
+import { matchesGrantedTable, matchesObject, matchesRelationName, matchesRole }                                                                                                                    from "./navigator/revealMatch";
+import type { NodeMatch }                                                                                                                                                                          from "./navigator/revealMatch";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                                                                                                                                     from "@jimka/typescript-ui/data";
 import type { AlterColumnAction, ColumnMeta, ConstraintKind, DbObjectRef, FunctionDefinition, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TypeDefinition } from "./contract";
 import { executeDdl, getColumns, getDatabaseGraph, getDependencies, getFunctionDefinition, getInheritance, getRoleDetail, getRoles, getSchemaGraph, getSchemas, getTablePrivileges, getTypeDefinition, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewAlterTypeAddValue, previewConstraint, previewCreateCompositeType, previewCreateEnumType, previewCreateFunction, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropFunction, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropType, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema, previewReplaceMatview, previewSequenceOwner, runExplain, runQuery, tableExportUrl } from "./data/api";
@@ -231,6 +233,9 @@ export class SqlAdminController {
     private readonly _database    : string | undefined;
     private readonly _openPanels  : Map<string, OpenPanel> = new Map();
     private _navigator            : ExplorerTree | null = null;
+    // The Roles rail's tree, registered the same way the navigator is, so a role
+    // opened from a route or a link can drive its selection too.
+    private _rolesTree            : ExplorerTree | null = null;
     // The diagram panels' shared right-click menu, mirroring how NavigatorTree
     // and RolesTree each own one reusable Menu(). Named diagramContextMenu (see
     // below), not showObjectMenu, so the method does not shadow the imported
@@ -247,10 +252,14 @@ export class SqlAdminController {
     private readonly _recentTables: RecentTable[] = [];
 
     // Shell-injected handles (mirroring how ActivityBar takes a SidebarSizer): one
-    // toggles the start-page deck, one selects the Queries activity-bar view, one
-    // focuses a section (Saved/Recent) of the Queries view.
+    // toggles the start-page deck, three select an activity-bar view (Queries,
+    // Database, Roles), one focuses a section (Saved/Recent) of the Queries view.
+    // The Database/Roles pair brings a revealed object's own tree forward, so a
+    // reveal never searches a tree whose deck page is hidden.
     private _startToggle        : ((visible: boolean) => void) | null = null;
     private _showQueriesView    : (() => void) | null = null;
+    private _showDatabaseView   : (() => void) | null = null;
+    private _showRolesView      : (() => void) | null = null;
     private _focusQueriesSection: ((section: QueriesSection) => void) | null = null;
 
     // Listeners rebuilt when the workspace data changes (a run recorded, a query
@@ -414,6 +423,14 @@ export class SqlAdminController {
      */
     setNavigator(tree: ExplorerTree): void {
         this._navigator = tree;
+    }
+
+    /**
+     * Register the roles tree so a role open can drive its selection, mirroring
+     * {@link setNavigator}.
+     */
+    setRolesTree(tree: ExplorerTree): void {
+        this._rolesTree = tree;
     }
 
     /**
@@ -2207,8 +2224,9 @@ export class SqlAdminController {
      * navigator. `Tree.revealByPredicate` expands the path to the node —
      * loading lazy branches (unexpanded schemas) as needed — so the target is
      * revealed even when the user never navigated to it. That reveal can take a
-     * moment (each unexpanded branch on the path is a fetch), so it runs
-     * concurrently with the tab's own open rather than gating it: the tab
+     * moment (it waits for the navigator's own load, and each unexpanded branch
+     * on the path is a fetch), so it runs concurrently with the tab's own open
+     * rather than gating it: the tab
      * appears at once, exactly like every other open path, with its content
      * loading lazily behind it (see openTable); the navigator selection lands
      * whenever the reveal resolves. Best-effort: if no node matches, the tab
@@ -2217,11 +2235,7 @@ export class SqlAdminController {
      * @param ref - The referenced table to open.
      */
     openReferencedTable(ref: DbObjectRef): void {
-        const revealed = (this._navigator?.revealByPredicate((data: unknown) => {
-            const r = data as DbObjectRef | undefined;
-
-            return !!r && r.database === ref.database && r.schema === ref.schema && r.name === ref.name;
-        }) ?? Promise.resolve(null)).then(n => n ?? undefined);
+        const revealed = this.revealNavigatorNode(matchesRelationName(ref));
 
         void this.openTable(ref, revealed);
         void revealed.then(node => { if (node) { this._navigator?.selectNode(node); } });
@@ -2275,22 +2289,91 @@ export class SqlAdminController {
      * lazy branches (unexpanded schemas) as needed — so the target is revealed
      * even when the user never navigated to it.
      *
-     * Unlike {@link openReferencedTable}'s inline predicate, this one also
-     * matches on `kind`: a sequence and a relation can share a schema+name
-     * (`products_id_seq` is unique, but nothing forbids a table of that name),
-     * and matching database/schema/name alone could reveal the wrong node.
+     * Matches on `kind` as well as database/schema/name (see
+     * {@link matchesObject}), unlike {@link openReferencedTable}'s kind-blind
+     * rule.
      *
      * @param ref - The object to reveal.
      *
      * @returns The revealed node, or undefined when no node matches.
      */
-    private async revealObject(ref: DbObjectRef): Promise<TreeNode | undefined> {
-        return (await this._navigator?.revealByPredicate((data: unknown) => {
-            const r = data as DbObjectRef | undefined;
+    private revealObject(ref: DbObjectRef): Promise<TreeNode | undefined> {
+        return this.revealNavigatorNode(matchesObject(ref));
+    }
 
-            return !!r && r.kind === ref.kind && r.database === ref.database
-                && r.schema === ref.schema && r.name === ref.name;
-        })) ?? undefined;
+    /**
+     * Bring the Database view forward and reveal the first navigator node
+     * `match` accepts, once the navigator has finished loading.
+     *
+     * The view switch comes first because revealing means searching a tree and
+     * scrolling to the result, which is pointless while that tree's deck page
+     * is hidden. The `whenLoaded` wait is what makes a reveal issued at boot —
+     * a deep link's, or an early double-click's — search a populated tree
+     * instead of silently finding nothing in one still filling.
+     *
+     * @param match - Tests each node's `data` payload; see revealMatch.ts.
+     *
+     * @returns The revealed node, or undefined when no node matches.
+     */
+    private async revealNavigatorNode(match: NodeMatch): Promise<TreeNode | undefined> {
+        this.showDatabaseView();
+        await this._navigator?.whenLoaded();
+
+        return (await this._navigator?.revealByPredicate(match)) ?? undefined;
+    }
+
+    /**
+     * Bring the Roles view forward and reveal `name`'s roles-tree node, once
+     * the role list has finished loading — the roles-side twin of
+     * {@link revealNavigatorNode}.
+     *
+     * @param name - The role to reveal.
+     *
+     * @returns The revealed node, or undefined when no node matches.
+     */
+    private async revealRoleNode(name: string): Promise<TreeNode | undefined> {
+        this.showRolesView();
+        await this._rolesTree?.whenLoaded();
+
+        return (await this._rolesTree?.revealByPredicate(matchesRole(name))) ?? undefined;
+    }
+
+    /**
+     * Bring the Database view forward and select `ref`'s navigator node.
+     *
+     * The caller-side reveal a route handler pairs with its own `open*` call,
+     * the same way {@link openReferencedTable} pairs one with `openTable` —
+     * the sidebar follows an *open*, not a focus, so `syncToPanel`'s
+     * focus-driven selection stays as it is. Best-effort and fire-and-forget:
+     * a ref naming no navigator node only switches the view.
+     *
+     * @param ref - The object just opened.
+     */
+    selectObject(ref: DbObjectRef): void {
+        // A database-wide ref names no navigator node (the tree is rooted at
+        // schemas — the app connects to one database per session), so switch the
+        // view and stop: revealByPredicate walks depth first, so a search would
+        // lazily fetch every schema's objects only to find nothing. Keyed on
+        // `schema` rather than `kind === "database"` so any future schema-less
+        // ref is covered by the same rule.
+        if (!ref.schema) {
+            this.showDatabaseView();
+
+            return;
+        }
+
+        void this.revealObject(ref).then(node => { if (node) { this._navigator?.selectNode(node); } });
+    }
+
+    /**
+     * Bring the Roles view forward and select `name`'s roles-tree node — the
+     * roles-side twin of {@link selectObject}. Best-effort and
+     * fire-and-forget: a name matching no leaf only switches the view.
+     *
+     * @param name - The role just opened.
+     */
+    selectRole(name: string): void {
+        void this.revealRoleNode(name).then(node => { if (node) { this._rolesTree?.selectNode(node); } });
     }
 
     /**
@@ -2648,6 +2731,37 @@ export class SqlAdminController {
     }
 
     /**
+     * Register the shell's Database-view selector, so a navigator reveal can
+     * bring the tree it searches forward.
+     *
+     * @param select - Makes the Database activity-bar view the active one.
+     */
+    setShowDatabaseView(select: () => void): void {
+        this._showDatabaseView = select;
+    }
+
+    /**
+     * Register the shell's Roles-view selector, so a roles-tree reveal can
+     * bring the tree it searches forward.
+     *
+     * @param select - Makes the Roles activity-bar view the active one.
+     */
+    setShowRolesView(select: () => void): void {
+        this._showRolesView = select;
+    }
+
+    // Bring the Database / Roles view forward. Absent only before the shell has
+    // wired them (and in the DOM-less path, which has no sidebar at all), so
+    // both are optional calls, exactly like _showQueriesView above.
+    private showDatabaseView(): void {
+        this._showDatabaseView?.();
+    }
+
+    private showRolesView(): void {
+        this._showRolesView?.();
+    }
+
+    /**
      * Register the Queries view's section focuser (owned by the view, not the
      * shell): focus and reveal the Saved or Recent list.
      *
@@ -2948,20 +3062,18 @@ export class SqlAdminController {
      * (best-effort). `RolePrivilege` carries no database (the roles endpoint is
      * not database-scoped), so — unlike openReferencedTable, which matches on
      * database + schema + name — this matches on schema + name only and adopts
-     * whichever database the first matching revealed navigator node carries. If
-     * no node matches (the table's database was never browsed, or the tree is
-     * not loaded), status-bars a "not found" message and opens nothing.
+     * whichever database the first matching revealed navigator node carries.
+     * The reveal waits for the navigator's own load first, so an early
+     * double-click in a grants graph no longer misses a tree that is still
+     * filling; if no node genuinely matches (the table's database was never
+     * browsed), status-bars a "not found" message and opens nothing.
      *
      * @param schema - The granted table's schema.
      * @param table - The granted table's name.
      */
     openGrantedTable(schema: string, table: string): void {
         void (async () => {
-            const node = (await this._navigator?.revealByPredicate((data: unknown) => {
-                const r = data as DbObjectRef | undefined;
-
-                return !!r && r.schema === schema && r.name === table;
-            })) ?? undefined;
+            const node = await this.revealNavigatorNode(matchesGrantedTable(schema, table));
 
             if (!node) {
                 this.statusBar.setMessage(`${this._statusScope} · ${schema}.${table}: not found in navigator`);

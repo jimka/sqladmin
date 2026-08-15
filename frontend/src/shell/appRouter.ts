@@ -7,6 +7,13 @@
 // query string — see the plan's "Object identity lives in path segments;
 // view-mode properties live in the query string" Architecture Decision.
 //
+// Every object-bearing route also reveals its object in the sidebar: one
+// `controller.selectObject(ref)` / `controller.selectRole(name)` statement per
+// handler, immediately before its `open*` call and after any view-segment
+// check, so an unknown view segment reveals nothing. That pairing is
+// caller-side by design — the reveal is not baked into the `open*` methods,
+// exactly as `openReferencedTable` pairs `openTable` with a reveal of its own.
+//
 // Every registered handler runs through `dispatch`, which catches a
 // synchronous throw or a rejected promise and routes both to
 // controller.notifyError — a route must never reject into SqlAdminApp's boot
@@ -79,11 +86,17 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
     router.register("/notes", () => dispatch(controller, () => controller.openDocumentation()));
 
-    router.register("/database/diagram", () => dispatch(controller, () => controller.openDatabaseDiagram({
-        connectionId: controller.connectionId,
-        database    : controller.database,
-        kind        : "database",
-    })));
+    router.register("/database/diagram", () => dispatch(controller, () => {
+        const ref: DbObjectRef = {
+            connectionId: controller.connectionId,
+            database    : controller.database,
+            kind        : "database",
+        };
+
+        controller.selectObject(ref);
+
+        return controller.openDatabaseDiagram(ref);
+    }));
 
     router.register("/schema/:schema/:view", (params, path) => dispatch(controller, () => {
         const view = schemaView(params.view);
@@ -95,6 +108,8 @@ export function buildAppRouter(controller: SqlAdminController): Router {
         }
 
         const ref: DbObjectRef = { connectionId: controller.connectionId, database: controller.database, schema: params.schema, kind: "schema" };
+
+        controller.selectObject(ref);
 
         switch (view) {
             case "diagram":      return controller.openSchemaDiagram(ref);
@@ -108,11 +123,16 @@ export function buildAppRouter(controller: SqlAdminController): Router {
     // under /schema/:schema/ so a relation's route mirrors the navigator's
     // own schema-then-object containment.
     for (const { segment, kind } of RELATION_KINDS) {
-        router.register(`/schema/:schema/${segment}/:name`, (params, _path, _fragment, query) => dispatch(controller, () =>
-            controller.openTable(relationRef(controller, kind, params.schema, params.name), undefined, {
+        router.register(`/schema/:schema/${segment}/:name`, (params, _path, _fragment, query) => dispatch(controller, () => {
+            const ref = relationRef(controller, kind, params.schema, params.name);
+
+            controller.selectObject(ref);
+
+            return controller.openTable(ref, undefined, {
                 rotated: routeFlag(query.rotated),
                 record:  query.record,
-            })));
+            });
+        }));
 
         router.register(`/schema/:schema/${segment}/:name/:view`, (params, path, _fragment, query) => dispatch(controller, () => {
             const view = relationView(kind, params.view);
@@ -125,6 +145,8 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
             const ref = relationRef(controller, kind, params.schema, params.name);
 
+            controller.selectObject(ref);
+
             switch (view) {
                 case "structure":    return controller.openStructure(ref);
                 case "definition":   return controller.openDefinition(ref);
@@ -135,34 +157,54 @@ export function buildAppRouter(controller: SqlAdminController): Router {
         }));
     }
 
-    router.register("/schema/:schema/sequence/:name", params => dispatch(controller, () => controller.openSequence({
-        connectionId: controller.connectionId,
-        database    : controller.database,
-        schema      : params.schema,
-        name        : params.name,
-        kind        : "sequence",
-    })));
+    router.register("/schema/:schema/sequence/:name", params => dispatch(controller, () => {
+        const ref: DbObjectRef = {
+            connectionId: controller.connectionId,
+            database    : controller.database,
+            schema      : params.schema,
+            name        : params.name,
+            kind        : "sequence",
+        };
 
-    router.register("/schema/:schema/index/:name", params => dispatch(controller, () => controller.openIndex({
-        connectionId: controller.connectionId,
-        database    : controller.database,
-        schema      : params.schema,
-        name        : params.name,
-        kind        : "index",
-    })));
+        controller.selectObject(ref);
+
+        return controller.openSequence(ref);
+    }));
+
+    router.register("/schema/:schema/index/:name", params => dispatch(controller, () => {
+        const ref: DbObjectRef = {
+            connectionId: controller.connectionId,
+            database    : controller.database,
+            schema      : params.schema,
+            name        : params.name,
+            kind        : "index",
+        };
+
+        controller.selectObject(ref);
+
+        return controller.openIndex(ref);
+    }));
 
     // A single registration: the overload-disambiguating signature is a query
     // parameter, not a second path pattern — see the plan's "Object identity
     // lives in path segments; view-mode properties live in the query string"
     // Architecture Decision.
-    router.register("/schema/:schema/function/:name", (params, _path, _fragment, query) => dispatch(controller, () => controller.openFunctionDefinition({
-        connectionId: controller.connectionId,
-        database    : controller.database,
-        schema      : params.schema,
-        name        : params.name,
-        kind        : "function",
-        signature   : query.signature ?? "",
-    })));
+    router.register("/schema/:schema/function/:name", (params, _path, _fragment, query) => dispatch(controller, () => {
+        const ref: DbObjectRef = {
+            connectionId: controller.connectionId,
+            database    : controller.database,
+            schema      : params.schema,
+            name        : params.name,
+            kind        : "function",
+            signature   : query.signature ?? "",
+        };
+
+        // The reveal matches on name and kind, not signature, so an overloaded
+        // routine selects its first leaf while the tab opens the exact overload.
+        controller.selectObject(ref);
+
+        return controller.openFunctionDefinition(ref);
+    }));
 
     // The three role buckets are registered once per ROLE_BUCKETS entry, the
     // same technique RELATION_KINDS uses — mirroring RolesTree's own
@@ -171,7 +213,10 @@ export function buildAppRouter(controller: SqlAdminController): Router {
     // the three opens the same role by name (see the plan's Architecture
     // Decisions).
     for (const bucket of ROLE_BUCKETS) {
-        router.register(`/role/${bucket}/:role`, params => dispatch(controller, () => { controller.showRole(params.role); }));
+        router.register(`/role/${bucket}/:role`, params => dispatch(controller, () => {
+            controller.selectRole(params.role);
+            controller.showRole(params.role);
+        }));
 
         router.register(`/role/${bucket}/:role/:view`, (params, path, _fragment, query) => dispatch(controller, () => {
             const view = roleView(params.view);
@@ -181,6 +226,8 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
                 return;
             }
+
+            controller.selectRole(params.role);
 
             switch (view) {
                 case "grants-diagram": return controller.openRoleGrantsDiagram(params.role);

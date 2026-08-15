@@ -26,6 +26,7 @@ import { circle_nodes }                         from "@jimka/typescript-ui/glyph
 import type { DbObjectKind, DbObjectRef }       from "../contract";
 import { getFunctions, getIndexes, getObjects, getSchemas, getTypes } from "../data/api";
 import { TreeExpansionPersistence }             from "../data/treeExpansion";
+import { LoadSignal }                           from "../data/loadSignal";
 import { KIND_GLYPH }                           from "./objectGlyphs";
 import { isRelationKind, objectCategories }     from "./objectKinds";
 import { showObjectMenu }                       from "./objectMenu";
@@ -101,6 +102,12 @@ function nodeGlyph(node: TreeNode): string {
 /** A `Tree` that also exposes a `refresh` action reloading its top level. */
 export interface ExplorerTree extends Tree {
     refresh(): void;
+    /**
+     * Resolves once the tree's top level has loaded; already resolved when no
+     * load is running. Await it before a reveal, which searches the tree's
+     * current nodes and would silently find nothing in a tree still filling.
+     */
+    whenLoaded(): Promise<void>;
 }
 
 /** Build the navigator Tree, wired to open tables and report load errors. */
@@ -112,6 +119,7 @@ class NavigatorTree extends Tree implements ExplorerTree {
     private readonly database:   string;
     private readonly contextMenu = Menu();
     private readonly _expansion: TreeExpansionPersistence;
+    private readonly _loaded: LoadSignal = new LoadSignal();
 
     constructor(controller: SqlAdminController) {
         super();
@@ -210,6 +218,8 @@ class NavigatorTree extends Tree implements ExplorerTree {
     // arrow-function field: refreshTool/bindRefreshShortcut hold this by
     // reference, which would lose `this` if it were a plain method.
     refresh = (): void => {
+        this._loaded.arm();
+
         void loadSchemas(this.conn, this.database)
             .then(async nodes => {
                 this.setNodes(nodes);
@@ -225,8 +235,21 @@ class NavigatorTree extends Tree implements ExplorerTree {
                     this.expandNode(nodes[0]);
                 }
             })
-            .catch(error => this.controller.notifyError(error));
+            .catch(error => this.controller.notifyError(error))
+            // After the whole chain — the expansion restore included — so a
+            // waiting reveal never races the restore into re-collapsing the path
+            // it just opened. Attached after the .catch so the signal settles on
+            // the failure path too, rather than depending on handler order.
+            .finally(() => this._loaded.settle());
     };
+
+    /**
+     * @returns A promise resolving once {@link refresh}'s load chain has
+     * finished; an already-resolved one when no load is running.
+     */
+    whenLoaded(): Promise<void> {
+        return this._loaded.whenSettled();
+    }
 }
 
 async function loadSchemas(conn: string, database: string): Promise<TreeNode[]> {

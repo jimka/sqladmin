@@ -17,8 +17,8 @@
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the bar `extends
 // Container` directly, so the instance itself is the mountable component (no
-// handle/`.component`). `toggleCollapsed`/`setSizer`/`selectView` are
-// arrow-function fields — the shell passes/holds them by reference (see
+// handle/`.component`). `toggleCollapsed`/`setSizer`/`selectView`/`revealView`
+// are arrow-function fields — the shell passes/holds them by reference (see
 // SqlAdminShell.ts), which would silently drop `this` if they were plain
 // methods.
 
@@ -223,6 +223,30 @@ class ActivityBar extends Container {
 
     /** Select and expand a view by its id (the menu's entry point to a view). */
     selectView = (id: string): void => {
+        this.showView(id);
+    };
+
+    /**
+     * Make `id` the active view **without** changing the sidebar's collapsed
+     * state — the entry point for a programmatic reveal (a deep link, an FK
+     * jump), where the user asked to see a tab, not the sidebar. `selectView`
+     * above stays the menu/accelerator entry point and keeps expanding.
+     *
+     * An arrow-function field: the shell passes this by reference.
+     */
+    revealView = (id: string): void => {
+        if (this.collapsed) {
+            // The rail buttons stay deselected while collapsed (collapse()
+            // deselects them all, and lighting one whose deck page is hidden
+            // would show an active view that is not visible), so recording the
+            // id and the deck page is all a later expand needs — toggleCollapsed
+            // re-runs showView on activeId on the way back out.
+            this.activeId = id;
+            this.card.setVisibleComponentId(id);
+
+            return;
+        }
+
         this.showView(id);
     };
 }

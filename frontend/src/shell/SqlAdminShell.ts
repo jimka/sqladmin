@@ -134,10 +134,17 @@ class SqlAdminShell extends Container {
         // array, so running them after super() is behaviour-neutral
         // (COMPONENT_CONVENTIONS.md (b) step 3). The menu's "Open Saved…"/"Query
         // History…" entry points route through the controller; give it the
-        // shell-owned selector for the Queries view. The New-Query menu shortcut
-        // is a display hint only (MenuItem.ts), so install the real Alt+N
-        // accelerator as a document keydown listener.
+        // shell-owned selector for the Queries view. The Database/Roles pair
+        // below lets a programmatic reveal — a deep link, an FK jump — bring its
+        // tree's view forward before searching it. They use `revealView`, not
+        // `selectView`: the user asked to see a tab, so a sidebar they had
+        // deliberately collapsed stays collapsed (it opens on the revealed view
+        // next time they expand it). The New-Query menu shortcut is a display
+        // hint only (MenuItem.ts), so install the real Alt+N accelerator as a
+        // document keydown listener.
         controller.setShowQueriesView(() => sidebar.selectView(QUERIES_VIEW_ID));
+        controller.setShowDatabaseView(() => sidebar.revealView(DATABASE_VIEW_ID));
+        controller.setShowRolesView(() => sidebar.revealView(ROLES_VIEW_ID));
         installAccelerators(controller, sidebar);
     }
 }
