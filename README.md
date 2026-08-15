@@ -26,10 +26,11 @@ It is not hardened for exposure to the public internet:
 - **Object navigator** — walk databases, schemas, tables, and views; open a
   table to browse its rows.
 - **Deep links** — a URL addresses a view, so a link can be shared or
-  bookmarked: `/table/<schema>/<table>` opens a table's data tab,
-  `/table/<schema>/<table>/structure` its Structure tab, `/schema/<schema>/diagram`
-  a schema's ER diagram, `/role/<role>/membership` a role's membership graph.
-  An unauthenticated visitor is prompted to sign in first, then lands on the
+  bookmarked: `/schema/<schema>/table/<table>` opens a table's data tab,
+  `/schema/<schema>/table/<table>/structure` its Structure tab,
+  `/schema/<schema>/diagram` a schema's ER diagram,
+  `/role/user/<role>/membership` a role's membership graph. An
+  unauthenticated visitor is prompted to sign in first, then lands on the
   requested view. Links are read on load only — the address bar does not yet
   follow in-app navigation.
 - **Data grid** — sort and page through table data; insert, update, and delete
