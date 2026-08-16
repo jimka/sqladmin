@@ -13,6 +13,13 @@ also bump its version in frontend/package.json's dependencies.
 Run `npm install --package-lock-only` in frontend/ to update
 frontend/package-lock.json.
 
+Also bump the pinned `image:` tag in docker-compose.yml's `app` service to
+`ghcr.io/jimka/sqladmin:X.Y.Z`. It's a plain string, not derived from
+anything else in the repo, so nothing else catches this if it's missed —
+`docker compose pull` silently keeps serving whatever version it last
+pointed at (this went unbumped from 0.1.0 all the way to 0.6.0 before
+being caught).
+
 ## Changelog
 
 Add a new `## [X.Y.Z] — YYYY-MM-DD` section to the top of CHANGELOG.md
