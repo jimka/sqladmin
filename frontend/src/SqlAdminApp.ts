@@ -4,16 +4,20 @@
 // link (e.g. /schema/sales/table/customers?record=42) opens its view on
 // load. The connection id comes from the authenticated session, not a
 // hardcoded default. Absent a deep link, the Dock starts empty; tables are
-// opened by selecting them in the navigator.
+// opened by selecting them in the navigator. Also wires the reverse
+// direction — controller.setSyncAddressBar — so the address bar follows
+// in-app navigation as tabs are opened and focused, writing through the
+// DOM sink directly rather than router.navigate (see the plan's Architecture
+// Decision on why navigate() would re-dispatch on every sync).
 
-import { Body }                 from "@jimka/typescript-ui/core";
-import { Fit }                  from "@jimka/typescript-ui/layout";
-import { SqlAdminController }   from "./SqlAdminController";
-import { SqlAdminShell }        from "./shell/SqlAdminShell";
-import { buildAppRouter }       from "./shell/appRouter";
-import { whoami, setCsrfToken } from "./data/api";
-import { showLoginDialog }      from "./shell/LoginDialog";
-import { APP_FAVICON }          from "./appIdentity";
+import { Body, DOM }             from "@jimka/typescript-ui/core";
+import { Fit }                   from "@jimka/typescript-ui/layout";
+import { SqlAdminController }    from "./SqlAdminController";
+import { SqlAdminShell }         from "./shell/SqlAdminShell";
+import { buildAppRouter }        from "./shell/appRouter";
+import { whoami, setCsrfToken }  from "./data/api";
+import { showLoginDialog }       from "./shell/LoginDialog";
+import { APP_FAVICON }           from "./appIdentity";
 
 // An async IIFE (not top-level await) so the boot gate works regardless of the
 // bundler's module target. A boot failure (e.g. whoami rejecting for a network
@@ -30,6 +34,13 @@ import { APP_FAVICON }          from "./appIdentity";
 
     const controller = new SqlAdminController(session.connectionId, session.username, session.database);
     const router     = buildAppRouter(controller);
+
+    // The reverse of router.start(): as the user switches tabs, replace the
+    // address bar with that tab's own URL. getHref does the formatting (base
+    // join, percent-encoding); replaceHistoryPath writes it directly, bypassing
+    // Router.navigate's automatic re-dispatch — see the plan's Architecture
+    // Decision on why navigate() would be unsafe here.
+    controller.setSyncAddressBar((path, query) => DOM.sink.replaceHistoryPath(router.getHref(path, query)));
 
     // Now that we are authenticated, mount the shell into the already-initialised
     // Body.

@@ -22,8 +22,10 @@ import { user }                                                                 
 import type { TreeNode }                                                                                                                                                                           from "@jimka/typescript-ui/component/tree";
 import type { ExplorerTree }                                                                                                                                                                       from "./navigator/NavigatorTree";
 import { showObjectMenu }                                                                                                                                                                          from "./navigator/objectMenu";
-import { matchesGrantedTable, matchesObject, matchesRelationName, matchesRole }                                                                                                                    from "./navigator/revealMatch";
+import { matchesGrantedTable, matchesObject, matchesRelationName, matchesRole, matchesRoleSection }                                                                                                from "./navigator/revealMatch";
 import type { NodeMatch }                                                                                                                                                                          from "./navigator/revealMatch";
+import { objectPath, rolePath, databaseDiagramPath, notesPath, resolveAddressBarRoute }                                                                                                            from "./shell/routeTargets";
+import type { PanelRoute }                                                                                                                                                                         from "./shell/routeTargets";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                                                                                                                                     from "@jimka/typescript-ui/data";
 import type { AlterColumnAction, ColumnMeta, ConstraintKind, DbObjectRef, FunctionDefinition, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary, TypeDefinition } from "./contract";
 import { executeDdl, getColumns, getDatabaseGraph, getDependencies, getFunctionDefinition, getInheritance, getRoleDetail, getRoles, getSchemaGraph, getSchemas, getTablePrivileges, getTypeDefinition, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewAlterTypeAddValue, previewConstraint, previewCreateCompositeType, previewCreateEnumType, previewCreateFunction, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropFunction, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropType, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema, previewReplaceMatview, previewSequenceOwner, runExplain, runQuery, tableExportUrl } from "./data/api";
@@ -232,6 +234,14 @@ export class SqlAdminController {
     private readonly _connectionId: string;
     private readonly _database    : string | undefined;
     private readonly _openPanels  : Map<string, OpenPanel> = new Map();
+    // Reopens each routed panel at its own URL — set from spec.route in
+    // openAsyncPanel (or openDocumentation's direct call), read by the dock's
+    // "focus" handler via resolveAddressBarRoute. See routeTargets.ts's PanelRoute.
+    private readonly _panelRoutes: Map<string, PanelRoute> = new Map();
+    // A query panel's latest recorded run, by panel id — resolveAddressBarRoute's
+    // fallback for a panel with no _panelRoutes entry (openTable's view/matview
+    // branch deliberately has none — see the plan's Architecture Decision).
+    private readonly _queryPanelRuns: Map<string, number> = new Map();
     private _navigator            : ExplorerTree | null = null;
     // The Roles rail's tree, registered the same way the navigator is, so a role
     // opened from a route or a link can drive its selection too.
@@ -260,6 +270,8 @@ export class SqlAdminController {
     private _showQueriesView    : (() => void) | null = null;
     private _showDatabaseView   : (() => void) | null = null;
     private _showRolesView      : (() => void) | null = null;
+    // The address-bar sync hook, wired from SqlAdminApp.ts — see setSyncAddressBar.
+    private _syncAddressBar     : ((path: string, query?: Record<string, string>) => void) | null = null;
     private _focusQueriesSection: ((section: QueriesSection) => void) | null = null;
 
     // Listeners rebuilt when the workspace data changes (a run recorded, a query
@@ -342,6 +354,8 @@ export class SqlAdminController {
             this.disposePanel(e.id);
             this._activeQueryResult.delete(e.id);
             this._activeRoleGrants.delete(e.id);
+            this._panelRoutes.delete(e.id);
+            this._queryPanelRuns.delete(e.id);
         });
 
         // A deferred panel whose fetch rejected: the Dock has already closed the tab,
@@ -374,6 +388,8 @@ export class SqlAdminController {
             } else {
                 this._activePanelId = null;
             }
+
+            this.syncAddressBarFor(e ? e.id : null);
         });
 
         // Show the connected database in the status bar's left zone.
@@ -475,12 +491,25 @@ export class SqlAdminController {
             return;
         }
 
+        // The address-bar route captured at open time — record/rotated flags
+        // only, never a diagram depth (openTable has none); see the plan's
+        // "per-panel route registry" Architecture Decision for why this is a
+        // one-shot snapshot rather than kept live as the tab's view changes.
+        const query: Record<string, string> = {};
+
+        if (view?.rotated) { query.rotated = "true"; }
+        if (view?.record)  { query.record  = view.record; }
+
+        const built = objectPath(ref);
+        const route: PanelRoute | undefined = built ? { path: built.path, query: Object.keys(query).length > 0 ? query : undefined } : undefined;
+
         this.openAsyncPanel({
             id,
             title  : ref.name ?? id,
             glyph  : KIND_GLYPH[ref.kind],
             tooltip: this.panelTooltip(ref),
             ref,
+            route,
         }, async () => {
             // The fetch now runs behind the library's spinner. A throw here closes
             // the tab and reaches the "exception" handler — so no local catch. The
@@ -538,12 +567,15 @@ export class SqlAdminController {
             return;
         }
 
+        const route = objectPath(ref, "definition") ?? undefined;
+
         this.openAsyncPanel({
             id,
             title  : `${ref.name ?? id} (definition)`,
             glyph  : "file-code",
             tooltip: this.panelTooltip(ref),
             ref,
+            route,
         }, async () => {
             // The fetch now runs behind the library's spinner. A throw here closes
             // the tab and reaches the "exception" handler — so no local catch.
@@ -687,12 +719,15 @@ export class SqlAdminController {
             return;
         }
 
+        const route = objectPath(ref) ?? undefined;
+
         this.openAsyncPanel({
             id,
             title  : ref.name ?? id,
             glyph  : "arrow-up-1-9",
             tooltip: this.panelTooltip(ref),
             ref,
+            route,
         }, async () => {
             const [[detailResult, rolesResult], resolvedNode] = await Promise.all([
                 Promise.allSettled([getSequenceDetail(ref), getRoles(ref.connectionId)]),
@@ -764,12 +799,15 @@ export class SqlAdminController {
             return;
         }
 
+        const route = objectPath(ref) ?? undefined;
+
         this.openAsyncPanel({
             id,
             title  : ref.name ?? id,
             glyph  : "magnifying-glass",
             tooltip: this.panelTooltip(ref),
             ref,
+            route,
         }, async () => {
             const [detail, resolvedNode] = await Promise.all([getIndexDetail(ref), Promise.resolve(node)]);
 
@@ -815,12 +853,15 @@ export class SqlAdminController {
             return;
         }
 
+        const route = objectPath(ref, "structure") ?? undefined;
+
         this.openAsyncPanel({
             id,
             title  : `${ref.name ?? id} (structure)`,
             glyph  : "table-columns",
             tooltip: this.panelTooltip(ref),
             ref,
+            route,
         }, async () => {
             // The fetch now runs behind the library's spinner. A throw here closes
             // the tab and reaches the "exception" handler — so no local catch. A
@@ -1412,6 +1453,7 @@ export class SqlAdminController {
         }
 
         const signature = ref.signature ?? "";
+        const route = objectPath(ref) ?? undefined;
 
         this.openAsyncPanel({
             id,
@@ -1422,6 +1464,7 @@ export class SqlAdminController {
             glyph  : "file-code",
             tooltip: this.panelTooltip(ref),
             ref,
+            route,
         }, async () => {
             // The fetch now runs behind the library's spinner. A throw here closes
             // the tab and reaches the "exception" handler — so no local catch.
@@ -1704,6 +1747,8 @@ export class SqlAdminController {
             markdown => this._notes.save(markdown),
         );
 
+        this._panelRoutes.set(id, notesPath());
+
         this.dock.addPanel({ id, title: "Notes", glyph: "file-lines", content: panel.content });
     }
 
@@ -1724,11 +1769,14 @@ export class SqlAdminController {
             return;
         }
 
+        const route = objectPath(ref, "diagram") ?? undefined;
+
         this.openAsyncPanel({
             id,
             title         : `${ref.schema} (diagram)`,
             glyph         : "diagram-project",
             ref,
+            route,
         }, async () => {
             const data = await this.buildSchemaGraphData(ref);
 
@@ -1817,11 +1865,14 @@ export class SqlAdminController {
             return;
         }
 
+        const route = databaseDiagramPath();
+
         this.openAsyncPanel({
             id,
             title         : `${ref.database} (diagram)`,
             glyph         : "circle-nodes",
             ref,
+            route,
         }, async () => {
             const schemas = await this.buildDatabaseGraphData(ref);
 
@@ -1901,12 +1952,16 @@ export class SqlAdminController {
             return;
         }
 
+        const built = objectPath(ref, "diagram");
+        const route: PanelRoute | undefined = built ? { path: built.path, query: depth ? { depth } : undefined } : undefined;
+
         this.openAsyncPanel({
             id,
             title         : `${ref.name} (relations)`,
             glyph         : "diagram-project",
             tooltip       : this.panelTooltip(ref),
             ref,
+            route,
         }, async () => {
             const full = await this.buildSchemaGraphData(ref, { withColumns: true });
 
@@ -2002,11 +2057,14 @@ export class SqlAdminController {
             return;
         }
 
+        const route = objectPath(ref, "dependencies") ?? undefined;
+
         this.openAsyncPanel({
             id,
             title         : `${ref.schema} (dependencies)`,
             glyph         : "share-nodes",
             ref,
+            route,
         }, async () => {
             const data = await this.fetchDependencyGraph(ref);
 
@@ -2057,12 +2115,16 @@ export class SqlAdminController {
             return;
         }
 
+        const built = objectPath(ref, "dependencies");
+        const route: PanelRoute | undefined = built ? { path: built.path, query: depth ? { depth } : undefined } : undefined;
+
         this.openAsyncPanel({
             id,
             title         : `${ref.name} (dependencies)`,
             glyph         : "share-nodes",
             tooltip       : this.panelTooltip(ref),
             ref,
+            route,
         }, async () => {
             const full = await this.fetchDependencyGraph(ref);
 
@@ -2118,11 +2180,14 @@ export class SqlAdminController {
             return;
         }
 
+        const route = objectPath(ref, "inheritance") ?? undefined;
+
         this.openAsyncPanel({
             id,
             title         : `${ref.schema} (inheritance)`,
             glyph         : "sitemap",
             ref,
+            route,
         }, async () => {
             const data = await this.fetchInheritanceGraph(ref);
 
@@ -2174,12 +2239,16 @@ export class SqlAdminController {
             return;
         }
 
+        const built = objectPath(ref, "inheritance");
+        const route: PanelRoute | undefined = built ? { path: built.path, query: depth ? { depth } : undefined } : undefined;
+
         this.openAsyncPanel({
             id,
             title         : `${ref.name} (inheritance)`,
             glyph         : "sitemap",
             tooltip       : this.panelTooltip(ref),
             ref,
+            route,
         }, async () => {
             const full = await this.fetchInheritanceGraph(ref);
 
@@ -2323,19 +2392,19 @@ export class SqlAdminController {
     }
 
     /**
-     * Bring the Roles view forward and reveal `name`'s roles-tree node, once
-     * the role list has finished loading — the roles-side twin of
-     * {@link revealNavigatorNode}.
+     * Bring the Roles view forward and reveal the first roles-tree node
+     * `match` accepts, once the role list has finished loading — the
+     * roles-side twin of {@link revealNavigatorNode}.
      *
-     * @param name - The role to reveal.
+     * @param match - Tests each node's `data` payload; see revealMatch.ts.
      *
      * @returns The revealed node, or undefined when no node matches.
      */
-    private async revealRoleNode(name: string): Promise<TreeNode | undefined> {
+    private async revealRoleNode(match: NodeMatch): Promise<TreeNode | undefined> {
         this.showRolesView();
         await this._rolesTree?.whenLoaded();
 
-        return (await this._rolesTree?.revealByPredicate(matchesRole(name))) ?? undefined;
+        return (await this._rolesTree?.revealByPredicate(match)) ?? undefined;
     }
 
     /**
@@ -2373,7 +2442,43 @@ export class SqlAdminController {
      * @param name - The role just opened.
      */
     selectRole(name: string): void {
-        void this.revealRoleNode(name).then(node => { if (node) { this._rolesTree?.selectNode(node); } });
+        void this.revealRoleNode(matchesRole(name)).then(node => { if (node) { this._rolesTree?.selectNode(node); } });
+    }
+
+    /**
+     * Switch the sidebar to the Database view and expand `schema`'s own
+     * navigator node (its category children become visible) — no tab opens.
+     * Best-effort, mirroring selectObject: a schema matching no navigator
+     * node only switches the view.
+     *
+     * @param schema - The schema to reveal.
+     */
+    revealSchema(schema: string): void {
+        const ref: DbObjectRef = { connectionId: this._connectionId, database: this._database ?? "", schema, kind: "schema" };
+
+        void this.revealNavigatorNode(matchesObject(ref)).then(node => {
+            if (node) {
+                this._navigator?.selectNode(node);
+                this._navigator?.expandNode(node);
+            }
+        });
+    }
+
+    /**
+     * Switch the sidebar to the Roles view and expand the named section's
+     * group node ("Users" / "Groups" / "Predefined") — its role leaves
+     * become visible — no tab opens. Best-effort, mirroring selectRole: a
+     * section matching no group node only switches the view.
+     *
+     * @param section - The RolesTree section label to reveal.
+     */
+    revealRoleSection(section: string): void {
+        void this.revealRoleNode(matchesRoleSection(section)).then(node => {
+            if (node) {
+                this._rolesTree?.selectNode(node);
+                this._rolesTree?.expandNode(node);
+            }
+        });
     }
 
     /**
@@ -2421,7 +2526,7 @@ export class SqlAdminController {
             // Record every run in history and feed the panel's Ctrl+↑/↓ recall.
             // The store dependency stays here — the panel is a pure view over
             // these injected callbacks (matching notify/onError).
-            onRun     : (entry: HistoryEntry) => this.recordRun(entry),
+            onRun     : (entry: HistoryEntry) => this.recordRun(id, entry),
             getHistory: () => this._history.list().map(e => e.sql),
             // The Save toolbar button hands back the trimmed SQL; the
             // controller owns the naming modal and the saved-query store.
@@ -2750,6 +2855,35 @@ export class SqlAdminController {
         this._showRolesView = select;
     }
 
+    /**
+     * Register the shell's address-bar sync callback, invoked with the
+     * currently focused tab's own URL (see resolveAddressBarRoute) whenever
+     * that URL might have changed, so the shell can write it in place
+     * without triggering the router's own navigation dispatch.
+     *
+     * @param sync - Writes `path`/`query` to the address bar, replacing the
+     *   current history entry.
+     */
+    setSyncAddressBar(sync: (path: string, query?: Record<string, string>) => void): void {
+        this._syncAddressBar = sync;
+    }
+
+    /**
+     * Resolve `id`'s address-bar route and write it, if a sync hook is
+     * registered. Called on every dock "focus" event, and — since an
+     * auto-run query panel's run finishes asynchronously behind an already-
+     * focused tab, with no further "focus" event to catch it — from
+     * recordRun whenever the completing run belongs to the panel that is
+     * still focused.
+     *
+     * @param id - The panel id to resolve, or null for an empty dock.
+     */
+    private syncAddressBarFor(id: string | null): void {
+        const route = resolveAddressBarRoute(id, this._panelRoutes, this._queryPanelRuns, this._history.list());
+
+        this._syncAddressBar?.(route.path, route.query);
+    }
+
     // Bring the Database / Roles view forward. Absent only before the shell has
     // wired them (and in the DOM-less path, which has no sidebar at all), so
     // both are optional calls, exactly like _showQueriesView above.
@@ -2796,9 +2930,26 @@ export class SqlAdminController {
         this.notifyWorkspaceChanged();
     }
 
-    /** Record a completed run in history and refresh the workspace surfaces. */
-    private recordRun(entry: HistoryEntry): void {
+    /**
+     * Record a completed run in history, remember it as this panel's latest
+     * run for the address-bar sync, and refresh the workspace surfaces. Also
+     * re-syncs the address bar when `id` is still the focused panel: an
+     * auto-run query tab's run finishes after the "focus" event that opened
+     * it already fired (and fired too early — before any run existed to
+     * resolve to), so without this the address bar would stay on "/" until
+     * the user switched tabs away and back.
+     *
+     * @param id - The query panel's id (resolveAddressBarRoute's fallback key).
+     * @param entry - The completed run.
+     */
+    private recordRun(id: string, entry: HistoryEntry): void {
         this._history.record(entry);
+        this._queryPanelRuns.set(id, entry.timestamp);
+
+        if (id === this._activePanelId) {
+            this.syncAddressBarFor(id);
+        }
+
         this.notifyWorkspaceChanged();
     }
 
@@ -2955,7 +3106,9 @@ export class SqlAdminController {
             return;
         }
 
-        this.openAsyncPanel({ id, title: `Grants: ${role}`, glyph: "key" }, async () => {
+        const route = rolePath(role);
+
+        this.openAsyncPanel({ id, title: `Grants: ${role}`, glyph: "key", route }, async () => {
             const detail = await getRoleDetail(this._connectionId, role);
 
             this.rolesProperties.show(detail);
@@ -2991,10 +3144,14 @@ export class SqlAdminController {
             return;
         }
 
+        const built = rolePath(name, "membership");
+        const route: PanelRoute = { path: built.path, query: depth ? { depth } : undefined };
+
         this.openAsyncPanel({
             id,
             title         : `${name} (membership)`,
             glyph         : "diagram-project",
+            route,
         }, async () => {
             // The fetch now runs behind the library's spinner. A throw here closes
             // the tab and reaches the "exception" handler — so no local catch.
@@ -3024,10 +3181,13 @@ export class SqlAdminController {
             return;
         }
 
+        const route = rolePath(name, "grants-diagram");
+
         this.openAsyncPanel({
             id,
             title         : `${name} (grants graph)`,
             glyph         : "diagram-project",
+            route,
         }, async () => {
             const detail = await this.fetchRoleDetail(name);
 
@@ -3272,9 +3432,13 @@ export class SqlAdminController {
      * @param spec - The tab's identity.
      */
     private openAsyncPanel(
-        spec: { id: string; title: string; glyph: string; tooltip?: string; ref?: DbObjectRef },
+        spec: { id: string; title: string; glyph: string; tooltip?: string; ref?: DbObjectRef; route?: PanelRoute },
         build: () => Promise<Component>,
     ): void {
+        if (spec.route) {
+            this._panelRoutes.set(spec.id, spec.route);
+        }
+
         this.dock.addLazyPanel({
             id     : spec.id,
             title  : spec.title,

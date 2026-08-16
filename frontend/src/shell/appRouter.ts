@@ -1,9 +1,12 @@
 // Builds the app's Router: one route per view this app can deep-link to,
 // each mapped onto the controller's existing `open*` methods (see
-// SqlAdminController.ts). Consume-only — nothing here ever calls
-// router.navigate or getHref; the URL is read once at boot (SqlAdminApp.ts's
-// router.start()) and never written. Object identity (schema/name/role) comes
-// from the path; view-mode properties (depth, rotated, record) come from the
+// SqlAdminController.ts). This file only ever reads the URL — it registers
+// handlers and never calls router.navigate or getHref itself; the *write*
+// direction (the address bar following in-app navigation) lives outside this
+// file entirely, in SqlAdminApp.ts's setSyncAddressBar wiring, which reads
+// back through the controller's own per-panel route registry rather than
+// this file's forward table. Object identity (schema/name/role) comes from
+// the path; view-mode properties (depth, rotated, record) come from the
 // query string — see the plan's "Object identity lives in path segments;
 // view-mode properties live in the query string" Architecture Decision.
 //
@@ -24,8 +27,9 @@
 import { Router } from "@jimka/typescript-ui/router";
 import type { SqlAdminController } from "../SqlAdminController";
 import type { DbObjectRef } from "../contract";
-import { RELATION_KINDS, ROLE_BUCKETS, relationView, schemaView, roleView, routeFlag } from "./routeTargets";
+import { RELATION_KINDS, ROLE_BUCKETS, ROLE_BUCKET_SECTIONS, relationView, schemaView, roleView, routeFlag } from "./routeTargets";
 import type { RelationKind } from "./routeTargets";
+import { findHistoryEntry } from "../data/queryStore";
 
 /**
  * Run a route handler's body, reporting anything it throws or rejects with.
@@ -86,6 +90,24 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
     router.register("/notes", () => dispatch(controller, () => controller.openDocumentation()));
 
+    // Replays a run behind an opaque local key into QueryHistoryStore — never
+    // arbitrary SQL — and auto-runs it, so a revisited link matches the state
+    // the tab was actually showing when the address bar synced to it. See the
+    // plan's "Query-history links replay the run behind an opaque local key"
+    // Architecture Decision for why this reopens the "seed and auto-run" shape
+    // router-deep-linking rejected for arbitrary SQL.
+    router.register("/query/history/:timestamp", (params, path) => dispatch(controller, () => {
+        const entry = findHistoryEntry(controller.historyList(), params.timestamp);
+
+        if (!entry) {
+            reportUnknownLink(controller, path);
+
+            return;
+        }
+
+        controller.openQuery(entry.sql, true);
+    }));
+
     router.register("/database/diagram", () => dispatch(controller, () => {
         const ref: DbObjectRef = {
             connectionId: controller.connectionId,
@@ -96,6 +118,14 @@ export function buildAppRouter(controller: SqlAdminController): Router {
         controller.selectObject(ref);
 
         return controller.openDatabaseDiagram(ref);
+    }));
+
+    // Reveals the schema container in the sidebar without opening a tab — see
+    // the plan's "The database rail becomes a bare schema route" Architecture
+    // Decision. Two segments, so matchPattern's exact-segment-count rule keeps
+    // it distinct from the three-segment /schema/:schema/:view below.
+    router.register("/schema/:schema", params => dispatch(controller, () => {
+        controller.revealSchema(params.schema);
     }));
 
     router.register("/schema/:schema/:view", (params, path) => dispatch(controller, () => {
@@ -213,6 +243,13 @@ export function buildAppRouter(controller: SqlAdminController): Router {
     // the three opens the same role by name (see the plan's Architecture
     // Decisions).
     for (const bucket of ROLE_BUCKETS) {
+        // Reveals the bucket's section in the sidebar without opening a tab —
+        // the role-bucket twin of the bare /schema/:schema route above. Two
+        // segments, distinct from the three-segment /role/:bucket/:role below.
+        router.register(`/role/${bucket}`, () => dispatch(controller, () => {
+            controller.revealRoleSection(ROLE_BUCKET_SECTIONS[bucket]);
+        }));
+
         router.register(`/role/${bucket}/:role`, params => dispatch(controller, () => {
             controller.selectRole(params.role);
             controller.showRole(params.role);
