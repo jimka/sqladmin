@@ -38,7 +38,7 @@ class DropRelationForm extends Panel {
     constructor(summary: string) {
         const cascadeBox = Checkbox({ label: "CASCADE (also drop dependent objects)", selected: false });
 
-        super({ layoutManager: new VBox({ stretching: true }), components: [new Text(summary), cascadeBox] });
+        super({ layoutManager: new VBox({ itemAlign: "stretch" }), components: [new Text(summary), cascadeBox] });
 
         this._cascadeBox = cascadeBox;
     }
@@ -109,7 +109,7 @@ class RefreshMatviewForm extends Panel {
         const withNoDataBox = Checkbox({ label: "WITH NO DATA (clear instead of repopulate)", selected: false });
 
         super({
-            layoutManager: new VBox({ stretching: true }),
+            layoutManager: new VBox({ itemAlign: "stretch" }),
             components:    [concurrentlyBox, withNoDataBox],
         });
 

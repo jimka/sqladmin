@@ -23,7 +23,7 @@ class ConfirmCascadeForm extends Panel {
         const cascadeBox = Checkbox({ label: "CASCADE (also drop dependent objects)", selected: false });
 
         super({
-            layoutManager: new VBox({ stretching: true, spacing: ROW_SPACING }),
+            layoutManager: new VBox({ itemAlign: "stretch", spacing: ROW_SPACING }),
             components:    [new Text(summary), cascadeBox],
         });
 

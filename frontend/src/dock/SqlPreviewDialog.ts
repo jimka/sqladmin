@@ -138,7 +138,7 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
     regenerateButton.on("action", () => void refreshPreview(editor, options));
 
     const content = Panel({
-        layoutManager: VBox({ stretching: true, spacing: CONTENT_SPACING }),
+        layoutManager: VBox({ itemAlign: "stretch", spacing: CONTENT_SPACING }),
         components:    [options.form, regenerateButton, editor],
     });
 

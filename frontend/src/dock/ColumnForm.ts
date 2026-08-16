@@ -24,7 +24,7 @@ class ColumnForm extends Panel {
         const defaultField = new TextField({ placeholder: "default (optional)" });
 
         super({
-            layoutManager: new VBox({ stretching: true, spacing: ROW_SPACING }),
+            layoutManager: new VBox({ itemAlign: "stretch", spacing: ROW_SPACING }),
             components:    [nameField, typeField, nullableBox, defaultField],
         });
 

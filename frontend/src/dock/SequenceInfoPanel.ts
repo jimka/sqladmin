@@ -195,10 +195,10 @@ class SequenceInfoPanel extends Container {
             ],
         });
 
-        // LabeledFieldSet's Grid gives its input track a weighted (stretching)
-        // column, so dropping the form straight into the tab's CENTER region
-        // stretches it to the tab's full width — unwieldy on an ultra-wide,
-        // maximized window. A plain (non-stretching) VBox wrapper instead
+        // LabeledFieldSet's Grid gives its input track a weighted (itemAlign:
+        // "stretch") column, so dropping the form straight into the tab's CENTER
+        // region stretches it to the tab's full width — unwieldy on an ultra-wide,
+        // maximized window. A plain (non-stretch itemAlign) VBox wrapper instead
         // sizes the form to its own preferred width and top/left-anchors it;
         // `autoScroll: "auto"` keeps the tab scrollable, rather than clipped,
         // when the tab is narrower than the form's content minimum.
@@ -404,7 +404,7 @@ function summaryPanel(specs: SequenceEditSpecs, detail: SequenceDetail): Panel {
     }
 
     return Panel({
-        layoutManager: new VBox({ stretching: true }),
+        layoutManager: new VBox({ itemAlign: "stretch" }),
         components:    lines.map(line => new Text(line)),
     });
 }

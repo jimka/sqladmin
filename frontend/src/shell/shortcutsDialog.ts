@@ -31,7 +31,7 @@ export function openShortcutsDialog(): void {
     // viewport is later enlarged. autoScroll keeps the eased wheel scroll for the
     // capped case, matching the smooth scroll everywhere else.
     const content = Panel({
-        layoutManager: new VBox({ stretching: true }),
+        layoutManager: new VBox({ itemAlign: "stretch" }),
         insets       : new Insets(CONTENT_PAD, CONTENT_PAD, CONTENT_PAD, CONTENT_PAD),
         autoScroll   : "y",
     });

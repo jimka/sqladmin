@@ -66,7 +66,7 @@ class CreateSequenceForm extends Panel {
         const cycleBox = Checkbox({ label: "CYCLE", selected: false });
 
         super({
-            layoutManager: new VBox({ stretching: true }),
+            layoutManager: new VBox({ itemAlign: "stretch" }),
             components:    [nameField, incrementField, startField, minField, maxField, cacheField, cycleBox],
         });
 

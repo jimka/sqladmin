@@ -109,7 +109,7 @@ class LoginDialog {
         }
 
         return new Panel({
-            layoutManager: VBox({ stretching: true }),
+            layoutManager: VBox({ itemAlign: "stretch" }),
             components: [
                 new LabeledFieldSet("Saved connections", { rows: presetRows }),
                 this.form,

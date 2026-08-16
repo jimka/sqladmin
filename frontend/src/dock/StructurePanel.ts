@@ -178,7 +178,7 @@ class StructurePanel extends Panel {
         // intrinsic-size change up to the scroll host (typescript-ui
         // Component.notifyIntrinsicSizeChanged), so no onSectionToggle relay is
         // needed here.
-        super({ layoutManager: new VBox({ stretching: true }), autoScroll: "auto" });
+        super({ layoutManager: new VBox({ itemAlign: "stretch" }), autoScroll: "auto" });
 
         this._columns = columns;
 

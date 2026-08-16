@@ -20,7 +20,7 @@ class RenameTableForm extends Panel {
     constructor(schema: string, name: string) {
         const newNameField = new TextField({ placeholder: "new table name", text: name });
 
-        super({ layoutManager: new VBox({ stretching: true }), components: [newNameField] });
+        super({ layoutManager: new VBox({ itemAlign: "stretch" }), components: [newNameField] });
 
         this._schema       = schema;
         this._name         = name;

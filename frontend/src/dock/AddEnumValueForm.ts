@@ -55,7 +55,7 @@ class AddEnumValueForm extends Panel {
         });
 
         super({
-            layoutManager: new VBox({ stretching: true, spacing: ROW_SPACING }),
+            layoutManager: new VBox({ itemAlign: "stretch", spacing: ROW_SPACING }),
             components:    [existingLine, valueField, placementCombo, existingCombo],
         });
 

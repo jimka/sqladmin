@@ -52,7 +52,7 @@ export function openChangelogDialog(): void {
     const content = Panel({
         // Stretch the content to the dialog's content width so the Markdown has
         // a concrete width to wrap and self-measure within.
-        layoutManager: new VBox({ stretching: true }),
+        layoutManager: new VBox({ itemAlign: "stretch" }),
         insets       : new Insets(CONTENT_PAD, CONTENT_PAD, CONTENT_PAD, CONTENT_PAD),
     });
 

@@ -39,7 +39,7 @@ class CreateSchemaForm extends Panel {
         const nameField = new TextField({ placeholder: "schema name" });
         const authField = new TextField({ placeholder: "authorization (optional owner role)" });
 
-        super({ layoutManager: new VBox({ stretching: true }), components: [nameField, authField] });
+        super({ layoutManager: new VBox({ itemAlign: "stretch" }), components: [nameField, authField] });
 
         this._nameField = nameField;
         this._authField = authField;
@@ -131,7 +131,7 @@ class RenameSchemaForm extends Panel {
     constructor(name: string) {
         const newNameField = new TextField({ placeholder: "new schema name", text: name });
 
-        super({ layoutManager: new VBox({ stretching: true }), components: [newNameField] });
+        super({ layoutManager: new VBox({ itemAlign: "stretch" }), components: [newNameField] });
 
         this._newNameField = newNameField;
     }

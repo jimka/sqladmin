@@ -31,7 +31,7 @@ const ROW_SPACING   = 4;
  * @returns The legend component (pure Text/Grid; no disposal needed).
  */
 export function buildShortcutLegend(): Component {
-    const legend = Panel({ layoutManager: new VBox({ stretching: true, spacing: GROUP_SPACING }) });
+    const legend = Panel({ layoutManager: new VBox({ itemAlign: "stretch", spacing: GROUP_SPACING }) });
 
     for (const group of groupByCategory()) {
         legend.addComponent(buildGroup(group));
@@ -48,7 +48,7 @@ export function buildShortcutLegend(): Component {
  * @returns The group's stacked component.
  */
 function buildGroup(group: ShortcutGroup): Component {
-    const block = Panel({ layoutManager: new VBox({ stretching: true, spacing: ROW_SPACING }) });
+    const block = Panel({ layoutManager: new VBox({ itemAlign: "stretch", spacing: ROW_SPACING }) });
 
     block.addComponent(heading(group.title));
     block.addComponent(buildGrid(group));

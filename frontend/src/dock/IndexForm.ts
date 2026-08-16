@@ -39,7 +39,7 @@ class IndexForm extends Panel {
         const methodCombo = new ComboBox({ items: METHOD_CHOICES, value: METHOD_UNSET });
 
         super({
-            layoutManager: new VBox({ stretching: true, spacing: ROW_SPACING }),
+            layoutManager: new VBox({ itemAlign: "stretch", spacing: ROW_SPACING }),
             components:    [nameField, checklist, uniqueBox, methodCombo],
         });
 

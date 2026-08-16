@@ -91,7 +91,7 @@ class ConstraintForm extends Panel {
         const nameField = new TextField({ placeholder: "constraint name (optional)" });
 
         super({
-            layoutManager: new VBox({ stretching: true, spacing: ROW_SPACING }),
+            layoutManager: new VBox({ itemAlign: "stretch", spacing: ROW_SPACING }),
             components:    [...fields.components, nameField],
         });
 

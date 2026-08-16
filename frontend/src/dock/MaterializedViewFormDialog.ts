@@ -58,7 +58,7 @@ class MatviewForm extends Panel {
         const nameField = new TextField({ placeholder: "materialized view name" });
         const withDataBox = Checkbox({ label: "Populate immediately (WITH DATA)", selected: true });
 
-        super({ layoutManager: new VBox({ stretching: true }), components: [schemaCombo, nameField, withDataBox] });
+        super({ layoutManager: new VBox({ itemAlign: "stretch" }), components: [schemaCombo, nameField, withDataBox] });
 
         this._schemaCombo = schemaCombo;
         this._nameField = nameField;

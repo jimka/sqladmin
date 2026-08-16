@@ -31,7 +31,7 @@ class LoginForm extends Form {
         const password = new PasswordField();
 
         super({
-            layoutManager: VBox({ stretching: true }),
+            layoutManager: VBox({ itemAlign: "stretch" }),
             components: [
                 new LabeledFieldSet("Connection", {
                     rows: [

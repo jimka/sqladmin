@@ -68,7 +68,7 @@ const BUTTON_HEIGHT = 30;
 // to this one value, clamping the column's own content-driven preferred
 // width up or down to exactly 350px regardless of what its content would
 // otherwise ask for — height is deliberately left alone (unlike a Border
-// layout's WEST region, this HBox isn't stretching, so an explicit
+// layout's WEST region, this HBox's itemAlign isn't `"stretch"`, so an explicit
 // `preferredSize.height` here would be taken literally and collapse the
 // column instead of being ignored). Neither column ever grows or shrinks —
 // only the trailing flex Spacer in buildColumns responds to available width.
@@ -108,7 +108,7 @@ class StartPage extends Panel {
             // eased wheel-scroll listener registers under this id — see the
             // `id` param doc.
             id,
-            layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
+            layoutManager: new VBox({ itemAlign: "stretch", spacing: ENTRY_SPACING }),
             // The page is the bounded scroll host (the CENTER card sizes it to
             // the viewport): autoScroll — not `overflow`, which only clips —
             // mounts a scrollbar so a short viewport scrolls the whole home
@@ -168,8 +168,8 @@ class StartPage extends Panel {
  * bounded max width here would leak into the shell's navigator rail the
  * moment its gutter is touched, not just on a passive resize.
  *
- * The explicit anchor on the content columns matters because this HBox isn't
- * `stretching`, so absent one, `BoxLayout` falls back to baseline alignment:
+ * The explicit anchor on the content columns matters because this HBox's
+ * `itemAlign` isn't `"stretch"`, so absent one, `BoxLayout` falls back to baseline alignment:
  * it centres a null-baseline child within the row's text-line band instead of
  * placing it at the top. The right column reports a real baseline (its first
  * child, the shortcut legend, is Text-bearing) while the left column's first
@@ -206,7 +206,7 @@ function buildColumns(controller: SqlAdminController): Component {
  */
 function buildLeftColumn(controller: SqlAdminController): Panel {
     const column = Panel({
-        layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
+        layoutManager: new VBox({ itemAlign: "stretch", spacing: ENTRY_SPACING }),
         minSize      : { width: COLUMN_WIDTH, height: 0 },
         maxSize      : { width: COLUMN_WIDTH, height: UNBOUNDED },
     });
@@ -229,7 +229,7 @@ function buildLeftColumn(controller: SqlAdminController): Panel {
  * @returns The quick actions panel.
  */
 function buildQuickActions(controller: SqlAdminController): Panel {
-    const panel = Panel({ layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }) });
+    const panel = Panel({ layoutManager: new VBox({ itemAlign: "stretch", spacing: ENTRY_SPACING }) });
 
     panel.addComponent(actionButton("New Query", () => controller.openQuery(), "plus"));
 
@@ -248,7 +248,7 @@ function buildQuickActions(controller: SqlAdminController): Panel {
  */
 function buildRightColumn(): Panel {
     const column = Panel({
-        layoutManager: new VBox({ stretching: true, spacing: ENTRY_SPACING }),
+        layoutManager: new VBox({ itemAlign: "stretch", spacing: ENTRY_SPACING }),
         minSize      : { width: COLUMN_WIDTH, height: 0 },
         maxSize      : { width: COLUMN_WIDTH, height: UNBOUNDED },
     });

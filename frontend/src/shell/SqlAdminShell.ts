@@ -112,12 +112,12 @@ class SqlAdminShell extends Container {
         // The brand strip rides directly above the menu bar as its own row: the
         // two stack in a VBox that occupies the shell's NORTH band together, so
         // the strip sizes to its own content instead of stretching the menu
-        // bar's baseline-aligned button row. `stretching: true` fills each row to
+        // bar's baseline-aligned button row. `itemAlign: "stretch"` fills each row to
         // the full shell width — the menu bar needs it so its trailing
         // `Spacer.flex()` can push Shortcuts/About to the right edge, as it did
         // when the bar sat directly in the BorderLayout's stretched NORTH slot.
         const topChrome = new Container({
-            layoutManager: new VBox({ spacing: 0, stretching: true }),
+            layoutManager: new VBox({ spacing: 0, itemAlign: "stretch" }),
             components   : [AppHeader(), menuBar],
         });
 

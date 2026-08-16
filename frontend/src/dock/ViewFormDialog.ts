@@ -59,7 +59,7 @@ class ViewForm extends Panel {
         const nameField = new TextField({ placeholder: "view name" });
         const columnsField = new TextField({ placeholder: "column aliases (comma-separated, optional)" });
 
-        super({ layoutManager: new VBox({ stretching: true }), components: [schemaCombo, nameField, columnsField] });
+        super({ layoutManager: new VBox({ itemAlign: "stretch" }), components: [schemaCombo, nameField, columnsField] });
 
         this._schemaCombo = schemaCombo;
         this._nameField = nameField;

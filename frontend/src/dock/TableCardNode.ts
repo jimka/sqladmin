@@ -124,7 +124,7 @@ class TableCardNode extends Panel {
         badge?.setPointerEvents("none");
 
         const header = new Component({
-            layoutManager: new HBox({ spacing: 6, stretching: true }),
+            layoutManager: new HBox({ spacing: 6, itemAlign: "stretch" }),
             preferredSize: { width: CARD_WIDTH, height: CARD_HEADER_HEIGHT },
             components   : badge ? [{ component: name, constraints: { weight: 1 } }, badge] : [name],
         });
@@ -229,7 +229,7 @@ function columnRow(column: ColumnRowData, tableBlock: string, onSelectColumn?: (
     // lines up across rows and each cell ellipsises its own overflow instead of
     // the whole row shrinking the name toward its min width.
     const row = new Component({
-        layoutManager: new HBox({ spacing: 6, stretching: true }),
+        layoutManager: new HBox({ spacing: 6, itemAlign: "stretch" }),
         preferredSize: { width: CARD_WIDTH, height: CARD_ROW_HEIGHT },
         components   : [
             { component: name, constraints: { weight: NAME_WEIGHT } },

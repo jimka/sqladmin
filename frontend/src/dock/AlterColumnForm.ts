@@ -79,7 +79,7 @@ class AlterColumnForm extends Panel {
     constructor(schema: string, table: string, column: ColumnMeta, action: AlterColumnAction) {
         const fields = buildActionFields(action, column);
 
-        super({ layoutManager: new VBox({ stretching: true, spacing: ROW_SPACING }), components: fields.components });
+        super({ layoutManager: new VBox({ itemAlign: "stretch", spacing: ROW_SPACING }), components: fields.components });
 
         this._schema = schema;
         this._table  = table;

@@ -629,7 +629,7 @@ export class QueryPanel {
 
                 errorBannerText = new Text("", { whiteSpace: "normal", truncate: false });
 
-                errorBanner = Container({ layoutManager: new HBox({ spacing: 8, stretching: true }) });
+                errorBanner = Container({ layoutManager: new HBox({ spacing: 8, itemAlign: "stretch" }) });
                 errorBanner.addComponent(icon);
                 errorBanner.addComponent(errorBannerText, { weight: 1 });
                 errorBanner.addComponent(dismiss);

@@ -78,7 +78,7 @@ class CreateTableForm extends Panel {
         });
 
         super({
-            layoutManager: new VBox({ stretching: true, spacing: ROW_SPACING }),
+            layoutManager: new VBox({ itemAlign: "stretch", spacing: ROW_SPACING }),
             components:    [nameField, addButton, gridPanel],
         });
 
