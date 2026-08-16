@@ -10,6 +10,12 @@ ANALYZE path runs inside an explicitly rolled-back transaction — the plan is
 captured, then a sentinel exception forces asyncpg to roll the transaction back,
 discarding any DML/DDL side-effect even if the frontend read-only guard is
 bypassed. Plain EXPLAIN only plans and never executes, so it needs no rollback.
+
+The ``verbose`` flag adds ``VERBOSE`` to the option list, which makes Postgres
+report each scanned relation's schema and alias-qualify every predicate column —
+the frontend heuristic index advisor (``suggestIndexes.ts``) needs both to
+attribute a plan's filters/sorts/joins back to a specific relation. It is opt-in
+so the plain JSON plan export keeps producing exactly the payload it does today.
 """
 
 from __future__ import annotations
@@ -35,12 +41,40 @@ class _ExplainDone(Exception):
     """
 
 
+def _explain_options(analyze: bool, verbose: bool, fmt: str) -> str:
+    """
+    Assemble the EXPLAIN option list, e.g. "ANALYZE, VERBOSE, FORMAT JSON".
+
+    Args:
+        analyze: whether to include ANALYZE.
+        verbose: whether to include VERBOSE.
+        fmt: the EXPLAIN output format, ``"text"`` or ``"json"``.
+
+    Returns:
+        The comma-separated option list, in ``ANALYZE, VERBOSE, FORMAT …`` order,
+        omitting any flag that is off.
+    """
+    flags = []
+
+    if analyze:
+        flags.append("ANALYZE")
+
+    if verbose:
+        flags.append("VERBOSE")
+
+    flags.append(f"FORMAT {fmt.upper()}")
+
+    return ", ".join(flags)
+
+
 class ExplainQueryCommand(Command):
     """
     Run EXPLAIN / EXPLAIN ANALYZE for one statement and return its plan.
     """
 
-    def __init__(self, conn: asyncpg.Connection, sql: str, analyze: bool, fmt: str) -> None:
+    def __init__(
+        self, conn: asyncpg.Connection, sql: str, analyze: bool, fmt: str, verbose: bool = False
+    ) -> None:
         """
         Capture the statement and options, rejecting invalid input before any I/O.
 
@@ -50,6 +84,9 @@ class ExplainQueryCommand(Command):
             analyze: whether to EXPLAIN ANALYZE (executes the statement, then
                 rolls back) rather than plain EXPLAIN (plans only).
             fmt: the EXPLAIN output format, ``"text"`` or ``"json"``.
+            verbose: whether to add VERBOSE, which reports each scanned
+                relation's schema and alias-qualifies every predicate column.
+                Defaults to False.
 
         Raises:
             ValidationError: if the SQL is empty/whitespace-only, or the format
@@ -65,6 +102,7 @@ class ExplainQueryCommand(Command):
         self._sql: str = sql
         self._analyze: bool = analyze
         self._fmt: str = fmt
+        self._verbose: bool = verbose
         self._plan: Sequence[Any] | None = None
 
     async def apply(self) -> None:
@@ -76,7 +114,7 @@ class ExplainQueryCommand(Command):
         the plan survives on ``self._plan`` but any write is discarded. Plain
         EXPLAIN only plans, so it runs directly with no rollback dance.
         """
-        options = ("ANALYZE, " if self._analyze else "") + f"FORMAT {self._fmt.upper()}"
+        options = _explain_options(self._analyze, self._verbose, self._fmt)
         stmt    = f"EXPLAIN ({options}) {self._sql}"
 
         if self._analyze:

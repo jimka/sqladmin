@@ -12,6 +12,9 @@ import type { ExplainFormat, QueryExplainResult, QueryRowsResult } from "../cont
 export interface ExplainOptions {
     analyze: boolean;
     format: ExplainFormat;
+    /** Ask for `EXPLAIN (VERBOSE …)`, which adds each scan's "Schema" and
+     *  alias-qualifies every predicate column. Defaults to false. */
+    verbose?: boolean;
 }
 
 /** Runs EXPLAIN / EXPLAIN ANALYZE for one statement and resolves its plan. */

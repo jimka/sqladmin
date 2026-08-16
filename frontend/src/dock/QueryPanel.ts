@@ -87,7 +87,10 @@ import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
 import { parseExplainPlan, parseExplainSummary } from "../data/parseExplainPlan";
 import type { ExplainPlanNode, ExplainSummary }  from "../data/parseExplainPlan";
+import { resolveIndexSuggestions }       from "../data/suggestIndexes";
+import type { LoadTableStructure }       from "../data/suggestIndexes";
 import { ExplainDiagramPanel }           from "./ExplainDiagramPanel";
+import type { ExplainAdvisorInput }      from "./ExplainDiagramPanel";
 import { buildQueryExportItems }         from "./menuItems";
 import type { ActiveExport, RunExplain } from "../data/explain";
 import type { HistoryEntry }             from "../data/queryStore";
@@ -124,6 +127,12 @@ export type Notify = (message: string) => void;
 
 /** Runs one SQL statement and resolves its result. */
 export type RunQuery = (sql: string) => Promise<QueryResult>;
+
+/** What the panel needs to compute index suggestions and act on one. */
+export interface IndexAdvisorHooks {
+    loadTableStructure: LoadTableStructure;
+    onCreateIndex: (schema: string, relation: string, columns: string[]) => void;
+}
 
 /** Construction inputs for {@link QueryPanel}. */
 export interface QueryPanelOptions {
@@ -168,6 +177,9 @@ export interface QueryPanelOptions {
     splitLayout: SplitLayoutBinding;
     /** The saved Explain-diagram info-column Accordion open state and section sizes plus its save hooks (`controller.layout.bindAccordion("explainDiagram")`). */
     explainDiagramLayout: AccordionLayoutBinding;
+    /** Enables the index advisor. Omitted when the controller has no database name,
+     *  in which case no suggestions are computed and no strip is shown. */
+    indexAdvisor?: IndexAdvisorHooks;
 }
 
 /**
@@ -219,7 +231,7 @@ export class QueryPanel {
     readonly content: QueryPanelContent;
 
     constructor(options: QueryPanelOptions) {
-        const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult, splitLayout, explainDiagramLayout } = options;
+        const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult, splitLayout, explainDiagramLayout, indexAdvisor } = options;
 
         const editor = new CodeEditor(initialSql, { language: "sql" });
 
@@ -664,12 +676,14 @@ export class QueryPanel {
         }
 
         /**
-         * Re-request the shown Explain plan as a FORMAT JSON plan tree, parse it, and
-         * open (or refresh) the Diagram tab in the result pane. Uses the shown plan's
-         * statement and analyze flag, so it needs no read-only re-check (the text
-         * Explain already ran). Shares the runSeq guard / busy-button behaviour with
-         * the other actions. A no-op when no plan is shown (the button is disabled
-         * then, so defensive); a malformed/empty plan notifies and opens nothing.
+         * Re-request the shown Explain plan as a FORMAT JSON plan tree (with
+         * VERBOSE, so the heuristic index advisor can attribute predicates to a
+         * schema-qualified relation), parse it, and open (or refresh) the Diagram
+         * tab in the result pane. Uses the shown plan's statement and analyze
+         * flag, so it needs no read-only re-check (the text Explain already ran).
+         * Shares the runSeq guard / busy-button behaviour with the other
+         * actions. A no-op when no plan is shown (the button is disabled then,
+         * so defensive); a malformed/empty plan notifies and opens nothing.
          */
         async function showDiagram(): Promise<void> {
             if (!explainSlot) {
@@ -685,7 +699,7 @@ export class QueryPanel {
             notify("Building the plan diagram…");
 
             try {
-                const json = await runExplain(sql, { analyze, format: "json" });
+                const json = await runExplain(sql, { analyze, format: "json", verbose: true });
 
                 if (seq !== runSeq) {
                     return;
@@ -699,8 +713,36 @@ export class QueryPanel {
                     return;
                 }
 
-                showDiagramTab(roots, parseExplainSummary(json.planJson));
-                notify(`plan diagram (${roots.length} plan root(s))`);
+                // Compute the advisor's suggestions (a further await, on top of the
+                // /structure fetches inside resolveIndexSuggestions) only when the
+                // controller wired it in (it needs a database name — see
+                // IndexAdvisorHooks's doc comment). Re-check runSeq after this
+                // second await too, so a newer run started meanwhile still wins.
+                let advisor: ExplainAdvisorInput | undefined;
+
+                if (indexAdvisor) {
+                    const suggestions = await resolveIndexSuggestions(roots, indexAdvisor.loadTableStructure);
+
+                    if (seq !== runSeq) {
+                        return;
+                    }
+
+                    advisor = {
+                        suggestions,
+                        onCreateIndex: suggestion =>
+                            indexAdvisor.onCreateIndex(suggestion.schema, suggestion.relation, suggestion.columns),
+                    };
+                }
+
+                showDiagramTab(roots, parseExplainSummary(json.planJson), advisor);
+
+                const advisorSuffix = advisor === undefined
+                    ? ""
+                    : advisor.suggestions.length > 0
+                        ? `, ${advisor.suggestions.length} index suggestion(s)`
+                        : ", no index suggestions";
+
+                notify(`plan diagram (${roots.length} plan root(s))${advisorSuffix}`);
             } catch (error) {
                 if (seq === runSeq) {
                     onError(error);
@@ -719,9 +761,10 @@ export class QueryPanel {
          *
          * @param roots - The parsed plan roots to diagram.
          * @param summary - The plan's top-level planning/execution times.
+         * @param advisor - The index advisor's suggestions + Create hook, if enabled.
          */
-        function showDiagramTab(roots: ExplainPlanNode[], summary: ExplainSummary): void {
-            const nextDiagram = new ExplainDiagramPanel(roots, summary, explainDiagramLayout);
+        function showDiagramTab(roots: ExplainPlanNode[], summary: ExplainSummary, advisor?: ExplainAdvisorInput): void {
+            const nextDiagram = new ExplainDiagramPanel(roots, summary, explainDiagramLayout, advisor);
 
             ensureResultPaneShown();
 

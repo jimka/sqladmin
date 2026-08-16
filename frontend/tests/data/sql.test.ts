@@ -1,6 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { buildSelectSql } from "../../src/data/sql";
+import { buildSelectSql, quoteIdent } from "../../src/data/sql";
 import type { DbObjectRef } from "../../src/contract";
+
+describe("quoteIdent", () => {
+    it("wraps a plain identifier in double quotes", () => {
+        expect(quoteIdent("orders")).toBe('"orders"');
+    });
+
+    it("doubles an embedded double-quote", () => {
+        expect(quoteIdent('we"ird')).toBe('"we""ird"');
+    });
+});
 
 const ref = (over: Partial<DbObjectRef> = {}): DbObjectRef => ({
     connectionId: "default",

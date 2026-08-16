@@ -3,7 +3,13 @@
 // WEST column is an accordion of three sections — a Summary table (planning /
 // execution time), the structural plan Tree, and a flat Plan-steps table — and
 // collapses away entirely (the Border WEST region's chevron) to give the diagram
-// the full width. The tree and diagram stay correlated by node id
+// the full width. An optional SOUTH strip (IndexSuggestionsView, also
+// collapsible) shows the heuristic index advisor's ranked CREATE INDEX
+// suggestions below the diagram, mounted only when the caller already computed
+// at least one; a full-width region rather than a fourth WEST section, since
+// the 320px WEST column can't show a CREATE INDEX statement (see the plan's
+// "SOUTH region, not a fourth accordion section" architecture decision). The
+// tree and diagram stay correlated by node id
 // (ExplainPlanNode.id === DiagramNodeData.id === the id carried on each
 // TreeNode.data): selecting a tree row selects and scrolls the matching diagram
 // node into the viewport (the feature's hard requirement), and selecting a
@@ -48,8 +54,10 @@ import { buildPlanStepsRows }       from "../data/buildPlanSteps";
 import { formatMetric }             from "../data/explainFormat";
 import { ExplainNode }              from "./ExplainNode";
 import { elkWorkerFactory }         from "./elkWorkerFactory";
+import { IndexSuggestionsView }     from "./IndexSuggestionsView";
 import type { ExplainPlanNode, ExplainSummary } from "../data/parseExplainPlan";
 import type { AccordionLayoutBinding } from "../data/layoutStore";
+import type { IndexSuggestion } from "../data/suggestIndexes";
 
 // Fixed width of the WEST info column: fits the Action + Cost columns of the
 // steps table and a node-type tree heading without stealing canvas width from
@@ -131,6 +139,12 @@ const SUMMARY_FIELDS: { name: string; type: FieldType }[] = [
     { name: "Value",  type: "string" },
 ];
 
+/** Already-computed suggestions plus the click handler for the strip's Create button. */
+export interface ExplainAdvisorInput {
+    suggestions: IndexSuggestion[];
+    onCreateIndex: (suggestion: IndexSuggestion) => void;
+}
+
 /**
  * A read-only Dock panel pairing a collapsible WEST accordion (Summary table /
  * plan Tree / flat Plan-steps table) with the plan DiagramView (CENTER). Tree
@@ -146,8 +160,18 @@ class ExplainDiagramPanel extends Panel {
      *   hook (`controller.layout.bindAccordion("explainDiagram")`, threaded in
      *   via QueryPanel). The accordion is resizable — a dragged gutter's sizes
      *   persist alongside each section's open flag.
+     * @param advisor - The heuristic index advisor's already-computed
+     *   suggestions plus its Create-button hook. Omitted (or empty) when the
+     *   advisor did not run or found nothing — the SOUTH strip is then not
+     *   mounted at all, so a plain Explain diagram looks exactly as it did
+     *   before this feature existed.
      */
-    constructor(roots: ExplainPlanNode[], summary: ExplainSummary, layout: AccordionLayoutBinding) {
+    constructor(
+        roots: ExplainPlanNode[],
+        summary: ExplainSummary,
+        layout: AccordionLayoutBinding,
+        advisor?: ExplainAdvisorInput,
+    ) {
         // Locals before super() — they are super()'s children (this is
         // unavailable until super() returns).
         const data         = buildExplainDiagram(roots);
@@ -215,6 +239,13 @@ class ExplainDiagramPanel extends Panel {
             initialFocusNode: roots[0]?.id,
         });
 
+        // The suggestions strip: built only when the advisor ran and found at
+        // least one suggestion, so a plain Explain diagram (no advisor input, or
+        // an advisor that found nothing) mounts no SOUTH region at all.
+        const suggestionsView = advisor && advisor.suggestions.length > 0
+            ? new IndexSuggestionsView(advisor.suggestions, advisor.onCreateIndex)
+            : null;
+
         super({
             layoutManager: new Border(),
             components   : [
@@ -222,6 +253,11 @@ class ExplainDiagramPanel extends Panel {
                 // whole info column into a strip, handing its width to the diagram.
                 { component: accordion, constraints: { placement: Placement.WEST, collapsible: true } },
                 { component: diagram,   constraints: { placement: Placement.CENTER } },
+                // collapsible: the same chevron behaviour as the WEST column, so the
+                // strip can be tucked away and hand its height back to the diagram.
+                ...(suggestionsView
+                    ? [{ component: suggestionsView, constraints: { placement: Placement.SOUTH, collapsible: true } }]
+                    : []),
             ],
         });
 

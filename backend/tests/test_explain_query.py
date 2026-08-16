@@ -14,7 +14,24 @@ import pytest
 
 from app.errors import ValidationError
 from app.operations import ExplainQueryCommand
+from app.operations.explain_query import _explain_options
 from tests.conftest import NO_CONN
+
+
+def test_explain_options_with_no_flags() -> None:
+    assert _explain_options(False, False, "text") == "FORMAT TEXT"
+
+
+def test_explain_options_with_analyze_only() -> None:
+    assert _explain_options(True, False, "json") == "ANALYZE, FORMAT JSON"
+
+
+def test_explain_options_with_verbose_only() -> None:
+    assert _explain_options(False, True, "json") == "VERBOSE, FORMAT JSON"
+
+
+def test_explain_options_with_analyze_and_verbose() -> None:
+    assert _explain_options(True, True, "json") == "ANALYZE, VERBOSE, FORMAT JSON"
 
 
 def test_empty_sql_raises() -> None:

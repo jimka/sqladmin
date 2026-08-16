@@ -846,10 +846,12 @@ async def explain_query(
     Route: ``POST /api/{connection_id}/explain``.
 
     Args:
-        body: ``{"sql": str, "analyze": bool, "format": "text"|"json"}`` — the
-            statement to explain (a ``;``-separated script is rejected by the
+        body: ``{"sql": str, "analyze": bool, "format": "text"|"json", "verbose": bool}``
+            — the statement to explain (a ``;``-separated script is rejected by the
             extended query protocol as a 400). ANALYZE executes the statement,
             but the operation rolls the transaction back so no write is committed.
+            ``verbose`` adds VERBOSE, which reports each scanned relation's schema
+            and alias-qualifies every predicate column; defaults to False.
 
     Returns:
         ``{"kind": "explain", "format", "analyze", "plan"}`` — the joined plan
@@ -861,6 +863,7 @@ async def explain_query(
             body.get("sql", ""),
             bool(body.get("analyze", False)),
             str(body.get("format", "text")),
+            bool(body.get("verbose", False)),
         )
         await op.apply()
 

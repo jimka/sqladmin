@@ -1,7 +1,7 @@
 // Generate a browse query for a table/view: a quoted SELECT with a small row
 // cap so "open as query" on a large table previews cheaply (a query panel has
-// no pagination). This is the only place the app generates SQL — the front-end
-// mirror of the backend's quote_ident.
+// no pagination). `quoteIdent` is the front-end mirror of the backend's
+// quote_ident, shared with suggestIndexes.ts's CREATE INDEX preview DDL.
 
 import type { DbObjectRef } from "../contract";
 
@@ -10,7 +10,7 @@ import type { DbObjectRef } from "../contract";
 const DEFAULT_LIMIT = 50;
 
 /** Quote a SQL identifier: wrap in double quotes, doubling any embedded quote. */
-function quoteIdent(name: string): string {
+export function quoteIdent(name: string): string {
     return `"${name.replace(/"/g, '""')}"`;
 }
 

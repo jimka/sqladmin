@@ -106,6 +106,51 @@ describe("parseExplainPlan", () => {
         expect(roots[0].peakMemoryUsage).toBe(512);
     });
 
+    it("captures the advisor fields (schema/alias/parentRelationship/filter/conds/sortKey)", () => {
+        const roots = parseExplainPlan(envelope({
+            "Node Type": "Seq Scan",
+            "Relation Name": "orders",
+            "Schema": "public",
+            "Alias": "o",
+            "Parent Relationship": "Outer",
+            "Filter": "(o.status = 'shipped'::text)",
+            "Rows Removed by Filter": 99500,
+            "Index Cond": "(o.id = 1)",
+            "Hash Cond": "(o.customer_id = c.id)",
+            "Merge Cond": "(o.customer_id = c.id)",
+            "Join Filter": "(o.total > 100)",
+            "Sort Key": ["o.created_at DESC"],
+        }));
+        const root = roots[0];
+
+        expect(root.schema).toBe("public");
+        expect(root.alias).toBe("o");
+        expect(root.parentRelationship).toBe("Outer");
+        expect(root.filter).toBe("(o.status = 'shipped'::text)");
+        expect(root.rowsRemovedByFilter).toBe(99500);
+        expect(root.indexCond).toBe("(o.id = 1)");
+        expect(root.hashCond).toBe("(o.customer_id = c.id)");
+        expect(root.mergeCond).toBe("(o.customer_id = c.id)");
+        expect(root.joinFilter).toBe("(o.total > 100)");
+        expect(root.sortKey).toEqual(["o.created_at DESC"]);
+    });
+
+    it("leaves every advisor field undefined when the source omits it", () => {
+        const roots = parseExplainPlan(envelope({ "Node Type": "Seq Scan", "Relation Name": "orders" }));
+        const root = roots[0];
+
+        expect(root.schema).toBeUndefined();
+        expect(root.alias).toBeUndefined();
+        expect(root.parentRelationship).toBeUndefined();
+        expect(root.filter).toBeUndefined();
+        expect(root.rowsRemovedByFilter).toBeUndefined();
+        expect(root.indexCond).toBeUndefined();
+        expect(root.hashCond).toBeUndefined();
+        expect(root.mergeCond).toBeUndefined();
+        expect(root.joinFilter).toBeUndefined();
+        expect(root.sortKey).toBeUndefined();
+    });
+
     it("labels a node without a Relation Name by its node type alone", () => {
         const roots = parseExplainPlan(envelope({ "Node Type": "Hash Join", "Total Cost": 50 }));
 
