@@ -6,7 +6,7 @@ import {
     parseIndexColumns,
     isFkUnique,
     isFkMandatory,
-    isFkCovered,
+    isColumnPrefixIndexed,
     annotateFkCardinality,
     applyCoverageStyle,
 } from "../../src/data/fkCardinality";
@@ -95,39 +95,39 @@ describe("isFkMandatory", () => {
     });
 });
 
-describe("isFkCovered", () => {
+describe("isColumnPrefixIndexed", () => {
     it("true when a plain index has the FK columns as a leading prefix", () => {
         const s = structure({ indexes: [index("CREATE INDEX i ON t USING btree (a, b)")] });
 
-        expect(isFkCovered(["a"], s)).toBe(true);
+        expect(isColumnPrefixIndexed(["a"], s)).toBe(true);
     });
 
     it("false when the index covers fewer columns than the FK", () => {
         const s = structure({ indexes: [index("CREATE INDEX i ON t USING btree (a)")] });
 
-        expect(isFkCovered(["a", "b"], s)).toBe(false);
+        expect(isColumnPrefixIndexed(["a", "b"], s)).toBe(false);
     });
 
     it("true when the index is a prefix superset of the FK columns", () => {
         const s = structure({ indexes: [index("CREATE INDEX i ON t USING btree (a, b, c)")] });
 
-        expect(isFkCovered(["a", "b"], s)).toBe(true);
+        expect(isColumnPrefixIndexed(["a", "b"], s)).toBe(true);
     });
 
     it("false when the index columns are in the wrong order", () => {
         const s = structure({ indexes: [index("CREATE INDEX i ON t USING btree (b, a)")] });
 
-        expect(isFkCovered(["a", "b"], s)).toBe(false);
+        expect(isColumnPrefixIndexed(["a", "b"], s)).toBe(false);
     });
 
     it("true when a PK/unique constraint covers the FK columns", () => {
-        expect(isFkCovered(["a"], structure({ constraints: [constraint("primaryKey", ["a"])] }))).toBe(true);
+        expect(isColumnPrefixIndexed(["a"], structure({ constraints: [constraint("primaryKey", ["a"])] }))).toBe(true);
     });
 
     it("false when only an unparseable expression index exists", () => {
         const s = structure({ indexes: [index("CREATE INDEX i ON t USING btree (lower(email))")] });
 
-        expect(isFkCovered(["a"], s)).toBe(false);
+        expect(isColumnPrefixIndexed(["a"], s)).toBe(false);
     });
 });
 
