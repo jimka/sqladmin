@@ -4,6 +4,75 @@ All notable changes to SQLAdmin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-08-16
+
+### Added
+- **Quick search and a header filter row replace the modal Filter dialog**
+  on the Data tab, and the same quick search now covers the view/run-SQL
+  results grid too. Quick search hides loaded rows client-side with no
+  network request and matches against each cell's displayed text —
+  including dates, times, and combo labels — rather than its raw stored
+  value; the header filter row reloads page 1 per column filter, and the
+  two compose.
+- **The header filter row now supports date, time, and datetime columns.**
+- **The Database and Roles rail trees remember which nodes were
+  expanded** across a reload, instead of starting fully collapsed every
+  time.
+- **A flat, schema-wide Indexes category** lists every index across a
+  schema's tables in the navigator, each opening a read-only tab with its
+  unique/primary flags, a link to its owning table's Structure tab, and
+  its full `CREATE INDEX` text.
+- **A toolbar Refresh button on the Structure, Definition, Sequence, and
+  Index tabs**, matching the data grid's own Refresh — Alt+R and View →
+  Refresh now work on these tabs too.
+- **Deep links.** A URL now addresses a specific table, view, schema,
+  database, role, sequence, index, function, or notes view — nested under
+  its schema, matching the navigator's own containment — and opening one
+  syncs the sidebar tree selection to match, even before the tree has
+  finished its initial load.
+
+### Changed
+- **"Show database diagram" moved to a Database accordion header tool
+  button**, next to Create schema and Refresh, out of the schema node's
+  right-click Show submenu.
+- **The Explain diagram's info accordion is resizable**, with real
+  minimum floors for Summary and Plan steps instead of both being
+  crushed toward zero by a large plan's flattened tree.
+- **Previous/Next record stepping now respects the live quick-search
+  query**, skipping records the current search doesn't match.
+- **The Data tab loads behind a spinner**, and re-running a query keeps
+  the previous grid visible until the new one is confirmed to hold rows —
+  a failed run shows a durable in-panel error banner instead of
+  destroying an already-loaded grid.
+- **The TableWorkPanel toolbar was trimmed** per live user-testing
+  feedback: the redundant Filter toggle (duplicated by the grid's own
+  header menu) and the separate quick-search status label are gone; the
+  match count now reports through the shared status line instead.
+- **Refresh buttons moved to each toolbar's far right**, mirroring the
+  data grid's Save-left/Refresh-right layout, across the Definition,
+  Sequence, and Index tabs.
+
+### Fixed
+- **Re-running a query no longer flashes two Data tabs during the
+  fetch**, and no longer strands editor focus on the Data tab once the
+  new grid lands.
+- **Diagram legend rows are disposed on rebuild instead of just
+  detached**, fixing a listener leak that grew with every root,
+  direction/depth, or schema-toggle change.
+- **Dragging the sidebar gutter while the start page is showing no
+  longer snaps the navigator rail open unexpectedly wide.** The page's
+  two content columns are now pinned to a fixed width and a trailing
+  flex spacer absorbs the rest, so the row's own reported max width
+  stays unbounded instead of clamping the split's drag floor.
+
+### Internal
+- Migrated to `@jimka/typescript-ui` 0.6.0, including migrating
+  `BoxLayout`'s deprecated `stretching` option to `itemAlign: "stretch"`
+  across every call site.
+- Unit-test coverage for deep-link route parsing, tree-expansion
+  persistence, quick-search matching, and the flattened Indexes
+  navigator rows.
+
 ## [0.5.0] — 2026-08-09
 
 ### Added
@@ -137,6 +206,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 First public release: browse schemas and roles, edit rows, run and EXPLAIN SQL,
 and visualize schema and role relationships as diagrams.
 
+[0.6.0]: https://github.com/jimka/sqladmin/releases/tag/v0.6.0
 [0.5.0]: https://github.com/jimka/sqladmin/releases/tag/v0.5.0
 [0.4.0]: https://github.com/jimka/sqladmin/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jimka/sqladmin/releases/tag/v0.3.0
