@@ -226,7 +226,7 @@ describe("runQuery", () => {
 });
 
 describe("runExplain", () => {
-    it("POSTs { sql, analyze, format } to the explain endpoint and returns the envelope", async () => {
+    it("POSTs { sql, analyze, format, verbose } to the explain endpoint and returns the envelope", async () => {
         const envelope  = { kind: "explain", format: "text", analyze: false, plan: "Seq Scan" };
         const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => envelope });
         vi.stubGlobal("fetch", fetchMock);
@@ -239,7 +239,22 @@ describe("runExplain", () => {
             expect.objectContaining({
                 method : "POST",
                 headers: { "Content-Type": "application/json" },
-                body   : JSON.stringify({ sql: "select 1", analyze: false, format: "text" }),
+                body   : JSON.stringify({ sql: "select 1", analyze: false, format: "text", verbose: false }),
+            }),
+        );
+    });
+
+    it("forwards verbose:true when requested", async () => {
+        const envelope  = { kind: "explain", format: "json", analyze: false, plan: "", planJson: [] };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => envelope });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await runExplain("default", "select 1", { analyze: false, format: "json", verbose: true });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/default/explain",
+            expect.objectContaining({
+                body: JSON.stringify({ sql: "select 1", analyze: false, format: "json", verbose: true }),
             }),
         );
     });

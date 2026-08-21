@@ -25,6 +25,7 @@ import {
     buildSequenceOwnerSpec,
     diffSequenceSpecs,
     orderColumnsBySelection,
+    preserveSuggestedColumnOrder,
     parseColumnList,
     parseOptionalInt,
     stripTrailingSemicolon,
@@ -189,6 +190,40 @@ describe("orderColumnsBySelection", () => {
 
     it("returns an empty array when nothing is selected", () => {
         expect(orderColumnsBySelection(["a", "b"], [])).toEqual([]);
+    });
+});
+
+describe("preserveSuggestedColumnOrder", () => {
+    it("returns the suggested order when the selection is unchanged from it", () => {
+        // The table's own column order ("id" before "status" before "created_at")
+        // differs from the advisor's deliberate equality-then-sort order.
+        const selected = ["id", "status", "created_at"];
+        const suggested = ["status", "created_at", "id"];
+
+        expect(preserveSuggestedColumnOrder(selected, suggested)).toEqual(suggested);
+    });
+
+    it("returns the suggested order regardless of the selection's own order", () => {
+        expect(preserveSuggestedColumnOrder(["created_at", "status"], ["status", "created_at"]))
+            .toEqual(["status", "created_at"]);
+    });
+
+    it("falls back to the table-order selection once the user unchecks a suggested column", () => {
+        const selected = ["status"]; // "created_at" was unchecked
+        const suggested = ["status", "created_at"];
+
+        expect(preserveSuggestedColumnOrder(selected, suggested)).toEqual(selected);
+    });
+
+    it("falls back to the table-order selection once the user checks an extra column", () => {
+        const selected = ["status", "created_at", "total"]; // "total" was added
+        const suggested = ["status", "created_at"];
+
+        expect(preserveSuggestedColumnOrder(selected, suggested)).toEqual(selected);
+    });
+
+    it("returns the selection unchanged when there is no suggested order", () => {
+        expect(preserveSuggestedColumnOrder(["a", "b"], undefined)).toEqual(["a", "b"]);
     });
 });
 

@@ -237,6 +237,33 @@ export function orderColumnsBySelection(allColumns: string[], selected: Readonly
 }
 
 /**
+ * The column order for a CREATE INDEX spec seeded from a deliberate
+ * suggestion (the heuristic index advisor's "Create index…" action): honours
+ * `suggestedOrder` exactly when the checklist's current selection is still
+ * the same set of columns, since `orderColumnsBySelection`'s table-order
+ * default — right for a form with no other ordering signal — would otherwise
+ * silently discard the advisor's deliberate equality/sort/range order (see
+ * suggestIndexes.ts's "Column order" rule). Falls back to `selected` (already
+ * in table order) once the user edits the checked set, since a column added
+ * or removed from the suggestion leaves no reliable signal for where it
+ * belongs.
+ *
+ * @param selected - The checklist's current selection, in table order
+ *   (`ColumnChecklist.readSelected()`'s own order).
+ * @param suggestedOrder - The order the form was seeded with, if any.
+ * @returns `suggestedOrder` when `selected` is still the same column set, else `selected`.
+ */
+export function preserveSuggestedColumnOrder(selected: string[], suggestedOrder?: string[]): string[] {
+    if (suggestedOrder === undefined || suggestedOrder.length !== selected.length) {
+        return selected;
+    }
+
+    const selectedSet = new Set(selected);
+
+    return suggestedOrder.every(c => selectedSet.has(c)) ? suggestedOrder : selected;
+}
+
+/**
  * Parse a comma-separated column list (the FK form's ref-columns TextField —
  * see plans/implemented/table-ddl.md's "FK ref-column entry" mitigation),
  * trimming whitespace and dropping empty entries.

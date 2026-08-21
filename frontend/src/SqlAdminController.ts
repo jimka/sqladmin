@@ -1220,6 +1220,45 @@ export class SqlAdminController {
     }
 
     /**
+     * Open the "Create index" dialog for a heuristic index advisor suggestion,
+     * with the suggested columns pre-checked — the suggestions strip's "Create
+     * index…" action (QueryPanel's `indexAdvisor.onCreateIndex`). Modelled on
+     * {@link createIndex}, but fetches the table's full column list with
+     * `getColumns(ref)` rather than reading the cached `structureColumns`,
+     * since a suggestion's table need not have its Structure tab open.
+     *
+     * @param schema - The suggested index's schema.
+     * @param table - The suggested index's table.
+     * @param columns - The advisor's suggested columns, pre-checked in the form.
+     */
+    private async createSuggestedIndex(schema: string, table: string, columns: string[]): Promise<void> {
+        const ref: DbObjectRef = {
+            connectionId: this._connectionId, database: this._database, schema, name: table, kind: "table",
+        };
+
+        let allColumns: string[];
+
+        try {
+            allColumns = (await getColumns(ref)).map(c => c.name);
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return;
+        }
+
+        const form = new IndexForm(schema, table, allColumns, columns);
+
+        openSqlPreviewDialog({
+            title:       "Create index",
+            form,
+            generateSql: async () => (await previewIndex(ref, form.readSpec())).sql,
+            execute:     sql => executeDdl(this._connectionId, sql),
+            onSuccess:   () => this.refreshStructure(ref),
+            onError:     msg => this.notifyError(new Error(msg), ref),
+        });
+    }
+
+    /**
      * Open the CREATE VIEW dialog for a schema (the navigator's schema
      * context-menu launcher). Fetches the connection's schema list for the
      * form's schema ComboBox. Success refreshes the navigator, since a new
@@ -2536,6 +2575,15 @@ export class SqlAdminController {
             onResult  : (active: ActiveExport | null) => this._activeQueryResult.set(id, active),
             splitLayout         : this.layout.bindSplit("query"),
             explainDiagramLayout: this.layout.bindAccordion("explainDiagram"),
+            // The advisor needs a database name for /structure; omitted (no
+            // strip, no suggestions computed) when the controller has none.
+            indexAdvisor: this._database === undefined ? undefined : {
+                loadTableStructure: (schema: string, relation: string) => getStructure({
+                    connectionId: this._connectionId, database: this._database, schema, name: relation, kind: "table",
+                }),
+                onCreateIndex: (schema: string, relation: string, columns: string[]) =>
+                    void this.createSuggestedIndex(schema, relation, columns),
+            },
         });
 
         this.dock.addPanel({ id, title: label, glyph: "terminal", content: panel.content });

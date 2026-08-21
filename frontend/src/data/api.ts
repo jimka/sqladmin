@@ -326,6 +326,7 @@ export function runExplain(
         sql,
         analyze: opts.analyze,
         format : opts.format,
+        verbose: opts.verbose ?? false,
     });
 }
 

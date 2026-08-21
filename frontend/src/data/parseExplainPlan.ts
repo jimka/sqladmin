@@ -41,6 +41,28 @@ export interface ExplainPlanNode {
     /** "Peak Memory Usage" (kB) — peak working memory of a hash/sort node. */
     peakMemoryUsage?: number;
 
+    /** "Schema" — the scanned relation's schema; VERBOSE only. */
+    schema?: string;
+    /** "Alias" — the relation's alias in the query, which plan predicates qualify with. */
+    alias?: string;
+    /** "Parent Relationship" — e.g. "Outer", "Inner", "SubPlan". */
+    parentRelationship?: string;
+
+    /** "Filter" — the residual qualifier applied after the scan. */
+    filter?: string;
+    /** "Rows Removed by Filter" — analyze only. */
+    rowsRemovedByFilter?: number;
+    /** "Index Cond" — the qualifier an index scan pushed into the index. */
+    indexCond?: string;
+    /** "Hash Cond" — a Hash Join's join qualifier. */
+    hashCond?: string;
+    /** "Merge Cond" — a Merge Join's join qualifier. */
+    mergeCond?: string;
+    /** "Join Filter" — a join qualifier not usable as the join method's own condition. */
+    joinFilter?: string;
+    /** "Sort Key" — the sort expressions of a Sort node. */
+    sortKey?: string[];
+
     /** Child plan nodes (from the source "Plans" array). */
     children: ExplainPlanNode[];
 }
@@ -143,6 +165,18 @@ function parseNode(plan: Record<string, unknown>, id: string): ExplainPlanNode {
         hashBatches    : num(plan, "Hash Batches"),
         peakMemoryUsage: num(plan, "Peak Memory Usage"),
 
+        schema            : str(plan, "Schema"),
+        alias             : str(plan, "Alias"),
+        parentRelationship: str(plan, "Parent Relationship"),
+
+        filter              : str(plan, "Filter"),
+        rowsRemovedByFilter : num(plan, "Rows Removed by Filter"),
+        indexCond           : str(plan, "Index Cond"),
+        hashCond            : str(plan, "Hash Cond"),
+        mergeCond           : str(plan, "Merge Cond"),
+        joinFilter          : str(plan, "Join Filter"),
+        sortKey             : stringArray(plan, "Sort Key"),
+
         children,
     };
 }
@@ -181,6 +215,21 @@ function num(plan: Record<string, unknown>, field: string): number | undefined {
     const value = plan[field];
 
     return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Read a string field (e.g. "Schema", "Filter"), or `undefined` when it is
+ * absent or not a string.
+ *
+ * @param plan - The raw Plan object.
+ * @param field - The source field name.
+ *
+ * @returns The string value, or `undefined`.
+ */
+function str(plan: Record<string, unknown>, field: string): string | undefined {
+    const value = plan[field];
+
+    return typeof value === "string" ? value : undefined;
 }
 
 /**

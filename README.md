@@ -51,7 +51,14 @@ It is not hardened for exposure to the public internet:
 - **SQL workspace** — run ad-hoc queries, `EXPLAIN` a statement, and save
   queries for reuse. Export query and table results to CSV or JSON. Flip a
   query's results into the same one-record-at-a-time field/value view as the
-  data grid, with Previous/Next to step through the returned rows.
+  data grid, with Previous/Next to step through the returned rows. After
+  `EXPLAIN`, the plan diagram carries a heuristic index advisor that reads
+  the plan for sequential scans with selective filters, sorts an index could
+  serve, and join columns with no index, then offers the matching
+  `CREATE INDEX` — cross-checked against the table's existing indexes, and
+  executed through the same preview dialog as every other DDL action. The
+  advice is heuristic: plan shapes and row counts, never a hypothetical-index
+  cost estimate.
 - **Structure & definitions** — inspect columns, view a view's definition, and
   read a table's `GRANT`s. Each inspector tab has a Refresh button (also
   Alt+R) that re-reads the object from the database.

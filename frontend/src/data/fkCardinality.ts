@@ -189,17 +189,19 @@ export function isFkMandatory(fkColumns: string[], columns: ColumnMeta[]): boole
 }
 
 /**
- * True when some index (or PK/unique constraint) has `fkColumns` as a leading
- * prefix of its own column list — the FK lookup (`WHERE fk_col = …`) can use
- * that index/constraint's underlying B-tree.
+ * True when some index (or PK/unique constraint) has `columns` as a leading
+ * prefix of its own column list — a lookup on `columns` (`WHERE col = …`, or a
+ * multi-column equivalent) can use that index/constraint's underlying B-tree.
+ * Used both for FK-coverage warnings and by the index advisor to drop a
+ * candidate an existing index already serves.
  *
- * @param fkColumns - The FK's local columns, in key order.
- * @param structure - The referencing table's structure.
- * @returns Whether the FK columns are covered by an index or constraint.
+ * @param columns - The columns to test, in the order a lookup would use them.
+ * @param structure - The table's structure.
+ * @returns Whether `columns` are covered by an index or constraint.
  */
-export function isFkCovered(fkColumns: string[], structure: TableStructure): boolean {
+export function isColumnPrefixIndexed(columns: string[], structure: TableStructure): boolean {
     const constraintMatch = structure.constraints.some(c =>
-        (c.type === "primaryKey" || c.type === "unique") && isLeadingPrefix(fkColumns, c.columns));
+        (c.type === "primaryKey" || c.type === "unique") && isLeadingPrefix(columns, c.columns));
 
     if (constraintMatch) {
         return true;
@@ -208,7 +210,7 @@ export function isFkCovered(fkColumns: string[], structure: TableStructure): boo
     return structure.indexes.some((idx) => {
         const cols = parseIndexColumns(idx.definition);
 
-        return cols !== null && isLeadingPrefix(fkColumns, cols);
+        return cols !== null && isLeadingPrefix(columns, cols);
     });
 }
 
@@ -300,7 +302,7 @@ export function annotateFkCardinality(
 
         const fks = fkData.fks.map((fk): FkDetail => ({
             ...fk,
-            uncovered: !isFkCovered(fk.columns, structure),
+            uncovered: !isColumnPrefixIndexed(fk.columns, structure),
         }));
 
         const unique    = fkData.fks.every(fk => isFkUnique(fk.columns, structure));
