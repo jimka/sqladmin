@@ -66,6 +66,11 @@ CREATE VIEW public.active_customers AS
     FROM public.customers
     WHERE active;
 
+-- A standalone enum type, so the navigator's Types category — and any info
+-- view built for it — has a real ENUM to show. Not read by any application
+-- code or column here; it exists purely as a schema object to introspect.
+CREATE TYPE public.priority_level AS ENUM ('low', 'medium', 'high', 'urgent');
+
 -- ---------------------------------------------------------------------------
 -- sales: product catalogue + order line items. order_items reaches back into
 -- public.orders (a cross-schema FK: sales -> public) and sideways to
@@ -176,6 +181,16 @@ INSERT INTO sales.credit_notes (invoice_id, amount, reason) VALUES
     (1, 20.00, 'Damaged in transit'),
     (3, 99.00, 'Returned item');
 
+-- A standalone composite type: a reusable postal-address shape, one attribute
+-- per line like a table's column list — the navigator's Types category needs
+-- a real composite (not just an enum) to show.
+CREATE TYPE sales.mailing_address AS (
+    street      text,
+    city        text,
+    postal_code text,
+    country     text
+);
+
 -- ---------------------------------------------------------------------------
 -- inventory: warehouses + per-warehouse stock. stock reaches into
 -- sales.products (cross-schema: inventory -> sales) and inventory.warehouses
@@ -265,6 +280,11 @@ CREATE VIEW hr.employee_directory AS
     FROM hr.employees e
     JOIN hr.departments d    ON d.id = e.department_id
     LEFT JOIN hr.employees m ON m.id = e.manager_id;
+
+-- A second standalone enum, in a different schema from priority_level — so
+-- the Types category (and its info tab) is exercised across more than one
+-- schema, not just public.
+CREATE TYPE hr.employment_status AS ENUM ('active', 'on_leave', 'terminated');
 
 -- ---------------------------------------------------------------------------
 -- analytics: read-only rollups. A materialized view over public plus a plain
