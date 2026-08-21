@@ -10,12 +10,17 @@
 // Execute is a show/retry loop, not a one-shot resolve: a failed execute must
 // leave the dialog open with the SQL intact for a retry/edit, the same shape
 // showLoginDialog uses to re-prompt after a failed login (see
-// shell/LoginDialog.ts). Dialog.hide() destructs the Dialog instance on every
-// dismissal, so a retry cannot re-show the same instance — it detaches the
-// persistent content (the phase's form + the editor) from the spent dialog's
-// content container and re-wraps it in a fresh Dialog instead, so the form's
-// and the editor's own state (and the Component objects themselves) survive
-// across retries.
+// shell/LoginDialog.ts). Dialog now owns its content's recursive teardown the
+// same way Dock owns a tab's (see
+// plans/implemented/adopt-dock-owned-teardown.md): hide() destructs the
+// Dialog instance before show()'s promise resolves, so a retry cannot re-show
+// the same instance. RetainedContentDialog rescues the persistent content
+// (the phase's form + the editor) from that teardown by detaching it one step
+// earlier, in its own destructor() override, mirroring QueryPanelContent's
+// destructor() override in dock/QueryPanel.ts; the rescued content is then
+// re-wrapped in a fresh Dialog for the retry, so the form's and the editor's
+// own state (and the Component objects themselves) survive. showExecuteRetryLoop's
+// caller disposes content itself, once, when the loop concludes.
 //
 // The Dialog exposes only three result codes ("confirm" | "cancel" | "close"),
 // and every dismiss gesture (Escape, backdrop, the always-present title-bar
@@ -28,7 +33,7 @@ import { VBox }                    from "@jimka/typescript-ui/layout";
 import { Button }                  from "@jimka/typescript-ui/component/button";
 import { CodeEditor }              from "@jimka/typescript-ui/component/editor";
 import { Dialog, Notification }    from "@jimka/typescript-ui/overlay";
-import type { DialogButtonConfig } from "@jimka/typescript-ui/overlay";
+import type { DialogButtonConfig, DialogConfig } from "@jimka/typescript-ui/overlay";
 import type { QueryStatusResult }  from "../contract";
 
 // A comfortable modal width for a structured DDL form plus the SQL preview
@@ -146,7 +151,13 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
         await refreshPreview(editor, options);
         await showExecuteRetryLoop(content, editor, options, resizer);
     } finally {
-        editor.dispose();
+        // RetainedContentDialog detaches `content` from every dialog it
+        // wraps instead of letting the base class's owned teardown dispose
+        // it (see showExecuteRetryLoop's doc comment), so this is the one
+        // place that disposes it — exactly once, on every exit path.
+        // Cascades to editor, the "Regenerate SQL" button, and
+        // options.form, since all three are still its registered children.
+        content.dispose();
     }
 }
 
@@ -167,13 +178,16 @@ async function refreshPreview(editor: CodeEditor, options: SqlPreviewDialogOptio
 }
 
 /**
- * Show the dialog and, on Execute, run it; a failed execute reports the error
- * and re-shows a fresh dialog (Dialog.hide() destructs on every dismissal, so
- * the same instance can't be re-shown) wrapping the same, still-live content
- * — so the form and the SQL text survive the retry. Returns once the user
- * cancels/dismisses or an execute succeeds.
+ * Show the dialog and, on Execute, run it; a failed execute reports the
+ * error and re-shows a fresh dialog wrapping the same, still-live content
+ * — so the form and the SQL text survive the retry. Every dialog built
+ * here is a RetainedContentDialog, which detaches `content` from itself
+ * before its own teardown can reach it, so `content` is never disposed as
+ * a side effect of hide() — the caller disposes it once this resolves.
+ * Returns once the user cancels/dismisses or an execute succeeds.
  *
- * @param content - the persistent form + editor content, reused across retries.
+ * @param content - the persistent form + editor content, reused across
+ *     retries and disposed by the caller once this resolves.
  * @param editor - the preview editor executed SQL is read from.
  * @param options - carries `execute`, `onSuccess`, and the error reporter.
  * @param resizer - rewired to the current Dialog on every build, so the
@@ -205,13 +219,43 @@ async function showExecuteRetryLoop(
         } catch (err) {
             reportError(err, options.onError);
 
-            // The dialog just shown is now destructed; detach the persistent
-            // content from its (spent) content container before re-wrapping
-            // it in a fresh dialog for the retry.
-            dialog.getContentComponent().removeComponent(content);
+            // RetainedContentDialog already detached `content` from the spent
+            // dialog during its own teardown (see its class doc) — content
+            // survived and is ready to re-wrap in a fresh dialog for the retry.
             dialog = buildDialog(content, options);
             resizer.fit = () => dialog.resizeToContent();
         }
+    }
+}
+
+/**
+ * A Dialog that keeps `content` alive across the base class's owned-teardown
+ * recursion, by detaching it in `destructor()` before `super.destructor()`
+ * runs. Every dialog `buildDialog` constructs is one of these, so
+ * `showExecuteRetryLoop` can pull `content` out of a spent dialog and
+ * re-wrap it in a fresh one on a failed-execute retry, and the form's and
+ * editor's own state survive. `content` is never disposed here — the loop
+ * that owns it disposes it exactly once, when it actually concludes.
+ */
+class RetainedContentDialog extends Dialog {
+    private readonly _content: Component;
+
+    /**
+     * @param content - The persistent form + editor content this dialog
+     *     wraps; detached, not disposed, on teardown. Must be the same
+     *     component passed as `config.contentComponent`.
+     * @param config - The Dialog configuration.
+     */
+    constructor(content: Component, config: DialogConfig) {
+        super(config);
+
+        this._content = content;
+    }
+
+    protected destructor(): void {
+        this.getContentComponent().removeComponent(this._content);
+
+        super.destructor();
     }
 }
 
@@ -222,7 +266,7 @@ async function showExecuteRetryLoop(
  * @param options - carries the title and width.
  */
 function buildDialog(content: Component, options: SqlPreviewDialogOptions): Dialog {
-    return new Dialog({
+    return new RetainedContentDialog(content, {
         title:            options.title,
         contentComponent: content,
         buttons:          [CANCEL_BUTTON, EXECUTE_BUTTON],

@@ -117,7 +117,7 @@ literal `[x]: https://example.com` text.
 
 ---
 
-## 🐞🔎 `SqlPreviewDialog`'s failed-execute retry crashes — `Dialog` now owns its content's teardown too (app bug, exposed by 0.4.1, symlinked)
+## 🐞✅ `SqlPreviewDialog`'s failed-execute retry crashes — `Dialog` now owns its content's teardown too (app bug, exposed by 0.4.1, symlinked)
 
 Found manually verifying `align-with-library-post-0.4.1`'s Change 2 "failed Execute, followed by retry"
 bullet — pre-existing code, **not** touched by that plan's diff (only `resizer.fit = () =>
@@ -175,6 +175,15 @@ and `SqlPreviewDialog`'s *sizing*, not its retry lifecycle; this bug predates an
 Fixing it properly needs a real redesign — e.g. rebuilding the form + editor content fresh on each retry
 instead of reusing the disposed instance, mirroring how `adopt-dock-owned-teardown` handled the same class
 of problem for Dock tabs — which belongs in its own plan, not a mid-implementation patch.
+
+**Fixed here** (`sqlpreviewdialog-retry-content-teardown-fix.md`) — the fix is app-side, entirely in
+`frontend/src/dock/SqlPreviewDialog.ts`: a `RetainedContentDialog` subclass detaches `content` from the
+base class's owned teardown one step earlier than the code above tried to — inside its own `destructor()`
+override, before `super.destructor()` runs, rather than after `dialog.show()` resolves. Since `content` is
+now detached from every dialog it wraps instead of being disposed as a side effect of `hide()`,
+`runSqlPreviewDialog`'s `finally` block disposes `content` itself, once, on every exit path — nothing else
+disposes it now that the detach happens before teardown can reach it. The repro, root-cause analysis, and
+console trace above remain accurate history of the bug as found.
 
 ---
 
