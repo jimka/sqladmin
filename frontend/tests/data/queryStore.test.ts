@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { QueryHistoryStore, SavedQueryStore } from "../../src/data/queryStore";
+import { QueryHistoryStore, SavedQueryStore, findHistoryEntry } from "../../src/data/queryStore";
 import type { KeyValueStore, HistoryEntry } from "../../src/data/queryStore";
 
 /** A trivial in-memory KeyValueStore fake (the node vitest env has no localStorage). */
@@ -178,5 +178,33 @@ describe("SavedQueryStore", () => {
 
         expect(a.get("q")?.sql).toEqual("from A");
         expect(b.get("q")?.sql).toEqual("from B");
+    });
+});
+
+describe("findHistoryEntry", () => {
+    it("finds the entry whose timestamp stringifies to rawTimestamp", () => {
+        const entries = [entry("a", { timestamp: 100 }), entry("b", { timestamp: 200 }), entry("c", { timestamp: 300 })];
+
+        expect(findHistoryEntry(entries, "200")).toEqual(entry("b", { timestamp: 200 }));
+    });
+
+    it("returns undefined when no entry's timestamp matches", () => {
+        const entries = [entry("a", { timestamp: 100 }), entry("b", { timestamp: 200 })];
+
+        expect(findHistoryEntry(entries, "999")).toBeUndefined();
+    });
+
+    it("returns the first matching entry when timestamps collide", () => {
+        const entries = [entry("a", { timestamp: 100 }), entry("b", { timestamp: 100 })];
+
+        expect(findHistoryEntry(entries, "100")).toEqual(entry("a", { timestamp: 100 }));
+    });
+
+    it("returns undefined for an empty entries list", () => {
+        expect(findHistoryEntry([], "100")).toBeUndefined();
+    });
+
+    it("returns undefined for an empty rawTimestamp", () => {
+        expect(findHistoryEntry([entry("a", { timestamp: 100 })], "")).toBeUndefined();
     });
 });

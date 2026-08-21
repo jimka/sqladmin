@@ -105,3 +105,23 @@ export function matchesGrantedTable(schema: string, table: string): NodeMatch {
 export function matchesRole(name: string): NodeMatch {
     return data => data === name;
 }
+
+/**
+ * Matches a roles-tree GROUP parent (a RoleGroupData marker) whose section
+ * equals `section` — "Users" / "Groups" / "Predefined". Does not import
+ * RoleGroupData; tests the shape structurally, mirroring asObjectRef's own
+ * style in this file.
+ *
+ * @param section - The section label to match ("Users", "Groups", "Predefined").
+ *
+ * @returns The predicate to hand to `Tree.revealByPredicate`.
+ */
+export function matchesRoleSection(section: string): NodeMatch {
+    return data => {
+        if (typeof data !== "object" || data === null) {
+            return false;
+        }
+
+        return (data as { section?: unknown }).section === section;
+    };
+}

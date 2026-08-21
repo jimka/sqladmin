@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { TreeNode } from "@jimka/typescript-ui/component/tree";
 import type { DbObjectRef } from "../../src/contract";
 import type { RoleGroupData } from "../../src/roles/groupRoles";
-import { matchesObject, matchesRelationName, matchesGrantedTable, matchesRole } from "../../src/navigator/revealMatch";
+import { matchesObject, matchesRelationName, matchesGrantedTable, matchesRole, matchesRoleSection } from "../../src/navigator/revealMatch";
 import type { NodeMatch } from "../../src/navigator/revealMatch";
 
 /** The navigator leaf every case below is tested against: sales.orders, a table. */
@@ -116,5 +116,27 @@ describe("matchesRole", () => {
 
     it("does not match undefined", () => {
         expect(matchesRole("analyst")(undefined)).toBe(false);
+    });
+});
+
+describe("matchesRoleSection", () => {
+    it("matches a group parent whose section equals the requested one", () => {
+        const usersGroup: RoleGroupData = { section: "Users", glyph: "users" };
+
+        expect(matchesRoleSection("Users")(usersGroup)).toBe(true);
+    });
+
+    it("does not match a group parent from a different section", () => {
+        const groupsGroup: RoleGroupData = { section: "Groups", glyph: "user-group" };
+
+        expect(matchesRoleSection("Users")(groupsGroup)).toBe(false);
+    });
+
+    it("does not match a role leaf's bare name string", () => {
+        expect(matchesRoleSection("Users")("analyst")).toBe(false);
+    });
+
+    it("does not match undefined", () => {
+        expect(matchesRoleSection("Users")(undefined)).toBe(false);
     });
 });

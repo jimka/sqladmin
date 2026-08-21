@@ -145,6 +145,22 @@ export class QueryHistoryStore {
     }
 }
 
+/**
+ * The first entry whose `timestamp` stringifies to `rawTimestamp` — the
+ * inverse of a query-history route's `:timestamp` param. Mirrors
+ * recordNavigation.ts's findRecordByKey exactly: a stored timestamp is a
+ * number, a route param is a string, so the comparison goes through String()
+ * rather than parsing the param, avoiding a NaN/loose-equality trap.
+ *
+ * @param entries - The history list to search (any order).
+ * @param rawTimestamp - The route's raw `:timestamp` param.
+ *
+ * @returns The matching entry, or undefined when none matches.
+ */
+export function findHistoryEntry(entries: readonly HistoryEntry[], rawTimestamp: string): HistoryEntry | undefined {
+    return entries.find(e => String(e.timestamp) === rawTimestamp);
+}
+
 /** Per-user, per-connection named-query store (upsert by name). */
 export class SavedQueryStore {
     private readonly _key: string;

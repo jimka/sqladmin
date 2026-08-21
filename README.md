@@ -33,8 +33,15 @@ It is not hardened for exposure to the public internet:
   unauthenticated visitor is prompted to sign in first, then lands on the
   requested view. A deep link also brings the object's sidebar view forward
   and selects the object in its tree, so the navigator (or the roles tree)
-  shows where the opened tab sits. Links are read on load only — the address
-  bar does not yet follow in-app navigation.
+  shows where the opened tab sits. The address bar also follows in-app
+  navigation as tabs are opened and focused (using `replace`, so switching
+  tabs never adds browser-history entries); an ad-hoc query panel gets a URL
+  once it has run at least once, keyed to that run in the browser's own
+  local history (`/query/history/…` — resolves only on the same browser,
+  same user, same connection, the same limitation `openSavedQuery` already
+  has); and `/schema/<schema>` / `/role/user` (or `group`/`predefined`)
+  reveal a schema or role-bucket container in the sidebar without opening a
+  tab.
 - **Data grid** — sort and page through table data; insert, update, and delete
   rows (write actions are gated on the connected role's privileges). A
   per-column header filter row narrows what the server sends back, and a

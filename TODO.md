@@ -36,9 +36,9 @@ Deferred features and known issues. Implemented work lives in
   `connectionId` route/registry seam from `tsui-sql-admin.md`); needs auth/session
   thinking.
 - **Shareable link UI** — a "Copy link" action (context menu / toolbar) that
-  builds the URL for the focused tab, plus keeping the address bar in step as
-  the user navigates. `router-deep-linking` only resolves an incoming URL;
-  generating one is a deliberate non-goal there.
+  builds a URL for the focused tab. `address-bar-navigation-sync` already
+  keeps the address bar in step as the user navigates; this is just the
+  manual copy affordance on top of it.
 
 ### Polish
 - **Dark theme** — the theme system already has a classic/default toggle.
