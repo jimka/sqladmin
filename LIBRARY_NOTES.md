@@ -677,9 +677,72 @@ and a freshly-constructed demo, no matter how structurally bulked, never does. N
 matching this entry's established pattern, to instrument that internal state directly (not just its DOM/stylesheet
 symptoms) across a long-running session before attempting a fix.
 
+**Re-measured against 0.7.0 (symlinked, not yet released) — the reversing-sweep stall no longer reproduces.**
+0.7.0 ships three changes squarely in the space this entry has been chasing: `table-column-window-rotation`'s fast
+path ("horizontal scrolling now touches only the columns entering or leaving the visible window, instead of
+re-deriving every rendered column's cell assignment on every tick"), `row-cell-cache` (a narrowed table caches
+displaced cells instead of disposing/rebuilding them), and the CSS-hoisting work's own class-tier dedup, which
+should shrink the shared stylesheet the DOMSize-scaling hypothesis implicated. Re-ran the identical
+`wide.cols_60`, 1500×800, real-`WheelEvent`, direction-reversing protocol this entry's own numbers came from (a
+fixed 16ms-paced dispatch cadence, not `requestAnimationFrame`-paced, for the same reason the
+`smooth-scroller-confound` footnote above already ruled that pacing method out): a 4-leg/80-event burst measured a
+worst single frame gap of **83 ms**, zero gaps over 100 ms; a harsher 6-leg/150-event burst run immediately after
+on the same page (no reload, to probe the entry's own still-open "session accumulation" question, at least across
+two back-to-back bursts rather than a single fresh one) measured a worst gap of **133 ms**, 7 frames over 100 ms,
+zero over 500 ms — against the pre-fix baseline's 5–75 s wall-clock and gaps up to 14.5 s under the same protocol.
+A Chrome performance trace taken during a third identical burst found `getComputedStyle` calls still at zero (the
+already-fixed forced-reflow mechanism stays fixed) and, this time, **no `DOMSize` insight at all** — the insight
+that dominated every prior post-forced-reflow-fix trace in this entry is simply absent; the only `ForcedReflow`
+attribution left is the same already-known-negligible `getScrollLeft` cost this entry documented before (1,257 ms
+across the whole ~11 s trace, Chrome's own "estimated savings: none").
+
+**Not a full re-run of this entry's own protocol** — two escalating bursts back-to-back is not the "genuine
+multi-minute session accumulation" the Status paragraph above says was never tested, so that specific question
+is still technically open. But the mechanism this entry ultimately traced the stall to (style-recalculation cost
+scaling with page size) no longer shows up in a trace at all under the same repro that reliably surfaced it
+before, which is a materially different result from every earlier "still stalls, mechanism confirmed" update in
+this entry. Worth a final confirmation pass against the tagged 0.7.0 release (not just the symlinked build) before
+closing this entry outright.
+
+**Correction to the above, same day: the "no `DOMSize` insight at all" result was a viewport-size false negative,
+not a fix.** The prior re-measurement ran at this entry's original 1500×800 (~7,700–8,100 total DOM elements). Retried
+at a maximized 5120×1932 window (this machine's real display, ~17,300–19,750 total elements depending on scroll
+position — the same table renders far more columns and rows simultaneously) and the `DOMSize` insight **reappears**,
+with the same signature as every pre-0.7.0 trace in this entry: 35 style-recalculation passes in one burst, 90–144 ms
+each, each touching **12,462–14,094 of 19,752 total elements** — 63–71% of the entire page restyling per pass, the
+same "essentially the whole page restyles on every recalculation, not just the handful of cells that actually
+changed" shape this entry described at 0.4.1, scaled proportionally with the bigger DOM (pre-0.7.0 at the smaller
+viewport: 5,470–6,038 of 9,318, 59–65%). `getComputedStyle` stayed at zero and `ForcedReflow` stayed
+`getScrollLeft`-only (2,072 ms across the burst, "estimated savings: none") — unchanged from before. **So the
+underlying mechanism is not fixed; 0.7.0 just moved the DOM-size threshold at which it becomes visible, and the
+1500×800 test sat under that threshold.**
+
+That said, **severity is genuinely, reproducibly better, not merely hidden.** Four runs of the identical 4-leg/
+80-event reversing-`WheelEvent` burst at the maximized size (two horizontal, two vertical, same page, no reload)
+never produced a gap anywhere near the pre-0.7.0 5–75 s stalls: worst horizontal frame gap across the four runs was
+**433–533 ms** (one run barely crossed 500 ms once), average **91–95 ms**, with roughly **30% of frames over
+100 ms** — real, user-noticeable jank on a big monitor, but bounded, not a multi-second freeze.
+
+**The sharpest new lead: horizontal and vertical scrolling are not equally affected at the same DOM size, which
+narrows the mechanism further than this entry ever managed to.** The identical burst protocol dispatched as
+vertical (`deltaY`) scrolling instead, on the same page, same element count, same trace: worst frame gap
+**150–167 ms**, average **27–31 ms**, only **~4% of frames over 100 ms** — three to four times smoother than
+horizontal by every measure, with nothing to suggest row-scrolling's own cell-recycling path (`row-cell-cache`,
+new in 0.7.0) triggers a comparable whole-page style recalc. Column-window reconciliation does something vertical
+row-window reconciliation does not — plausibly a class-tier or shared-rule write on the column-window slide path
+that invalidates a selector matched far outside the table (the same "read-all-then-write-all cannot fix it, a
+render pass writes rules before it can read" shape the 0.4.0 entry above already worked through), where the row
+path's equivalent write is scoped more narrowly. Not root-caused past this point — would need the same kind of
+live `DOM.sink.setRuleStyles`/style-write instrumentation this entry used earlier, scoped to compare the two paths
+directly, which no session has done yet.
+
+**Status: revise "fixed" to "improved, mechanism unchanged, now better localized."** Worth a final pass against the
+tagged 0.7.0 release, and the horizontal-vs-vertical asymmetry above is a concrete enough lead that the library's
+own next investigation should start there rather than re-deriving DOM-size-scaling from scratch again.
+
 ---
 
-## 🐞🩹🔎 A numeric `fontSize` passed to `Text`'s constructor is silently ignored
+## 🐞✅ A numeric `fontSize` passed to `Text`'s constructor is silently ignored
 
 `new Text("v0.1.0", { fontSize: 10 })` renders at the theme default (14px), not
 10px. Other `Text` options passed the same way (e.g. `fontWeight`) apply
@@ -695,11 +758,18 @@ prefers `_fontSizeCSSRule` when non-null, reverting to 14px. The setter path has
 no such problem: `text.setFontSize(10)` *after* construction runs once the
 initializers are already done, so nothing restores the var afterward.
 
-Worked around in `AppHeader` by calling `version.setFontSize(VERSION_FONT_SIZE)`
-after construction instead of passing `fontSize` in the constructor options.
-The library fix is to have the field initializers not clobber an explicitly-set
-numeric size — e.g. seed the var binding only when no `fontSize` option was
-supplied, or move the restore ahead of the option cascade.
+Previously worked around in `AppHeader` by calling
+`version.setFontSize(VERSION_FONT_SIZE)` after construction instead of passing
+`fontSize` in the constructor options.
+
+**Fixed in the library, 0.7.0.** The changelog's Fixed/Components entry
+("A construction-time `fontSize`/`lineHeight` option on `Text` … was silently
+ignored in the rendered CSS") matches this cause exactly, and also names
+`PickerColumn`'s date/time column headers and `AbstractCalendarDropdown`'s
+header cells as library-internal call sites that rendered at the wrong size
+for the same reason. Adopted here: `AppHeader.ts`'s workaround is reverted —
+`version` is now constructed with `{ fontSize: VERSION_FONT_SIZE }` directly,
+verified against the symlinked 0.7.0 build.
 
 ---
 

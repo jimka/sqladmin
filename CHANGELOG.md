@@ -4,6 +4,35 @@ All notable changes to SQLAdmin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-08-22
+
+### Changed
+- **Selecting and copying values in any data grid — query results, table
+  data, the Structure/Sequence/Index panels, and the sidebar
+  Properties/Roles inspectors — now works as a rectangular cell-range
+  selection instead of browser text selection.** Click-drag selects whole
+  cells; Ctrl/Cmd+C, or a cell's right-click Copy entry, copies the
+  selected range as tab-separated columns and newline-separated rows.
+  Selecting a substring of one cell's text (e.g. part of a long value) is
+  no longer possible — only whole cells.
+- **Table/Structure/Sequence link references** (the owning-table link in
+  Index details, "owned by" in Sequence details) **are now selectable
+  text, not just clickable** — drag to select and copy the referenced
+  name without navigating to it.
+- **Dialog and notification message text is now selectable and
+  copyable**, including confirmation prompts and error messages — useful
+  for grabbing the exact wording of a database error to search or report.
+
+### Fixed
+- **Pressing Enter in the "Save preset" name prompt (opened from the
+  login screen) no longer also submits the login form behind it.** The
+  two dialogs were stacked, and Enter previously reached both.
+
+### Internal
+- Migrated to `@jimka/typescript-ui` 0.7.0.
+- Reverted `AppHeader.ts`'s `fontSize`-after-construction workaround now
+  that the library's underlying `Text` constructor bug is fixed.
+
 ## [0.6.0] — 2026-08-16
 
 ### Added
@@ -206,9 +235,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 First public release: browse schemas and roles, edit rows, run and EXPLAIN SQL,
 and visualize schema and role relationships as diagrams.
 
+[0.7.0]: https://github.com/jimka/sqladmin/releases/tag/v0.7.0
 [0.6.0]: https://github.com/jimka/sqladmin/releases/tag/v0.6.0
 [0.5.0]: https://github.com/jimka/sqladmin/releases/tag/v0.5.0
 [0.4.0]: https://github.com/jimka/sqladmin/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jimka/sqladmin/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jimka/sqladmin/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jimka/sqladmin/releases/tag/v0.1.0
+
