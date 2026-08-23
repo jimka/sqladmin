@@ -7,6 +7,7 @@
 // by the host in a separate error dialog, not inline here.
 
 import { Form, callable } from "@jimka/typescript-ui/core";
+import type { Component }  from "@jimka/typescript-ui/core";
 import { VBox }            from "@jimka/typescript-ui/layout";
 import { LabeledFieldSet } from "@jimka/typescript-ui/component/container";
 import { PasswordField, TextField, UsernameField } from "@jimka/typescript-ui/component/input";
@@ -76,11 +77,27 @@ class LoginForm extends Form {
         if (details.password !== undefined) this.password.setText(details.password);
     }
 
-    /** Fill the connection fields from a preset (credentials are left untouched). */
+    /** Fill the connection fields from a preset, including the saved username
+     *  (the password is always left untouched — a preset never stores one). */
     applyPreset(preset: ConnectionPreset): void {
         this.host.setText(preset.host);
         this.port.setText(String(preset.port));
         this.database.setText(preset.database);
+        this.username.setText(preset.username);
+    }
+
+    /**
+     * The field that should take focus: `host`, with no preset applied — or,
+     * for an applied preset, the first of database/username/password it
+     * leaves blank (password when the preset fills all three, since a
+     * password is never stored and always needs (re-)entering).
+     */
+    focusTarget(preset: ConnectionPreset | null): Component {
+        if (!preset) return this.host;
+        if (!preset.database.trim()) return this.database;
+        if (!preset.username.trim()) return this.username;
+
+        return this.password;
     }
 }
 

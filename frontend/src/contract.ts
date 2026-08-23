@@ -556,14 +556,30 @@ export interface RelationEdge {
 }
 
 /**
- * A named connection target picked at login. Carries host/port/database ONLY —
- * never a username or password (credentials are per-login, handled by the
- * browser's own password manager). Shared by server presets (from the pre-auth
- * `/api/config`) and the user's own localStorage presets.
+ * A named connection target picked at login. Carries host/port/database and
+ * the username to sign in as — never a password (always a per-login field,
+ * handled by the browser's own password manager). `isDefault` marks the one
+ * preset that should be pre-selected when the login dialog opens; at most one
+ * is default per source. Shared by server presets (from the pre-auth
+ * `/api/config`) and the user's own localStorage presets — but the backend's
+ * `ServerPreset` never carries a `username` (that endpoint is unauthenticated
+ * and deliberately credential-free), so a server preset's `username` always
+ * normalizes to `""`. Use {@link normalizeConnectionPreset} on any preset read
+ * from an external source (server JSON, an old localStorage blob) that may
+ * predate these fields.
  */
 export interface ConnectionPreset {
     name: string;
     host: string;
     port: number;
     database: string;
+    username: string;
+    isDefault?: boolean;
+}
+
+/** Backfills `username`/`isDefault` on a preset from a source that may predate
+ *  them (server JSON, an old localStorage blob) so callers can treat every
+ *  `ConnectionPreset` field as always present. */
+export function normalizeConnectionPreset(preset: ConnectionPreset): ConnectionPreset {
+    return { ...preset, username: preset.username ?? "", isDefault: preset.isDefault ?? false };
 }

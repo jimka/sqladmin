@@ -1,12 +1,14 @@
 // A thin domain wrapper over the library's WebStorageProxy for the user's own
-// connection presets. Persists { name, host, port, database } ONLY — never any
-// credential (those stay per-login, handled by the browser's own password
-// manager). Backed by web storage under a single `sqladmin.*` key so the
-// shell's "Clear SQLAdmin data" and the localStorage inspector cover it for
-// free. The proxy owns the normal read/write path; the raw Storage is touched
-// only to discard a corrupt blob so a write can recover (see `_withRepair`).
+// connection presets. Persists { name, host, port, database, username,
+// isDefault } — never a password (that stays per-login, handled by the
+// browser's own password manager). Backed by web storage under a single
+// `sqladmin.*` key so the shell's "Clear SQLAdmin data" and the localStorage
+// inspector cover it for free. The proxy owns the normal read/write path; the
+// raw Storage is touched only to discard a corrupt blob so a write can
+// recover (see `_withRepair`).
 
 import { Model, ModelRecord, WebStorageProxy } from "@jimka/typescript-ui/data";
+import { normalizeConnectionPreset } from "../contract";
 import type { ConnectionPreset } from "../contract";
 
 /** Web-storage key holding the preset array (flat — presets predate any connection). */
@@ -14,7 +16,10 @@ const PRESETS_KEY = "sqladmin.presets";
 
 /** The preset record schema; primary key `name` drives upsert/remove matching. */
 const PRESET_MODEL = new Model(
-    [{ name: "name" }, { name: "host" }, { name: "port" }, { name: "database" }],
+    [
+        { name: "name" }, { name: "host" }, { name: "port" }, { name: "database" },
+        { name: "username" }, { name: "isDefault" },
+    ],
     "name",
 );
 
@@ -71,10 +76,37 @@ export class PresetStore {
         });
     }
 
-    /** Read guarded against a corrupt blob's synchronous `JSON.parse` throw. */
+    /**
+     * Marks the named preset as the default, clearing the flag on every other
+     * one — at most one preset is default at a time. Pass `null` to clear the
+     * current default without setting a new one. A no-op (past discarding a
+     * corrupt blob) when a non-null `name` matches no stored preset.
+     */
+    async setDefault(name: string | null): Promise<void> {
+        await this._withRepair(async () => {
+            const rows = await this._readSafe();
+
+            if (name !== null && !rows.some(r => r.name === name)) {
+                return;
+            }
+
+            for (const row of rows) {
+                const shouldBeDefault = row.name === name;
+
+                if (Boolean(row.isDefault) !== shouldBeDefault) {
+                    await this._proxy.update(new ModelRecord(PRESET_MODEL, { ...row, isDefault: shouldBeDefault }));
+                }
+            }
+        });
+    }
+
+    /** Read guarded against a corrupt blob's synchronous `JSON.parse` throw,
+     *  normalizing each row so callers never see a preset predating a field. */
     private async _readSafe(): Promise<ConnectionPreset[]> {
         try {
-            return (await this._proxy.read()) as ConnectionPreset[];
+            const rows = (await this._proxy.read()) as ConnectionPreset[];
+
+            return rows.map(normalizeConnectionPreset);
         } catch {
             return [];
         }

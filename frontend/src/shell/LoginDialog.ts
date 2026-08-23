@@ -11,7 +11,10 @@
 // spinner overlay while `login()` runs, and on failure shows an error dialog and
 // then re-prompts with the previously-entered values restored. Presets live
 // OUTSIDE the <form> (a <button>/combo inside a <form> would submit it) and carry
-// host/port/database only — credentials stay per-login fields the browser fills.
+// host/port/database/username — the password stays a per-login field the
+// browser fills. Preset entries are loaded (`LoginDialog.create`) before the
+// dialog is constructed, so a default preset — and the field it should focus —
+// is settled before the dialog's first paint rather than raced against it.
 
 import { Body, Panel }               from "@jimka/typescript-ui/core";
 import { Dialog, Notification }      from "@jimka/typescript-ui/overlay";
@@ -25,6 +28,7 @@ import { right_to_bracket }          from "@jimka/typescript-ui/glyphs/solid/rig
 import { getConfig, login }          from "../data/api";
 import type { AppConfig, LoginDetails, Session } from "../data/api";
 import { PresetStore }               from "../data/presetStore";
+import { normalizeConnectionPreset } from "../contract";
 import type { ConnectionPreset }     from "../contract";
 import { promptQueryName }           from "../promptQueryName";
 import { LoginForm }                 from "./LoginForm";
@@ -63,29 +67,61 @@ class LoginDialog {
     private readonly picker: ComboBox;
     private readonly dialog: Dialog;
     private readonly byKey = new Map<string, PresetEntry>();
+    private defaultBtn?: Button;
 
-    constructor(
+    private constructor(
         private readonly config: AppConfig,
         private readonly store:  PresetStore,
         seed: LoginSeed,
+        entries: PresetEntry[],
     ) {
         if (seed.details) this.form.setDetails(seed.details);
 
         this.picker = new ComboBox({ items: [BLANK_ITEM] });
         this.picker.on("change", (key: string) => this.onPresetSelected(key));
 
+        const content = this.buildContent();
+
+        this.setEntries(entries);
+
+        // Auto-select the default preset on a fresh open only — a reopen
+        // after a failed attempt restores the previously entered values
+        // instead (`seed`), which takes priority over any default.
+        const defaultKey   = seed.details ? undefined : this.findDefaultKey();
+        const defaultEntry = defaultKey !== undefined ? this.byKey.get(defaultKey) : undefined;
+
+        if (defaultKey !== undefined && defaultEntry) {
+            this.picker.setValue(defaultKey);
+            this.form.applyPreset(defaultEntry.preset);
+        }
+
+        this.updateDefaultButton();
+
         this.dialog = new Dialog({
             title:            "Connect to database",
-            contentComponent: this.buildContent(),
+            contentComponent: content,
             buttons:          [{ text: "Sign in", result: "confirm", glyph: "right-to-bracket", primary: true }],
             dismissable:      false,
             width:            DIALOG_WIDTH,
+            // Host by default; the default preset's first unfilled field when
+            // one was just auto-selected above. Set once, at construction —
+            // `Dialog` reads `initialFocus` only from its own open-time
+            // `focusFirst()`, so this must be settled before the dialog opens.
+            initialFocus:     this.form.focusTarget(defaultEntry?.preset ?? null),
         });
+    }
+
+    /**
+     * Build a dialog with its preset entries already loaded from server config
+     * and (if allowed) the user's own store, so a default preset — and the
+     * field it should focus — is known before the dialog is constructed.
+     */
+    static async create(config: AppConfig, store: PresetStore, seed: LoginSeed): Promise<LoginDialog> {
+        return new LoginDialog(config, store, seed, await LoginDialog.loadEntries(config, store));
     }
 
     /** Show the dialog; resolves with the entered details once the user confirms. */
     async prompt(): Promise<LoginDetails> {
-        void this.refreshPresets();
         await this.dialog.show(); // dismissable:false -> resolves only via Sign in / Enter
 
         return this.form.getDetails();
@@ -96,14 +132,18 @@ class LoginDialog {
         const presetRows: LabeledRowDescriptor[] = [[{ title: "Preset", component: this.picker }]];
 
         if (this.config.allowUserPresets) {
-            const save   = new Button({ text: "Save preset", compact: true });
-            const remove = new Button({ text: "Delete preset", compact: true });
+            const save          = new Button({ text: "Save preset", compact: true });
+            const remove        = new Button({ text: "Delete preset", compact: true });
+            const toggleDefault = new Button({ text: "Set default", compact: true });
 
-            save.on("action", () => void this.savePreset());
-            remove.on("action", () => void this.deleteSelectedPreset());
+            save.on("action",          () => void this.savePreset());
+            remove.on("action",        () => void this.deleteSelectedPreset());
+            toggleDefault.on("action", () => void this.toggleDefaultForSelected());
+
+            this.defaultBtn = toggleDefault;
 
             presetRows.push({
-                component: new Panel({ layoutManager: HBox(), components: [save, remove] }),
+                component: new Panel({ layoutManager: HBox(), components: [save, remove, toggleDefault] }),
                 fullWidth: true,
             });
         }
@@ -122,17 +162,24 @@ class LoginDialog {
 
         if (entry) {
             this.form.applyPreset(entry.preset);
+            this.form.focusTarget(entry.preset).focus();
         }
+
+        this.updateDefaultButton();
     }
 
-    private async refreshPresets(): Promise<void> {
-        const userPresets = this.config.allowUserPresets ? await this.store.list() : [];
+    /** Preset entries from server config and (if allowed) the user's own store. */
+    private static async loadEntries(config: AppConfig, store: PresetStore): Promise<PresetEntry[]> {
+        const userPresets = config.allowUserPresets ? await store.list() : [];
 
-        const entries: PresetEntry[] = [
-            ...this.config.presets.map(p => ({ preset: p, origin: "server" as const })),
+        return [
+            ...config.presets.map(p => ({ preset: normalizeConnectionPreset(p), origin: "server" as const })),
             ...userPresets.map(p => ({ preset: p, origin: "user" as const })),
         ];
+    }
 
+    /** Populate `byKey` and the picker's items from a freshly loaded entry list. */
+    private setEntries(entries: PresetEntry[]): void {
         this.byKey.clear();
         entries.forEach((entry, i) => this.byKey.set(String(i), entry));
 
@@ -142,27 +189,47 @@ class LoginDialog {
         ]);
     }
 
+    /** The key of the first entry (server presets take precedence) flagged `isDefault`. */
+    private findDefaultKey(): string | undefined {
+        for (const [key, entry] of this.byKey) {
+            if (entry.preset.isDefault) return key;
+        }
+
+        return undefined;
+    }
+
+    private async refreshPresets(): Promise<void> {
+        this.setEntries(await LoginDialog.loadEntries(this.config, this.store));
+    }
+
     private async savePreset(): Promise<void> {
-        const name = await promptQueryName("");
+        const name = await promptQueryName("", { title: "Save preset", placeholder: "Preset name" });
 
         if (!name) {
             return;
         }
 
-        const { host, port, database } = this.form.getDetails();
+        const { host, port, database, username } = this.form.getDetails();
 
-        await this.store.save({ name, host, port, database });
+        // Resaving an existing default preset under its own name keeps it
+        // default; saving under any other name never claims default on its own.
+        const wasDefault = [...this.byKey.values()]
+            .some(e => e.origin === "user" && e.preset.name === name && e.preset.isDefault === true);
+
+        await this.store.save({ name, host, port, database, username, isDefault: wasDefault });
         await this.refreshPresets();
 
         // Select the just-saved preset so the picker reflects what was stored.
         this.selectUserPreset(name);
     }
 
-    /** Select the user preset with the given name in the picker, if present. */
+    /** Select the user preset with the given name in the picker, if present,
+     *  and sync the default-toggle button to its state. */
     private selectUserPreset(name: string): void {
         for (const [key, entry] of this.byKey) {
             if (entry.origin === "user" && entry.preset.name === name) {
                 this.picker.setValue(key);
+                this.updateDefaultButton();
 
                 return;
             }
@@ -176,6 +243,32 @@ class LoginDialog {
             await this.store.remove(entry.preset.name);
             await this.refreshPresets();
         }
+    }
+
+    /** Toggle default status of the selected preset. User presets only —
+     *  server presets are env-config-defined and not editable from this UI. */
+    private async toggleDefaultForSelected(): Promise<void> {
+        const entry = this.byKey.get(this.picker.getValue());
+
+        if (!entry || entry.origin !== "user") {
+            return;
+        }
+
+        await this.store.setDefault(entry.preset.isDefault ? null : entry.preset.name);
+        await this.refreshPresets();
+        this.selectUserPreset(entry.preset.name);
+    }
+
+    /** Sync the "Set default" button's label and enabled state to the current selection. */
+    private updateDefaultButton(): void {
+        if (!this.defaultBtn) {
+            return;
+        }
+
+        const entry = this.byKey.get(this.picker.getValue());
+
+        this.defaultBtn.setEnabled(entry?.origin === "user");
+        this.defaultBtn.setText(entry?.preset.isDefault ? "Unset default" : "Set default");
     }
 }
 
@@ -202,7 +295,8 @@ export async function showLoginDialog(): Promise<Session> {
     let seed: LoginSeed = {};
 
     for (;;) {
-        const details = await new LoginDialog(config, store, seed).prompt();
+        const dialog  = await LoginDialog.create(config, store, seed);
+        const details = await dialog.prompt();
 
         try {
             const session = await withSpinner(() => login(details));

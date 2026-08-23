@@ -18,7 +18,7 @@ function makeStorage(): Storage {
 }
 
 const preset = (name: string, over: Partial<ConnectionPreset> = {}): ConnectionPreset =>
-    ({ name, host: "db.host", port: 5432, database: "app", ...over });
+    ({ name, host: "db.host", port: 5432, database: "app", username: "", isDefault: false, ...over });
 
 const KEY = "sqladmin.presets";
 
@@ -71,15 +71,59 @@ describe("PresetStore", () => {
         expect((await new PresetStore().list()).map(p => p.name)).toEqual(["Keep"]);
     });
 
-    it("never persists a credential field in the stored blob", async () => {
+    it("never persists a password field in the stored blob", async () => {
         await new PresetStore().save(preset("Prod"));
 
         const blob = localStorage.getItem(KEY)!;
         expect(blob).not.toContain("password");
-        expect(blob).not.toContain("username");
 
         const stored = JSON.parse(blob)[0];
         expect(stored).toMatchObject({ name: "Prod", host: "db.host", port: 5432, database: "app" });
+    });
+
+    it("saves and lists back the username", async () => {
+        const store = new PresetStore();
+        await store.save(preset("Prod", { username: "alice" }));
+
+        expect(await store.list()).toEqual([preset("Prod", { username: "alice" })]);
+    });
+
+    it("backfills username/isDefault on a preset stored before those fields existed", async () => {
+        localStorage.setItem(KEY, JSON.stringify([{ name: "Legacy", host: "db.host", port: 5432, database: "app" }]));
+
+        expect(await new PresetStore().list()).toEqual([preset("Legacy")]);
+    });
+
+    describe("setDefault", () => {
+        it("marks the named preset default and clears any other preset's default flag", async () => {
+            const store = new PresetStore();
+            await store.save(preset("A", { isDefault: true }));
+            await store.save(preset("B"));
+
+            await store.setDefault("B");
+
+            const all = await store.list();
+            expect(all.find(p => p.name === "A")?.isDefault).toBe(false);
+            expect(all.find(p => p.name === "B")?.isDefault).toBe(true);
+        });
+
+        it("clears the current default when passed null", async () => {
+            const store = new PresetStore();
+            await store.save(preset("A", { isDefault: true }));
+
+            await store.setDefault(null);
+
+            expect((await store.list())[0].isDefault).toBe(false);
+        });
+
+        it("no-ops when name matches nothing", async () => {
+            const store = new PresetStore();
+            await store.save(preset("A", { isDefault: true }));
+
+            await store.setDefault("nope");
+
+            expect((await store.list())[0].isDefault).toBe(true);
+        });
     });
 
     it("returns [] on a corrupt blob instead of throwing", async () => {
