@@ -740,6 +740,230 @@ directly, which no session has done yet.
 tagged 0.7.0 release, and the horizontal-vs-vertical asymmetry above is a concrete enough lead that the library's
 own next investigation should start there rather than re-deriving DOM-size-scaling from scratch again.
 
+**Re-measured against the local `column-window-edge-stability` fix (symlinked, not yet released) — real
+improvement on both figures this entry's own 0.7.0 update named as the next lead, though the underlying
+DOM-size-scaling mechanism is still not root-caused.** Same `wide.cols_60`, maximized (5120×1932, ~18,750 total
+elements — in range of the prior entry's 19,750), same 4-leg/80-event direction-reversing `WheelEvent` burst
+protocol (fixed 16ms-paced dispatch). A first instrumented pass (trace running) measured horizontal worst frame
+gap **416.6 ms**, average **76.4 ms**, **26.6%** of frames over 100 ms — already inside the pre-fix range
+(433–533 ms / 91–95 ms / ~30%), and its Chrome trace's `DOMSize` insight found only **one** style-recalculation
+pass over the whole burst, 46 ms, touching **2,738 of 18,750 elements (14.6%)** — down sharply from the pre-fix
+63–71%. A second pair of untraced runs (horizontal then vertical, same page, no reload) sharpened the picture:
+horizontal worst **200.1 ms**, average **53.2 ms**, **18.3%** over 100 ms; vertical worst **116.7 ms**, average
+**34.0 ms**, **0.9%** over 100 ms — horizontal has moved noticeably toward vertical's numbers, which is exactly
+what this plan targeted, though a real gap between the two remains and an isolated anomalous vertical run (worst
+350.1 ms) during the traced pass is a reminder this environment's numbers carry real run-to-run noise. Neither the
+traced horizontal-2 nor the vertical run surfaced a `DOMSize` insight at all (below Chrome's significance
+threshold), consistent with fewer/smaller whole-page restyle passes than before.
+
+**Not independently re-verified live: the exact-pixel edge-flush and header/body-alignment claims in this plan's
+own manual-verification checklist.** Synthetic `WheelEvent`/`PointerEvent` dispatch in this session could not be
+made to reliably drive the custom horizontal scrollbar to its exact extremes (repeated large-magnitude bursts in
+both directions left the rendered column window pinned at its already-computed edge window with no observed
+change, and a simulated thumb drag had no effect at all) — likely a sign-convention or trusted-event mismatch
+with `VirtualScroller`'s own gesture handling rather than a product defect, but not tracked down further here.
+Relying instead on the plan's own unit coverage for those specific invariants (`Body.test.ts`'s
+`firstCol`/`lastCol` bounds checks at extreme `scrollX`, and the geometry-after-slide cases), which all pass and
+whose reasoning — every window slot still maps to a real column, so `bindAndPositionRows`'s existing accumulation
+is unaffected — was not itself in question; only a fresh live pixel measurement of it is missing. Worth a repeat
+attempt with real (non-synthetic) input if this entry gets picked up again.
+
+**Re-measured against the combined `column-window-edge-stability` + `header-column-window-rotation` stack
+(symlinked at `.worktrees/header-column-window-rotation`, `dist/lib` rebuilt fresh, not yet released), 2026-08-23 —
+numbers moved the wrong direction from the edge-stability-alone entry above, though same-session vertical noise
+makes a clean regression verdict unsafe.** Same `wide.cols_60`, maximized 5120×1932 (17,600–19,200 total elements
+across runs, in range of prior maximized-viewport traces), same 4-leg/80-event direction-reversing `WheelEvent`
+burst protocol (fixed 16ms-paced dispatch). First, a process pitfall that cost the first measurement attempt
+entirely: this session's long-running dev server had survived several prior `dist/lib` rebuilds across earlier
+work on this same stack, and a first traced run was still executing a stale `DOM-Cjh7_7TF.js`/`Component-D99-15Zt.js`
+pair — confirmed by cross-checking the running module's resource URL against the freshly built `dist/lib`'s actual
+chunk hashes, `DOM-Duqyqa3h.js`/`Component-CBqLXFCF.js` — despite the symlink and the rebuild both being correct.
+That run's numbers (a 16–18 second dispatch for a nominally ~1.3 second burst) are discarded outright. Killing both
+stray `vite` processes bound to :5173/:5174 and starting one fresh instance fixed it, confirmed by the served chunk
+hashes matching the fresh build before re-measuring. Worth carrying forward: a symlinked-lib re-verify against a
+dev server that has survived several rebuilds needs a server restart, not just a page reload, to be trusted.
+
+**Untraced pair (horizontal then vertical, same page, no reload; run twice each for reproducibility, since this
+entry's own baselines only had single-trial numbers to compare against).** Horizontal worst **216.7–250 ms**,
+average **88.2–94.9 ms**, **32.7–34.6%** of frames over 100 ms. Vertical worst **150.0–166.7 ms**, average
+**44.6–45.0 ms**, **4.6–5.0%** over 100 ms. Both axes reproduced tightly across their two trials.
+
+**Traced runs ran substantially worse than untraced ones this session, and getting a usable `DOMSize` insight out
+of one proved unexpectedly hard.** Five direct start-trace/dispatch/stop-trace attempts (worst gaps 300–433 ms,
+averages 128–156 ms, 57–84% of frames over 100 ms — every one worse than either untraced trial) came back with
+**no insights in any category**, despite the frame-gap numbers clearly showing a problem. Each trace's own reported
+bounds spanned 16–18 seconds against a ~5 second dispatch-plus-settle window; the unaccounted ~12 seconds is almost
+certainly dead time from this session's own tool-call round-trips between issuing `performance_start_trace`,
+`evaluate_script`, and `performance_stop_trace`, which dilutes the burst's share of an otherwise-idle trace below
+whatever threshold Chrome's insight engine uses to decide something is worth surfacing — a session-specific
+measurement limitation, not evidence the mechanism is gone (the frame-gap numbers say otherwise). Worked around by
+moving the whole burst into a page `initScript` that self-triggers ~2 s after `load`, combined with a trace started
+before the reload — no manual round trip between trace-start and dispatch. That run did surface both insights.
+`ForcedReflow` stayed negligible (**197 ms** total, only **17 ms** of it `getScrollLeft` — consistent with every
+prior measurement in this entry). `DOMSize` did not: **171 ms touching 17,793 elements** (against this trace's own
+17,621-element total — DOM size drifted slightly between snapshots, so read this as touching essentially the whole
+page), **114 ms touching 12,853 elements**, and **106 ms touching 1,548 elements**, plus a separate **72 ms** layout
+pass touching 21,584 of 22,844 total *nodes* (a node count that includes text nodes, so not directly comparable to
+the element counts above, but the same story: nearly the whole tree). That is multiple passes touching roughly
+**73–100%** of the page — much closer to the pre-fix baseline's 63–71% than to edge-stability-alone's single
+14.6%-touched pass. This same run's frame gaps were the worst of the session (worst **1,583.3 ms**, average
+**244.4 ms**, **78.8%** over 100 ms), but it ran immediately after a fresh reload, so some of that is plausibly
+first-paint/cold-cache cost the other five, warm-page traced attempts didn't carry — and it is the only run mixing
+page-load activity into the same trace as the burst, so its `DOMSize` figures are not as cleanly burst-only as the
+isolated-page traces earlier in this entry.
+
+**Against both baselines: worst-case single-frame gap stayed roughly bounded (the 1,583 ms cold-start run aside,
+everything else sits in the same 200–430 ms band both prior measurements found), but every other metric drifted
+back toward the pre-fix numbers rather than past edge-stability-alone's.** Untraced horizontal's average
+(88.2–94.9 ms) sits almost exactly on the *original pre-fix* baseline's 91–95 ms, not edge-stability-alone's
+53.2 ms; its 32.7–34.6% over 100 ms is if anything slightly above pre-fix's ~30%, not below edge-stability-alone's
+18.3%. Vertical softened the same way relative to edge-stability-alone's own vertical run (worst 116.7 ms, average
+34.0 ms, 0.9% over 100 ms) — this session's 150.0–166.7 ms / 44.6–45.0 ms / 4.6–5.0% land almost exactly on the
+*pre-fix* vertical baseline instead. Because vertical scrolling isn't touched by either the edge-stability or
+header-rotation fix, and it degraded by roughly the same proportion as horizontal did relative to the
+edge-stability-alone entry, at least part of this is elevated session noise rather than something specific to the
+header fix — the horizontal-vs-vertical asymmetry this entry has tracked throughout is still clearly present
+(worst/average/percent-over-100ms all 2–5× higher on horizontal than vertical here, matching every prior
+measurement). But the `DOMSize` insight's affected-element percentage reverting most of the way from
+edge-stability-alone's 14.6% back up to ~73–100% is a larger, more specific shift than session noise alone
+comfortably explains, and it is exactly the mechanism this entry has chased since 0.7.0. **Net: this session's data
+does not show the header fix improving on edge-stability-alone, and on the `DOMSize` metric specifically it looks
+worse — but with only one session's readings, elevated same-session noise on the unrelated vertical axis, and a
+`DOMSize` sample that mixes page-load and burst activity, this is not strong enough evidence to call it a confirmed
+regression either.** Needs a repeat pass in a fresh, dedicated session (clean dev server, no prior tracing attempts
+against the same page) before concluding anything about the header fix's actual effect on top of edge-stability.
+
+**The requested repeat pass, run clean (machine otherwise idle, fresh `vite` kill-and-restart per version, served
+chunk hashes verified against each version's `dist/lib` before measuring), covering v0.6.0, v0.7.0, and the combined
+stack side by side with the identical protocol.** `DOM-C-Edb3tA.js`/`Component-B0ShfPVi.js` for v0.6.0,
+`DOM-Cjh7_7TF.js`/`Component-D99-15Zt.js` for v0.7.0, `DOM-Duqyqa3h.js`/`Component-CBqLXFCF.js` for the combined
+stack — all confirmed served before any measurement in that version's block. Same `wide.cols_60`, maximized
+5120×1932, same 4-leg/80-event direction-reversing `WheelEvent` burst (fixed 16ms-paced dispatch), untraced pair run
+twice per axis, one traced horizontal run per version via a page `initScript` that self-triggers ~2s after `load`
+(trace started before the reload, same workaround the noisy session used, and this time the trace bounds stayed
+tight to the actual burst window for v0.7.0 and the combined stack — v0.6.0's trace ran needlessly long due to this
+session's own wait-timing overhead, but the insight data came through fine regardless).
+
+**v0.6.0, never before measured against this entry's current standardized protocol, cleanly reproduces the old
+multi-second-stall era.** Horizontal: run 1 took **27.5 s** to dispatch a nominal ~1.3 s burst, worst gap
+**1,666.5 ms**, average **254.8 ms**, **40.9%** of frames over 100 ms; run 2, **34.4 s** dispatch, worst
+**1,700 ms**, average **298.4 ms**, **43.6%** over 100 ms. Vertical was unaffected both times: **~2.5 s** dispatch
+(near-nominal), worst **133–150 ms**, average **~39.5 ms**, **2.6–5.3%** over 100 ms — the horizontal/vertical
+asymmetry this entry has tracked since the 0.7.0 update is already present a full baseline earlier than this entry
+had previously measured it.
+
+**v0.7.0 reproduces its own prior entry closely, confirming that measurement was not a fluke.** Horizontal: worst
+**400.1 ms** then **350 ms**, average **111.2–119.5 ms**, **36.8–39.5%** over 100 ms across the two runs — matching
+the prior 0.7.0 update's 433–533 ms / 91–95 ms / ~30% band within normal session-to-session variation (this run's
+worst gaps are a little better, its averages a little worse). Vertical: worst **150 ms** both times, average
+**41.5–42.4 ms**, **4.2–4.4%** over 100 ms — matching the prior entry's 150–167 ms / 27–31 ms / ~4% almost exactly.
+
+**`DOMSize` traces for v0.6.0 and v0.7.0 are close enough to be the same mechanism at the same scale — new, direct
+confirmation of this entry's own "0.7.0 moved the threshold, didn't fix the mechanism" conclusion.** v0.6.0 (16,678
+total elements): three style-recalculation passes at 102 ms/1,548 elements, 166 ms/16,924 elements (101% — DOM size
+drifted slightly mid-trace), 124 ms/12,273 elements, plus a 49 ms layout pass touching 20,426 of 21,586 nodes. v0.7.0
+(16,751 total elements): 104 ms/1,548 elements, 144 ms/16,923 elements, 101 ms/12,271 elements, 42 ms layout touching
+20,444 of 21,695 nodes — the same three pass sizes to within a handful of elements. `ForcedReflow` stayed negligible
+both times (200 ms and 185 ms total respectively, `getBorderWidths` at 8 ms in each — the poisoned-write mechanism
+from 0.4.0 stays fixed in both).
+
+**The combined stack's untraced frame-gap numbers are unambiguously clean this time and supersede the 2026-08-23
+noisy session's untraced figures for this specific metric — on average and percent-over-100ms decisively, on
+worst-gap more narrowly.** Horizontal: worst **183.4 ms** then **216.7 ms**, average **64.6–64.7 ms**,
+**15.6–16.4%** over 100 ms; dispatch time itself dropped to **3.6–3.8 s** for the nominal 1.3 s burst, the fastest
+dispatch of the three versions measured this session. Average and percent-over-100ms are roughly half the noisy
+session's own untraced horizontal figures (average 88.2–94.9 ms, 32.7–34.6% over 100 ms). Worst-gap is more mixed,
+worth stating precisely rather than rounding away: one run (183.4 ms) beats the noisy session's own best case
+outright, the other (216.7 ms) ties its lower bound exactly — neither comes close to its 250 ms upper bound, but
+it isn't a clean sweep on this one sub-metric. Vertical: worst **149.9–150 ms**, average **39.8–41.4 ms**,
+**5.6–5.7%** over 100 ms — essentially identical to the noisy session's own vertical (150.0–166.7 ms / 44.6–45.0 ms
+/ 4.6–5.0%), both still somewhat elevated versus `column-window-edge-stability`-alone's vertical baseline (116.7 ms
+/ 34.0 ms / 0.9%). That reproduction matters: the noisy session guessed its elevated vertical numbers were "session
+noise... rather than something specific to the header fix"; a clean session landing on nearly the same vertical
+figures argues against one-off noise as the explanation, though vertical scrolling touches neither fix's code path,
+so whatever is elevating it against the edge-stability-alone baseline is still unidentified and evidently not
+merely bad luck in one session.
+
+**But the `DOMSize` insight tells the opposite story on the combined stack, and this clean read confirms — rather
+than refutes — the noisy session's specific worry there.** The combined stack's one traced horizontal run (17,621
+total elements — matching the noisy session's own 17,621-element total exactly) found the same three-pass shape as
+v0.6.0 and v0.7.0 above: 117 ms/1,548 elements, 148 ms/**17,793** elements, 112 ms/**12,853** elements, plus a 51 ms
+layout pass touching 21,584 of 22,844 nodes. Those two bolded element counts, plus the 1,548 figure, match the
+noisy session's own traced numbers exactly — 171 ms/17,793 elements, 114 ms/12,853 elements, 106 ms/1,548 elements
+— down to the element count, even though the noisy session's read mixed page-load cost into the same trace and this
+one did not. That is too precise a match to be coincidence: the combined stack genuinely still restyles essentially
+the whole page (~101% of the DOM in the largest pass, drift included) on this burst, exactly like every
+pre-`column-window-edge-stability` build in this entry, and unlike edge-stability-alone's own traced runs, which
+found only a single 46 ms/14.6%-touched pass (or no `DOMSize` insight at all, twice). Whatever
+`column-window-edge-stability` did to shrink the restyle scope, `header-column-window-rotation` on top of it does
+not preserve — the DOM-size-scaling mechanism this entry has chased since 0.4.1 is unambiguously still present in
+the combined stack, now confirmed rather than left as an open question. `ForcedReflow` stayed negligible here too
+(239 ms total, `getBorderWidths` at 9 ms).
+
+**Net picture, no longer noisy: the combined stack is the best build in this entry's history on wall-clock/frame-gap
+terms, and simultaneously shows no improvement over the pre-fix `DOMSize` mechanism's scope.** Those two findings
+coexist because the fix apparently works by touching fewer things *per wheel event* (the fast
+column-window-edge-stability/header-rotation paths) rather than by shrinking what a style-recalculation pass touches
+when one does fire — each pass still sweeps close to the whole page, but far fewer passes are needed to service the
+same burst, and each one is fast enough (~100–150 ms here, versus the multi-second cascades this entry documented
+pre-fix) that the net wall-clock effect is a large real win despite the underlying mechanism being untouched. One
+more thing worth flagging plainly rather than smoothing over: every traced run in this session — all three
+versions — measured substantially worse frame gaps than its own untraced pair (v0.6.0: 1,983.3 ms worst / 47.2% over
+100 ms traced vs. 1,666.5–1,700 ms / 40.9–43.6% untraced; v0.7.0: 1,449.9 ms / 56.25% traced vs. 350–400.1 ms /
+36.8–39.5% untraced; combined stack: 1,500 ms / 49.0% traced vs. 183.4–216.7 ms / 15.6–16.4% untraced) — confirming,
+now across three separate builds instead of one, that Chrome's own trace recording adds real overhead to this
+specific workload, and traced numbers should not be read as representative of unobserved scrolling.
+
+**2026-08-23, a dedicated back-to-back same-session A/B between `column-window-edge-stability` alone and the
+combined stack — filling the one gap the prior "clean" three-way session left open (it measured v0.6.0/v0.7.0/the
+combined stack, never edge-stability-alone itself under the same method) — finds the `DOMSize`/average-gap
+"regression" does not reproduce: it resolves to a measurement-methodology artifact, not a real cost from the header
+fix.** Both builds freshly rebuilt (`npm run build:lib` in each worktree) immediately before measuring, dev server
+killed and restarted between them, served chunk paths (`@fs/.../<worktree>/packages/lib/dist/lib/...`) confirmed
+against each worktree before every run — `DOM-Duqyqa3h.js`/`Component-CBqLXFCF.js` came out byte-identical between
+the two builds (their only difference is in `component/table.es.js`, 141,786 bytes for edge-stability-alone vs
+144,211 bytes for the combined stack), so freshness here was verified by served *path*, not by a differing chunk
+hash. Same `wide.cols_60`, maximized 5120×1932 (17,621 elements at trace time for both builds — identical), same
+4-leg/80-event direction-reversing `WheelEvent` burst (60 px/event, fixed 16ms-paced dispatch — this session's own
+re-derived delta, since no prior session's literal harness script was recoverable from history or from either
+worktree's plan docs; internally consistent between the two builds, which is what an A/B needs regardless of
+whether it matches an earlier session's absolute numbers).
+
+**Untraced pair, horizontal then vertical, twice each, no reload.** Edge-stability-alone: horizontal worst
+186.1/159.3 ms, average 45.1/55.8 ms, 10.4/11.2% over 100 ms; vertical worst 174.1/144.6 ms, average 34.4/32.9 ms,
+1.8/1.8% over 100 ms. Combined stack: horizontal worst 236.8/165.3 ms, average 21.1/51.3 ms, 1.4/13.3% over 100 ms;
+vertical worst 161.3/143.6 ms, average 33.1/33.1 ms, 3.5/0.9% over 100 ms. Every one of these eight figures overlaps
+the other build's own two-run range on the matching axis/metric — there is no consistent direction of difference on
+wall-clock/frame-gap terms, matching this entry's already-established pattern of substantial run-to-run noise at
+this scale. Vertical in particular is close to indistinguishable between builds, as expected since neither fix
+touches vertical scrolling.
+
+**Traced horizontal run, one per build, via the page-`initScript`-self-triggers-2s-after-load technique (trace
+started before the reload, no manual round trip between trigger and dispatch) — nearly identical on every figure.**
+Edge-stability-alone: dispatch 5,002 ms, worst gap 603.8 ms, average 39.0 ms, 7.1% over 100 ms. Combined stack:
+dispatch 4,988 ms, worst gap 611.1 ms, average 39.7 ms, 7.2% over 100 ms. `ForcedReflow` stayed negligible and
+matched almost exactly both times (191 ms total for both builds; `getScrollLeft` 15 ms edge-stability-alone vs 7 ms
+combined stack). **`DOMSize` — the metric this whole investigation turned on — came back essentially identical
+between the two builds:** both traces show the same 17,621 total elements and the same three-pass shape
+(edge-stability-alone: 106 ms/1,548 elements, 144 ms/17,793 elements, 118 ms/12,853 elements, plus a 102 ms layout
+pass touching 21,584 of 22,844 nodes; combined stack: 109 ms/1,548 elements, 181 ms/17,793 elements, 113 ms/12,853
+elements, plus a 70 ms layout pass touching the same 21,584 of 22,844 nodes) — the affected-element counts match to
+the last digit across both builds.
+
+**Verdict: the suspected regression does not reproduce.** Neither the `DOMSize` insight's affected-element share
+nor the untraced average-frame-gap figure shows the combined stack doing worse than edge-stability-alone when both
+are measured the identical way in the same session — they land on the same numbers, within the noise already
+documented elsewhere in this entry. The prior comparison's edge-stability-alone figure (14.6% touched, one 46 ms
+pass) was measured by a *different* tracing technique — direct start-trace/dispatch/stop-trace, from before this
+entry's noisy header-rotation session discovered that technique dilutes a burst's signal below Chrome's insight
+threshold and adopted the `initScript` workaround — while the combined-stack figure it was compared against (~101%
+touched, three passes) was measured with the `initScript` technique from the start. That was an apples-to-oranges
+methodology gap, not a same-method regression: this session's edge-stability-alone run, measured with the same
+`initScript` technique the combined-stack figure always used, reproduces that build's own ~101%/three-pass shape
+almost exactly, not the older 14.6%/single-pass figure. **Session noise and a methodology mismatch, not a real
+header-fix cost — this time confirmed by a direct same-session, same-method comparison, not merely inferred from a
+vertical-axis proxy.**
+
 ---
 
 ## 🐞✅ A numeric `fontSize` passed to `Text`'s constructor is silently ignored
