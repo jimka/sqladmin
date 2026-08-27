@@ -37,3 +37,15 @@ def single_pk(columns: list[ColumnMeta]) -> str:
         )
 
     return pks[0]
+
+
+def is_required_column(column: ColumnMeta) -> bool:
+    """
+    Returns whether a column requires a user-supplied value on insert.
+
+    Required = NOT NULL, not generated, and no DB default — mirrors the
+    frontend's ``isRequiredColumn`` (``tableWriteRules.ts``), so a required
+    column is flagged identically whether the value came from a manual grid
+    edit or an imported row.
+    """
+    return not column.nullable and not column.is_generated and not column.has_default

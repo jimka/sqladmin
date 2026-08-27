@@ -43,7 +43,8 @@ import { buildRelationGraph, relationNodeId }                                   
 import { buildSelectSql, buildRoutineCallSql, routineCallIsComplete }                                                                                                                              from "./data/sql";
 import { buildStore }                                                                                                                                                                              from "./data/stores";
 import { TableWorkPanel }                                                                                                                                                                          from "./dock/TableWorkPanel";
-import type { TableViewOptions }                                                                                                                                                                   from "./dock/TableWorkPanel";
+import type { TableViewOptions, Notify }                                                                                                                                                           from "./dock/TableWorkPanel";
+import { openImportRowsDialog }                                                                                                                                                                    from "./dock/ImportRowsDialog";
 import { StructurePanel }                                                                                                                                                                          from "./dock/StructurePanel";
 import type { StructureActions, StructureRefresh }                                                                                                                                                from "./dock/StructurePanel";
 import { openSqlPreviewDialog }                                                                                                                                                                    from "./dock/SqlPreviewDialog";
@@ -529,7 +530,10 @@ export class SqlAdminController {
             }
 
             const notify = (message: string): void => { this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: ${message}`); };
-            const panel = new TableWorkPanel(store, columns, notify, format => this.exportTable(ref, format), privileges, view);
+            const panel = new TableWorkPanel(
+                store, columns, notify, format => this.exportTable(ref, format),
+                () => this.importIntoTable(ref, store, columns, notify), privileges, view,
+            );
 
             // Not awaited: the panel already exists, so TablePanel's own store-driven
             // spinner covers the row load, and load()'s rejection is already surfaced by
@@ -2670,6 +2674,30 @@ export class SqlAdminController {
         document.body.appendChild(anchor);
         anchor.click();
         document.body.removeChild(anchor);
+    }
+
+    /**
+     * Open the "Import data" dialog for a table: file pick -> preview ->
+     * commit. On a successful commit, discards any pending local edits and
+     * reloads the grid from page 1 — the same reload sequence the toolbar's
+     * own Refresh button uses — then reports the inserted count through the
+     * panel's shared status line.
+     *
+     * @param ref - The target table.
+     * @param store - The table's live grid store, reloaded after a commit.
+     * @param columns - The table's introspected columns (drives the preview grid).
+     * @param notify - The panel's shared status-line reporter.
+     */
+    private importIntoTable(ref: DbObjectRef, store: AjaxStore, columns: ColumnMeta[], notify: Notify): void {
+        openImportRowsDialog({
+            ref,
+            columns,
+            onImported: (insertedCount: number): void => {
+                store.reject();
+                void store.load();
+                notify(`Imported ${insertedCount} row(s)`);
+            },
+        });
     }
 
     /**

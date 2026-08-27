@@ -52,6 +52,7 @@ from .operations import (
     ExplainQueryCommand,
     ExportRowsQuery,
     FunctionDefinitionQuery,
+    ImportRowsCommand,
     IndexDetailQuery,
     InsertRowCommand,
     ListColumnsQuery,
@@ -71,6 +72,7 @@ from .operations import (
     PreviewConstraint,
     PreviewCreateTable,
     PreviewDropTable,
+    PreviewImportRowsQuery,
     PreviewIndex,
     RefreshMaterializedViewPreview,
     ReplaceMaterializedViewPreview,
@@ -804,6 +806,60 @@ async def delete_row(
         await op.apply()
 
         return Response(status_code=204)
+
+
+@app.post("/api/{connection_id}/{database}/{schema}/{table}/rows/import/preview")
+async def preview_import_rows(
+    connection_id: str, database: str, schema: str, table: str, data: dict = Body(...),
+    session: Session = Depends(require_csrf),
+) -> dict:
+    """
+    Validate every row of a proposed import without writing anything.
+
+    Route: ``POST /api/{connection_id}/{database}/{schema}/{table}/rows/import/preview``.
+
+    Args:
+        data: ``{"rows": [...]}`` — the file's parsed rows, as plain JSON
+            objects keyed by column name.
+
+    Returns:
+        ``{"rows": [...], "totalRows": int, "errorRows": int}`` — one
+        ``{rowNumber, ok, values | error}`` entry per row.
+    """
+    ref = TableRef(database, schema, table)
+
+    async with session_pool_for(session, connection_id).acquire() as c:
+        cols = await _columns_for(c, ref)
+        op = PreviewImportRowsQuery(ref, data.get("rows", []), cols)
+        await op.apply()
+
+        return op.get_result()
+
+
+@app.post("/api/{connection_id}/{database}/{schema}/{table}/rows/import")
+async def import_rows(
+    connection_id: str, database: str, schema: str, table: str, data: dict = Body(...),
+    session: Session = Depends(require_csrf),
+) -> dict:
+    """
+    Insert every row of a validated import in one all-or-nothing transaction.
+
+    Route: ``POST /api/{connection_id}/{database}/{schema}/{table}/rows/import``.
+
+    Args:
+        data: ``{"rows": [...]}`` — the same shape ``preview_import_rows`` takes.
+
+    Returns:
+        ``{"insertedCount": int}``.
+    """
+    ref = TableRef(database, schema, table)
+
+    async with session_pool_for(session, connection_id).acquire() as c:
+        cols = await _columns_for(c, ref)
+        op = ImportRowsCommand(c, ref, data.get("rows", []), cols)
+        await op.apply()
+
+        return op.get_result()
 
 
 # --- Arbitrary SQL --------------------------------------------------------

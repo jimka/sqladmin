@@ -25,6 +25,7 @@ def col(
     pk: bool = False,
     generated: bool = False,
     has_default: bool = False,
+    nullable: bool = True,
     data_type: str = "text",
 ) -> ColumnMeta:
     """
@@ -33,7 +34,7 @@ def col(
     return ColumnMeta(
         name=name,
         data_type=data_type,
-        nullable=True,
+        nullable=nullable,
         is_primary_key=pk,
         is_generated=generated,
         has_default=has_default,

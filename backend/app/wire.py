@@ -46,6 +46,12 @@ _DATETIME_TYPES = frozenset(
 _STRING_TYPES = frozenset(
     {"text", "character varying", "varchar", "character", "char", "bpchar", "name", "uuid", "citext"}
 )
+# Case-insensitive text accepted for a BOOLEAN import cell (stripped first —
+# see from_import_scalar). Mirrors no existing frontend list (the manual-edit
+# path never types raw text into a boolean cell), so this is import-specific.
+_TRUE_TEXT = frozenset({"true", "t", "1", "yes", "y"})
+_FALSE_TEXT = frozenset({"false", "f", "0", "no", "n"})
+
 # Subsets of the datetime family, used by from_wire_value to pick the Python
 # temporal type (date / time / datetime) an ISO string is parsed into.
 _DATE_TYPES = frozenset({"date"})
@@ -212,6 +218,156 @@ def from_wire_value(value: Any, column: ColumnMeta) -> Any:
         return base64.b64decode(value)
 
     return value
+
+
+def from_import_scalar(raw: Any, column: ColumnMeta) -> Any:
+    """
+    Normalize one raw import-file value into the shape ``from_wire_value``
+    already expects for ``column`` — the first of the two coercion steps a
+    file-sourced row goes through (see ``import_rows.py``'s ``_coerce_row``).
+
+    ``raw`` is whatever the client's JSON payload carries for one imported
+    cell: always ``str | None`` for a CSV-sourced row (``parseImportFile``'s
+    CSV branch never emits anything else), or any JSON-native scalar/object
+    for a JSON-sourced row. This function does not know or care which file
+    format produced ``raw`` — it dispatches purely on ``column.wire_type``
+    and Python's own type of ``raw``. Some checks are deliberately left to
+    ``from_wire_value``/the eventual INSERT rather than duplicated here: a
+    numeric-as-string value's eventual ``Decimal(...)`` parse, a ``BASE64``
+    value's eventual ``base64.b64decode``, and an ``ISO_STRING`` value's
+    eventual date/time parse.
+
+    Args:
+        raw: the raw file value for one cell (``None`` for a SQL NULL).
+        column: the target column, whose wire type selects the coercion.
+
+    Raises:
+        ValueError: ``raw``'s type or text cannot be coerced for
+            ``column.wire_type`` (a non-numeric ``NUMBER`` string, an
+            unrecognized ``BOOLEAN`` string, a non-string value for a type
+            that only ever arrives as text, a non-array value for a
+            ``JSON_ARRAY`` column, ...).
+
+    Returns:
+        The coerced value, wire-shaped for ``from_wire_value``.
+    """
+    if raw is None:
+        return None
+
+    wire_type = column.wire_type
+    data_type = column.data_type.lower()
+
+    if wire_type is WireType.NUMBER:
+        if isinstance(raw, bool):
+            raise ValueError("expected a number, got a boolean")
+
+        if isinstance(raw, (int, float)):
+            return raw
+
+        if isinstance(raw, str):
+            text = raw.strip()
+
+            try:
+                return int(text)
+            except ValueError:
+                return float(text)  # raises ValueError naturally if not numeric either
+
+        raise ValueError(f"expected a number, got {raw!r}")
+
+    if wire_type is WireType.STRING:
+        if data_type in _NUMERIC_AS_STRING:
+            if isinstance(raw, str):
+                return raw
+
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                return str(raw)
+
+            raise ValueError(f"expected a numeric value, got {raw!r}")
+
+        if data_type == "uuid":
+            if isinstance(raw, str):
+                return raw
+
+            raise ValueError(f"expected a UUID string, got {raw!r}")
+
+        # Plain text: a non-string scalar is accepted leniently (str(raw)),
+        # matching a manual cell edit's own str() coercion; anything else
+        # (a dict/list) is not.
+        if isinstance(raw, str):
+            return raw
+
+        if isinstance(raw, (int, float, bool)):
+            return str(raw)
+
+        raise ValueError(f"expected text, got {raw!r}")
+
+    if wire_type is WireType.BOOLEAN:
+        if isinstance(raw, bool):
+            return raw
+
+        if isinstance(raw, str):
+            text = raw.strip().lower()
+
+            if text in _TRUE_TEXT:
+                return True
+
+            if text in _FALSE_TEXT:
+                return False
+
+        raise ValueError(f"expected a boolean, got {raw!r}")
+
+    if wire_type is WireType.ISO_STRING:
+        if isinstance(raw, str):
+            return raw
+
+        raise ValueError(f"expected an ISO-8601 string, got {raw!r}")
+
+    if wire_type is WireType.JSON:
+        if isinstance(raw, str):
+            # A CSV cell's text for a JSON column is always the column's full
+            # json.dumps() rendering (export_format.py's _csv_field), so this
+            # succeeds for every well-formed CSV row. A JSON-sourced row,
+            # however, may carry a jsonb column's own plain string value
+            # directly (e.g. {"doc": "hello"} — "hello" is not itself valid
+            # JSON) — from_import_scalar cannot tell the two apart (see its
+            # docstring), so a parse failure here falls back to treating raw
+            # as already the final scalar rather than raising, matching the
+            # JSON-sourced case. This does mean a malformed CSV JSON cell (a
+            # hand-edited file, unbalanced braces) is stored as a literal
+            # jsonb string instead of rejected — an accepted trade-off, not a
+            # silent data-loss risk, since jsonb can hold any scalar and the
+            # alternative (rejecting every JSON-sourced plain string) is a
+            # hard failure on the far more common case.
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return raw
+
+        return raw  # dict/list/other JSON-native passthrough
+
+    if wire_type is WireType.JSON_ARRAY:
+        # Unlike JSON, no CSV/JSON-cell convention exists in this app to
+        # invert for a Postgres array column (see the plan's Non-Goals):
+        # from_wire_value has no JSON_ARRAY case of its own either, relying
+        # on the value already being a native Python list, and there is no
+        # per-element coercion here to turn e.g. a numeric[]/timestamp[]
+        # column's array-literal text into correctly-typed elements. A
+        # JSON-sourced row's array value already arrives as a native list and
+        # passes through untouched; anything else — CSV text, or a
+        # JSON-sourced value that isn't an array at all — is rejected rather
+        # than guessed at.
+        if isinstance(raw, list):
+            return raw
+
+        raise ValueError(f"array column: expected a JSON array value, got {raw!r}")
+
+    if wire_type is WireType.BASE64:
+        if isinstance(raw, str):
+            return raw
+
+        raise ValueError(f"expected a base64 string, got {raw!r}")
+
+    return raw
 
 
 def _to_utc(moment: datetime.datetime) -> datetime.datetime:

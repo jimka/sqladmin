@@ -74,6 +74,7 @@ import { save }                        from "@jimka/typescript-ui/glyphs/solid/s
 import { table_list }                  from "@jimka/typescript-ui/glyphs/solid/table_list";
 import { angle_left }                  from "@jimka/typescript-ui/glyphs/solid/angle_left";
 import { angle_right }                 from "@jimka/typescript-ui/glyphs/solid/angle_right";
+import { file_import }                 from "@jimka/typescript-ui/glyphs/solid/file_import";
 import type { ColumnMeta, TablePrivileges } from "../contract";
 import { buildExportButton }           from "./exportButton";
 import { buildColumnSpec, missingRequiredFields } from "./tableWriteRules";
@@ -82,13 +83,16 @@ import { stepIndex, visibleRecords, findRecordByKey } from "./recordNavigation";
 import { quickSearchFields, matchesQuery } from "./gridQuickSearch";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR } from "../theme";
 
-Glyph.register(refresh, plus, minus, save, table_list, angle_left, angle_right);
+Glyph.register(refresh, plus, minus, save, table_list, angle_left, angle_right, file_import);
 
 /** Surface a short status message (validation / save feedback) to the user. */
 export type Notify = (message: string) => void;
 
 /** Export the whole relation server-side (the streaming full-table export). */
 export type ExportTable = (format: "csv" | "json") => void;
+
+/** Open the import dialog (file pick -> preview -> commit) for this table. */
+export type ImportTable = () => void;
 
 /** How a table's data tab should open — the view-mode properties a route can request. */
 export interface TableViewOptions {
@@ -129,7 +133,10 @@ class TableWorkPanel extends Container {
     private readonly nextButton:       Button;
     private readonly quickSearchField: TextField;
 
-    constructor(store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable, privileges: TablePrivileges, view?: TableViewOptions) {
+    constructor(
+        store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable, onImport: ImportTable,
+        privileges: TablePrivileges, view?: TableViewOptions,
+    ) {
         // `this` is unavailable until after `super()`, so the grid and toolbar
         // buttons are built as locals first.
         const dataGrid = Table(store, buildColumnSpec(columns, privileges.update));
@@ -146,6 +153,19 @@ class TableWorkPanel extends Container {
         // button explains itself rather than looking broken.
         const addButton = glyphButton("plus", CONSTRUCTIVE_COLOR,
             privileges.insert ? "Add row" : "Add row (no insert permission)", () => store.add({}));
+        // Import sits with Export in the far-right file-I/O group rather than
+        // beside Add — grouped with "moves data in/out of the table" rather
+        // than the row-level edit actions. Its construction and gating still
+        // mirror addButton's own (including CONSTRUCTIVE_COLOR, since it is
+        // itself an insert): it does not also disable in the rotated record
+        // view the way Add does (that restriction is specific to "only the
+        // grid can fill in a new row" — see syncAddEnabled below — which
+        // doesn't apply to a modal dialog flow), and `privileges.insert`
+        // never changes after the panel opens, so this is a one-time
+        // setEnabled rather than a syncXEnabled listener like Add/Delete/Save.
+        const importButton = glyphButton("file-import", CONSTRUCTIVE_COLOR,
+            privileges.insert ? "Import data (CSV / JSON)" : "Import data (no insert permission)", () => onImport());
+        importButton.setEnabled(privileges.insert);
         const deleteButton = glyphButton("minus", DESTRUCTIVE_COLOR,
             privileges.delete ? "Delete row" : "Delete row (no delete permission)", () => void confirmDelete(store, dataGrid));
         const saveButton = glyphButton("save", PRIMARY_COLOR,
@@ -182,13 +202,14 @@ class TableWorkPanel extends Container {
                 deleteButton,
                 saveButton,
                 // Flex spacer pushes the remaining view actions (quick search,
-                // Export, Refresh) to the far right, away from the edit
-                // actions.
+                // Import, Export, Refresh) to the far right, away from the
+                // edit actions.
                 Spacer.flex(),
                 quickSearchField,
-                // Separator sets quick search off from the Export/Refresh action
-                // group, since it's a view filter rather than an action.
+                // Separator sets quick search off from the Import/Export/Refresh
+                // action group, since it's a view filter rather than an action.
                 new ToolBarSeparator(),
+                importButton,
                 exportButton,
                 // Refresh discards unsaved edits then reloads from the server. reject()
                 // must precede load(): load() replaces the records but leaves pending
