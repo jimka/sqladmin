@@ -198,10 +198,10 @@ describe("objectPath", () => {
         expect(objectPath(ref)).toBeNull();
     });
 
-    it("returns null for a type ref — no route", () => {
+    it("builds a type path", () => {
         const ref: DbObjectRef = { connectionId: "default", database: "app", schema: "sales", name: "t1", kind: "type" };
 
-        expect(objectPath(ref)).toBeNull();
+        expect(objectPath(ref)).toEqual({ path: "/schema/sales/type/t1" });
     });
 
     it("returns null for a relation ref missing schema", () => {

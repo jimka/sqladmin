@@ -68,6 +68,7 @@ import { DefinitionPanel }                                                      
 import { FunctionDefinitionPanel }                                                                                                                                                                 from "./dock/FunctionDefinitionPanel";
 import { SequenceInfoPanel }                                                                                                                                                                       from "./dock/SequenceInfoPanel";
 import { IndexInfoPanel }                                                                                                                                                                          from "./dock/IndexInfoPanel";
+import { TypeInfoPanel }                                                                                                                                                                           from "./dock/TypeInfoPanel";
 import { DocumentationPanel }                                                                                                                                                                      from "./dock/DocumentationPanel";
 import { QueryPanel }                                                                                                                                                                              from "./dock/QueryPanel";
 import { RoleGrantsPanel }                                                                                                                                                                         from "./dock/RoleGrantsPanel";
@@ -182,9 +183,9 @@ interface OpenPanel {
     store?: AjaxStore;
     columns?: ColumnMeta[];
     detail?: string;
-    // Set only by the five storeless detail tabs (structure, definition,
-    // function definition, sequence, index) — what `refreshActive` dispatches
-    // to instead of the store-reload path. Never set alongside `store`.
+    // Set only by the six storeless detail tabs (structure, definition,
+    // function definition, sequence, index, type) — what `refreshActive`
+    // dispatches to instead of the store-reload path. Never set alongside `store`.
     refresh?: () => void;
 }
 
@@ -675,9 +676,9 @@ export class SqlAdminController {
     }
 
     /**
-     * Run one of the five detail tabs' Refresh: re-fetch and reseed via
+     * Run one of the six detail tabs' Refresh: re-fetch and reseed via
      * `reload`, then report the outcome — the shared success/error wording
-     * every Refresh button uses, so the five call sites don't drift apart.
+     * every Refresh button uses, so the six call sites don't drift apart.
      * Never rejects, so every call site may write `void this.refreshPanel(...)`.
      *
      * @param ref - The tab's own object, for the status message and a failed
@@ -836,6 +837,59 @@ export class SqlAdminController {
                 }),
                 onRefresh: refresh,
             });
+
+            return panel;
+        });
+    }
+
+    /**
+     * Open a read-only info tab for a standalone enum or composite type — its
+     * category, owning role, and ordered labels/attributes — deduping by
+     * type-info-panel id. The tab opens at once behind the library's
+     * spinner; behind it, the detail is fetched fresh through the same
+     * `getTypeDefinition` chain `editType`'s prefill uses (see the plan's
+     * "reuse TypeDefinitionQuery" decision) and passed to a TypeInfoPanel. A
+     * failed detail fetch closes the tab it opened, reported through
+     * notifyError. A type has no rows and no editable fields, so unlike
+     * openTable this has no store to register, and unlike openSequence the
+     * panel needs no dispose (see TypeInfoPanel).
+     *
+     * Unlike openSequence/openIndex, `node` is a plain `TreeNode | undefined`
+     * (matching openFunctionDefinition): nothing opens a type by reference,
+     * so there is no in-progress reveal `Promise` to await here.
+     */
+    async openType(ref: DbObjectRef, node?: TreeNode): Promise<void> {
+        const id = this.typeInfoPanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const route = objectPath(ref) ?? undefined;
+
+        this.openAsyncPanel({
+            id,
+            title  : ref.name ?? id,
+            glyph  : "cube",
+            tooltip: this.panelTooltip(ref),
+            ref,
+            route,
+        }, async () => {
+            const detail = await getTypeDefinition(ref);
+
+            // Read by `refresh` only after a click, which always happens after
+            // this variable is assigned just below — the forward reference is
+            // safe (mirrors openIndex's `panel`).
+            let panel: TypeInfoPanel;
+
+            const refresh = (): void => void this.refreshPanel(ref, async () => {
+                panel.reload(await getTypeDefinition(ref));
+            });
+
+            this._openPanels.set(id, { ref, node: node ?? null, detail: "info", refresh });
+            this.syncToPanel(id);
+
+            panel = new TypeInfoPanel(detail, { schema: ref.schema!, name: ref.name!, onRefresh: refresh });
 
             return panel;
         });
@@ -3261,9 +3315,9 @@ export class SqlAdminController {
     }
 
     /**
-     * Refresh the active work tab. Two reloadable shapes: the five storeless
+     * Refresh the active work tab. Two reloadable shapes: the six storeless
      * detail tabs (structure, definition, function definition, sequence,
-     * index) dispatch to their own registered `refresh` closure, which
+     * index, type) dispatch to their own registered `refresh` closure, which
      * re-fetches and reseeds via the panel's `reload` and reports its own
      * outcome (see `refreshPanel`); a data grid instead reloads its table's
      * or view's store from the server, discarding a table's unsaved edits
@@ -3349,6 +3403,11 @@ export class SqlAdminController {
     /** Stable id for an index's info tab, distinct from any relation tab. */
     private indexInfoPanelId(ref: DbObjectRef): string {
         return `${this.panelId(ref)}::index`;
+    }
+
+    /** Stable id for a type's info tab, distinct from any relation tab. */
+    private typeInfoPanelId(ref: DbObjectRef): string {
+        return `${this.panelId(ref)}::type`;
     }
 
     /**

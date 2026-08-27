@@ -1397,7 +1397,8 @@ async def type_definition(
     connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
 ) -> dict:
     """
-    Introspect an enum or composite type for the edit-prefill flow.
+    Introspect an enum or composite type for the edit-prefill flow and the
+    read-only info tab.
 
     Route: ``POST /api/{connection_id}/{database}/ddl/type-definition``.
 
@@ -1405,7 +1406,7 @@ async def type_definition(
         body: ``{schema, name}``.
 
     Returns:
-        ``{"category", "labels", "attributes"}``.
+        ``{"category", "labels", "attributes", "owner"}``.
     """
     async with session_pool_for(session, connection_id).acquire() as c:
         op = TypeDefinitionQuery(c, body.get("schema", ""), body.get("name", ""))

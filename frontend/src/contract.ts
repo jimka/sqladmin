@@ -358,11 +358,13 @@ export interface FunctionDefinition {
     language: string;
 }
 
-/** One enum or composite type's introspected shape, for the edit-prefill flow. */
+/** One enum or composite type's introspected shape, for the edit-prefill flow and the info tab. */
 export interface TypeDefinition {
     category: "enum" | "composite";
     labels: string[]; // enum only (ordered); empty for a composite
     attributes: { name: string; type: string }[]; // composite only (attnum order); empty for an enum
+    /** The role that owns the type (pg_get_userbyid(typowner)). */
+    owner: string;
 }
 
 /** One CREATE FUNCTION/PROCEDURE argument, as collected by the create-function form. */

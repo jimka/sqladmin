@@ -143,6 +143,13 @@ export function relationTypeLabel(kind: DbObjectRef["kind"]): string {
         return "Index";
     }
 
+    // Not a relation kind either, but panelTooltip calls this for every open
+    // tab including the type info tab, so the Type line reads "Type" rather
+    // than falling through to "Table".
+    if (kind === "type") {
+        return "Type";
+    }
+
     return "Table";
 }
 

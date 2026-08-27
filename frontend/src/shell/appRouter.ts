@@ -215,6 +215,20 @@ export function buildAppRouter(controller: SqlAdminController): Router {
         return controller.openIndex(ref);
     }));
 
+    router.register("/schema/:schema/type/:name", params => dispatch(controller, () => {
+        const ref: DbObjectRef = {
+            connectionId: controller.connectionId,
+            database    : controller.database,
+            schema      : params.schema,
+            name        : params.name,
+            kind        : "type",
+        };
+
+        controller.selectObject(ref);
+
+        return controller.openType(ref);
+    }));
+
     // A single registration: the overload-disambiguating signature is a query
     // parameter, not a second path pattern — see the plan's "Object identity
     // lives in path segments; view-mode properties live in the query string"

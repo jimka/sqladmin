@@ -38,7 +38,8 @@ export type ObjectMenuActions = Pick<SqlAdminController,
     | "createType" | "createFunction"
     | "dropSequence" | "dropFunction" | "editType" | "dropType"
     | "exportTable"
-    | "openIndex" | "openReferencedStructure">;
+    | "openIndex" | "openReferencedStructure"
+    | "openType">;
 
 /**
  * Build the schema node's own menu: its identity actions (rename/drop) above a
@@ -89,9 +90,10 @@ function functionMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
     ];
 }
 
-/** Build a standalone enum/composite type leaf's menu: edit it, or drop it. */
-function typeMenuItems(ref: DbObjectRef, actions: ObjectMenuActions): MenuItemConfig[] {
+/** Build a standalone enum/composite type leaf's menu: show its info, edit it, or drop it. */
+function typeMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: TreeNode): MenuItemConfig[] {
     return [
+        { text: "Show info", glyph: "cube", action: () => void actions.openType(ref, node) },
         { text: "Edit", glyph: "pencil", action: () => void actions.editType(ref) },
         { text: "Drop", glyph: "trash", action: () => actions.dropType(ref) },
     ];
@@ -222,7 +224,7 @@ export function buildObjectMenuItems(
     }
 
     if (ref.kind === "type") {
-        return typeMenuItems(ref, actions);
+        return typeMenuItems(ref, actions, node);
     }
 
     if (ref.kind === "index") {
