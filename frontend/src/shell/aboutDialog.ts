@@ -8,9 +8,22 @@
 import { Dialog, DialogButtons } from "@jimka/typescript-ui/overlay";
 import { Panel }                 from "@jimka/typescript-ui/core";
 import { VBox }                  from "@jimka/typescript-ui/layout";
-import { Markdown }              from "@jimka/typescript-ui/component/display";
+import { Markdown, Glyph }       from "@jimka/typescript-ui/component/display";
 import { Insets }                from "@jimka/typescript-ui/primitive";
+import { DiagnosticsOverlay }    from "@jimka/typescript-ui/diagnostics";
+import { gauge_high }            from "@jimka/typescript-ui/glyphs/solid/gauge_high";
 import { APP_NAME, APP_TAGLINE, APP_VERSION } from "../appIdentity";
+
+Glyph.register(gauge_high);
+
+// Dialog's button result is a closed 'confirm' | 'cancel' | 'close' union, so
+// the extra Diagnostics button borrows 'confirm' (unused by Close alone) to
+// signal itself; the dialog closes either way and openAboutDialog() branches
+// on the resolved result. "Debug", not "Diagnostics": every Dialog footer
+// button renders at a fixed 90px (Dialog.ts's BUTTON_WIDTH) regardless of
+// label length, and "Diagnostics" truncates there — short single words
+// (Confirm/Cancel/Close) are the button-label convention throughout the app.
+const DIAGNOSTICS_BUTTON = { text: "Debug", result: "confirm" as const, glyph: "gauge-high" };
 
 // The dialog's fixed width. The Dialog sizes its height to the wrapped content
 // (it measures the content at this width), so the body copy can be natural
@@ -59,10 +72,16 @@ export function openAboutDialog(): void {
     const dialog = Dialog({
         title           : `About ${APP_NAME}`,
         contentComponent: content,
-        buttons         : [DialogButtons.Close],
+        buttons         : [DIAGNOSTICS_BUTTON, DialogButtons.Close],
         width           : DIALOG_WIDTH,
         closeOnBackdrop : true,
     });
 
-    void dialog.show().then(() => md.dispose());
+    void dialog.show().then((result) => {
+        md.dispose();
+
+        if (result === "confirm") {
+            DiagnosticsOverlay.open();
+        }
+    });
 }
