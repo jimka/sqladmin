@@ -1,8 +1,8 @@
 // The dock's button-triggered dropdown item builders: the CSV/JSON export
 // chooser (table export and query-result export) and the Structure panel's
-// Alter-column / Add-constraint submenus. Pulled out of their panel modules so
-// the guards and branches — the only real logic in this change — can be pinned
-// by node vitest.
+// Add-constraint submenu. Pulled out of their panel modules so the guards and
+// branches — the only real logic in this change — can be pinned by node
+// vitest.
 //
 // Kept DOM-free (see memory "tsui DOM module side effects") so the node-only
 // vitest can import it: the library import below is `import type`, which
@@ -14,20 +14,9 @@ import type { MenuItemConfig }   from "@jimka/typescript-ui/component/container"
 import type { ActiveExport }     from "../data/explain";
 import type { Notify }           from "./QueryPanel";
 import type { StructureActions } from "./StructurePanel";
-import type { AlterColumnAction, ColumnMeta, ConstraintKind } from "../contract";
+import type { ConstraintKind } from "../contract";
 import { exportQueryResult } from "./exportQueryResult";
 import { exportExplainPlan } from "./exportExplainResult";
-
-// The "Alter column" submenu's actions, in menu order. Moved verbatim from
-// StructurePanel.ts.
-const ALTER_COLUMN_ACTIONS: ReadonlyArray<{ label: string; action: AlterColumnAction }> = [
-    { label: "Rename column…", action: "renameColumn" },
-    { label: "Change type…", action: "changeType" },
-    { label: "Set NOT NULL", action: "setNotNull" },
-    { label: "Drop NOT NULL", action: "dropNotNull" },
-    { label: "Set default…", action: "setDefault" },
-    { label: "Drop default", action: "dropDefault" },
-];
 
 // The "Add constraint" submenu's kinds, in menu order. Moved verbatim from
 // StructurePanel.ts. Foreign key lives here (not as its own Foreign Keys
@@ -83,28 +72,6 @@ export function buildQueryExportItems(active: ActiveExport | null, notify: Notif
         { text: "Export text (.txt)",  glyph: "file-lines", action: () => void exportExplainPlan(active.plan, "txt", notify) },
         { text: "Export JSON (.json)", glyph: "file-code",  action: () => void exportExplainPlan(active.plan, "json", notify) },
     ];
-}
-
-/**
- * Build the Columns section's "Alter column" submenu for the currently
- * resolved column.
- *
- * @param column - The selected row's resolved column metadata, or `undefined`
- *   when it could not be resolved.
- * @param actions - The launcher callbacks to invoke.
- *
- * @returns The six alter-action items, or an empty list when `column` is
- *   unresolved — an empty list means "don't open" (`Menu.toggleFor` suppresses
- *   it), reproducing the early-return this replaced. Reachable only via a
- *   `findColumn` miss over the array the grid was built from, so there is no
- *   honest placeholder text for it (see the plan's Architecture Decisions).
- */
-export function buildAlterColumnItems(column: ColumnMeta | undefined, actions: StructureActions): MenuItemConfig[] {
-    if (!column) {
-        return [];
-    }
-
-    return ALTER_COLUMN_ACTIONS.map(a => ({ text: a.label, action: () => actions.onAlterColumn(column, a.action) }));
 }
 
 /**

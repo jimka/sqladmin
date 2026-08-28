@@ -8,13 +8,12 @@ vi.mock("../../src/dock/exportExplainResult", () => ({ exportExplainPlan: vi.fn(
 import {
     buildTableExportItems,
     buildQueryExportItems,
-    buildAlterColumnItems,
     buildAddConstraintItems,
 } from "../../src/dock/menuItems";
 import { exportQueryResult }  from "../../src/dock/exportQueryResult";
 import { exportExplainPlan }  from "../../src/dock/exportExplainResult";
 import type { ActiveExport } from "../../src/data/explain";
-import type { ColumnMeta, QueryRowsResult } from "../../src/contract";
+import type { QueryRowsResult } from "../../src/contract";
 import type { StructureActions } from "../../src/dock/StructurePanel";
 
 const exportQueryResultMock  = vi.mocked(exportQueryResult);
@@ -22,17 +21,9 @@ const exportExplainPlanMock  = vi.mocked(exportExplainPlan);
 
 const notify = vi.fn();
 
-const column: ColumnMeta = {
-    name: "id", dataType: "integer", nullable: false,
-    isPrimaryKey: true, isGenerated: false, hasDefault: true, wireType: "number",
-};
-
 /** A minimal StructureActions with every callback a no-op spy. */
 function structureActions(): StructureActions {
     return {
-        onAddColumn:      vi.fn(),
-        onAlterColumn:    vi.fn(),
-        onDropColumn:     vi.fn(),
         onAddConstraint:  vi.fn(),
         onDropConstraint: vi.fn(),
         onCreateIndex:    vi.fn(),
@@ -91,24 +82,6 @@ describe("buildQueryExportItems", () => {
 
         items[1].action?.();
         expect(exportExplainPlanMock).toHaveBeenCalledWith(plan, "json", notify);
-    });
-});
-
-describe("buildAlterColumnItems", () => {
-    it("returns no items when no column is resolved, so the menu opens nothing", () => {
-        expect(buildAlterColumnItems(undefined, structureActions())).toEqual([]);
-    });
-
-    it("returns the six alter actions in order and wires each by column identity", () => {
-        const actions = structureActions();
-        const items = buildAlterColumnItems(column, actions);
-
-        expect(items.map(i => i.text)).toEqual([
-            "Rename column…", "Change type…", "Set NOT NULL", "Drop NOT NULL", "Set default…", "Drop default",
-        ]);
-
-        items[2].action?.();
-        expect(actions.onAlterColumn).toHaveBeenCalledWith(column, "setNotNull");
     });
 });
 

@@ -13,7 +13,10 @@ import {
 
 /** Build a minimal ColumnMeta, filling in the fields these tests don't vary. */
 function column(name: string, nullable: boolean): ColumnMeta {
-    return { name, dataType: "text", nullable, isPrimaryKey: false, isGenerated: false, hasDefault: false, wireType: "string" };
+    return {
+        name, dataType: "text", fullType: "text", nullable, isPrimaryKey: false,
+        isGenerated: false, hasDefault: false, defaultExpr: null, wireType: "string",
+    };
 }
 
 /** Build a minimal ConstraintMeta. */

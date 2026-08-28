@@ -11,12 +11,16 @@ from app.contract import SequenceRef, WireType
 from app.operations import ListColumnsQuery
 from tests.conftest import NO_CONN, TABLE
 
-# "id" is a serial: backed by a sequence. "balance" is a plain column, so its
-# sequence_schema/sequence_name arrive NULL from the query's LEFT JOIN.
+# "id" is a serial: backed by a sequence, and its default is the nextval()
+# expression that supplies it. "balance" is a plain column with a modifier on
+# its declared type (full_type differs from data_type) and no default, so its
+# sequence_schema/sequence_name/default_expr all arrive NULL from the query.
 _RAW = [
-    {"name": "id", "data_type": "integer", "nullable": False, "is_primary_key": True, "is_generated": True, "has_default": True,
+    {"name": "id", "data_type": "integer", "full_type": "integer", "nullable": False, "is_primary_key": True,
+     "is_generated": True, "has_default": True, "default_expr": "nextval('customers_id_seq'::regclass)",
      "sequence_schema": "public", "sequence_name": "customers_id_seq"},
-    {"name": "balance", "data_type": "numeric", "nullable": False, "is_primary_key": False, "is_generated": False, "has_default": False,
+    {"name": "balance", "data_type": "numeric", "full_type": "numeric(12,2)", "nullable": False, "is_primary_key": False,
+     "is_generated": False, "has_default": False, "default_expr": None,
      "sequence_schema": None, "sequence_name": None},
 ]
 
@@ -49,8 +53,30 @@ def test_get_result_contract_shape() -> None:
         "isGenerated": True,
         "hasDefault": True,
         "wireType": "number",
+        "fullType": "integer",
+        "defaultExpr": "nextval('customers_id_seq'::regclass)",
         "sequence": {"schema": "public", "name": "customers_id_seq"},
     }
+
+
+def test_get_result_carries_full_type_and_default_expr() -> None:
+    # "balance" carries a modifier its data_type (the SQL-standard type name)
+    # drops, and has no default.
+    op = _query()
+    op._raw = _RAW
+
+    assert op.get_result()[1]["fullType"] == "numeric(12,2)"
+    assert op.get_result()[1]["defaultExpr"] is None
+
+
+def test_get_result_leaves_data_type_has_default_and_wire_type_unchanged() -> None:
+    op = _query()
+    op._raw = _RAW
+    result = op.get_result()[1]
+
+    assert result["dataType"] == "numeric"
+    assert result["hasDefault"] is False
+    assert result["wireType"] == "string"
 
 
 def test_columns_maps_backing_sequence() -> None:
@@ -106,10 +132,14 @@ async def test_apply_falls_back_to_catalog_for_matview() -> None:
     matview_row = {
         "name": "total",
         "data_type": "numeric",
+        # _MATVIEW_SQL computes full_type with the same format_type() call as
+        # data_type (see list_columns.py), so the two agree in this fixture.
+        "full_type": "numeric",
         "nullable": True,
         "is_primary_key": False,
         "is_generated": False,
         "has_default": False,
+        "default_expr": None,
         "sequence_schema": None,
         "sequence_name": None,
     }
@@ -127,6 +157,10 @@ async def test_apply_falls_back_to_catalog_for_matview() -> None:
     # A matview column never has a sequence — the fallback query selects the
     # sequence columns as constant NULLs.
     assert meta.sequence is None
+    # A matview column never has a default either — no DEFAULT clause to call
+    # nextval() from, and nothing OWNED BY a matview column.
+    assert meta.full_type == "numeric"
+    assert meta.default_expr is None
 
 
 async def test_apply_skips_fallback_when_information_schema_has_rows() -> None:

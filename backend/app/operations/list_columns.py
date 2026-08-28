@@ -39,6 +39,8 @@ class ListColumnsQuery(Query):
         SELECT
             c.column_name AS name,
             c.data_type   AS data_type,
+            COALESCE(att.full_type, c.data_type) AS full_type,
+            c.column_default AS default_expr,
             (c.is_nullable = 'YES') AS nullable,
             COALESCE(
                 c.is_identity = 'YES'
@@ -60,6 +62,19 @@ class ListColumnsQuery(Query):
             WHERE tc.constraint_type = 'PRIMARY KEY'
               AND tc.table_schema = $1 AND tc.table_name = $2
         ) pk ON pk.column_name = c.column_name
+        -- The declared type WITH its modifier (information_schema.columns.data_type
+        -- is the SQL-standard type name only, e.g. "character varying" for a
+        -- varchar(60) column) — format_type() over pg_attribute is the only
+        -- source for the modifier, so this is a second self-join on the same
+        -- table/column, independent of the `seq` subquery below.
+        LEFT JOIN (
+            SELECT a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS full_type
+            FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_class ac      ON ac.oid = a.attrelid
+            JOIN pg_catalog.pg_namespace an  ON an.oid = ac.relnamespace
+            WHERE an.nspname = $1 AND ac.relname = $2
+              AND a.attnum > 0 AND NOT a.attisdropped
+        ) att ON att.column_name = c.column_name
         LEFT JOIN (
             SELECT DISTINCT ON (l.attnum)
                    a.attname  AS column_name,
@@ -110,11 +125,16 @@ class ListColumnsQuery(Query):
     # matview column), no backing sequence, so those two are constant-NULL. The
     # casts are what let asyncpg type the NULL columns. data_type arrives as a
     # format_type() string (e.g. "numeric", "integer") which pg_type_to_wire maps
-    # exactly as it does the information_schema names.
+    # exactly as it does the information_schema names. full_type reuses the same
+    # format_type() call under a second alias (data_type already carries the
+    # modifier here, unlike information_schema's SQL-standard name), and
+    # default_expr is constant-NULL for the same "no default" reason as has_default.
     _MATVIEW_SQL = """
         SELECT
             a.attname                              AS name,
             format_type(a.atttypid, a.atttypmod)   AS data_type,
+            format_type(a.atttypid, a.atttypmod)   AS full_type,
+            NULL::text                             AS default_expr,
             (NOT a.attnotnull)                     AS nullable,
             false                                  AS is_generated,
             false                                  AS has_default,
@@ -176,6 +196,8 @@ class ListColumnsQuery(Query):
                 is_generated=r["is_generated"],
                 has_default=r["has_default"],
                 wire_type=pg_type_to_wire(r["data_type"]),
+                full_type=r["full_type"],
+                default_expr=r["default_expr"],
                 sequence=(
                     SequenceRef(schema=r["sequence_schema"], name=r["sequence_name"])
                     if r["sequence_schema"] is not None
@@ -194,6 +216,7 @@ class ListColumnsQuery(Query):
 
         Returns:
             One contract dict (name, dataType, nullable, isPrimaryKey,
-            isGenerated, hasDefault, wireType, sequence) per column.
+            isGenerated, hasDefault, wireType, fullType, defaultExpr,
+            sequence) per column.
         """
         return [m.to_contract() for m in self.get_columns_result()]

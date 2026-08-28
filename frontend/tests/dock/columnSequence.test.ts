@@ -10,10 +10,12 @@ function column(sequence?: ColumnMeta["sequence"]): ColumnMeta {
     return {
         name:         "id",
         dataType:     "integer",
+        fullType:     "integer",
         nullable:     false,
         isPrimaryKey: true,
         isGenerated:  true,
         hasDefault:   true,
+        defaultExpr:  null,
         wireType:     "number",
         sequence,
     };
@@ -59,12 +61,26 @@ describe("toColumnRows", () => {
 
         expect(row).toMatchObject({
             name:         "id",
-            dataType:     "integer",
+            fullType:     "integer",
             nullable:     false,
             isPrimaryKey: true,
             isGenerated:  true,
             wireType:     "number",
         });
+    });
+
+    it("carries originalName as the column's name, and defaultExpr as \"\" for a null default", () => {
+        const [row] = toColumnRows([column(null)]);
+
+        expect(row.originalName).toBe("id");
+        expect(row.defaultExpr).toBe("");
+    });
+
+    it("carries a non-null defaultExpr through unchanged", () => {
+        const meta: ColumnMeta = { ...column(null), defaultExpr: "now()" };
+        const [row] = toColumnRows([meta]);
+
+        expect(row.defaultExpr).toBe("now()");
     });
 
     it("keeps a schema or sequence name containing a dot recoverable from the hidden fields", () => {
