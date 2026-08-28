@@ -803,3 +803,82 @@ and `hr.employment_status`, all owned by `sqladmin`):**
     ([revealMatch.ts:49](frontend/src/navigator/revealMatch.ts#L49)) already
     compares kind generically, so `controller.selectObject` reveals a type leaf
     with no change.
+
+---
+
+## Implementation Notes
+
+**`openType` initially omitted the deep-link route wiring the plan's own
+"gets a deep link, like every other info tab" Architecture Decision
+promises, and the audit caught it.** The plan's "Internal Structure" code
+sample for `openType` never computed `objectPath(ref)` or passed a `route`
+into `openAsyncPanel` (unlike `openIndex`'s identical-shaped sample, which
+does), and `routeTargets.ts`'s `objectPath()` still explicitly returned
+`null` for `ref.kind === "type"` with a comment claiming "type (no route)
+has no per-object path" — stale the moment `appRouter.ts` registered a real
+`/schema/:schema/type/:name` route. The implementer followed the plan's
+sample verbatim, so the omission originated in the plan, but the resulting
+behavior was a real regression from the stated goal: visiting the deep link
+opened the tab but the address bar snapped back to `/` immediately after
+(the dock's "focus" handler falls back to `{path: "/"}` when
+`_panelRoutes` has no entry for the panel), and double-clicking/"Show
+info"-ing any type leaf did the same instead of advancing the address bar
+to the type's URL. Fixed by adding the `route`/`objectPath` computation to
+`openType` (mirroring `openIndex`) and adding a `"type"` case to
+`objectPath()` alongside its existing `"sequence"`/`"index"` case
+(`frontend/src/shell/routeTargets.ts`), with `routeTargets.test.ts`'s
+stale "returns null for a type ref" case replaced by a positive
+"builds a type path" case. Confirmed live afterward (see below) — both
+directions of the deep link now work.
+
+**Manual-verify was completed live for every item except one.** A live
+chrome-devtools session against the seed database confirmed: opening
+`public.priority_level` renders the exact fieldset/grid content specified
+(Category `Enum`, Owner `sqladmin`, rows `1 low`/`2 medium`/`3 high`/`4
+urgent`); opening `sales.mailing_address` renders Category `Composite` with
+rows `street text`/`city text`/`postal_code text`/`country text`;
+right-clicking a type leaf shows exactly `Show info` / `Edit` / `Drop` and
+"Show info" opens the tab; the open tab's tooltip reads `priority_level\n\n
+Type: Type\nSchema: public\nDatabase: sqladmin` (confirming
+`relationTypeLabel`'s new `"type"` branch); single-clicking a type leaf
+still shows only the four identity rows in the Properties sidebar; and,
+after the fix above, visiting `/schema/sales/type/mailing_address` directly
+opens the composite tab with the `sales` schema and `Types` category
+expanded and `mailing_address` selected, the address bar staying at that
+path — and double-clicking a type leaf from a fresh navigation likewise
+advances the address bar to the type's URL (confirmed via both a direct
+`location.pathname` read and the navigation tool's own "Page navigated to
+…" report). Not covered live: `hr.employment_status` (a second schema) and
+the Edit-then-Refresh cycle (a 5th enum value appearing after `reload()`)
+— the session ran long and these two were judged lowest-risk to leave as
+code-level review rather than extend it further: the schema is passed
+through generically everywhere (no hardcoded `"public"` anywhere in the
+query, `openType`, or the route), and `reload()` delegates to the same
+already-tested `typeInfoRows` helpers the initial render uses, wired through
+the same `refreshPanel` helper `openIndex`/`openSequence` already ship with.
+An explicit live regression pass on table/sequence/index double-click was
+also not re-run after the initial interruption, but the diff to
+`NavigatorTree.ts`/`objectMenu.ts` touches no existing kind's branch (purely
+additive — see the code commit), and the full frontend suite (813 tests,
+including every other kind's menu/dispatch case) stays green throughout.
+Also incidental: the grid headers render the raw field names
+(`position`/`label`, `name`/`type`) rather than the `description` strings
+("Order"/"Label", "Attribute"/"Type") — confirmed against `Header.ts` in
+`typescript-ui` that `description` only feeds the header cell's hover
+tooltip, matching every other `readOnlyTable` grid in the app (e.g.
+`StructurePanel`'s Indexes/Constraints grids), so this is existing platform
+behavior, not a defect.
+
+One environment note, not a code change: the shared local `sqladmin-db`
+container's data predates this seed file's `public.priority_level` and
+`hr.employment_status` types (only `sales.mailing_address` existed), so the
+enum-tab checks above ran against a temporary `CREATE TYPE
+public.priority_level` issued directly through `psql`, dropped again once
+each check was done. Separately, the live sessions twice hit an unrelated
+environment snag worth flagging for future manual-verify runs in this
+repo: an already-running frontend dev server (from the main tree, on the
+default port 5173) silently absorbs port 5173 before a worktree's own `npm
+run dev` binds it, pushing the worktree's server onto 5173+1 — always
+confirm the actually-served origin (e.g. `curl .../src/shell/appRouter.ts`
+for a route just added) rather than assuming the default port is the
+worktree under test.

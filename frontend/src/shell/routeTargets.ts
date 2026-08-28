@@ -144,8 +144,8 @@ export interface PanelRoute {
  * inverse of RELATION_KINDS' segment lookup and relationView/schemaView's
  * forward validity check. An invalid `view` for `ref.kind` is ignored (the
  * bare object path is still returned, not null). Returns null only for a
- * `"database"` or `"type"` ref (use databaseDiagramPath for the former; the
- * latter has no route), or a ref missing the schema/name its kind needs.
+ * `"database"` ref (use databaseDiagramPath instead) or a ref missing the
+ * schema/name its kind needs.
  *
  * @param ref - The object to build a URL for.
  * @param view - The trailing view segment ("structure", "diagram", …),
@@ -176,7 +176,7 @@ export function objectPath(ref: DbObjectRef, view?: string): PanelRoute | null {
         return { path: `/schema/${ref.schema}/${relation.segment}/${ref.name}${validView ? `/${validView}` : ""}` };
     }
 
-    if (ref.kind === "sequence" || ref.kind === "index") {
+    if (ref.kind === "sequence" || ref.kind === "index" || ref.kind === "type") {
         return { path: `/schema/${ref.schema}/${ref.kind}/${ref.name}` };
     }
 
@@ -187,7 +187,7 @@ export function objectPath(ref: DbObjectRef, view?: string): PanelRoute | null {
         };
     }
 
-    return null; // "database" (use databaseDiagramPath) and "type" (no route) have no per-object path
+    return null; // "database" (use databaseDiagramPath instead) has no per-object path
 }
 
 /**

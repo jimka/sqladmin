@@ -179,6 +179,14 @@ class NavigatorTree extends Tree implements ExplorerTree {
                 return;
             }
 
+            // A type has no rows either — double-click opens its read-only
+            // info tab, mirroring the sequence and index branches above.
+            if (ref && ref.kind === "type") {
+                void this.controller.openType(ref, node);
+
+                return;
+            }
+
             if (ref && isRelation(ref.kind)) {
                 void this.controller.openTable(ref, node);
             }
