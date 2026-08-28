@@ -434,7 +434,7 @@ class DiagramShell extends Panel {
      * shared across passes and the user may have changed a control again
      * meanwhile.
      */
-    private settleViewport(): void {
+    protected settleViewport(): void {
         const root = this.rootId;
 
         void this.view.whenLaidOut().then(() => {

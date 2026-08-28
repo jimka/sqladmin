@@ -158,6 +158,8 @@ class DatabaseDiagramPanel extends DiagramShell {
                 this.rebuildBase();
                 this.rebuildLegend();
             }
+
+            this.settleViewport();
         });
     }
 
@@ -229,6 +231,7 @@ class DatabaseDiagramPanel extends DiagramShell {
         // Last: setRoot resets the selector to (none) and re-derives through
         // rootingChanged, so mode and hiddenSchemas must already be set.
         this.setRoot(null);
+        this.settleViewport();
     };
 }
 
