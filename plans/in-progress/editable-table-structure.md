@@ -1029,3 +1029,71 @@ lives in this plan's `## Architecture Decisions`.
     it splits the leftover with every other uncapped column rather than taking
     it all, and it makes the link column's width an accident of the grid's
     total width.
+
+## Implementation Notes
+
+- **The Columns grid's visual order comes from each field's `order`, not from
+  `linkedColumnsTable`'s `columns:` array listing sequence.** The plan's
+  Internal Structure section (and the Architecture Decisions' "A blank filler
+  column absorbs leftover width") describe the `columns:` array as if listing
+  a field there in a given position places it there on screen — e.g. "columns
+  listed explicitly to keep display order" — and step 11 only asked for
+  `STRUCTURE_FIELDS`' `order` values to be "unique and ascending across both
+  lists," not for them to encode the intended visual position. Implementing it
+  exactly as described (`DISPLAY_FIELDS`: name=1, fullType=2, nullable=3,
+  isPrimaryKey=4, isGenerated=5, wireType=6; `STRUCTURE_FIELDS`: defaultExpr=7,
+  sequence=8, …) rendered Default *after* Wire type instead of after Nullable
+  — caught live in the browser (manual-verify row 1), not by any unit test,
+  since none of them render an actual `Table`. The library's
+  `Column.resolve()` (`component/table/Column.ts`) sorts every field by
+  `Field.getOrder()` *before* consulting `spec.columns` for per-field
+  overrides (width, `readOnly`, `cellReadOnly`, a renderer, …) — that array is
+  a lookup keyed by field name, not a display sequence, and its own doc
+  comment says so ("The returned array is sorted by `Field.getOrder` so that
+  the column sequence matches the order used by the header and body
+  renderers"). Fixed by renumbering: `DISPLAY_FIELDS` now reserves order 4 for
+  `STRUCTURE_FIELDS`' `defaultExpr` and shifts `isPrimaryKey`/`isGenerated`/
+  `wireType` to 5/6/7, with a comment on each array cross-referencing the
+  other. `columns:` still lists every field in its intended visual order too
+  (for readability, matching the plan's pseudocode), but that ordering is now
+  documented as cosmetic — `frontend/src/dock/columnsGrid.ts`.
+
+- **Manual-verify walkthrough (step 20) ran against an isolated stack, not the
+  README's default ports.** :8000/:5173 were already serving a different,
+  unrelated worktree's dev session (`type-info-tab`) — touching those would
+  have disrupted it. Instead: a second backend on :8001
+  (`SQLADMIN_ALLOWED_HOSTS=localhost:5432 poetry run uvicorn app.main:app --port 8001`,
+  this worktree's own code) and a second frontend on :5175, reached by
+  temporarily pointing `vite.config.ts`'s dev proxy at :8001, reverted before
+  committing (`git diff frontend/vite.config.ts` is empty). Both processes
+  were stopped afterward. Rows walked live, against the `sqladmin` demo
+  database's `public.customers` table and `public.active_customers` view:
+  **1** (Type shows `numeric(12,2)`/`timestamp with time zone`, not the bare
+  SQL-standard names; Default column present with real expressions), **2**
+  (filler column visibly absorbs leftover width — this is what surfaced the
+  order bug above), **3** (Name/Type/Default cells open an editor;
+  Nullable toggles), **4** (PK cell double-click is a no-op — Save stays
+  disabled), **5** (`id`, a serial column: Type cell is a no-op, Name cell
+  still edits), **6** (initial state: Save/Drop disabled, Add/Refresh
+  enabled), **7** (editing Type enables Save), **8** (Add column: blank row
+  appended, selected, Save enables), **9** (select + Drop column: row
+  disappears, Save enables), **10** (Refresh discards the pending edit, Save
+  disables), **12** (Execute a real `ADD COLUMN` then a real `DROP COLUMN` —
+  both applied, grid reseeded in place, no leftover schema drift), **13**
+  (Cancel in the dialog leaves the grid's edit and Save's enabled state
+  intact), **14** (an Execute Postgres rejects — retyping `email`, which
+  `active_customers` depends on — leaves the dialog open with the SQL intact
+  and the error reported, confirming the retry loop), **17** (the view's
+  Structure tab: Columns header carries only Refresh, cells inert), **19**
+  (the Sequence link still opens `customers_id_seq`'s tab). Rows **11**,
+  **15**, **16** are pinned by `diffColumnSpecs`/`describeColumnSpecs`'s unit
+  tests (the exact worked example, the blank-name/blank-type throws, and the
+  empty-diff case respectively) and were not separately re-driven through the
+  UI beyond the single-change dialogs rows 12/14 already exercised. Rows
+  **18** and **20** were not re-driven live: both are unchanged code paths —
+  `buildIndexesTools`/a matview's Create-index tool never reads
+  `columnEdits`, and `DefinitionPanel` still calls `buildColumnsGrid(columns)`
+  with no `onOpenSequence`, so it gets `DISPLAY_FIELDS` only (no Default, no
+  filler) through `readOnlyTable`, unchanged by this plan beyond the
+  `dataType`→`fullType` rename already covered by the `grep -rn '\.dataType'`
+  regression check.
