@@ -51,6 +51,7 @@ from .graph import (
     assemble_schema_graph,
     flatten_schema_indexes,
 )
+from .import_rows import ImportRowsCommand, PreviewImportRowsQuery
 from .insert_row import InsertRowCommand
 from .list_columns import ListColumnsQuery
 from .list_databases import ListDatabasesQuery
@@ -109,6 +110,8 @@ __all__ = [
     "InsertRowCommand",
     "UpdateRowCommand",
     "DeleteRowCommand",
+    "PreviewImportRowsQuery",
+    "ImportRowsCommand",
     "RunQueryCommand",
     "ViewDefinitionQuery",
     "ExportRowsQuery",

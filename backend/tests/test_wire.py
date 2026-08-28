@@ -13,7 +13,14 @@ import pytest
 import uuid
 
 from app.contract import WireType
-from app.wire import from_wire_filter_operand, from_wire_value, pg_type_to_wire, rows_to_wire, to_wire_value
+from app.wire import (
+    from_import_scalar,
+    from_wire_filter_operand,
+    from_wire_value,
+    pg_type_to_wire,
+    rows_to_wire,
+    to_wire_value,
+)
 from tests.conftest import col
 
 
@@ -256,3 +263,185 @@ def test_from_wire_filter_operand_non_string_on_temporal_column_passes_through()
 def test_from_wire_filter_operand_unparseable_text_raises_value_error() -> None:
     with pytest.raises(ValueError):
         from_wire_filter_operand("not-a-date", col("d", WireType.ISO_STRING, data_type="date"))
+
+
+# --- from_import_scalar ------------------------------------------------------
+
+
+@pytest.mark.parametrize("wire,data_type", [
+    (WireType.NUMBER, "integer"),
+    (WireType.STRING, "text"),
+    (WireType.STRING, "numeric"),
+    (WireType.STRING, "uuid"),
+    (WireType.BOOLEAN, "boolean"),
+    (WireType.ISO_STRING, "date"),
+    (WireType.JSON, "jsonb"),
+    (WireType.JSON_ARRAY, "ARRAY"),
+    (WireType.BASE64, "bytea"),
+])
+def test_from_import_scalar_none_passes_through_for_every_wire_type(wire: WireType, data_type: str) -> None:
+    assert from_import_scalar(None, col("x", wire, data_type=data_type)) is None
+
+
+def test_from_import_scalar_number_int_and_float_pass_through() -> None:
+    column = col("n", WireType.NUMBER, data_type="integer")
+
+    assert from_import_scalar(42, column) == 42
+    assert from_import_scalar(19.99, column) == 19.99
+
+
+def test_from_import_scalar_number_rejects_bool() -> None:
+    with pytest.raises(ValueError):
+        from_import_scalar(True, col("n", WireType.NUMBER, data_type="integer"))
+
+
+def test_from_import_scalar_number_string_to_int_or_float() -> None:
+    column = col("n", WireType.NUMBER, data_type="integer")
+
+    assert from_import_scalar("42", column) == 42
+    assert isinstance(from_import_scalar("42", column), int)
+    assert from_import_scalar("19.99", column) == 19.99
+    assert from_import_scalar("  42  ", column) == 42  # whitespace stripped first
+
+
+def test_from_import_scalar_number_bad_string_raises() -> None:
+    with pytest.raises(ValueError):
+        from_import_scalar("abc", col("n", WireType.NUMBER, data_type="integer"))
+
+
+def test_from_import_scalar_numeric_as_string_passes_through_text() -> None:
+    column = col("amount", WireType.STRING, data_type="numeric")
+
+    assert from_import_scalar("19.99", column) == "19.99"
+
+
+def test_from_import_scalar_numeric_as_string_stringifies_a_number() -> None:
+    column = col("amount", WireType.STRING, data_type="numeric")
+
+    assert from_import_scalar(19.99, column) == "19.99"
+
+
+def test_from_import_scalar_numeric_as_string_rejects_bool() -> None:
+    with pytest.raises(ValueError):
+        from_import_scalar(True, col("amount", WireType.STRING, data_type="numeric"))
+
+
+def test_from_import_scalar_uuid_passes_through_text_only() -> None:
+    column = col("id", WireType.STRING, data_type="uuid")
+
+    assert from_import_scalar("12345678-1234-5678-1234-567812345678", column) == \
+        "12345678-1234-5678-1234-567812345678"
+
+    with pytest.raises(ValueError):
+        from_import_scalar(42, column)
+
+
+def test_from_import_scalar_plain_text_passes_through() -> None:
+    assert from_import_scalar("hello", col("t", WireType.STRING, data_type="text")) == "hello"
+
+
+def test_from_import_scalar_plain_text_stringifies_number_and_bool_leniently() -> None:
+    column = col("t", WireType.STRING, data_type="text")
+
+    assert from_import_scalar(42, column) == "42"
+    assert from_import_scalar(True, column) == "True"
+
+
+def test_from_import_scalar_plain_text_rejects_a_dict() -> None:
+    with pytest.raises(ValueError):
+        from_import_scalar({"a": 1}, col("t", WireType.STRING, data_type="text"))
+
+
+def test_from_import_scalar_boolean_passes_through() -> None:
+    column = col("b", WireType.BOOLEAN, data_type="boolean")
+
+    assert from_import_scalar(True, column) is True
+    assert from_import_scalar(False, column) is False
+
+
+@pytest.mark.parametrize("text", ["true", "T", "1", "yes", "Y", " true "])
+def test_from_import_scalar_boolean_true_text(text: str) -> None:
+    assert from_import_scalar(text, col("b", WireType.BOOLEAN, data_type="boolean")) is True
+
+
+@pytest.mark.parametrize("text", ["false", "F", "0", "no", "N", " false "])
+def test_from_import_scalar_boolean_false_text(text: str) -> None:
+    assert from_import_scalar(text, col("b", WireType.BOOLEAN, data_type="boolean")) is False
+
+
+def test_from_import_scalar_boolean_bad_text_raises() -> None:
+    with pytest.raises(ValueError):
+        from_import_scalar("nope", col("b", WireType.BOOLEAN, data_type="boolean"))
+
+
+def test_from_import_scalar_iso_string_passes_through_text() -> None:
+    column = col("d", WireType.ISO_STRING, data_type="date")
+
+    assert from_import_scalar("2026-01-01", column) == "2026-01-01"
+
+
+def test_from_import_scalar_iso_string_rejects_non_string() -> None:
+    with pytest.raises(ValueError):
+        from_import_scalar(20260101, col("d", WireType.ISO_STRING, data_type="date"))
+
+
+def test_from_import_scalar_json_parses_a_json_string() -> None:
+    column = col("doc", WireType.JSON, data_type="jsonb")
+
+    assert from_import_scalar('{"a": 1}', column) == {"a": 1}
+
+
+def test_from_import_scalar_json_passes_through_native_object() -> None:
+    column = col("doc", WireType.JSON, data_type="jsonb")
+    obj = {"a": 1}
+
+    assert from_import_scalar(obj, column) is obj
+
+
+def test_from_import_scalar_json_non_json_string_falls_back_to_the_literal_string() -> None:
+    # A CSV cell for a JSON column is always the column's json.dumps() text
+    # (so this only ever fires on a malformed CSV cell); a JSON-sourced row's
+    # jsonb column may also legitimately hold a plain string value directly
+    # (e.g. {"doc": "hello"}) — from_import_scalar cannot tell the two cases
+    # apart, so a parse failure falls back to the literal text instead of
+    # raising (see the module's own comment on this branch).
+    column = col("doc", WireType.JSON, data_type="jsonb")
+
+    assert from_import_scalar("hello", column) == "hello"
+    assert from_import_scalar("{not json", column) == "{not json"
+
+
+def test_from_import_scalar_json_array_passes_through_a_native_list() -> None:
+    # A JSON-sourced row's array column arrives as a native JS/Python list
+    # already; that passes through untouched.
+    column = col("tags", WireType.JSON_ARRAY, data_type="ARRAY")
+
+    assert from_import_scalar([1, 2], column) == [1, 2]
+
+
+def test_from_import_scalar_json_array_rejects_csv_text() -> None:
+    # No CSV/JSON-cell convention exists in this app to invert for a Postgres
+    # array column (see the plan's Non-Goals) — unlike JSON, array-literal
+    # text is never parsed, even when it happens to be valid JSON.
+    column = col("tags", WireType.JSON_ARRAY, data_type="ARRAY")
+
+    with pytest.raises(ValueError):
+        from_import_scalar("[1, 2]", column)
+
+
+def test_from_import_scalar_json_array_rejects_a_non_array_value() -> None:
+    column = col("tags", WireType.JSON_ARRAY, data_type="ARRAY")
+
+    with pytest.raises(ValueError):
+        from_import_scalar({"a": 1}, column)
+
+
+def test_from_import_scalar_base64_passes_through_text() -> None:
+    column = col("blob", WireType.BASE64, data_type="bytea")
+
+    assert from_import_scalar("aGVsbG8=", column) == "aGVsbG8="
+
+
+def test_from_import_scalar_base64_rejects_non_string() -> None:
+    with pytest.raises(ValueError):
+        from_import_scalar(42, col("blob", WireType.BASE64, data_type="bytea"))

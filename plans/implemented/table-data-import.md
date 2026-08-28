@@ -669,3 +669,122 @@ export type ImportTable = () => void;
     rows — already this app's established per-request ceiling — keeps the
     whole feature inside the existing "one JSON body in, one JSON body out"
     write shape every other route uses.
+
+---
+
+## Implementation Notes
+
+- **Unknown-column check moved into `PreviewImportRowsQuery.__init__`, not
+  left inside `apply()`'s per-row loop.** The Internal Structure section's
+  prose for `apply()` ("any failure at any of these steps records
+  `{ok: false, ...}`") read, taken literally, as if an unknown column would
+  also become a per-row preview entry — but the Architecture Decision
+  "Unknown column name: fail the whole import up front, not per-row" and
+  Expected Behaviour item 5 both explicitly require it to fail the whole
+  **construction**, exactly like `ImportRowsCommand`. Implemented per the
+  more specific Architecture Decision/Expected Behaviour text: both
+  operations' constructors now reject an unknown column immediately (a
+  dedicated up-front key scan for `PreviewImportRowsQuery`, since unlike
+  `ImportRowsCommand` its constructor does not otherwise coerce rows), and
+  `_validate_row`'s per-row try/except only ever sees a *value* coercion
+  failure or a missing-required-column failure — never an unknown-column one.
+
+- **`ImportRowsDialog`'s "Import" action is a content-embedded `Button`, not
+  one of the `Dialog` chrome's `buttons`.** The plan's Internal Structure
+  describes "the dialog's primary Import button" as disabled/enabled by
+  state, but `Dialog`'s `DialogButtonRow` builds its `Button` instances
+  internally and never exposes them — there is no public API to `setEnabled`
+  a chrome button after construction (confirmed by reading
+  `overlay/Dialog.ts`; `SqlPreviewDialog`'s own Execute button is never
+  disabled, so no existing app dialog needed this either). Instead, the
+  dialog's chrome carries only Cancel, and "Import" is an ordinary `Button`
+  in the content area, which supports `setEnabled()` like any other button in
+  this app. This also simplifies the retry flow versus `SqlPreviewDialog`'s
+  rebuild-on-failure dance: a chrome button always calls `hide()`
+  unconditionally on click, which is why `SqlPreviewDialog` must tear down
+  and rebuild the whole `Dialog` to retry after a failed Execute; the content
+  button here decides for itself whether to call `dialog.hide()`, so a
+  failed import simply leaves the same `Dialog` instance open, with the same
+  previewed rows, for a one-click retry — no `RetainedContentDialog`
+  machinery needed.
+
+- **`backend/tests/conftest.py`'s `col()` gained a `nullable: bool = True`
+  keyword parameter** (default preserves every existing call site). Not
+  listed in the plan's Files table, but required to construct a NOT NULL
+  test column for `test_import_rows.py`'s required-column-miss coverage
+  (Expected Behaviour item 3) — `col()` had no way to build one before.
+
+- **`from_import_scalar`'s `JSON`/`JSON_ARRAY` coercion table row ("str ->
+  json.loads(raw); raise on parse failure") does not actually hold for every
+  `str`, and the audit caught the resulting bug.** The plan's own docstring
+  premise — `from_import_scalar` "does not know or care which file format
+  produced `raw`" — cannot be honored for these two wire types specifically:
+  a CSV cell's text for a JSON column is always the column's full
+  `json.dumps()` rendering (so `json.loads` reliably succeeds), but a
+  JSON-sourced row's jsonb column may carry a plain string value directly —
+  e.g. `{"doc": "hello"}` — where `"hello"` is not itself valid JSON. Since
+  the backend has no signal distinguishing a CSV-sourced string from a
+  JSON-sourced one (by design — see the "why-not-client-coercion" footnote),
+  `from_import_scalar` now falls back to the literal string on a
+  `json.JSONDecodeError` instead of raising. Accepted trade-off: a malformed
+  CSV JSON cell (unbalanced braces, a stray comma) is now stored as a literal
+  jsonb string instead of rejected at preview time — not silent data loss
+  (jsonb can hold any scalar), just more lenient than the plan's literal
+  "raise on parse failure" wording for that one edge case.
+
+- **`ImportRowsDialog`'s commit no longer resends `previewedRows`' coerced
+  `values`.** As implemented before this fix, `handleImport` sent preview's
+  already-coerced values back to `executeImportRows`, and
+  `ImportRowsCommand.__init__` coerced them a *second* time. Coercion is not
+  idempotent for `JSON`/`JSON_ARRAY` (a value `from_import_scalar` itself
+  produced is not always valid input to `from_import_scalar` again — e.g. a
+  coerced jsonb string that happens not to be valid JSON text on its own),
+  so a row that passed preview could fail the whole all-or-nothing commit.
+  The dialog now keeps the *original* parsed rows (`parsedRows`, aligned by
+  index with `previewedRows`) and sends those — filtered to the ok ones —
+  to commit, so each phase coerces every value exactly once from its true
+  source text. This also matches `previewImportRows`/`executeImportRows`'s
+  own public API, which both take the same `Record<string, unknown>[]` shape
+  the plan defined — the coerced-values shortcut was an implementation
+  error, not something the plan asked for.
+
+- **`ImportRowsDialog.ts`'s preview-grid row building (PAGE_SIZE slicing +
+  the per-row `values`/`error` projection) moved to a new pure module,
+  `frontend/src/dock/importPreviewRows.ts`, with its own unit test.** Not
+  listed in the plan's Files table, but required to make Expected Behaviour
+  item 12's "unit-testable for the slicing" claim actually true:
+  `ImportRowsDialog.ts` imports DOM-touching library components (`Dialog`,
+  `FileDropZone`, `Table`, ...) at module scope, which have no stand-in
+  under this project's node vitest — the same constraint documented on
+  `tableWriteRules.ts`, whose own extraction from `TableWorkPanel.ts` this
+  mirrors.
+
+- **`from_import_scalar` no longer folds `JSON_ARRAY` into the same
+  `json.loads`-on-string rule as `JSON`.** The plan's own Internal Structure
+  coercion table lists `JSON, JSON_ARRAY` together with one rule, but its
+  Non-Goals section explicitly rules out array-literal parsing for
+  `JSON_ARRAY` ("no established CSV/JSON-cell convention... no array-literal
+  parsing is attempted"), and its Potential Challenges section says the same
+  ("`from_wire_value` has no `JSON_ARRAY` case today... Import intentionally
+  does not exercise this path for CSV... confirm `from_import_scalar`'s
+  `JSON_ARRAY` handling for JSON-sourced rows (passthrough) doesn't
+  accidentally break this existing fallback"). The shipped code initially
+  followed the table literally, which an audit round caught: it let a CSV
+  cell's (or any string's) JSON-parseable text through as a native list for
+  an array column — silently wrong for anything but the simplest element
+  type, since neither this function nor `from_wire_value` does the
+  per-element coercion a real Postgres array (`numeric[]`, `timestamp[]`,
+  ...) would need. Fixed to match the Non-Goals/Potential-Challenges intent
+  instead of the table: `JSON_ARRAY` now passes through only an already-native
+  Python `list` (the JSON-sourced case the plan says must keep working) and
+  raises for anything else, including CSV text that happens to be valid JSON
+  array syntax.
+
+- **`frontend/src/data/buildModel.ts`'s previously-private `toFields` helper
+  is now exported** and reused by `ImportRowsDialog.ts` to build the preview
+  grid's per-column fields — not listed in the plan's Files table, but a
+  direct instance of the Internal Structure's own "via the same
+  `WIRE_TO_FIELD` map `buildModel.ts` already uses" instruction: `toFields`
+  *is* that map's field-building wrapper, so reusing it (rather than
+  re-deriving the same name/type/order logic a second time) is the more
+  precise reading of "the same map," not a new pattern.

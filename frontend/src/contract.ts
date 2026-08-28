@@ -587,3 +587,23 @@ export interface ConnectionPreset {
 export function normalizeConnectionPreset(preset: ConnectionPreset): ConnectionPreset {
     return { ...preset, username: preset.username ?? "", isDefault: preset.isDefault ?? false };
 }
+
+/** One imported row's preview/commit outcome, 1-based by file position. */
+export interface ImportRowResult {
+    rowNumber: number;
+    ok: boolean;
+    values?: Record<string, unknown>; // present when ok
+    error?: string;                   // present when !ok
+}
+
+/** The row-import preview endpoint's response: one result per parsed row. */
+export interface ImportPreviewResult {
+    rows: ImportRowResult[];
+    totalRows: number;
+    errorRows: number;
+}
+
+/** The row-import commit endpoint's response. */
+export interface ImportCommitResult {
+    insertedCount: number;
+}

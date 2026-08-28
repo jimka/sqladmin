@@ -25,6 +25,8 @@ import type {
     DropTypeSpec,
     FunctionDefinition,
     FunctionListItem,
+    ImportCommitResult,
+    ImportPreviewResult,
     IndexDetail,
     IndexSpec,
     RefreshMatviewSpec,
@@ -496,6 +498,25 @@ export function previewDropType(ref: DbObjectRef, spec: DropTypeSpec): Promise<D
 /** Preview an ALTER TYPE ... ADD VALUE statement (function-type-ddl phase). */
 export function previewAlterTypeAddValue(ref: DbObjectRef, spec: AlterTypeAddValueSpec): Promise<DdlPreview> {
     return postJson<DdlPreview>(`/api/${ref.connectionId}/${ref.database}/ddl/alter-type-add-value`, spec);
+}
+
+/**
+ * Validate a proposed row import against `ref`'s table, with no write —
+ * mirrors the preview/execute split every DDL phase uses (`previewCreateTable`
+ * above), except this preview needs the target table's identity too (DDL
+ * previews carry it in `spec`; import's payload is just the parsed rows).
+ */
+export function previewImportRows(ref: DbObjectRef, rows: Record<string, unknown>[]): Promise<ImportPreviewResult> {
+    return postJson<ImportPreviewResult>(
+        `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/rows/import/preview`, { rows },
+    );
+}
+
+/** Insert every row of a validated import in one all-or-nothing transaction. */
+export function executeImportRows(ref: DbObjectRef, rows: Record<string, unknown>[]): Promise<ImportCommitResult> {
+    return postJson<ImportCommitResult>(
+        `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/rows/import`, { rows },
+    );
 }
 
 /** The Roles view's role list (introspection one-shot). */
