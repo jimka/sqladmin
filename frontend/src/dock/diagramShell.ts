@@ -311,6 +311,18 @@ class DiagramShell extends Panel {
         });
 
         rootControl?.on("change", (v: string) => this.chooseRoot(v === ROOT_NONE ? null : v));
+
+        // Without this, the tab's first render falls back to DiagramView's own
+        // one-shot centring, which holds the configured (default 1×) zoom
+        // instead of fitting the graph to the viewport — the diagram opens
+        // looking zoomed out. Every later gesture already re-settles the
+        // viewport; the initial mount is just the one gesture-less case.
+        // Deferred to the view's first connected+sized layout: called straight
+        // from the constructor, `settleViewport` would race the ELK layout
+        // this view's own constructor kicks off against the browser's first
+        // layout pass, and — same as `zoomToFit` always has — silently no-op
+        // if the ELK pass lands first, since the view has no width/height yet.
+        view.onFirstLayout(() => this.settleViewport());
     }
 
     /**
