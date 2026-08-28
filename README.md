@@ -60,7 +60,11 @@ It is not hardened for exposure to the public internet:
   advice is heuristic: plan shapes and row counts, never a hypothetical-index
   cost estimate.
 - **Structure & definitions** — inspect columns, view a view's definition, and
-  read a table's `GRANT`s. Each inspector tab has a Refresh button (also
+  read a table's `GRANT`s. A table's columns are editable in place on the
+  Structure tab: rename, retype, toggle NOT NULL, set or clear a default, or
+  add/remove a column, then Save generates the matching `ALTER TABLE`
+  statements for review in the same editable SQL preview every DDL action
+  uses before executing. Each inspector tab has a Refresh button (also
   Alt+R) that re-reads the object from the database.
 - **Diagrams** — schema-overview, per-schema, relation, and role
   grant/membership diagrams, laid out automatically with [elkjs](https://github.com/kieler/elkjs).
