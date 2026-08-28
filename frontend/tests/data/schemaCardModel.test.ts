@@ -15,7 +15,10 @@ import type { ColumnMeta, ForeignKeyMeta } from "../../src/contract";
 
 /** Build a minimal ColumnMeta, filling in the fields these tests don't vary. */
 function column(name: string, dataType: string, isPrimaryKey = false): ColumnMeta {
-    return { name, dataType, nullable: false, isPrimaryKey, isGenerated: false, hasDefault: false, wireType: "string" };
+    return {
+        name, dataType, fullType: dataType, nullable: false, isPrimaryKey,
+        isGenerated: false, hasDefault: false, defaultExpr: null, wireType: "string",
+    };
 }
 
 /** Build a minimal ColumnRowData, filling in the flags a test doesn't vary. */
@@ -63,7 +66,10 @@ describe("deriveColumnRows", () => {
     });
 
     it("carries nullable / generated / hasDefault from the ColumnMeta", () => {
-        const meta: ColumnMeta = { name: "c", dataType: "text", nullable: true, isPrimaryKey: false, isGenerated: true, hasDefault: true, wireType: "string" };
+        const meta: ColumnMeta = {
+            name: "c", dataType: "text", fullType: "text", nullable: true, isPrimaryKey: false,
+            isGenerated: true, hasDefault: true, defaultExpr: null, wireType: "string",
+        };
         const rows = deriveColumnRows([meta], []);
 
         expect(rows[0]).toMatchObject({ nullable: true, generated: true, hasDefault: true });

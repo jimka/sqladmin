@@ -1,15 +1,17 @@
 // Pure spec-assembly helpers for the table-DDL dialog forms: translate a
 // form's collected rows/fields into the wire spec the matching preview
 // client sends. Kept DOM-free (see memory "tsui DOM module side effects") so
-// vitest (node-only) can pin them; each form (CreateTableForm,
-// AlterColumnForm, ConstraintForm, IndexForm, ColumnChecklist) is a thin
-// collector that hands its inputs to one of these.
+// vitest (node-only) can pin them; each form (CreateTableForm, ConstraintForm,
+// IndexForm, ColumnChecklist) is a thin collector that hands its inputs to
+// one of these — as is StructurePanel's Columns-grid Save flow, via
+// diffColumnSpecs/describeColumnSpecs below.
 
 import type {
     AlterColumnAction,
     AlterSequenceSpec,
     AlterTableSpec,
     AlterTypeAddValueSpec,
+    ColumnMeta,
     ColumnSpec,
     ConstraintSpec,
     CreateCompositeTypeSpec,
@@ -118,6 +120,161 @@ export function buildAlterTableSpec(
         case "renameTable":
             return { ...base, newName: fields.newName };
     }
+}
+
+/** One Columns-grid row, as the Save diff reads it. */
+export interface EditedColumnRow {
+    /** The row's column name when the grid was seeded; "" for a row added since. */
+    originalName: string;
+    name: string;
+    type: string;
+    nullable: boolean;
+    /** "" means "no default". */
+    default: string;
+}
+
+/**
+ * Diff the edited Columns grid against the columns the tab loaded, returning
+ * the ALTER TABLE specs in execution order: drops (original order), then
+ * per-kept-row alters (grid order, each keyed on the row's pre-rename
+ * `originalName`), then renames (grid order), then adds (grid order). Every
+ * clause before a rename names the column the database still has, and every
+ * added column is created after the names it might reuse have been freed —
+ * see the plan's "Statement order" Architecture Decision. Every spec is
+ * assembled through {@link buildAlterTableSpec}.
+ *
+ * @param schema - the table's schema.
+ * @param table - the table's name.
+ * @param original - the columns the Structure tab loaded (the diff's baseline).
+ * @param edited - the Columns grid's current rows, in store order.
+ * @throws Error if a kept row's name or type is blank, or an added row has a
+ *   name but a blank type — naming the offending column, surfaced through the
+ *   Save flow's `onError` rather than opening a preview dialog.
+ * @returns the ordered specs; empty when nothing changed.
+ */
+export function diffColumnSpecs(
+    schema: string,
+    table: string,
+    original: ColumnMeta[],
+    edited: EditedColumnRow[],
+): AlterTableSpec[] {
+    const byOriginal = new Map(original.map(c => [c.name, c] as const));
+    const kept        = edited.filter(r => r.originalName !== "");
+    const added       = edited.filter(r => r.originalName === "" && r.name.trim() !== "");
+    const keptNames   = new Set(kept.map(r => r.originalName));
+    const specs: AlterTableSpec[] = [];
+
+    // 1. Drops, in the original column order.
+    for (const c of original) {
+        if (!keptNames.has(c.name)) {
+            specs.push(buildAlterTableSpec(schema, table, "dropColumn", { column: c.name }));
+        }
+    }
+
+    // 2. Per-kept-row alters, always naming the pre-rename `base.name`.
+    for (const r of kept) {
+        const base = byOriginal.get(r.originalName);
+
+        if (!base) {
+            continue; // Defensive: every kept row's originalName came from `original`.
+        }
+        if (r.name.trim() === "") {
+            throw new Error(`Column "${r.originalName}" cannot be renamed to an empty name`);
+        }
+        if (r.type.trim() === "") {
+            throw new Error(`Column "${r.originalName}" needs a type`);
+        }
+
+        if (r.type.trim() !== base.fullType) {
+            specs.push(buildAlterTableSpec(schema, table, "changeType", { column: base.name, newType: r.type.trim() }));
+        }
+        if (r.nullable !== base.nullable) {
+            specs.push(buildAlterTableSpec(schema, table, r.nullable ? "dropNotNull" : "setNotNull", { column: base.name }));
+        }
+
+        const editedDefault   = r.default.trim();
+        const originalDefault = (base.defaultExpr ?? "").trim();
+
+        if (editedDefault !== originalDefault) {
+            specs.push(editedDefault === ""
+                ? buildAlterTableSpec(schema, table, "dropDefault", { column: base.name })
+                : buildAlterTableSpec(schema, table, "setDefault", { column: base.name, default: editedDefault }));
+        }
+    }
+
+    // 3. Renames, in grid order — after every alter, so each alter still names
+    //    the pre-rename identifier.
+    for (const r of kept) {
+        const base = byOriginal.get(r.originalName);
+
+        if (base && r.name.trim() !== base.name) {
+            specs.push(buildAlterTableSpec(schema, table, "renameColumn", { column: base.name, newName: r.name.trim() }));
+        }
+    }
+
+    // 4. Adds, in grid order — after drops/renames, so an added column may
+    //    reuse a name a drop or rename just freed.
+    for (const r of added) {
+        if (r.type.trim() === "") {
+            throw new Error(`New column "${r.name.trim()}" needs a type`);
+        }
+
+        specs.push(buildAlterTableSpec(schema, table, "addColumn", {
+            columnDef: {
+                name:       r.name.trim(),
+                type:       r.type.trim(),
+                nullable:   r.nullable,
+                default:    r.default.trim() === "" ? null : r.default.trim(),
+                primaryKey: false,
+            },
+        }));
+    }
+
+    return specs;
+}
+
+/**
+ * Describe one {@link AlterTableSpec} as a single human-readable summary
+ * line, for the preview dialog's form panel. Exhaustive over every
+ * `AlterTableSpec.action` — `diffColumnSpecs` never emits `renameTable`, but
+ * `describeColumnSpecs` takes the general `AlterTableSpec[]` type, so every
+ * action needs a line.
+ *
+ * @param spec - the spec to describe.
+ * @returns the summary line.
+ */
+function describeColumnSpec(spec: AlterTableSpec): string {
+    switch (spec.action) {
+        case "renameColumn":
+            return `Rename: "${spec.column}" → "${spec.newName}"`;
+        case "changeType":
+            return `Change type: "${spec.column}" → ${spec.newType}`;
+        case "setNotNull":
+            return `Set NOT NULL: "${spec.column}"`;
+        case "dropNotNull":
+            return `Drop NOT NULL: "${spec.column}"`;
+        case "setDefault":
+            return `Set default: "${spec.column}" → ${spec.default}`;
+        case "dropDefault":
+            return `Drop default: "${spec.column}"`;
+        case "dropColumn":
+            return `Drop column: "${spec.column}"`;
+        case "addColumn":
+            return `Add column: "${spec.columnDef!.name}" ${spec.columnDef!.type}`;
+        case "renameTable":
+            return `Rename table to "${spec.newName}"`;
+    }
+}
+
+/**
+ * Describe every spec in `specs`, in order — one summary line per spec, for
+ * the Save preview dialog's form panel.
+ *
+ * @param specs - the diff's specs, in execution order.
+ * @returns one line per spec, in the same order; `[]` for an empty input.
+ */
+export function describeColumnSpecs(specs: AlterTableSpec[]): string[] {
+    return specs.map(describeColumnSpec);
 }
 
 /** The fields a constraint action may carry; which ones apply depends on `action`. */

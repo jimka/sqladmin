@@ -23,6 +23,8 @@ import {
     buildIndexSpec,
     buildRenameSchemaSpec,
     buildSequenceOwnerSpec,
+    describeColumnSpecs,
+    diffColumnSpecs,
     diffSequenceSpecs,
     orderColumnsBySelection,
     preserveSuggestedColumnOrder,
@@ -30,8 +32,8 @@ import {
     parseOptionalInt,
     stripTrailingSemicolon,
 } from "../../src/dock/ddlSpecs";
-import type { ColumnRow, EditedSequenceValues, FunctionArgRow } from "../../src/dock/ddlSpecs";
-import type { SequenceDetail } from "../../src/contract";
+import type { ColumnRow, EditedColumnRow, EditedSequenceValues, FunctionArgRow } from "../../src/dock/ddlSpecs";
+import type { AlterTableSpec, ColumnMeta, SequenceDetail } from "../../src/contract";
 
 describe("buildCreateTableSpec", () => {
     it("drops blank-name rows", () => {
@@ -131,6 +133,206 @@ describe("buildAlterTableSpec", () => {
 
         expect(withoutCascade.cascade).toBeUndefined();
         expect(withCascade.cascade).toBe(true);
+    });
+});
+
+describe("diffColumnSpecs", () => {
+    /** A minimal ColumnMeta, filling in the fields a case doesn't vary. */
+    function columnMeta(overrides: Partial<ColumnMeta> & { name: string }): ColumnMeta {
+        return {
+            dataType: "text", fullType: "text", nullable: true, isPrimaryKey: false,
+            isGenerated: false, hasDefault: false, defaultExpr: null, wireType: "string",
+            ...overrides,
+        };
+    }
+
+    /** The edited row an unedited grid seed produces for `c`. */
+    function seededRow(c: ColumnMeta): EditedColumnRow {
+        return { originalName: c.name, name: c.name, type: c.fullType, nullable: c.nullable, default: c.defaultExpr ?? "" };
+    }
+
+    /** A blank in-progress "Add column" row, overridable per test. */
+    function blankRow(overrides: Partial<EditedColumnRow> = {}): EditedColumnRow {
+        return { originalName: "", name: "", type: "", nullable: true, default: "", ...overrides };
+    }
+
+    const note: ColumnMeta   = columnMeta({ name: "note", fullType: "text" });
+    const legacy: ColumnMeta = columnMeta({ name: "legacy", fullType: "integer" });
+    const original: ColumnMeta[] = [note, legacy];
+    const unedited: EditedColumnRow[] = original.map(seededRow);
+
+    it("returns no specs when nothing changed", () => {
+        expect(diffColumnSpecs("public", "invoices", original, unedited)).toEqual([]);
+    });
+
+    it("diffs a renamed column", () => {
+        const edited = unedited.map(r => r.originalName === "note" ? { ...r, name: "memo" } : r);
+
+        expect(diffColumnSpecs("public", "invoices", original, edited)).toEqual([
+            { schema: "public", name: "invoices", action: "renameColumn", column: "note", newName: "memo" },
+        ]);
+    });
+
+    it("diffs a changed type", () => {
+        const edited = unedited.map(r => r.originalName === "note" ? { ...r, type: "varchar(200)" } : r);
+
+        expect(diffColumnSpecs("public", "invoices", original, edited)).toEqual([
+            { schema: "public", name: "invoices", action: "changeType", column: "note", newType: "varchar(200)" },
+        ]);
+    });
+
+    it("diffs nullable cleared to setNotNull", () => {
+        const edited = unedited.map(r => r.originalName === "note" ? { ...r, nullable: false } : r);
+
+        expect(diffColumnSpecs("public", "invoices", original, edited)).toEqual([
+            { schema: "public", name: "invoices", action: "setNotNull", column: "note" },
+        ]);
+    });
+
+    it("diffs a NOT NULL column's nullable checked to dropNotNull", () => {
+        const requiredCol = columnMeta({ name: "req", fullType: "text", nullable: false });
+        const edited = [{ ...seededRow(requiredCol), nullable: true }];
+
+        expect(diffColumnSpecs("public", "invoices", [requiredCol], edited)).toEqual([
+            { schema: "public", name: "invoices", action: "dropNotNull", column: "req" },
+        ]);
+    });
+
+    it("diffs a set default", () => {
+        const edited = unedited.map(r => r.originalName === "note" ? { ...r, default: "now()" } : r);
+
+        expect(diffColumnSpecs("public", "invoices", original, edited)).toEqual([
+            { schema: "public", name: "invoices", action: "setDefault", column: "note", default: "now()" },
+        ]);
+    });
+
+    it("diffs a defaulted column's default cleared to dropDefault", () => {
+        const defaultedCol = columnMeta({ name: "created", fullType: "timestamptz", defaultExpr: "now()" });
+        const edited = [{ ...seededRow(defaultedCol), default: "" }];
+
+        expect(diffColumnSpecs("public", "invoices", [defaultedCol], edited)).toEqual([
+            { schema: "public", name: "invoices", action: "dropDefault", column: "created" },
+        ]);
+    });
+
+    it("diffs a removed row to dropColumn", () => {
+        const edited = unedited.filter(r => r.originalName !== "legacy");
+
+        expect(diffColumnSpecs("public", "invoices", original, edited)).toEqual([
+            { schema: "public", name: "invoices", action: "dropColumn", column: "legacy" },
+        ]);
+    });
+
+    it("diffs a new row to addColumn", () => {
+        const edited = [...unedited, blankRow({ name: "memo", type: "text" })];
+
+        expect(diffColumnSpecs("public", "invoices", original, edited)).toEqual([
+            {
+                schema: "public", name: "invoices", action: "addColumn",
+                columnDef: { name: "memo", type: "text", nullable: true, default: null, primaryKey: false },
+            },
+        ]);
+    });
+
+    it("silently drops a blank in-progress new row", () => {
+        const edited = [...unedited, blankRow()];
+
+        expect(diffColumnSpecs("public", "invoices", original, edited)).toEqual([]);
+    });
+
+    it("throws naming the column when a new row has a name but a blank type", () => {
+        const edited = [...unedited, blankRow({ name: "memo" })];
+
+        expect(() => diffColumnSpecs("public", "invoices", original, edited)).toThrow(/memo/);
+    });
+
+    it("throws naming the column when a kept row's name is cleared", () => {
+        const edited = unedited.map(r => r.originalName === "note" ? { ...r, name: "" } : r);
+
+        expect(() => diffColumnSpecs("public", "invoices", original, edited)).toThrow(/note/);
+    });
+
+    it("throws naming the column when a kept row's type is cleared", () => {
+        const edited = unedited.map(r => r.originalName === "note" ? { ...r, type: "" } : r);
+
+        expect(() => diffColumnSpecs("public", "invoices", original, edited)).toThrow(/note/);
+    });
+
+    it("orders a rename-and-retype column's changeType (naming the old name) before its renameColumn", () => {
+        const edited = unedited.map(r => r.originalName === "note" ? { ...r, name: "memo", type: "varchar(200)" } : r);
+        const specs = diffColumnSpecs("public", "invoices", original, edited);
+
+        expect(specs).toEqual([
+            { schema: "public", name: "invoices", action: "changeType", column: "note", newType: "varchar(200)" },
+            { schema: "public", name: "invoices", action: "renameColumn", column: "note", newName: "memo" },
+        ]);
+    });
+
+    it("orders the worked example: drops, then alters, then renames, then adds", () => {
+        // note -> memo, retyped, NOT NULL; legacy dropped; issued_at added.
+        const edited: EditedColumnRow[] = [
+            { originalName: "note", name: "memo", type: "varchar(200)", nullable: false, default: "" },
+            blankRow({ name: "issued_at", type: "timestamptz", default: "now()" }),
+        ];
+
+        expect(diffColumnSpecs("public", "invoices", original, edited)).toEqual([
+            { schema: "public", name: "invoices", action: "dropColumn", column: "legacy" },
+            { schema: "public", name: "invoices", action: "changeType", column: "note", newType: "varchar(200)" },
+            { schema: "public", name: "invoices", action: "setNotNull", column: "note" },
+            { schema: "public", name: "invoices", action: "renameColumn", column: "note", newName: "memo" },
+            {
+                schema: "public", name: "invoices", action: "addColumn",
+                columnDef: { name: "issued_at", type: "timestamptz", nullable: true, default: "now()", primaryKey: false },
+            },
+        ]);
+    });
+
+    it("produces no spec for a field edited then reverted to its original text", () => {
+        const roundTripped = unedited.map(r => r.originalName === "note" ? { ...r, type: "varchar(200)" } : r);
+        const reverted = roundTripped.map(r => r.originalName === "note" ? { ...r, type: "text" } : r);
+
+        expect(diffColumnSpecs("public", "invoices", original, reverted)).toEqual([]);
+    });
+
+    it("produces no spec when a type differs from the original only by surrounding whitespace", () => {
+        const edited = unedited.map(r => r.originalName === "note" ? { ...r, type: "  text  " } : r);
+
+        expect(diffColumnSpecs("public", "invoices", original, edited)).toEqual([]);
+    });
+});
+
+describe("describeColumnSpecs", () => {
+    it("returns an empty array for an empty input", () => {
+        expect(describeColumnSpecs([])).toEqual([]);
+    });
+
+    it("describes each action in spec order, one line per spec", () => {
+        const specs: AlterTableSpec[] = [
+            { schema: "public", name: "t", action: "dropColumn", column: "legacy" },
+            { schema: "public", name: "t", action: "changeType", column: "note", newType: "varchar(200)" },
+            { schema: "public", name: "t", action: "setNotNull", column: "note" },
+            { schema: "public", name: "t", action: "dropNotNull", column: "note" },
+            { schema: "public", name: "t", action: "setDefault", column: "note", default: "now()" },
+            { schema: "public", name: "t", action: "dropDefault", column: "note" },
+            { schema: "public", name: "t", action: "renameColumn", column: "note", newName: "memo" },
+            {
+                schema: "public", name: "t", action: "addColumn",
+                columnDef: { name: "memo", type: "text", nullable: true, default: null, primaryKey: false },
+            },
+            { schema: "public", name: "t", action: "renameTable", newName: "invoices2" },
+        ];
+
+        expect(describeColumnSpecs(specs)).toEqual([
+            'Drop column: "legacy"',
+            'Change type: "note" → varchar(200)',
+            'Set NOT NULL: "note"',
+            'Drop NOT NULL: "note"',
+            'Set default: "note" → now()',
+            'Drop default: "note"',
+            'Rename: "note" → "memo"',
+            'Add column: "memo" text',
+            'Rename table to "invoices2"',
+        ]);
     });
 });
 

@@ -7,14 +7,23 @@
 // and the `sequenceSchema`/`sequenceName` pair. The pair is what the grid's
 // cellclick handler reads to open the sequence — the label must never be
 // re-split on ".", since a schema or sequence name may itself contain one.
+//
+// The row also carries the Save diff's identity anchor: `originalName` is the
+// column's name as of this seed, read back by StructurePanel's
+// readEditedColumnRows so a renamed row's edits still resolve to the column
+// `diffColumnSpecs` must alter (see editable-table-structure.md).
 
 import type { ColumnMeta, SequenceRef } from "../contract";
 
 /** One Columns-grid row: the display fields, plus the sequence link's data. */
 export interface ColumnRow {
+    /** The column's name when the grid was seeded — the diff's identity anchor. */
+    originalName: string;
     name: string;
-    dataType: string;
+    fullType: string;
     nullable: boolean;
+    /** `""` when the column has no default. */
+    defaultExpr: string;
     isPrimaryKey: boolean;
     isGenerated: boolean;
     wireType: string;
@@ -46,9 +55,11 @@ export function sequenceLabel(sequence: SequenceRef | null | undefined): string 
  */
 export function toColumnRows(columns: ColumnMeta[]): ColumnRow[] {
     return columns.map(column => ({
+        originalName:   column.name,
         name:           column.name,
-        dataType:       column.dataType,
+        fullType:       column.fullType,
         nullable:       column.nullable,
+        defaultExpr:    column.defaultExpr ?? "",
         isPrimaryKey:   column.isPrimaryKey,
         isGenerated:    column.isGenerated,
         wireType:       column.wireType,

@@ -27,15 +27,22 @@
 // Accordion never scrolls itself vertically (it shrink-to-fits by design), so
 // the surrounding scroll pane is what keeps every section reachable.
 //
-// When `actions` (table-ddl phase) is passed, each editable section also
-// carries its add/alter/drop launchers as glyph-only header tools, ahead of
-// the always-present Refresh tool: Add is always enabled, Alter/Drop enable
-// only once the section's grid has a selected row. The grids themselves stay
-// read-only cells (rowReadOnly) either way — structure edits are
-// tool-launched dialogs, never inline cell edits (the library Table has no
-// per-row context-menu event to hang inline editing off; see the table-ddl
-// plan's "Read-only cells stay read-only" decision). Omitting `actions` gives
-// every section header just its Refresh tool.
+// When `actions` is passed, each editable section also carries its header
+// tools ahead of the always-present Refresh tool: Indexes/Constraints/Foreign
+// Keys keep the table-ddl phase's add/drop launcher dialogs (Add always
+// enabled, Drop enabled once the section's grid has a selected row) — but the
+// Columns section instead becomes an inline-editable grid with Add column /
+// Drop column / Save tools (see `actions.columnEdits` / `ColumnEditActions`).
+// This reverses table-ddl's "Read-only cells stay read-only" decision for
+// Columns specifically: a cell now enters edit mode on double-click or
+// Enter/Space, gated per-cell by ColumnConfig.cellReadOnly (locking a
+// generated column's Type/Nullable/Default while leaving its Name editable)
+// and, for a non-table relation, by the grid-wide `rowReadOnly` `buildColumnsGrid`
+// falls back to when `editable` is false — see editable-table-structure.md's
+// "reversing table-ddl's 'Read-only cells stay read-only'" Architecture
+// Decision for why. Indexes/Constraints/Foreign Keys are unaffected: they stay
+// read-only grids with their existing tool-launched dialogs. Omitting `actions`
+// gives every section header just its Refresh tool.
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the panel `extends Panel`
 // (the scroll host) and holds the AccordionPanel as its sole weighted child.
@@ -51,40 +58,47 @@ import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox, LayoutConstraints } from "@jimka/typescript-ui/layout";
 import { AccordionPanel }      from "@jimka/typescript-ui/component/container";
 import { Button }              from "@jimka/typescript-ui/component/button";
+import { Text }                from "@jimka/typescript-ui/component/input";
 import { Glyph }               from "@jimka/typescript-ui/component/display";
 import { Table, LinkCellRenderer } from "@jimka/typescript-ui/component/table";
 import type { CellClickEvent } from "@jimka/typescript-ui/component/table";
 import { MemoryStore, Model }  from "@jimka/typescript-ui/data";
+import type { ModelRecord }    from "@jimka/typescript-ui/data";
 import { table_columns }       from "@jimka/typescript-ui/glyphs/solid/table_columns";
 import { list }                from "@jimka/typescript-ui/glyphs/solid/list";
 import { shield_halved }       from "@jimka/typescript-ui/glyphs/solid/shield_halved";
 import { link }                from "@jimka/typescript-ui/glyphs/solid/link";
 import { plus }                from "@jimka/typescript-ui/glyphs/solid/plus";
-import { pencil }              from "@jimka/typescript-ui/glyphs/solid/pencil";
 import { trash }               from "@jimka/typescript-ui/glyphs/solid/trash";
+import { save }                from "@jimka/typescript-ui/glyphs/solid/save";
 import { refresh }             from "@jimka/typescript-ui/glyphs/solid/refresh";
 import type {
-    AlterColumnAction,
+    AlterTableSpec,
     ColumnMeta,
     ConstraintKind,
     ConstraintMeta,
+    DdlPreview,
     ForeignKeyMeta,
     IndexMeta,
+    QueryStatusResult,
     TableStructure,
 } from "../contract";
 import { buildColumnsGrid, readOnlyTable } from "./columnsGrid";
 import type { OpenSequenceHandler } from "./columnsGrid";
 import { toColumnRows } from "./columnSequence";
+import { describeColumnSpecs, diffColumnSpecs } from "./ddlSpecs";
+import type { EditedColumnRow } from "./ddlSpecs";
 import { constraintRows, foreignKeyRows } from "./structureRows";
 import { glyphButton, glyphMenuButton } from "./glyphButton";
-import { buildAlterColumnItems, buildAddConstraintItems } from "./menuItems";
+import { buildAddConstraintItems } from "./menuItems";
+import { openSqlPreviewDialog } from "./SqlPreviewDialog";
 import { CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR, PRIMARY_COLOR } from "../theme";
 import type { AccordionLayoutBinding } from "../data/layoutStore";
 
 // Section-header glyphs (Columns / Indexes / Constraints / Foreign Keys), the
-// header tools' add/alter/drop glyphs (plus / pencil / trash), and each
+// header tools' add/drop/save glyphs (plus / trash / save), and each
 // section's own Refresh glyph.
-Glyph.register(table_columns, list, shield_halved, link, plus, pencil, trash, refresh);
+Glyph.register(table_columns, list, shield_halved, link, plus, trash, save, refresh);
 
 /**
  * The edit-action callbacks a table-ddl-aware caller wires into the panel's
@@ -92,13 +106,36 @@ Glyph.register(table_columns, list, shield_halved, link, plus, pencil, trash, re
  * section header carrying only its Refresh tool.
  */
 export interface StructureActions {
-    onAddColumn(): void;
-    onAlterColumn(column: ColumnMeta, action: AlterColumnAction): void;
-    onDropColumn(column: ColumnMeta): void;
     onAddConstraint(kind: ConstraintKind): void;
     onDropConstraint(constraintName: string): void;
     onCreateIndex(): void;
     onDropIndex(indexName: string): void;
+    /** Column editing; omitted (views/matviews) leaves the Columns grid read-only. */
+    columnEdits?: ColumnEditActions;
+}
+
+/**
+ * What the Columns section's Save flow needs from the controller: the table's
+ * own identity, the DDL preview/execute round-trip every other phase's
+ * {@link openSqlPreviewDialog} call uses, and three outcome reporters. Built
+ * only when the tab's own relation is a table (see the plan's "Only a table's
+ * Structure tab is editable" Architecture Decision) — a view/matview's
+ * Structure tab omits `columnEdits` entirely, which is what keeps its Columns
+ * grid read-only (`buildColumnsGrid`'s `editable` argument).
+ */
+export interface ColumnEditActions {
+    schema: string;
+    table: string;
+    /** Preview one diffed ALTER TABLE spec — the same client every other phase's launcher uses. */
+    previewAlter(spec: AlterTableSpec): Promise<DdlPreview>;
+    /** Execute the (possibly hand-edited) joined SQL from the preview dialog. */
+    execute(sql: string): Promise<QueryStatusResult>;
+    /** Re-fetch the structure, reseed every section, and close the stale data tab. */
+    onSaved(): void;
+    /** Report a diff/preview/execute error. */
+    onError(message: string): void;
+    /** Report a short status message (e.g. a no-op Save). */
+    onStatus(message: string): void;
 }
 
 /**
@@ -130,19 +167,24 @@ function reseed(section: StructureGrid, rows: object[]): void {
 /**
  * The structure inspector panel for one table: a four-section accordion, one
  * facet per section, each section's header carrying its own Refresh tool
- * (plus, when `actions` is passed, that section's add/alter/drop launchers).
+ * (plus, when `actions` is passed, that section's edit tools).
  */
 class StructurePanel extends Panel {
-    // Mutable: reassigned by `reloadColumns`, so the Columns section's tools
-    // (built once at construction) resolve a selected row against the
-    // current column list via a getter rather than a stale captured array —
-    // see buildColumnsTools.
+    // Mutable: reassigned by `reloadColumns`, so `saveColumns()`'s diff always
+    // compares the grid against the columns most recently loaded, not a stale
+    // captured array.
     private _columns: ColumnMeta[];
 
     private readonly _columnsSection:     StructureGrid;
     private readonly _indexesSection:     StructureGrid;
     private readonly _constraintsSection: StructureGrid;
     private readonly _foreignKeysSection: StructureGrid;
+
+    // Undefined for a view/matview's Structure tab, or when the caller omits
+    // `actions` entirely — saveColumns() is defensive against that (its own
+    // Save tool doesn't exist either in that case, so it should never run).
+    private readonly _columnEdits: ColumnEditActions | undefined;
+    private readonly _columnsSaveButton: Button | undefined;
 
     /**
      * @param columns - The table's introspected columns (the Columns grid).
@@ -158,8 +200,7 @@ class StructurePanel extends Panel {
      *   hook (`controller.layout.bindAccordion("structure")`). This accordion
      *   is not resizable, so only open state persists.
      * @param actions - The edit-action callbacks for each section's header
-     *   tools (table-ddl phase). Omitted leaves every section header with
-     *   just its Refresh tool.
+     *   tools. Omitted leaves every section header with just its Refresh tool.
      */
     constructor(
         columns: ColumnMeta[],
@@ -182,7 +223,9 @@ class StructurePanel extends Panel {
 
         this._columns = columns;
 
-        const columnsSection     = buildColumnsGrid(columns, onOpenSequence);
+        const columnEdits = actions?.columnEdits;
+
+        const columnsSection     = buildColumnsGrid(columns, onOpenSequence, columnEdits !== undefined);
         const indexesSection     = buildIndexesGrid(structure.indexes);
         const constraintsSection = buildConstraintsGrid(structure.constraints);
         const foreignKeysSection = buildForeignKeysGrid(structure.foreignKeys, onOpenReferenced);
@@ -191,6 +234,7 @@ class StructurePanel extends Panel {
         this._indexesSection     = indexesSection;
         this._constraintsSection = constraintsSection;
         this._foreignKeysSection = foreignKeysSection;
+        this._columnEdits        = columnEdits;
 
         // Declare each section's natural height (see SECTION_HEIGHT) so the
         // accordion has a definite preferred size for the scroll host — the
@@ -198,6 +242,15 @@ class StructurePanel extends Panel {
         for (const section of [columnsSection, indexesSection, constraintsSection, foreignKeysSection]) {
             section.grid.setPreferredSize({ width: 0, height: SECTION_HEIGHT });
         }
+
+        // Built before the AccordionPanel (below), which is where
+        // buildColumnsTools consumes it, and after super() so `this` is
+        // available for the click handler (COMPONENT_CONVENTIONS.md (b)).
+        const columnsSaveButton = columnEdits
+            ? glyphButton("save", PRIMARY_COLOR, "Save column changes", () => this.saveColumns())
+            : undefined;
+
+        this._columnsSaveButton = columnsSaveButton;
 
         // Only Columns opens by default — the facet a reader reaches for first;
         // the other three start collapsed to their header row and expand on
@@ -208,7 +261,7 @@ class StructurePanel extends Panel {
 
         const accordion: AccordionPanel = new AccordionPanel({
             sections: [
-                { label: "Columns",      component: columnsSection.grid,     glyph: "table-columns", initiallyOpen: open[0], tools: buildColumnsTools(() => this._columns, columnsSection.grid, refresh.onRefreshColumns, actions) },
+                { label: "Columns",      component: columnsSection.grid,     glyph: "table-columns", initiallyOpen: open[0], tools: buildColumnsTools(columnsSection.grid, refresh.onRefreshColumns, columnsSaveButton) },
                 { label: "Indexes",      component: indexesSection.grid,     glyph: "list",          initiallyOpen: open[1], tools: buildIndexesTools(indexesSection.grid, refresh.onRefreshIndexes, actions) },
                 { label: "Constraints",  component: constraintsSection.grid, glyph: "shield-halved", initiallyOpen: open[2], tools: buildConstraintsTools(constraintsSection.grid, refresh.onRefreshConstraints, actions) },
                 { label: "Foreign Keys", component: foreignKeysSection.grid, glyph: "link",          initiallyOpen: open[3], tools: buildForeignKeysTools(foreignKeysSection.grid, refresh.onRefreshForeignKeys, actions) },
@@ -224,21 +277,80 @@ class StructurePanel extends Panel {
         const constraints = new LayoutConstraints();
         constraints.weight = 1;
         this.addComponent(accordion, constraints);
+
+        // Save starts disabled (no pending edits yet) and re-syncs on every
+        // grid change — an inline edit, an added row, or a removed row all
+        // fire the store's "datachange" event.
+        columnsSection.store.on("datachange", this.syncColumnsSave);
+        this.syncColumnsSave();
     }
+
+    /**
+     * Diff the Columns grid's current rows against `this._columns` and, if
+     * anything changed, open the shared SQL preview dialog; a diff error (a
+     * blank name/type) and a no-op diff are both reported through
+     * `_columnEdits` without opening a dialog. Registered as the Save
+     * button's click handler — see the constructor's `columnsSaveButton`.
+     */
+    private saveColumns(): void {
+        const edits = this._columnEdits;
+
+        if (!edits) {
+            return; // Defensive: the Save tool only exists when `edits` is set.
+        }
+
+        let specs: AlterTableSpec[];
+
+        try {
+            specs = diffColumnSpecs(
+                edits.schema, edits.table, this._columns, readEditedColumnRows(this._columnsSection.store),
+            );
+        } catch (err) {
+            edits.onError(err instanceof Error ? err.message : String(err));
+
+            return;
+        }
+
+        if (specs.length === 0) {
+            edits.onStatus("No changes");
+
+            return;
+        }
+
+        openSqlPreviewDialog({
+            title:       "Alter columns",
+            form:        summaryPanel(describeColumnSpecs(specs)),
+            generateSql: async () => (await Promise.all(specs.map(s => edits.previewAlter(s)))).map(p => p.sql).join(";\n"),
+            execute:     edits.execute,
+            onSuccess:   () => edits.onSaved(),
+            onError:     edits.onError,
+        });
+    }
+
+    // Registered by reference on the Columns store's "datachange" event —
+    // an arrow-function field (COMPONENT_CONVENTIONS.md (c)).
+    private syncColumnsSave = (): void => {
+        this._columnsSaveButton?.setEnabled(this._columnsSection.store.hasPendingChanges());
+    };
 
     /**
      * Reseed the Columns section after a successful Columns Refresh (or a
      * whole-tab `reload`) — called by the controller instead of rebuilding
-     * the tab. `this._columns` is what `buildColumnsTools`'s Alter/Drop
-     * launchers resolve a selected row against, so it must track the same
-     * data the grid now shows.
+     * the tab. `this._columns` is what `saveColumns()` diffs the grid
+     * against, so it must track the same data the grid now shows.
      *
      * @param columns - the freshly re-fetched columns.
      */
     reloadColumns(columns: ColumnMeta[]): void {
         this._columns = columns;
 
+        // `loadData` replaces the records but leaves pending removals queued
+        // (see TableWorkPanel.ts's Refresh ordering note), so `reject()` must
+        // precede the reseed — otherwise a queued removal survives into the
+        // next Save diff even though the row it named is back.
+        this._columnsSection.store.reject();
         reseed(this._columnsSection, toColumnRows(columns));
+        this.syncColumnsSave();
     }
 
     /** Reseed the Indexes section after a successful Indexes Refresh (or a whole-tab `reload`). */
@@ -295,77 +407,77 @@ function gateOnSelection(grid: Table, buttons: Button[]): void {
 }
 
 /**
- * Look up a column's full metadata by name — the grid's selection only
- * carries the row's display fields, so the toolbar re-resolves the selected
- * name against the table's own introspected columns to hand the launcher a
- * complete `ColumnMeta`.
+ * Build the Columns section's header tools: Add column (always enabled,
+ * appends a blank row via `Table.addRow`) and Drop column (gated on a
+ * selected row, removes it via `Table.removeSelectedRow`) when `saveButton`
+ * is given, that Save button, then Refresh last — always present,
+ * independent of `saveButton`. Add/Drop talk to the grid directly rather than
+ * to a controller callback — every edit lives in the grid until Save diffs
+ * it (see the plan's "The Columns grid itself becomes editable" Architecture
+ * Decision).
  *
- * @param columns - The table's introspected columns.
- * @param name - The selected row's column name.
- *
- * @returns The matching column, or undefined if it somehow isn't found.
- */
-function findColumn(columns: ColumnMeta[], name: string): ColumnMeta | undefined {
-    return columns.find(c => c.name === name);
-}
-
-/**
- * Build the Columns section's header tools: Add (always enabled), Alter (a
- * submenu built by {@link buildAlterColumnItems}), and Drop (both gated on a
- * selected row) when `actions` is passed, then Refresh last — always
- * present, independent of `actions`.
- *
- * @param currentColumns - Reads the table's current introspected columns, to
- *   resolve the selected row back to a full `ColumnMeta`. A getter rather
- *   than a plain array, since `reloadColumns` replaces the panel's column
- *   list after construction — a captured array would leave Alter/Drop
- *   resolving a selected row against the pre-refresh column list.
- * @param grid - The Columns grid to read the selection from.
+ * @param grid - The Columns grid to add/remove rows on and read the selection from.
  * @param onRefresh - Invoked when this section's Refresh tool is clicked.
- * @param actions - The launcher callbacks to invoke, if this tab is table-ddl-aware.
+ * @param saveButton - The section's Save button, already wired to `saveColumns()`
+ *   — present only when this tab is column-edit-aware (see `columnEdits`).
  *
  * @returns The wired header tool buttons, in display order.
  */
-function buildColumnsTools(
-    currentColumns: () => ColumnMeta[],
-    grid: Table,
-    onRefresh: () => void,
-    actions?: StructureActions,
-): Button[] {
+function buildColumnsTools(grid: Table, onRefresh: () => void, saveButton?: Button): Button[] {
     const refreshButton = glyphButton("refresh", PRIMARY_COLOR, "Refresh columns", onRefresh);
 
-    if (!actions) {
+    if (!saveButton) {
         return [refreshButton];
     }
 
-    const addButton = glyphButton("plus", CONSTRUCTIVE_COLOR, "Add column", () => actions.onAddColumn());
-    const alterButton = glyphMenuButton("pencil", PRIMARY_COLOR, "Alter column",
-                                        () => buildAlterColumnItems(selectedColumn(currentColumns(), grid), actions));
+    const addButton = glyphButton("plus", CONSTRUCTIVE_COLOR, "Add column", () => {
+        grid.addRow({
+            originalName: "", name: "", fullType: "", nullable: true, defaultExpr: "",
+            isPrimaryKey: false, isGenerated: false, wireType: "",
+        });
+    });
     const dropButton = glyphButton("trash", DESTRUCTIVE_COLOR, "Drop column", () => {
-        const column = selectedColumn(currentColumns(), grid);
-
-        if (column) {
-            actions.onDropColumn(column);
-        }
+        grid.removeSelectedRow();
     });
 
-    gateOnSelection(grid, [alterButton, dropButton]);
+    gateOnSelection(grid, [dropButton]);
 
-    return [addButton, alterButton, dropButton, refreshButton];
+    return [addButton, dropButton, saveButton, refreshButton];
 }
 
 /**
- * Resolve the Columns grid's currently selected row to its full `ColumnMeta`.
+ * Read the Columns grid's current rows into the shape `diffColumnSpecs`
+ * compares, off the store's master list (`getAll()`) so a header sort never
+ * changes the diff's row order.
  *
- * @param columns - The table's introspected columns.
- * @param grid - The Columns grid.
- *
- * @returns The selected column, or undefined when nothing is selected.
+ * @param store - The Columns section's store.
+ * @returns one `EditedColumnRow` per grid row, in load order.
  */
-function selectedColumn(columns: ColumnMeta[], grid: Table): ColumnMeta | undefined {
-    const record = grid.getSelectedRecord();
+function readEditedColumnRows(store: MemoryStore): EditedColumnRow[] {
+    return store.getAll().map((r: ModelRecord) => ({
+        originalName: String(r.get("originalName") ?? ""),
+        name:         String(r.get("name") ?? ""),
+        type:         String(r.get("fullType") ?? ""),
+        nullable:     r.get("nullable") === true,
+        default:      String(r.get("defaultExpr") ?? ""),
+    }));
+}
 
-    return record ? findColumn(columns, String(record.get("name"))) : undefined;
+/**
+ * Build the minimal read-only summary shown above the Save SQL preview: one
+ * line per changed column, from `describeColumnSpecs`. Display-only — the
+ * previewed (and possibly hand-edited) SQL text is authoritative at execute,
+ * the same trust model every other DDL phase's preview dialog uses. Mirrors
+ * SequenceInfoPanel's own `summaryPanel`.
+ *
+ * @param lines - one summary line per changed column.
+ * @returns the summary panel to host above the SQL preview editor.
+ */
+function summaryPanel(lines: string[]): Panel {
+    return Panel({
+        layoutManager: new VBox({ itemAlign: "stretch" }),
+        components:    lines.map(line => new Text(line)),
+    });
 }
 
 /**

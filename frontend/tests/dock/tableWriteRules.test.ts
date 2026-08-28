@@ -4,8 +4,8 @@ import type { ColumnMeta, WireType } from "../../src/contract";
 
 function column(overrides: Partial<ColumnMeta> = {}): ColumnMeta {
     return {
-        name: "col", dataType: "text", nullable: true, isPrimaryKey: false,
-        isGenerated: false, hasDefault: false, wireType: "string", ...overrides,
+        name: "col", dataType: "text", fullType: "text", nullable: true, isPrimaryKey: false,
+        isGenerated: false, hasDefault: false, defaultExpr: null, wireType: "string", ...overrides,
     };
 }
 

@@ -51,10 +51,14 @@ export interface SequenceRef {
 export interface ColumnMeta {
     name: string;
     dataType: string;
+    /** The declared type including any modifier, e.g. "character varying(60)". */
+    fullType: string;
     nullable: boolean;
     isPrimaryKey: boolean;
     isGenerated: boolean;
     hasDefault: boolean; // has a column default; not user-required on insert
+    /** The column's DEFAULT expression, or null when it has none. */
+    defaultExpr: string | null;
     wireType: WireType;
     // The sequence backing this column, or null when none does. Independent of
     // isGenerated: a `GENERATED ALWAYS AS (expr) STORED` column is generated but

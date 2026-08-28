@@ -59,13 +59,16 @@ def test_columns_wraps_column_meta_as_payload() -> None:
         },
     ]
 
+    # This op's raw rows carry no full_type/default_expr, so the ColumnMeta
+    # objects it builds fall back to the dataclass defaults ("" / None) —
+    # SchemaColumnsQuery is unrelated to the editable Structure tab.
     assert op.get_result() == [
         {
             "schema": "public", "table": "customers",
             "payload": {
                 "name": "id", "dataType": "integer", "nullable": False,
                 "isPrimaryKey": True, "isGenerated": True, "hasDefault": True,
-                "wireType": "number",
+                "wireType": "number", "fullType": "", "defaultExpr": None,
                 "sequence": {"schema": "public", "name": "customers_id_seq"},
             },
         },
@@ -74,7 +77,7 @@ def test_columns_wraps_column_meta_as_payload() -> None:
             "payload": {
                 "name": "balance", "dataType": "numeric", "nullable": False,
                 "isPrimaryKey": False, "isGenerated": False, "hasDefault": False,
-                "wireType": "string",
+                "wireType": "string", "fullType": "", "defaultExpr": None,
                 "sequence": None,
             },
         },

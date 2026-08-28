@@ -93,6 +93,18 @@ class ColumnMeta:
     has_default: bool        # has a column default (e.g. now()) — not user-required on INSERT
     wire_type: WireType      # the contract scalar a row value of this column arrives as
 
+    # The declared type WITH its modifier (format_type()), e.g.
+    # "character varying(60)" where data_type reports only "character
+    # varying". Defaulted to "" (and therefore after every non-defaulted
+    # field) so the construction sites outside list_columns.py — graph.py,
+    # run_query.py, tests/conftest.py — compile unchanged; those callers never
+    # populate a Structure tab's editable Type cell.
+    full_type: str = ""
+    # The column's DEFAULT expression (information_schema.columns.column_default),
+    # or None when it has none. Distinct from has_default: this carries the
+    # expression text itself, which an editable Default cell needs to diff
+    # against, where has_default only reports whether one exists.
+    default_expr: str | None = None
     # The sequence backing this column, or None when none does. Defaulted (and
     # therefore last: dataclass requires defaulted fields after non-defaulted
     # ones) so existing ColumnMeta construction sites need no change. Distinct
@@ -106,8 +118,8 @@ class ColumnMeta:
 
         Returns:
             A dict with name, dataType, nullable, isPrimaryKey, isGenerated,
-            hasDefault, wireType, and sequence (null when no sequence backs
-            the column — the key is always present).
+            hasDefault, wireType, fullType, defaultExpr, and sequence (null
+            when no sequence backs the column — the key is always present).
         """
         return {
             "name": self.name,
@@ -117,6 +129,8 @@ class ColumnMeta:
             "isGenerated": self.is_generated,
             "hasDefault": self.has_default,
             "wireType": self.wire_type.value,
+            "fullType": self.full_type,
+            "defaultExpr": self.default_expr,
             "sequence": self.sequence.to_contract() if self.sequence else None,
         }
 
