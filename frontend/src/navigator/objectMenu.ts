@@ -20,6 +20,7 @@ import type { TreeNode }         from "@jimka/typescript-ui/component/tree";
 import type { DbObjectRef }      from "../contract";
 import type { SqlAdminController } from "../SqlAdminController";
 import type { DdlLaunchers }     from "../controller/ddlLaunchers";
+import type { QueryWorkspace }   from "../controller/queryWorkspace";
 import { isRelationKind }        from "./objectKinds";
 import { buildTableExportItems } from "../dock/menuItems";
 
@@ -31,24 +32,29 @@ export type DdlMenuActions = Pick<DdlLaunchers,
     | "dropTable" | "dropRelation" | "refreshMaterializedView"
     | "dropSchema" | "dropSequence" | "dropFunction" | "editType" | "dropType">;
 
+/** The two query-workspace actions the object context menu invokes. */
+export type WorkspaceMenuActions = Pick<QueryWorkspace, "openQueryFor" | "executeFunction">;
+
 /**
- * The controller methods (and, for DDL, the `ddl` collaborator's methods) the
- * object context menu invokes. A narrowed slice of SqlAdminController so the
- * tree and the diagram panels build identical menus without the builder
- * depending on the whole controller. The controller (and `this.controller` in
- * the tree) satisfies it structurally. The import above is `import type`,
- * erased at runtime, so no cycle forms even though the controller imports
- * this module at runtime for `showObjectMenu`.
+ * The controller methods (and, for DDL/workspace actions, the `ddl`/
+ * `workspace` collaborators' methods) the object context menu invokes. A
+ * narrowed slice of SqlAdminController so the tree and the diagram panels
+ * build identical menus without the builder depending on the whole
+ * controller. The controller (and `this.controller` in the tree) satisfies
+ * it structurally. The import above is `import type`, erased at runtime, so
+ * no cycle forms even though the controller imports this module at runtime
+ * for `showObjectMenu`.
  */
 export interface ObjectMenuActions extends Pick<SqlAdminController,
-    | "openTable" | "openQueryFor" | "openStructure" | "openDefinition"
-    | "openSequence" | "openFunctionDefinition" | "executeFunction"
+    | "openTable" | "openStructure" | "openDefinition"
+    | "openSequence" | "openFunctionDefinition"
     | "openRelationDiagram" | "openRelationDependencyGraph" | "openRelationInheritanceGraph"
     | "openSchemaDiagram" | "openSchemaDependencyGraph" | "openSchemaInheritanceGraph"
     | "exportTable"
     | "openIndex" | "openReferencedStructure"
     | "openType"> {
     readonly ddl: DdlMenuActions;
+    readonly workspace: WorkspaceMenuActions;
 }
 
 /**
@@ -93,7 +99,7 @@ function sequenceMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
  */
 function functionMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: TreeNode): MenuItemConfig[] {
     return [
-        { text: ref.isProcedure ? "Call" : "Execute", glyph: "play", action: () => actions.executeFunction(ref) },
+        { text: ref.isProcedure ? "Call" : "Execute", glyph: "play", action: () => actions.workspace.executeFunction(ref) },
         { separator: true },
         { text: "Show definition", glyph: "file-code", action: () => void actions.openFunctionDefinition(ref, node) },
         { text: "Drop", glyph: "trash", action: () => actions.ddl.dropFunction(ref) },
@@ -142,7 +148,7 @@ function relationMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
     // A view already opens as that query ("Show data" above), so the item would
     // be a redundant duplicate there.
     if (ref.kind === "table") {
-        items.push({ text: "Open as query", glyph: "terminal", action: () => actions.openQueryFor(ref) });
+        items.push({ text: "Open as query", glyph: "terminal", action: () => actions.workspace.openQueryFor(ref) });
     }
 
     items.push({ separator: true });

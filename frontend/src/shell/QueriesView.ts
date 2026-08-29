@@ -112,22 +112,22 @@ class QueriesView extends AccordionPanel {
             title    : "Saved",
             glyph    : "floppy-disk",
             empty    : "No saved queries",
-            rows     : () => controller.savedList().map(q => ({ key: q.name, label: q.name, sql: q.sql, name: q.name })),
-            open     : row => controller.openSavedQuery(row.name!, false),
-            execute  : row => controller.openSavedQuery(row.name!, true),
+            rows     : () => controller.workspace.savedList().map(q => ({ key: q.name, label: q.name, sql: q.sql, name: q.name })),
+            open     : row => controller.workspace.openSavedQuery(row.name!, false),
+            execute  : row => controller.workspace.openSavedQuery(row.name!, true),
             secondary: { glyph: "trash", color: DESTRUCTIVE_COLOR, label: "Remove",
-                         run: row => void controller.removeSavedQuery(row.name!) },
+                         run: row => void controller.workspace.removeSavedQuery(row.name!) },
         });
 
         const recent = buildSection({
             title    : "Recent",
             glyph    : "clock-rotate-left",
             empty    : "No recent queries",
-            rows     : () => controller.historyList().map((h, i) => ({ key: String(i), label: snippet(h.sql), sql: h.sql })),
-            open     : row => controller.openQuery(row.sql, false),
-            execute  : row => controller.openQuery(row.sql, true),
+            rows     : () => controller.workspace.historyList().map((h, i) => ({ key: String(i), label: snippet(h.sql), sql: h.sql })),
+            open     : row => controller.workspace.openQuery(row.sql, false),
+            execute  : row => controller.workspace.openQuery(row.sql, true),
             secondary: { glyph: "floppy-disk", color: PRIMARY_COLOR, label: "Save under a name",
-                         run: row => void controller.promptAndSaveQuery(row.sql) },
+                         run: row => void controller.workspace.promptAndSaveQuery(row.sql) },
         });
 
         super({
@@ -163,7 +163,7 @@ class QueriesView extends AccordionPanel {
         // The menu's "Open Saved…" / "Query History…" land the keyboard on the
         // right list: expand its section and focus it. Saved is section 0,
         // Recent is 1.
-        controller.setQueriesSectionFocus(section => {
+        controller.workspace.setQueriesSectionFocus(section => {
             const target = section === "saved" ? saved : recent;
             accordion.openSection(section === "saved" ? 0 : 1);
             target.focusList();
@@ -174,7 +174,7 @@ class QueriesView extends AccordionPanel {
             recent.refresh();
         };
 
-        controller.onWorkspaceChanged(rebuild);
+        controller.workspace.onWorkspaceChanged(rebuild);
         rebuild();
 
         // Alt+R re-reads both sections' stores while this rail has focus (see refreshTool).
@@ -259,7 +259,7 @@ function buildSection(config: SectionConfig): Section {
         }
 
         // Focus after the next layout flush, not now: this runs from
-        // controller.showQueriesView, which reveals the Queries view and opens its
+        // controller.workspace.showQueriesView, which reveals the Queries view and opens its
         // section — both via scheduleLayout — so on this tick the list is not yet
         // in its final attached, laid-out state. afterNextLayout follows the
         // batched layout pass deterministically, so focus lands on the settled

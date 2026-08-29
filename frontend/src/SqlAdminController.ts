@@ -2,7 +2,7 @@
 // the open-panel registry (deduped by panel id). Components stay dumb: they emit,
 // the controller decides. All app-side errors funnel to notifyError.
 
-import { Dialog, Dock, Menu, Notification, NotificationHistoryButton, Tooltip }                                                                                                                    from "@jimka/typescript-ui/overlay";
+import { Dock, Menu, Notification, NotificationHistoryButton, Tooltip }                                                                                                                            from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent, DockExceptionEvent }                                                                                                                                                 from "@jimka/typescript-ui/overlay";
 import { Component, Util }                                                                                                                                                                         from "@jimka/typescript-ui/core";
 import { HBox }                                                                                                                                                                                    from "@jimka/typescript-ui/layout";
@@ -22,11 +22,11 @@ import { user }                                                                 
 import type { TreeNode }                                                                                                                                                                           from "@jimka/typescript-ui/component/tree";
 import { showObjectMenu }                                                                                                                                                                          from "./navigator/objectMenu";
 import { matchesGrantedTable, matchesObject, matchesRelationName }                                                                                                                                 from "./navigator/revealMatch";
-import { objectPath, rolePath, databaseDiagramPath, notesPath, resolveAddressBarRoute }                                                                                                            from "./shell/routeTargets";
+import { objectPath, rolePath, databaseDiagramPath, resolveAddressBarRoute }                                                                                                                       from "./shell/routeTargets";
 import type { PanelRoute }                                                                                                                                                                         from "./shell/routeTargets";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                                                                                                                                     from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef, FunctionDefinition, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary } from "./contract";
-import { executeDdl, getColumns, getDatabaseGraph, getDependencies, getFunctionDefinition, getInheritance, getRoleDetail, getRoles, getSchemaGraph, getTablePrivileges, getTypeDefinition, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewCreateView, previewReplaceMatview, previewSequenceOwner, runExplain, runQuery, tableExportUrl } from "./data/api";
+import { executeDdl, getColumns, getDatabaseGraph, getDependencies, getFunctionDefinition, getInheritance, getRoleDetail, getRoles, getSchemaGraph, getTablePrivileges, getTypeDefinition, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewCreateView, previewReplaceMatview, previewSequenceOwner, tableExportUrl } from "./data/api";
 import { getSequenceDetail }                                                                                                                                                                       from "./data/api";
 import { getIndexDetail }                                                                                                                                                                          from "./data/api";
 import { exportQueryResult }                                                                                                                                                                       from "./dock/exportQueryResult";
@@ -39,7 +39,7 @@ import { buildRoleMembershipDiagram }                                           
 import { buildRoleGrantsDiagram }                                                                                                                                                                  from "./data/buildRoleGrantsDiagram";
 import { buildRelationGraph, relationNodeId }                                                                                                                                                      from "./data/buildRelationGraph";
 import type { RelationNodeData }                                                                                                                                                                   from "./data/buildRelationGraph";
-import { buildSelectSql, buildRoutineCallSql, routineCallIsComplete }                                                                                                                              from "./data/sql";
+import { buildSelectSql }                                                                                                                                                                          from "./data/sql";
 import { buildStore }                                                                                                                                                                              from "./data/stores";
 import { TableWorkPanel }                                                                                                                                                                          from "./dock/TableWorkPanel";
 import type { TableViewOptions, Notify }                                                                                                                                                           from "./dock/TableWorkPanel";
@@ -52,8 +52,6 @@ import { FunctionDefinitionPanel }                                              
 import { SequenceInfoPanel }                                                                                                                                                                       from "./dock/SequenceInfoPanel";
 import { IndexInfoPanel }                                                                                                                                                                          from "./dock/IndexInfoPanel";
 import { TypeInfoPanel }                                                                                                                                                                           from "./dock/TypeInfoPanel";
-import { DocumentationPanel }                                                                                                                                                                      from "./dock/DocumentationPanel";
-import { QueryPanel }                                                                                                                                                                              from "./dock/QueryPanel";
 import { RoleGrantsPanel }                                                                                                                                                                         from "./dock/RoleGrantsPanel";
 import { exportRoleGrants }                                                                                                                                                                        from "./dock/exportRoleGrants";
 import { SchemaDiagramPanel }                                                                                                                                                                      from "./dock/SchemaDiagramPanel";
@@ -69,22 +67,19 @@ import { PropertiesPanel }                                                      
 import { RolesPropertiesPanel }                                                                                                                                                                    from "./roles/RolesPropertiesPanel";
 import { KIND_GLYPH }                                                                                                                                                                              from "./navigator/objectGlyphs";
 import { kindDisplayLabel }                                                                                                                                                                        from "./navigator/objectKinds";
-import { QueryHistoryStore, SavedQueryStore }                                                                                                                                                      from "./data/queryStore";
-import type { HistoryEntry, SavedQuery }                                                                                                                                                           from "./data/queryStore";
-import { NotesStore }                                                                                                                                                                              from "./data/notesStore";
 import { LayoutStore }                                                                                                                                                                             from "./data/layoutStore";
-import { promptQueryName }                                                                                                                                                                         from "./promptQueryName";
 import {
     panelId, structurePanelId, definitionPanelId, sequenceInfoPanelId, indexInfoPanelId, typeInfoPanelId,
     functionDefinitionPanelId, diagramPanelId, relationDiagramPanelId,
     dependencyPanelId, relationDependencyPanelId, inheritancePanelId, relationInheritancePanelId,
-    databaseDiagramPanelId, notesPanelId, roleGrantsPanelId, roleGrantsDiagramPanelId, roleMembershipDiagramPanelId,
-    panelTooltip as buildPanelTooltip, elideName, errorMessage, panelIdsFor,
+    databaseDiagramPanelId, roleGrantsPanelId, roleGrantsDiagramPanelId, roleMembershipDiagramPanelId,
+    panelTooltip as buildPanelTooltip, errorMessage, panelIdsFor,
 } from "./controller/controllerText";
 import { PanelLoadError } from "./controller/panelHost";
-import type { PanelHost, OpenPanel, RecentTable, RoleGrants, AsyncPanelSpec } from "./controller/panelHost";
+import type { PanelHost, OpenPanel, RoleGrants, AsyncPanelSpec } from "./controller/panelHost";
 import { RevealCoordinator } from "./controller/revealCoordinator";
 import { DdlLaunchers } from "./controller/ddlLaunchers";
+import { QueryWorkspace } from "./controller/queryWorkspace";
 
 // The non-relation dock-tab glyphs (query / structure / definition / grants /
 // notes) plus the distinct diagram-tab glyphs: `diagram-project` is the FK
@@ -141,13 +136,6 @@ function awaitDiagramLayout(content: Component): Promise<void> {
     return panel.whenLaidOut?.() ?? Promise.resolve();
 }
 
-/** A focusable section of the Queries view — the Saved or the Recent list. */
-export type QueriesSection = "saved" | "recent";
-
-// How many recently opened tables the start page lists. Small enough to stay a
-// glanceable "jump back in" strip, not a full history.
-const MAX_RECENT_TABLES = 8;
-
 // Dependency graph reads left-to-right as a dependency flow (view -> underlying),
 // matching the FK schema diagram's RIGHT layered layout.
 const DEPENDENCY_LAYOUT = { "elk.algorithm": "layered", "elk.direction": "RIGHT" };
@@ -189,6 +177,9 @@ export class SqlAdminController implements PanelHost {
     // Every DDL launcher (create/rename/drop for every object kind, plus the
     // Structure tab's Constraints/Indexes toolbar actions).
     readonly ddl            : DdlLaunchers;
+    // Scratch query panels, the run-history/saved-query/notes stores, and
+    // recently opened tables.
+    readonly workspace      : QueryWorkspace;
 
     private readonly _connectionId: string;
     private readonly _database    : string | undefined;
@@ -207,33 +198,13 @@ export class SqlAdminController implements PanelHost {
     // module wrapper of the same purpose.
     private readonly _objectMenu: Menu = Menu();
 
-    // The per-connection localStorage stores backing the Queries view, the start
-    // page, and the panel's Ctrl+↑/↓ recall.
-    private readonly _history: QueryHistoryStore;
-    private readonly _saved  : SavedQueryStore;
-    private readonly _notes  : NotesStore;
-
-    // Recently opened tables (newest-first), surfaced on the start page.
-    private readonly _recentTables: RecentTable[] = [];
-
-    // Shell-injected handles (mirroring how ActivityBar takes a SidebarSizer): one
-    // toggles the start-page deck, one selects the Queries activity-bar view, one
-    // focuses a section (Saved/Recent) of the Queries view. The Database/Roles
-    // view selectors live on `reveal` instead (RevealCoordinator.setShowDatabaseView/
-    // setShowRolesView) — a reveal never searches a tree whose deck page is hidden.
+    // Shell-injected handle (mirroring how ActivityBar takes a SidebarSizer):
+    // toggles the start-page deck. The Queries-view selector/section-focuser
+    // live on `workspace` instead, and the Database/Roles view selectors live
+    // on `reveal` — a reveal never searches a tree whose deck page is hidden.
     private _startToggle        : ((visible: boolean) => void) | null = null;
-    private _showQueriesView    : (() => void) | null = null;
     // The address-bar sync hook, wired from SqlAdminApp.ts — see setSyncAddressBar.
     private _syncAddressBar     : ((path: string, query?: Record<string, string>) => void) | null = null;
-    private _focusQueriesSection: ((section: QueriesSection) => void) | null = null;
-
-    // Listeners rebuilt when the workspace data changes (a run recorded, a query
-    // saved/removed, a table opened) — the Queries view and the start page.
-    private readonly _workspaceListeners: Array<() => void> = [];
-
-    // Monotonic counter minting unique ids for scratch query panels, which are
-    // never deduped (each "New Query" / "Open as query" opens a fresh panel).
-    private _queryCounter: number = 0;
 
     // Bumped on every showProperties call so a slow column fetch whose selection
     // has since moved on is discarded instead of clobbering the current view.
@@ -286,14 +257,6 @@ export class SqlAdminController implements PanelHost {
         // username is absent (a bare test construction), keeping the key well-formed.
         const userId = username || "default";
 
-        // Production storage is the DOM localStorage (persisted per user and
-        // connection); the pure stores keep it injected so their logic tests run
-        // DOM-less. History, saved queries, and notes are the user's own work
-        // against a specific database, so they carry both the user and connection.
-        this._history = new QueryHistoryStore(userId, connectionId, window.localStorage);
-        this._saved   = new SavedQueryStore(userId, connectionId, window.localStorage);
-        this._notes   = new NotesStore(userId, connectionId, window.localStorage);
-
         // No connectionId — layout is a property of the user's window, not of the
         // database being viewed, so it is scoped per user only (see data/layoutStore.ts).
         this.layout = new LayoutStore(userId, window.localStorage);
@@ -302,8 +265,9 @@ export class SqlAdminController implements PanelHost {
         // DDL launchers that depend on it. Built before the rest of the
         // collaborators land (a later plan phase), since panels/diagrams/roles
         // will all depend on both.
-        this.reveal = new RevealCoordinator(connectionId, database);
-        this.ddl    = new DdlLaunchers(this, this.reveal);
+        this.reveal    = new RevealCoordinator(connectionId, database);
+        this.ddl       = new DdlLaunchers(this, this.reveal);
+        this.workspace = new QueryWorkspace(this, this.ddl, username);
 
         // The dock disposes a closed tab's content itself (destroying every
         // registered child in its subtree) and fires "close" only on genuine
@@ -422,9 +386,9 @@ export class SqlAdminController implements PanelHost {
         if (ref.kind === "view" || ref.kind === "materializedView") {
             // Not awaited: remembering the table has no bearing on the query tab
             // that follows, and a pending reveal must not delay it.
-            void Promise.resolve(node).then(resolved => { if (resolved) { this.rememberTable(ref, resolved); } });
+            void Promise.resolve(node).then(resolved => { if (resolved) { this.workspace.rememberTable(ref, resolved); } });
 
-            this.openQuery(buildSelectSql(ref), true, ref.name);
+            this.workspace.openQuery(buildSelectSql(ref), true, ref.name);
 
             return;
         }
@@ -471,7 +435,7 @@ export class SqlAdminController implements PanelHost {
             this.registerPanel(id, { ref, node: resolvedNode ?? null, store, columns });
 
             if (resolvedNode) {
-                this.rememberTable(ref, resolvedNode);
+                this.workspace.rememberTable(ref, resolvedNode);
             }
 
             const notify = (message: string): void => { this.status(`${ref.name}: ${message}`); };
@@ -1094,45 +1058,6 @@ export class SqlAdminController implements PanelHost {
     }
 
     /**
-     * Open a new query tab seeded with a call to this function/procedure, so
-     * the routine can actually be run (the navigator's "Execute"/"Call"
-     * launcher). A function is seeded as `SELECT * FROM …`, a procedure as
-     * `CALL …` (see buildRoutineCallSql). A zero-argument routine's call is
-     * complete, so it auto-runs; one with arguments seeds its signature as an
-     * inline comment to fill in and waits for the user to run it.
-     *
-     * @param ref - the function/procedure to call.
-     */
-    executeFunction(ref: DbObjectRef): void {
-        const verb = ref.isProcedure ? "Call" : "Run";
-
-        this.openQuery(buildRoutineCallSql(ref), routineCallIsComplete(ref), `${verb} ${ref.name}`);
-    }
-
-    /**
-     * Open (or focus) the singleton documentation/notes tab for this connection:
-     * a WYSIWYG DocumentationPanel seeded from and persisting to the
-     * per-connection notes store. Not registered in `_openPanels` (it carries
-     * no `DbObjectRef`), matching how scratch query panels are handled.
-     */
-    openDocumentation(): void {
-        const id = notesPanelId(this._connectionId);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const panel = new DocumentationPanel(
-            this._notes.load(),
-            markdown => this._notes.save(markdown),
-        );
-
-        this._panelRoutes.set(id, notesPath());
-
-        this.dock.addPanel({ id, title: "Notes", glyph: "file-lines", content: panel.content });
-    }
-
-    /**
      * Open a read-only entity-relationship diagram for a whole schema in the Dock
      * (deduped by panel id): tables as nodes, foreign keys as edges, auto-laid-out
      * by ELK. Selecting a node opens that table's data tab via openReferencedTable.
@@ -1683,75 +1608,6 @@ export class SqlAdminController implements PanelHost {
     }
 
     /**
-     * Open a fresh scratch query panel, optionally seeded with SQL to run on
-     * open. Each call mints a new id, so re-invoking always opens a new panel
-     * (no dedup — the natural behaviour for a scratch buffer).
-     *
-     * Query panels are deliberately NOT registered in `_openPanels`: they carry
-     * no `ref`/`node`/`columns` and need no dedup or focus-sync, so the
-     * table-panel lifecycle (`OpenPanel`/`syncToPanel`/`disposePanel`) stays
-     * untouched. The controller holds no reference back to the panel — the Dock
-     * destroys its content, and every live CodeEditor beneath it, when its tab
-     * closes.
-     *
-     * @param seedSql - SQL to prefill the editor with.
-     * @param run - Whether to execute the seeded SQL on open. Defaults to
-     *   `false` — opening seeds the editor only; a caller that wants the
-     *   phpMyAdmin "run immediately" behaviour (Open-as-query, "Execute") opts in.
-     * @param title - The tab title (and status-line label). Defaults to
-     *   `Query N`; a saved query passes its name so the tab reads as the query.
-     * @param explain - Auto-EXPLAIN the seeded SQL on open instead of running it
-     *   (`"plain"` / `"analyze"`); used by the view panel's Explain actions.
-     */
-    openQuery(seedSql?: string, run: boolean = false, title?: string, explain?: "plain" | "analyze"): void {
-        const n     = ++this._queryCounter;
-        const id    = `query-${n}`;
-        const label = title ?? `Query ${n}`;
-
-        // The tab keeps the full name; only the status line, which has to fit a
-        // scope and a message beside it, spends a bounded amount on the label.
-        const statusLabel = elideName(label);
-
-        const notify = (message: string): void => {
-            this.status(`${statusLabel}: ${message}`);
-        };
-
-        const panel = new QueryPanel({
-            runQuery  : sql => runQuery(this._connectionId, sql),
-            runExplain: (sql, opts) => runExplain(this._connectionId, sql, opts),
-            notify,
-            onError   : error => this.notifyError(error),
-            initialSql : seedSql,
-            autoRun    : run,
-            autoExplain: explain,
-            // Record every run in history and feed the panel's Ctrl+↑/↓ recall.
-            // The store dependency stays here — the panel is a pure view over
-            // these injected callbacks (matching notify/onError).
-            onRun     : (entry: HistoryEntry) => this.recordRun(id, entry),
-            getHistory: () => this._history.list().map(e => e.sql),
-            // The Save toolbar button hands back the trimmed SQL; the
-            // controller owns the naming modal and the saved-query store.
-            onSave    : (sql: string) => void this.promptAndSaveQuery(sql),
-            // Mirror this panel's latest exportable result (rows or plan) so
-            // the menubar export can reach it while it is the active panel.
-            onResult  : (active: ActiveExport | null) => this._activeQueryResult.set(id, active),
-            splitLayout         : this.layout.bindSplit("query"),
-            explainDiagramLayout: this.layout.bindAccordion("explainDiagram"),
-            // The advisor needs a database name for /structure; omitted (no
-            // strip, no suggestions computed) when the controller has none.
-            indexAdvisor: this._database === undefined ? undefined : {
-                loadTableStructure: (schema: string, relation: string) => getStructure({
-                    connectionId: this._connectionId, database: this._database, schema, name: relation, kind: "table",
-                }),
-                onCreateIndex: (schema: string, relation: string, columns: string[]) =>
-                    void this.ddl.createSuggestedIndex(schema, relation, columns),
-            },
-        });
-
-        this.dock.addPanel({ id, title: label, glyph: "terminal", content: panel.content });
-    }
-
-    /**
      * Export the active work tab's data as CSV or JSON — the menubar's "Export
      * results…" convenience, routed to whichever tab is focused. A query panel
      * exports its loaded result client-side; a table or view data tab streams the
@@ -1921,129 +1777,16 @@ export class SqlAdminController implements PanelHost {
     }
 
     /**
-     * Open a table/view "as a query": a generated `SELECT * FROM … LIMIT n` in a
-     * new query panel (the phpMyAdmin drop-to-SQL affordance). Additive to
-     * `openTable`, never a replacement — the CRUD panel stays the primary open.
-     *
-     * @param ref - The table/view to browse as a query.
-     */
-    openQueryFor(ref: DbObjectRef): void {
-        this.openQuery(buildSelectSql(ref), true);
-    }
-
-    /**
-     * Open a saved query by name in a fresh query panel (a no-op for an unknown
-     * name). Like every scratch panel, it is never deduped.
-     *
-     * @param name - The saved query's name.
-     * @param run - Whether to execute it on open (the "Execute" gesture); the
-     *   default opens it in the editor without running.
-     */
-    openSavedQuery(name: string, run: boolean = false): void {
-        const saved = this._saved.get(name);
-
-        if (saved) {
-            this.openQuery(saved.sql, run, name);
-        }
-    }
-
-    /**
-     * Save (upsert) a named query and refresh the workspace surfaces.
-     *
-     * @param name - The name to store the query under (overwrites an existing one).
-     * @param sql - The SQL to save.
-     */
-    saveQuery(name: string, sql: string): void {
-        this._saved.save(name, sql);
-        this.notifyWorkspaceChanged();
-    }
-
-    /**
-     * Prompt (via the in-app modal) for a name and save the SQL under it,
-     * reporting the outcome on the status bar. A cancelled or blank name
-     * abandons the save. Bound to the query panel's Save toolbar button and the
-     * Queries view's "Save…" action.
-     *
-     * @param sql - The SQL to save.
-     */
-    async promptAndSaveQuery(sql: string): Promise<void> {
-        const name = await promptQueryName();
-
-        if (name === null) {
-            return;
-        }
-
-        this.saveQuery(name, sql);
-        this.status(`Saved query as “${elideName(name)}”`);
-    }
-
-    /**
-     * Confirm (via the in-app modal), then remove a saved query and refresh the
-     * workspace surfaces. Cancelling leaves the saved query untouched.
-     *
-     * @param name - The saved query's name.
-     */
-    async removeSavedQuery(name: string): Promise<void> {
-        const confirmed = await Dialog.confirm(
-            "Remove saved query",
-            `Are you sure that you want to remove the saved query “${elideName(name)}”?`,
-        );
-
-        if (!confirmed) {
-            return;
-        }
-
-        this._saved.remove(name);
-        this.notifyWorkspaceChanged();
-    }
-
-    /**
-     * @returns The run history, newest-first (for the Queries view's Recent section).
-     */
-    historyList(): HistoryEntry[] {
-        return this._history.list();
-    }
-
-    /**
-     * @returns The saved queries, sorted by name (for the Queries view + start page).
-     */
-    savedList(): SavedQuery[] {
-        return this._saved.list();
-    }
-
-    /**
-     * @returns The recently opened tables, newest-first (for the start page).
-     */
-    recentTables(): DbObjectRef[] {
-        return this._recentTables.map(t => t.ref);
-    }
-
-    /**
      * Re-open a recently opened table from the start page, reusing the stored
      * navigator node so the reopened panel still drives the tree selection.
      *
      * @param ref - The table ref (matched to a remembered entry by panel id).
      */
     reopenTable(ref: DbObjectRef): void {
-        const entry = this._recentTables.find(t => panelId(t.ref) === panelId(ref));
+        const entry = this.workspace.recentEntry(ref);
 
         if (entry) {
             void this.openTable(entry.ref, entry.node);
-        }
-    }
-
-    /**
-     * Select and expand the Queries activity-bar view (the menu's entry point),
-     * optionally focusing one of its sections so "Open Saved…" and "Query
-     * History…" land the keyboard on the Saved vs Recent list respectively.
-     *
-     * @param section - Which section's list to focus, if any.
-     */
-    showQueriesView(section?: QueriesSection): void {
-        this._showQueriesView?.();
-
-        if (section) {
-            this._focusQueriesSection?.(section);
         }
     }
 
@@ -2057,16 +1800,6 @@ export class SqlAdminController implements PanelHost {
     setStartToggle(toggle: (visible: boolean) => void): void {
         this._startToggle = toggle;
         toggle(this.dock.isEmpty());
-    }
-
-    /**
-     * Register the shell's Queries-view selector (the ActivityBar can select a
-     * view by id, but only the shell holds the bar handle).
-     *
-     * @param select - Selects and expands the Queries activity-bar view.
-     */
-    setShowQueriesView(select: () => void): void {
-        this._showQueriesView = select;
     }
 
     /**
@@ -2093,72 +1826,9 @@ export class SqlAdminController implements PanelHost {
      * @param id - The panel id to resolve, or null for an empty dock.
      */
     private syncAddressBarFor(id: string | null): void {
-        const route = resolveAddressBarRoute(id, this._panelRoutes, this._queryPanelRuns, this._history.list());
+        const route = resolveAddressBarRoute(id, this._panelRoutes, this._queryPanelRuns, this.workspace.historyList());
 
         this._syncAddressBar?.(route.path, route.query);
-    }
-
-    /**
-     * Register the Queries view's section focuser (owned by the view, not the
-     * shell): focus and reveal the Saved or Recent list.
-     *
-     * @param focus - Focuses the named section's list.
-     */
-    setQueriesSectionFocus(focus: (section: QueriesSection) => void): void {
-        this._focusQueriesSection = focus;
-    }
-
-    /**
-     * Subscribe to workspace changes (a run recorded, a query saved/removed, a
-     * table opened) so a live surface can rebuild. Used by the Queries view and
-     * the start page.
-     *
-     * @param listener - Called after any workspace-data change.
-     */
-    onWorkspaceChanged(listener: () => void): void {
-        this._workspaceListeners.push(listener);
-    }
-
-    /** Remember a just-opened table (dedupe by panel id, move-to-front, capped). */
-    private rememberTable(ref: DbObjectRef, node: TreeNode): void {
-        const id       = panelId(ref);
-        const existing = this._recentTables.findIndex(t => panelId(t.ref) === id);
-
-        if (existing >= 0) {
-            this._recentTables.splice(existing, 1);
-        }
-
-        this._recentTables.unshift({ ref, node });
-        this._recentTables.length = Math.min(this._recentTables.length, MAX_RECENT_TABLES);
-        this.notifyWorkspaceChanged();
-    }
-
-    /**
-     * Record a completed run in history, remember it as this panel's latest
-     * run for the address-bar sync, and refresh the workspace surfaces. Also
-     * re-syncs the address bar when `id` is still the focused panel: an
-     * auto-run query tab's run finishes after the "focus" event that opened
-     * it already fired (and fired too early — before any run existed to
-     * resolve to), so without this the address bar would stay on "/" until
-     * the user switched tabs away and back.
-     *
-     * @param id - The query panel's id (resolveAddressBarRoute's fallback key).
-     * @param entry - The completed run.
-     */
-    private recordRun(id: string, entry: HistoryEntry): void {
-        this._history.record(entry);
-        this._queryPanelRuns.set(id, entry.timestamp);
-
-        if (id === this._activePanelId) {
-            this.syncAddressBarFor(id);
-        }
-
-        this.notifyWorkspaceChanged();
-    }
-
-    /** Notify every workspace-change listener that the stored data changed. */
-    private notifyWorkspaceChanged(): void {
-        this._workspaceListeners.forEach(listener => listener());
     }
 
     /**

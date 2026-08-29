@@ -93,13 +93,13 @@ class SqlAdminShell extends Container {
         const workArea = buildWorkArea(sidebar, controller);
         const menuBar  = buildMenuBar({
             onToggleSidebar    : sidebar.toggleCollapsed,
-            onNewQuery         : () => controller.openQuery(),
-            onOpenSaved        : () => controller.showQueriesView("saved"),
-            onQueryHistory     : () => controller.showQueriesView("recent"),
+            onNewQuery         : () => controller.workspace.openQuery(),
+            onOpenSaved        : () => controller.workspace.showQueriesView("saved"),
+            onQueryHistory     : () => controller.workspace.showQueriesView("recent"),
             onExportResults    : format => controller.exportActive(format),
             activeExportKind   : () => controller.activeExportKind(),
             canExportActive    : () => controller.canExportActive(),
-            onOpenDocumentation: () => controller.openDocumentation(),
+            onOpenDocumentation: () => controller.workspace.openDocumentation(),
             onShowLocalStorage : () => openLocalStorageWindow(),
             onShowShortcuts    : () => openShortcutsDialog(),
             onShowChangelog    : () => openChangelogDialog(),
@@ -143,7 +143,7 @@ class SqlAdminShell extends Container {
         // next time they expand it). The New-Query menu shortcut is a display
         // hint only (MenuItem.ts), so install the real Alt+N accelerator as a
         // document keydown listener.
-        controller.setShowQueriesView(() => sidebar.selectView(QUERIES_VIEW_ID));
+        controller.workspace.setShowQueriesView(() => sidebar.selectView(QUERIES_VIEW_ID));
         controller.reveal.setShowDatabaseView(() => sidebar.revealView(DATABASE_VIEW_ID));
         controller.reveal.setShowRolesView(() => sidebar.revealView(ROLES_VIEW_ID));
         installAccelerators(controller, sidebar);
@@ -171,11 +171,11 @@ function installAccelerators(controller: SqlAdminController, sidebar: ActivityBa
         let matched = true;
 
         if (isNewQueryChord(event)) {
-            controller.openQuery();
+            controller.workspace.openQuery();
         } else if (isOpenSavedChord(event)) {
-            controller.showQueriesView("saved");
+            controller.workspace.showQueriesView("saved");
         } else if (isQueryHistoryChord(event)) {
-            controller.showQueriesView("recent");
+            controller.workspace.showQueriesView("recent");
         } else if (isDatabasesRailChord(event)) {
             sidebar.selectView(DATABASE_VIEW_ID);
         } else if (isRolesRailChord(event)) {

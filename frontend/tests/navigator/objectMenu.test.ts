@@ -21,13 +21,16 @@ const SCHEMA = "public";
 /** A minimal ObjectMenuActions with every controller method a no-op spy. */
 function stubActions(): ObjectMenuActions {
     return {
-        openTable: vi.fn(), openQueryFor: vi.fn(), openStructure: vi.fn(), openDefinition: vi.fn(),
-        openSequence: vi.fn(), openFunctionDefinition: vi.fn(), executeFunction: vi.fn(),
+        openTable: vi.fn(), openStructure: vi.fn(), openDefinition: vi.fn(),
+        openSequence: vi.fn(), openFunctionDefinition: vi.fn(),
         openRelationDiagram: vi.fn(), openRelationDependencyGraph: vi.fn(), openRelationInheritanceGraph: vi.fn(),
         openSchemaDiagram: vi.fn(), openSchemaDependencyGraph: vi.fn(), openSchemaInheritanceGraph: vi.fn(),
         exportTable: vi.fn(),
         openIndex: vi.fn(), openReferencedStructure: vi.fn(),
         openType: vi.fn(),
+        workspace: {
+            openQueryFor: vi.fn(), executeFunction: vi.fn(),
+        },
         ddl: {
             renameTable: vi.fn(), dropTable: vi.fn(), dropRelation: vi.fn(), refreshMaterializedView: vi.fn(),
             renameSchema: vi.fn(), dropSchema: vi.fn(),

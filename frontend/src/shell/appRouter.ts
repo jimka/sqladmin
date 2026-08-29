@@ -88,7 +88,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
     // unknown link — the start page already shows while the Dock is empty.
     router.register("/", () => {});
 
-    router.register("/notes", () => dispatch(controller, () => controller.openDocumentation()));
+    router.register("/notes", () => dispatch(controller, () => controller.workspace.openDocumentation()));
 
     // Replays a run behind an opaque local key into QueryHistoryStore — never
     // arbitrary SQL — and auto-runs it, so a revisited link matches the state
@@ -97,7 +97,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
     // Architecture Decision for why this reopens the "seed and auto-run" shape
     // router-deep-linking rejected for arbitrary SQL.
     router.register("/query/history/:timestamp", (params, path) => dispatch(controller, () => {
-        const entry = findHistoryEntry(controller.historyList(), params.timestamp);
+        const entry = findHistoryEntry(controller.workspace.historyList(), params.timestamp);
 
         if (!entry) {
             reportUnknownLink(controller, path);
@@ -105,7 +105,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             return;
         }
 
-        controller.openQuery(entry.sql, true);
+        controller.workspace.openQuery(entry.sql, true);
     }));
 
     router.register("/database/diagram", () => dispatch(controller, () => {

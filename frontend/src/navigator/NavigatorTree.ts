@@ -154,7 +154,7 @@ class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements Expl
             // arguments), the closest thing to a table's data tab. Its
             // definition is reached from the context menu's "Show definition".
             if (ref && ref.kind === "function") {
-                this.controller.executeFunction(ref);
+                this.controller.workspace.executeFunction(ref);
 
                 return;
             }
