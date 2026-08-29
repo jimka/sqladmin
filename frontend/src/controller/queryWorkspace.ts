@@ -332,6 +332,13 @@ export class QueryWorkspace {
      * table opened) so a live surface can rebuild. Used by the Queries view and
      * the start page.
      *
+     * Push-only, with no unsubscribe: a registered listener is never removed,
+     * so it must outlive the workspace. Both current subscribers (QueriesView,
+     * StartPage) are constructed once by the shell and never replaced, so
+     * this holds today — a subscriber with a shorter life than the workspace
+     * would need to be a deliberate decision made against this stated
+     * contract, not an accident.
+     *
      * @param listener - Called after any workspace-data change.
      */
     onWorkspaceChanged(listener: () => void): void {

@@ -1,6 +1,12 @@
 // The app mediator. Owns the Dock, the StatusBar, the current connection, and
 // the open-panel registry (deduped by panel id). Components stay dumb: they emit,
 // the controller decides. All app-side errors funnel to notifyError.
+//
+// Each area of work — panels, diagrams, DDL, sidebar reveal, the query
+// workspace, and roles — lives in its own module under controller/, reached
+// through the matching public field, never a delegating wrapper method here.
+// Every collaborator reaches back through the PanelHost interface alone
+// (controller/panelHost.ts, implemented below) — no import cycle can form.
 
 import { Dock, Menu, Notification, NotificationHistoryButton, Tooltip }                                                                                                                            from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent, DockExceptionEvent }                                                                                                                                                 from "@jimka/typescript-ui/overlay";
@@ -88,12 +94,8 @@ interface LayoutSettlingPanel {
 /**
  * Hold a lazy tab's spinner until the panel's diagram has placed its nodes, so
  * no tab is ever revealed showing an unplaced graph. The method is probed
- * optionally: the non-diagram panels `openAsyncPanel` builds do not have it and
- * resolve at once.
- *
- * @param content - The freshly built panel.
- *
- * @returns A promise resolving once the panel's first diagram layout settled.
+ * optionally: the non-diagram panels `openAsyncPanel` builds do not have it
+ * and resolve at once.
  */
 function awaitDiagramLayout(content: Component): Promise<void> {
     const panel = content as unknown as Partial<LayoutSettlingPanel>;
@@ -106,75 +108,61 @@ export class SqlAdminController implements PanelHost {
     readonly statusBar      : StatusBar;
     readonly properties     : PropertiesPanel;
     readonly rolesProperties: RolesPropertiesPanel;
-    // Public (not private-with-delegators like `_history`): eight layout sites
-    // bind against it directly, and mirroring the whole store API onto the
-    // controller would carry no information.
+    // Public, not private-with-delegators: mirroring the whole store API onto
+    // the controller would carry no information (eight layout sites bind
+    // against this directly).
     readonly layout         : LayoutStore;
-    // The reveal-then-select wiring for the two sidebar trees. Constructed
-    // first among the collaborators (see the constructor) since ddl/panels/
-    // diagrams/roles all depend on it.
+    // Reveal-then-select wiring for the two sidebar trees. Built first among
+    // the collaborators since ddl/panels/diagrams/roles all depend on it.
     readonly reveal         : RevealCoordinator;
-    // Every DDL launcher (create/rename/drop for every object kind, plus the
-    // Structure tab's Constraints/Indexes toolbar actions).
+    // Every DDL launcher, plus the Structure tab's Constraints/Indexes toolbar.
     readonly ddl            : DdlLaunchers;
     // Scratch query panels, the run-history/saved-query/notes stores, and
     // recently opened tables.
     readonly workspace      : QueryWorkspace;
-    // Every per-object panel opener (table/view data, structure, definition,
-    // sequence, index, standalone-type info) and the reveal-then-open wiring
-    // for a foreign key's referenced table.
+    // Every per-object panel opener, and the reveal-then-open wiring for a
+    // foreign key's referenced table.
     readonly panels         : ObjectPanels;
-    // Every diagram/graph opener (schema/database ER diagrams, a
-    // relation-rooted FK diagram, and the dependency/inheritance graphs).
+    // Every diagram/graph opener (ER diagrams, dependency/inheritance graphs).
     readonly diagrams       : DiagramPanels;
-    // Every role-inspection and role-diagram action (the roles rail's list
-    // fetch, the grants tab, the membership/grants-graph diagrams, the
-    // per-role export).
+    // Every role-inspection and role-diagram action.
     readonly roles          : RoleActions;
 
     private readonly _connectionId: string;
     private readonly _database    : string | undefined;
     private readonly _openPanels  : Map<string, OpenPanel> = new Map();
     // Reopens each routed panel at its own URL — set from spec.route in
-    // openAsyncPanel (or openDocumentation's direct call), read by the dock's
-    // "focus" handler via resolveAddressBarRoute. See routeTargets.ts's PanelRoute.
+    // openAsyncPanel, read by the dock's "focus" handler via resolveAddressBarRoute.
     private readonly _panelRoutes: Map<string, PanelRoute> = new Map();
     // A query panel's latest recorded run, by panel id — resolveAddressBarRoute's
-    // fallback for a panel with no _panelRoutes entry (openTable's view/matview
-    // branch deliberately has none — see the plan's Architecture Decision).
+    // fallback for a panel with no _panelRoutes entry.
     private readonly _queryPanelRuns: Map<string, number> = new Map();
     // The diagram panels' shared right-click menu, mirroring how NavigatorTree
-    // and RolesTree each own one reusable Menu(). Named diagramContextMenu (see
-    // below), not showObjectMenu, so the method does not shadow the imported
-    // module wrapper of the same purpose.
+    // and RolesTree each own one reusable Menu(). Named diagramContextMenu below,
+    // not showObjectMenu, so it does not shadow the imported module wrapper.
     private readonly _objectMenu: Menu = Menu();
 
     // Shell-injected handle (mirroring how ActivityBar takes a SidebarSizer):
     // toggles the start-page deck. The Queries-view selector/section-focuser
-    // live on `workspace` instead, and the Database/Roles view selectors live
-    // on `reveal` — a reveal never searches a tree whose deck page is hidden.
+    // live on `workspace`, and the Database/Roles view selectors on `reveal`.
     private _startToggle        : ((visible: boolean) => void) | null = null;
     // The address-bar sync hook, wired from SqlAdminApp.ts — see setSyncAddressBar.
     private _syncAddressBar     : ((path: string, query?: Record<string, string>) => void) | null = null;
 
-    // Bumped on every showProperties call so a slow column fetch whose selection
-    // has since moved on is discarded instead of clobbering the current view.
+    // Bumped on every showProperties call so a stale column fetch is discarded.
     private _propsSeq: number = 0;
 
-    // In-flight `getColumns` requests, keyed by panel id, so the several column
-    // fetches a single navigator double-click triggers collapse into one request
-    // (see fetchColumns).
+    // In-flight `getColumns` requests, keyed by panel id, so several column
+    // fetches from one navigator double-click collapse into one request.
     private readonly _columnsInFlight = new Map<string, Promise<ColumnMeta[]>>();
 
-    // The latest exportable result each query panel displayed — a rows grid or an
-    // EXPLAIN plan — keyed by panel id (set via the panel's injected onResult),
-    // plus the currently focused panel id. Together they let the menubar "Export
-    // results…" item act on the active panel without the controller holding a
-    // reference back to the panel object.
+    // The latest exportable result each query panel displayed, keyed by panel
+    // id, plus the currently focused panel id — lets the menubar "Export
+    // results…" item act on the active panel with no back-reference to it.
     private readonly _activeQueryResult: Map<string, ActiveExport | null> = new Map();
-    // A grants tab's full grant set, keyed by panel id, so the active-tab export
-    // covers a focused role grants tab the same way _activeQueryResult covers a
-    // query panel. Grants tabs are not in _openPanels (no DbObjectRef).
+    // A grants tab's full grant set, keyed by panel id, mirroring
+    // _activeQueryResult for the active-tab export (grants tabs carry no
+    // DbObjectRef, so they are not in _openPanels).
     private readonly _activeRoleGrants: Map<string, RoleGrants> = new Map();
     private _activePanelId: string | null = null;
 
@@ -200,19 +188,17 @@ export class SqlAdminController implements PanelHost {
         this.properties      = new PropertiesPanel();
         this.rolesProperties = new RolesPropertiesPanel();
 
-        // Every localStorage store is scoped to the signed-in user so nothing
-        // bleeds between users on a shared browser. Fall back to "default" when the
-        // username is absent (a bare test construction), keeping the key well-formed.
+        // Fall back to "default" when the username is absent (a bare test
+        // construction), keeping localStorage keys well-formed.
         const userId = username || "default";
 
         // No connectionId — layout is a property of the user's window, not of the
         // database being viewed, so it is scoped per user only (see data/layoutStore.ts).
         this.layout = new LayoutStore(userId, window.localStorage);
 
-        // The six collaborators, in dependency order (see the plan's
-        // Architecture Decisions table). The context-menu callback lets
-        // diagrams/roles show the object menu without holding the whole
-        // controller.
+        // The six collaborators, in dependency order. The context-menu
+        // callback lets diagrams/roles show the object menu without holding
+        // the whole controller.
         const contextMenu: ShowObjectContextMenu = (ref, event) => this.diagramContextMenu(ref, event);
 
         this.reveal    = new RevealCoordinator(connectionId, database);
@@ -254,10 +240,8 @@ export class SqlAdminController implements PanelHost {
         // now-active panel, and records the active panel id so the Query-menu
         // export targets it. A null payload means no panel is focused — the
         // library emits it only from recomputeFocusAfterClose, when no frame
-        // remains (never when DOM focus merely leaves the dock) — so clearing
-        // `_activePanelId` here can't affect Query-menu export targeting on an
-        // ordinary tab switch. Clearing it also keeps a closed-last-tab Alt+R
-        // from invoking a refresh closure holding a torn-down panel.
+        // remains — so clearing `_activePanelId` here also keeps a
+        // closed-last-tab Alt+R from invoking a refresh on a torn-down panel.
         this.dock.on("focus", (e: DockPanelEvent | null) => {
             if (e) {
                 this._activePanelId = e.id;
@@ -315,9 +299,6 @@ export class SqlAdminController implements PanelHost {
      * the navigator tree shows for the identical object, built by the shared
      * buildObjectMenuItems (see objectMenu.ts). Called by each diagram panel's
      * "contextmenu" forwarding; a no-op for a kind with no menu.
-     *
-     * @param ref - The right-clicked diagram node's object.
-     * @param event - The originating right-click.
      */
     private diagramContextMenu(ref: DbObjectRef, event: MouseEvent): void {
         showObjectMenu(this._objectMenu, ref, this, event);
@@ -326,13 +307,10 @@ export class SqlAdminController implements PanelHost {
     /**
      * Export the active work tab's data as CSV or JSON — the menubar's "Export
      * results…" convenience, routed to whichever tab is focused. A query panel
-     * exports its loaded result client-side; a table or view data tab streams the
-     * whole relation server-side; a role grants tab serializes its full grant set.
-     * Each matches that tab's own toolbar Export button. Notifies when the focused
-     * tab has nothing to export — a structure/definition tab, an empty query
-     * panel, or no open tab.
-     *
-     * @param format - The export format, "csv" or "json".
+     * exports its loaded result client-side; a table/view data tab streams the
+     * whole relation server-side; a role grants tab serializes its full grant
+     * set — each matching that tab's own toolbar Export button. Notifies when
+     * the focused tab has nothing to export.
      */
     exportActive(format: "csv" | "json"): void {
         const id = this._activePanelId;
@@ -403,8 +381,6 @@ export class SqlAdminController implements PanelHost {
      * results" item can grey out when it does not. Mirrors {@link exportActive}'s
      * sources: a query result/plan, a table/view data grid, or a role's grants —
      * a structure/definition detail tab or no open tab has nothing.
-     *
-     * @returns True when the focused tab can export.
      */
     canExportActive(): boolean {
         const id = this._activePanelId;
@@ -421,11 +397,8 @@ export class SqlAdminController implements PanelHost {
     /**
      * Open the backend streaming export for a table/view: navigate a hidden
      * anchor to the export URL so the `attachment` response downloads the full
-     * relation without buffering it in the browser (a big table exports without
-     * freezing the grid). Works identically for a table and a view.
-     *
-     * @param ref - The table/view to export.
-     * @param format - The export format, "csv" or "json".
+     * relation without buffering it in the browser (a big table exports
+     * without freezing the grid). Works identically for a table and a view.
      */
     exportTable(ref: DbObjectRef, format: "csv" | "json"): void {
         downloadUrl(tableExportUrl(ref, format), tableExportFilename(ref, format));
@@ -434,8 +407,6 @@ export class SqlAdminController implements PanelHost {
     /**
      * Re-open a recently opened table from the start page, reusing the stored
      * navigator node so the reopened panel still drives the tree selection.
-     *
-     * @param ref - The table ref (matched to a remembered entry by panel id).
      */
     reopenTable(ref: DbObjectRef): void {
         const entry = this.workspace.recentEntry(ref);
@@ -449,8 +420,6 @@ export class SqlAdminController implements PanelHost {
      * Register the shell's start-page deck toggle. Invoked once the shell has
      * built the CENTER Card; mirrors how the ActivityBar takes a SidebarSizer.
      * The current emptiness is reflected immediately so the deck starts correct.
-     *
-     * @param toggle - Shows (true) or hides (false) the start page.
      */
     setStartToggle(toggle: (visible: boolean) => void): void {
         this._startToggle = toggle;
@@ -462,9 +431,6 @@ export class SqlAdminController implements PanelHost {
      * currently focused tab's own URL (see resolveAddressBarRoute) whenever
      * that URL might have changed, so the shell can write it in place
      * without triggering the router's own navigation dispatch.
-     *
-     * @param sync - Writes `path`/`query` to the address bar, replacing the
-     *   current history entry.
      */
     setSyncAddressBar(sync: (path: string, query?: Record<string, string>) => void): void {
         this._syncAddressBar = sync;
@@ -473,12 +439,9 @@ export class SqlAdminController implements PanelHost {
     /**
      * Resolve `id`'s address-bar route and write it, if a sync hook is
      * registered. Called on every dock "focus" event, and — since an
-     * auto-run query panel's run finishes asynchronously behind an already-
-     * focused tab, with no further "focus" event to catch it — from
-     * recordRun whenever the completing run belongs to the panel that is
-     * still focused.
-     *
-     * @param id - The panel id to resolve, or null for an empty dock.
+     * auto-run query panel's run finishes asynchronously behind an
+     * already-focused tab — from recordQueryRun when the completing run
+     * belongs to the panel that is still focused.
      */
     private syncAddressBarFor(id: string | null): void {
         const route = resolveAddressBarRoute(id, this._panelRoutes, this._queryPanelRuns, this.workspace.historyList());
@@ -486,14 +449,6 @@ export class SqlAdminController implements PanelHost {
         this._syncAddressBar?.(route.path, route.query);
     }
 
-    /**
-     * Show the selected object's metadata in the Properties inspector. A database
-     * or schema renders immediately; a table, view, or materialized view needs
-     * its columns (for the count and primary key), reused from an open panel when
-     * possible and fetched otherwise. A monotonic guard discards a stale fetch
-     * whose selection has since changed, so rapid clicks never render the wrong
-     * object.
-     */
     /**
      * Fetch a relation's columns, coalescing concurrent requests for the same
      * object. A navigator double-click fires two selection events (each showing
@@ -524,6 +479,14 @@ export class SqlAdminController implements PanelHost {
         return request;
     }
 
+    /**
+     * Show the selected object's metadata in the Properties inspector. A database
+     * or schema renders immediately; a table, view, or materialized view needs
+     * its columns (for the count and primary key), reused from an open panel when
+     * possible and fetched otherwise. A monotonic guard discards a stale fetch
+     * whose selection has since changed, so rapid clicks never render the wrong
+     * object.
+     */
     async showProperties(ref: DbObjectRef): Promise<void> {
         const seq = ++this._propsSeq;
 
@@ -557,15 +520,11 @@ export class SqlAdminController implements PanelHost {
 
     /**
      * Refresh the active work tab. Two reloadable shapes: the six storeless
-     * detail tabs (structure, definition, function definition, sequence,
-     * index, type) dispatch to their own registered `refresh` closure, which
-     * re-fetches and reseeds via the panel's `reload` and reports its own
-     * outcome (see `refreshPanel`); a data grid instead reloads its table's
-     * or view's store from the server, discarding a table's unsaved edits
-     * first (mirroring the grid's own Refresh button — a read-only view has
-     * no edits to reject). A no-op when the focused tab has neither (a
-     * query, a role's grants, or the empty start page), so "refresh the
-     * current view" simply does nothing when there is nothing to reload.
+     * detail tabs dispatch to their own registered `refresh` closure, which
+     * re-fetches and reseeds via the panel's `reload`; a data grid instead
+     * reloads its store from the server, discarding a table's unsaved edits
+     * first (a read-only view has none to reject). A no-op when the focused
+     * tab has neither (a query, a role's grants, the empty start page).
      * Wired to the Alt+R accelerator.
      */
     refreshActive(): void {
@@ -593,10 +552,9 @@ export class SqlAdminController implements PanelHost {
 
     /**
      * Surface an error (AjaxError detail, or any thrown value) to the StatusBar
-     * and as an error Notification. The toast is what lands the error in
-     * `Notification.getHistory()` — the status bar's line is clobbered by the
-     * next setMessage, so the history is the only place a passed-over error
-     * survives. The toast drops the "Error" prefix: its severity badge says so.
+     * and as an error Notification — the toast is what lands it in
+     * `Notification.getHistory()`, since the status bar's line is clobbered by
+     * the next setMessage. Drops the "Error" prefix: the toast's own badge says so.
      */
     notifyError(error: unknown, ref?: DbObjectRef): void {
         const where  = ref?.name ? ` (${ref.name})` : "";
@@ -635,9 +593,7 @@ export class SqlAdminController implements PanelHost {
      * Record a query panel's latest run for the address-bar sync, and
      * re-sync the address bar when `id` is still the focused panel: an
      * auto-run query tab's run finishes after the "focus" event that opened
-     * it already fired (and fired too early — before any run existed to
-     * resolve to), so without this the address bar would stay on "/" until
-     * the user switched tabs away and back (PanelHost).
+     * it already fired, so without this the bar would stay on "/" (PanelHost).
      */
     recordQueryRun(id: string, timestamp: number): void {
         this._queryPanelRuns.set(id, timestamp);
@@ -678,16 +634,10 @@ export class SqlAdminController implements PanelHost {
      * with the library's spinner, `build` runs behind it, and the built panel
      * replaces the spinner. A rejection closes the tab and reaches the Dock
      * "exception" handler, which reports it through notifyError. A build that
-     * lands after its tab closed (or after the id was reopened) is handled by
-     * the Dock itself — it cancels the materialization, and the arriving
-     * component is disposed rather than mounted.
-     *
-     * @param spec - The tab's identity.
+     * lands after its tab closed (or the id was reopened) is handled by the
+     * Dock itself — it cancels the materialization and disposes the arrival.
      */
-    openAsyncPanel(
-        spec: AsyncPanelSpec,
-        build: () => Promise<Component>,
-    ): void {
+    openAsyncPanel(spec: AsyncPanelSpec, build: () => Promise<Component>): void {
         if (spec.route) {
             this._panelRoutes.set(spec.id, spec.route);
         }
