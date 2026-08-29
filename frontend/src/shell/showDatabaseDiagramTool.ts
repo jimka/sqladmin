@@ -7,14 +7,11 @@
 // the clicked one), so it moved here next to the section it actually affects
 // — the same move createSchemaTool already made.
 
-import { Button } from "@jimka/typescript-ui/component/button";
+import type { Button } from "@jimka/typescript-ui/component/button";
+import { glyphButton } from "../dock/glyphButton";
 import { PRIMARY_COLOR } from "../theme";
 
 /** Build a compact "Show database diagram" tool button that runs `onShow` when clicked. */
 export function showDatabaseDiagramTool(onShow: () => void): Button {
-    const button = Button({ glyph: "circle-nodes", text: "Show database diagram", showText: false, foregroundColor: PRIMARY_COLOR, compact: true });
-
-    button.on("action", onShow);
-
-    return button;
+    return glyphButton("circle-nodes", PRIMARY_COLOR, "Show database diagram", onShow);
 }

@@ -24,7 +24,7 @@ import { database }                from "@jimka/typescript-ui/glyphs/solid/datab
 import { circle_info }             from "@jimka/typescript-ui/glyphs/solid/circle_info";
 import { users }                   from "@jimka/typescript-ui/glyphs/solid/users";
 import { terminal }                from "@jimka/typescript-ui/glyphs/solid/terminal";
-import { arrows_rotate }           from "@jimka/typescript-ui/glyphs/solid/arrows_rotate";
+import { refresh }                 from "@jimka/typescript-ui/glyphs/solid/refresh";
 import { plus }                    from "@jimka/typescript-ui/glyphs/solid/plus";
 import { floppy_disk }             from "@jimka/typescript-ui/glyphs/solid/floppy_disk";
 import { clock_rotate_left }       from "@jimka/typescript-ui/glyphs/solid/clock_rotate_left";
@@ -65,7 +65,7 @@ import type { SqlAdminController } from "../SqlAdminController";
 // and a people icon for the Roles view (rail button + roles section), plus a
 // rotate icon for the section refresh tools. Registered once here, the
 // composition root, and referenced by name downstream.
-Glyph.register(database, circle_info, users, terminal, arrows_rotate);
+Glyph.register(database, circle_info, users, terminal, refresh);
 // Glyphs decorating the menu bar's menus, items, and submenus.
 Glyph.register(plus, floppy_disk, clock_rotate_left, wrench, eye, file_export, file_lines, file_csv, file_code, bars, keyboard, right_from_bracket, scroll);
 
@@ -403,7 +403,7 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
                 { text: "Roles",     glyph: "users",    shortcut: ROLES_RAIL_SHORTCUT,     action: actions.onShowRoles },
                 { text: "Queries",   glyph: "terminal", shortcut: QUERIES_RAIL_SHORTCUT,   action: actions.onShowQueries },
                 { separator: true },
-                { text: "Refresh", glyph: "arrows-rotate", shortcut: REFRESH_SHORTCUT, action: actions.onRefresh },
+                { text: "Refresh", glyph: "refresh", shortcut: REFRESH_SHORTCUT, action: actions.onRefresh },
                 { separator: true },
                 { text: "Toggle Sidebar", glyph: "bars", action: actions.onToggleSidebar },
             ] },

@@ -1,10 +1,12 @@
 // A glyph-only toolbar button: a colored icon face whose label drives both the
-// hover tooltip and the accessible name (aria-label). Shared by the dock work
-// panels (table / view / query / role-grants), whose toolbars all build their
-// actions this way. `glyphMenuButton` is the same face wired to a dropdown
-// menu instead of a click handler, and `glyphToggleButton` is the same face
-// as a two-state toggle instead of a plain button — one owner, so the three
-// variants cannot drift apart in a toolbar that mixes them.
+// hover tooltip and the accessible name (aria-label). This is the app's single
+// owner of the glyph-only compact face, used by the dock work panels (table /
+// view / query / role-grants) as well as the sidebar rails' section tools
+// (Create schema, Show database diagram, Refresh) and the Queries rail's row
+// actions. `glyphMenuButton` is the same face wired to a dropdown menu instead
+// of a click handler, and `glyphToggleButton` is the same face as a two-state
+// toggle instead of a plain button — one owner, so the three variants cannot
+// drift apart in a toolbar that mixes them.
 
 import { Button }       from "@jimka/typescript-ui/component/button";
 import { MenuButton }   from "@jimka/typescript-ui/component/button";

@@ -81,6 +81,7 @@ import { buildColumnSpec, missingRequiredFields } from "./tableWriteRules";
 import { quickSearchStatus }           from "./quickSearchModel";
 import { stepIndex, visibleRecords, findRecordByKey } from "./recordNavigation";
 import { quickSearchFields, matchesQuery } from "./gridQuickSearch";
+import { REFRESH_SHORTCUT }            from "../shell/queryShortcuts";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR } from "../theme";
 
 Glyph.register(refresh, plus, minus, save, table_list, angle_left, angle_right, file_import);
@@ -215,7 +216,7 @@ class TableWorkPanel extends Container {
                 // must precede load(): load() replaces the records but leaves pending
                 // removals queued, so without it a deleted row would reappear yet stay
                 // marked for deletion on the next Save.
-                glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", () => { store.reject(); void store.load(); }),
+                glyphButton("refresh", PRIMARY_COLOR, `Refresh (${REFRESH_SHORTCUT})`, () => { store.reject(); void store.load(); }),
             ],
         });
 

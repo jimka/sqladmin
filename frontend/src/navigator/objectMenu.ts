@@ -182,7 +182,7 @@ function relationMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
         items.push({ text: "Drop", glyph: "trash", action: () => actions.dropRelation(ref) });
     } else if (ref.kind === "materializedView") {
         items.push({ separator: true });
-        items.push({ text: "Refresh", glyph: "arrows-rotate", action: () => actions.refreshMaterializedView(ref) });
+        items.push({ text: "Refresh", glyph: "refresh", action: () => actions.refreshMaterializedView(ref) });
         items.push({ text: "Drop", glyph: "trash", action: () => actions.dropRelation(ref) });
     }
 
