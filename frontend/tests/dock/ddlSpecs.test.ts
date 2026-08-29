@@ -360,6 +360,20 @@ describe("buildConstraintSpec", () => {
 
         expect(spec).toEqual({ schema: "public", name: "t", action: "drop", constraintName: "t_email_key" });
     });
+
+    it("omits cascade from a drop spec when the CASCADE checkbox is unchecked", () => {
+        const spec = buildConstraintSpec("public", "t", "drop", { constraintName: "t_email_key", cascade: false });
+
+        expect("cascade" in spec).toBe(false);
+    });
+
+    it("carries cascade through a drop spec when the CASCADE checkbox is checked", () => {
+        const spec = buildConstraintSpec("public", "t", "drop", { constraintName: "t_email_key", cascade: true });
+
+        expect(spec).toEqual({
+            schema: "public", name: "t", action: "drop", constraintName: "t_email_key", cascade: true,
+        });
+    });
 });
 
 describe("buildIndexSpec", () => {
@@ -372,6 +386,18 @@ describe("buildIndexSpec", () => {
     });
 
     it("builds a drop spec", () => {
+        const spec = buildIndexSpec("public", "drop", { indexName: "t_email_idx", cascade: true });
+
+        expect(spec).toEqual({ schema: "public", action: "drop", indexName: "t_email_idx", cascade: true });
+    });
+
+    it("omits cascade from a drop spec when the CASCADE checkbox is unchecked", () => {
+        const spec = buildIndexSpec("public", "drop", { indexName: "t_email_idx", cascade: false });
+
+        expect("cascade" in spec).toBe(false);
+    });
+
+    it("carries cascade through a drop spec when the CASCADE checkbox is checked", () => {
         const spec = buildIndexSpec("public", "drop", { indexName: "t_email_idx", cascade: true });
 
         expect(spec).toEqual({ schema: "public", action: "drop", indexName: "t_email_idx", cascade: true });

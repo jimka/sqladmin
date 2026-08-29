@@ -66,7 +66,7 @@ import { FunctionForm }                                                         
 import { EnumTypeForm }                                                                                                                                                                            from "./dock/EnumTypeForm";
 import { CompositeTypeForm }                                                                                                                                                                       from "./dock/CompositeTypeForm";
 import { AddEnumValueForm }                                                                                                                                                                        from "./dock/AddEnumValueForm";
-import { buildDropFunctionSpec, buildDropTypeSpec }                                                                                                                                                from "./dock/ddlSpecs";
+import { buildDropFunctionSpec, buildDropTypeSpec, buildConstraintSpec, buildIndexSpec }                                                                                                           from "./dock/ddlSpecs";
 import { DefinitionPanel }                                                                                                                                                                         from "./dock/DefinitionPanel";
 import { FunctionDefinitionPanel }                                                                                                                                                                 from "./dock/FunctionDefinitionPanel";
 import { SequenceInfoPanel }                                                                                                                                                                       from "./dock/SequenceInfoPanel";
@@ -1249,9 +1249,10 @@ export class SqlAdminController {
         openSqlPreviewDialog({
             title:       "Drop constraint",
             form,
-            generateSql: async () => (await previewConstraint(ref, {
-                schema: ref.schema!, name: ref.name!, action: "drop", constraintName, ...form.readSpec(),
-            })).sql,
+            generateSql: async () =>
+                (await previewConstraint(ref, buildConstraintSpec(ref.schema!, ref.name!, "drop", {
+                    constraintName, cascade: form.readSpec().cascade,
+                }))).sql,
             onSuccess: () => this.refreshStructure(ref),
             ...this.ddlDefaults(ref),
         });
@@ -1289,9 +1290,10 @@ export class SqlAdminController {
         openSqlPreviewDialog({
             title:       "Drop index",
             form,
-            generateSql: async () => (await previewIndex(ref, {
-                schema: ref.schema!, action: "drop", indexName, ...form.readSpec(),
-            })).sql,
+            generateSql: async () =>
+                (await previewIndex(ref, buildIndexSpec(ref.schema!, "drop", {
+                    indexName, cascade: form.readSpec().cascade,
+                }))).sql,
             onSuccess: () => this.refreshStructure(ref),
             ...this.ddlDefaults(ref),
         });
