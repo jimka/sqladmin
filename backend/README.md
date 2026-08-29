@@ -51,7 +51,13 @@ poetry run pytest
 
 ## Layout
 
-- `app/main.py` — FastAPI app, lifespan (idle-session sweep), exception handler, routes
+Authenticated routes are namespaced `/api/{connection_id}/...`, and every
+database-scoped route sits under `/api/{connection_id}/db/{database}/...` —
+the literal `db` keeps a database name out of the same path position as a
+literal segment like `roles`.
+
+- `app/main.py` — FastAPI app, lifespan (idle-session sweep), exception handlers, router wiring
+- `app/endpoints/` — one `APIRouter` per resource (`databases`, `schemas`, `tables`, `rows`, `export`, `roles`, `query`, `ddl`); `common.py` holds the two route prefixes
 - `app/auth.py` — login/logout/whoami, the host allowlist, session + CSRF dependencies
 - `app/config.py` — `SERVER_PRESETS` / `ALLOW_USER_PRESETS` + the pre-auth `GET /api/config`
 - `app/contract.py` — the wire contract's scalar types and shared value objects
