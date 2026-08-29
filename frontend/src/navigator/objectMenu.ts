@@ -10,7 +10,9 @@
 // erases at compile time, and glyphs are referenced by their registered
 // string name rather than imported — `Glyph.register` stays in the modules
 // that render these menus (NavigatorTree.ts, the controller's own
-// registrations). Mirrors the ./dock/menuItems.ts idiom.
+// registrations). Mirrors the ./dock/menuItems.ts idiom. `../dock/menuItems`
+// is safe to import here for the same reason: it touches `document` only
+// inside function bodies, never at import scope.
 
 import type { Menu }             from "@jimka/typescript-ui/overlay";
 import type { MenuItemConfig }   from "@jimka/typescript-ui/component/container";
@@ -18,6 +20,7 @@ import type { TreeNode }         from "@jimka/typescript-ui/component/tree";
 import type { DbObjectRef }      from "../contract";
 import type { SqlAdminController } from "../SqlAdminController";
 import { isRelationKind }        from "./objectKinds";
+import { buildTableExportItems } from "../dock/menuItems";
 
 /**
  * The controller methods the object context menu invokes. A narrowed slice of
@@ -186,10 +189,8 @@ function relationMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
     // Export streams the full relation server-side (not the loaded page), so a
     // large table/view exports without bulk-loading the grid.
     items.push({ separator: true });
-    items.push({ text: "Export", glyph: "file-export", submenu: { label: "Export", items: [
-        { text: "CSV (.csv)",   glyph: "file-csv",  action: () => actions.exportTable(ref, "csv") },
-        { text: "JSON (.json)", glyph: "file-code", action: () => actions.exportTable(ref, "json") },
-    ] } });
+    items.push({ text: "Export", glyph: "file-export", submenu: { label: "Export",
+        items: buildTableExportItems(format => actions.exportTable(ref, format)) } });
 
     return items;
 }

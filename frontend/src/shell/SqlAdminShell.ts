@@ -57,6 +57,7 @@ import { logout }                  from "../data/api";
 import { openShortcutsDialog }     from "./shortcutsDialog";
 import { openChangelogDialog }     from "./changelogDialog";
 import { openLocalStorageWindow }  from "./localStorageWindow";
+import { buildExportFormatItems }  from "../dock/menuItems";
 import type { SqlAdminController } from "../SqlAdminController";
 
 // Glyphs used across the sidebar subtree: a database for the Database view (rail
@@ -384,20 +385,11 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
                 // toolbar button is the primary surface; this acts on whichever tab
                 // is focused. Both this list and the submenu are providers, re-run
                 // each time their menu opens: the item greys out when the focused
-                // tab has nothing to export, and the submenu labels track its kind
-                // (a plan shows text / JSON, everything else CSV / JSON).
+                // tab has nothing to export, and the submenu labels track its kind.
                 { text: "Export results…", glyph: "file-export", enabled: actions.canExportActive(),
-                  submenu: { label: "Export results…", items: () => {
-                    const plan = actions.activeExportKind() === "plan";
-
-                    return [
-                        // First slot: plain-text plan (file-lines) vs. CSV (file-csv);
-                        // second is JSON (file-code) either way. Glyphs match every
-                        // other export menu across the app.
-                        { text: plan ? "Text (.txt)" : "CSV (.csv)", glyph: plan ? "file-lines" : "file-csv", action: () => actions.onExportResults("csv") },
-                        { text: "JSON (.json)",                      glyph: "file-code",                     action: () => actions.onExportResults("json") },
-                    ];
-                } } },
+                  submenu: { label: "Export results…", items: () => buildExportFormatItems(
+                    actions.activeExportKind() === "plan" ? "plan" : "rows",
+                    format => actions.onExportResults(format)) } },
                 { separator: true },
                 { text: "Notes…", glyph: "file-lines", action: actions.onOpenDocumentation },
                 // Opens the localStorage inspector window (view + clear stored state).

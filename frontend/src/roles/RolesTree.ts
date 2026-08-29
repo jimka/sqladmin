@@ -23,6 +23,7 @@ import { TreeExpansionPersistence }  from "../data/treeExpansion";
 import { LoadSignal }                from "../data/loadSignal";
 import { groupRoles, roleNodeKey }   from "./groupRoles";
 import type { RoleGroupData }        from "./groupRoles";
+import { buildTableExportItems }     from "../dock/menuItems";
 
 // Leaf rows use the single-user glyph; the group parents carry their own glyph
 // (from RoleGroupData) so each section reads as users / a group / built-ins.
@@ -93,10 +94,8 @@ class RolesTree extends Tree implements ExplorerTree {
                 { text: "Show membership graph", glyph: "diagram-project", action: () => void this.controller.openRoleMembershipDiagram(name) },
                 { text: "Show grants graph", glyph: "diagram-project", action: () => void this.controller.openRoleGrantsDiagram(name) },
                 { separator: true },
-                { text: "Export grants", glyph: "file-export", submenu: { label: "Export grants", items: [
-                    { text: "CSV (.csv)",   glyph: "file-csv",  action: () => void this.controller.exportRole(name, "csv") },
-                    { text: "JSON (.json)", glyph: "file-code", action: () => void this.controller.exportRole(name, "json") },
-                ] } },
+                { text: "Export grants", glyph: "file-export", submenu: { label: "Export grants",
+                    items: buildTableExportItems(format => void this.controller.exportRole(name, format)) } },
             ]);
         });
 
