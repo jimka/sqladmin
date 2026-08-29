@@ -1497,3 +1497,77 @@ documents that change:
     `super({ components: … })` reads them — and the doc already names `LoginForm` as
     the template two paragraphs down, so the corrected example and the surrounding
     text agree.
+
+---
+
+## Implementation Notes
+
+- **`ObjectPanels.exportTable`'s missing route, and the `downloadUrl`/
+  `tableExportFilename` extraction.** The plan keeps `exportTable` as the
+  coordinator's own method — not part of `PanelHost`, not delegated to any
+  collaborator (see the `[^pick-split]` note: "`exportTable` stays a direct
+  member because it is the coordinator's own route … and belongs to no
+  collaborator"). But `ObjectPanels.openTable` builds a `TableWorkPanel`
+  whose constructor takes an export callback, and that callback needs the
+  exact behaviour `SqlAdminController.exportTable` implements — and
+  `ObjectPanels` cannot call back through the coordinator (no reference is
+  held, by the plan's own acyclic design). The plan does not name this
+  wiring detail. Resolved it by extracting the anchor-click download trigger
+  into `data/download.ts` as `downloadUrl(url, filename)` (that module
+  already held the sibling `download(content, filename, mimeType)` for the
+  client-serialized case) and the filename derivation into
+  `controller/controllerText.ts` as `tableExportFilename(ref, format)` (pure
+  string logic, fitting that module's stated purpose). Both
+  `SqlAdminController.exportTable` and `ObjectPanels.openTable`'s
+  `TableWorkPanel` construction now call the same two functions, so the
+  streaming-download behaviour has exactly one implementation instead of
+  being duplicated or requiring a new coupling back to the coordinator.
+
+- **`ddlLaunchers.ts` and `objectPanels.ts`'s line-count targets.** The
+  plan's Verification lists "no module under `controller/` over 700"
+  lines. `ddlLaunchers.ts` (22 launchers plus their shared helpers) landed
+  at 763 lines on the first pass and was trimmed to 673 by tightening
+  JSDoc prose that restated the signature or repeated the same rationale
+  across near-identical launchers, with no loss of the "why" content.
+  `objectPanels.ts` (six full async panel-open flows, each with real
+  fetch/refresh/save/reveal logic, plus the reveal-then-open wiring) went
+  through the same pass — verbose prose cut by roughly a third (829 → 727
+  lines) — but did not converge under 700 without either cutting into
+  documentation the project's `CODE_CONVENTIONS.md` requires (explaining
+  non-obvious behaviour) or splitting the module in a shape the plan does
+  not authorize. `objectPanels.ts` ships at 727 lines, 27 over the stated
+  target; every other module under `controller/`, and the coordinator
+  itself (699 lines), lands under 700.
+
+- **`renameTable`'s tab-closing pair also became `PanelHost.closeTabsFor`.**
+  The plan's `## Expected Behaviour` case 26 and its `[^close-tabs]`
+  footnote describe the DROP-closes-every-tab behaviour change for
+  `dropTable`/`dropRelation`/`dropFunction` only, and the Non-Goals section
+  states "the two intentional behaviour changes are named in cases 26 and
+  27" — but step 8's own instruction is explicit that `renameTable`'s
+  `this.dock.removePanel(panelId(ref))` pair becomes `this.host.closeTabsFor(ref)`
+  too, alongside the three DROP methods. Followed the step's literal
+  instruction (`DdlLaunchers.renameTable` in `controller/ddlLaunchers.ts`
+  now closes every tab `panelIdsFor` lists for the renamed table, not just
+  the data and structure tabs) since it closes the identical latent bug the
+  DROP fix addresses — a renamed table's open diagram/dependency/inheritance
+  tabs, if any, were left pointed at the object's old identity exactly as a
+  dropped table's were.
+
+- **`dropSchema` also gained a `closeTabsFor` call, which step 8's text never
+  names.** An audit round caught that `DdlLaunchers.dropSchema` (`controller/
+  ddlLaunchers.ts`) only called `this.reveal.refreshNavigator()` on success,
+  even though case 26 explicitly promises "Dropping a schema closes that
+  schema's Diagram, Dependency and Inheritance tabs" and `panelIdsFor`'s
+  `"schema"` branch already returns exactly those three ids. The gap traces
+  to the pre-split file: unlike `dropTable`/`renameTable`/`dropRelation`/
+  `dropFunction`, `dropSchema` never had a hand-listed `removePanel` pair for
+  step 8 to convert, so nothing in the Ordered Implementation Steps directed
+  the change even though case 26's prose calls for it. Added
+  `this.host.closeTabsFor(ref)` to `dropSchema`'s `onSuccess`, matching the
+  other four DDL launchers and satisfying case 26 as written. Also touched
+  in this same pass, for the identical class of gap the plan's own
+  `## Files to Create / Modify / Delete` table didn't anticipate: a one-line
+  stale-comment fix apiece in `frontend/src/SqlAdminApp.ts` (which the file
+  table lists as "read but unchanged") and `frontend/src/roles/groupRoles.ts`,
+  both still naming a pre-split flat controller method in a code comment.
