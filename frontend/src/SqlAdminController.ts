@@ -1891,23 +1891,20 @@ export class SqlAdminController {
     }
 
     /**
-     * Rebuild the structure tab (remove then reopen) after a structure-only
-     * change (a constraint or index add/drop, or a NOT-NULL/default toggle)
-     * — the data tab's column set is unaffected, so it's left open. A no-op
-     * if the structure tab isn't open or was opened without a navigator node
-     * (should not happen in practice — the navigator always supplies one).
+     * Reseed the open Structure tab in place after a structure-only change (a
+     * constraint or index add/drop, or a NOT-NULL/default toggle) — the data
+     * tab's column set is unaffected, so it's left open. Dispatches to the
+     * same in-place `refresh` closure `openStructure` registers (the one
+     * Alt+R and the Columns-Save success path already use), which keeps the
+     * tab's accordion open-state and scroll position rather than a
+     * remove-and-reopen. A no-op if the structure tab isn't open — including
+     * one opened from a deep link with no navigator node, which a
+     * remove-and-reopen used to close permanently.
      *
-     * @param ref - The table whose structure tab to rebuild.
+     * @param ref - The table whose structure tab to reseed.
      */
     private refreshStructure(ref: DbObjectRef): void {
-        const id   = this.structurePanelId(ref);
-        const node = this._openPanels.get(id)?.node;
-
-        this.dock.removePanel(id);
-
-        if (node) {
-            void this.openStructure(ref, node);
-        }
+        this._openPanels.get(this.structurePanelId(ref))?.refresh?.();
     }
 
     /**
