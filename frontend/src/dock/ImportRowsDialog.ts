@@ -24,7 +24,6 @@
 import { Panel }                    from "@jimka/typescript-ui/core";
 import { VBox }                     from "@jimka/typescript-ui/layout";
 import { Text, FileDropZone }       from "@jimka/typescript-ui/component/input";
-import { Table }                    from "@jimka/typescript-ui/component/table";
 import { MemoryStore, Model }       from "@jimka/typescript-ui/data";
 import { Dialog }                   from "@jimka/typescript-ui/overlay";
 import type { DialogButtonConfig }  from "@jimka/typescript-ui/overlay";
@@ -35,6 +34,7 @@ import { parseImportFile }          from "../data/parseImport";
 import { toFields }                 from "../data/buildModel";
 import { PAGE_SIZE }                from "../data/stores";
 import { buildPreviewGridRows }     from "./importPreviewRows";
+import { readOnlyTable }            from "./columnsGrid";
 
 /** Options for {@link openImportRowsDialog}. */
 export interface ImportRowsDialogOptions {
@@ -92,7 +92,7 @@ async function runImportRowsDialog(options: ImportRowsDialogOptions): Promise<vo
         { name: "error", type: "string" as const, order: options.columns.length, description: "Error" },
     ];
     const previewStore = new MemoryStore(new Model({ fields }));
-    const previewGrid  = Table(previewStore, { columns: [], autoSizeColumns: true, rowReadOnly: () => true });
+    const previewGrid  = readOnlyTable(previewStore);
     previewGrid.setPreferredSize({ width: 0, height: PREVIEW_GRID_HEIGHT });
 
     // The last parsed file's ORIGINAL (uncoerced) rows, and their preview
