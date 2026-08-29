@@ -52,7 +52,7 @@ import { APP_FAVICON }           from "./appIdentity";
     // docs app's own router.start() placement (packages/docs/src/main.ts in
     // the typescript-ui repo). Placed after the shell (not before) so a
     // handler that touches the navigator finds SqlAdminShell's NavigatorTree
-    // already registered via controller.setNavigator; placed after the login
+    // already registered via controller.reveal.setNavigator; placed after the login
     // gate above (session is already resolved) so a deep link survives a
     // sign-in round-trip untouched — showLoginDialog() never navigates.
     router.start();

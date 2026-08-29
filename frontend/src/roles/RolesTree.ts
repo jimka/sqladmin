@@ -98,8 +98,8 @@ class RolesTree extends ExplorerTreeBase<RoleSummary[]> implements ExplorerTree 
             ]);
         });
 
-        // Let the controller drive selection when a role is opened.
-        this.controller.setRolesTree(this);
+        // Let the reveal coordinator drive selection when a role is opened.
+        this.controller.reveal.setRolesTree(this);
 
         // (Re)load the role list; used for the initial load.
         this.refresh();

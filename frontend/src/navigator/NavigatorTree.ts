@@ -196,8 +196,8 @@ class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements Expl
 
         this.on("loaderror", (_node: TreeNode, error: unknown) => this.controller.notifyError(error));
 
-        // Let the controller drive selection when a dock tab is focused.
-        this.controller.setNavigator(this);
+        // Let the reveal coordinator drive selection when a dock tab is focused.
+        this.controller.reveal.setNavigator(this);
 
         // (Re)load the top-level schemas; the lazy object levels reload on their
         // next expansion. Used for the initial load.

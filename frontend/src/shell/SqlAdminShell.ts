@@ -144,8 +144,8 @@ class SqlAdminShell extends Container {
         // hint only (MenuItem.ts), so install the real Alt+N accelerator as a
         // document keydown listener.
         controller.setShowQueriesView(() => sidebar.selectView(QUERIES_VIEW_ID));
-        controller.setShowDatabaseView(() => sidebar.revealView(DATABASE_VIEW_ID));
-        controller.setShowRolesView(() => sidebar.revealView(ROLES_VIEW_ID));
+        controller.reveal.setShowDatabaseView(() => sidebar.revealView(DATABASE_VIEW_ID));
+        controller.reveal.setShowRolesView(() => sidebar.revealView(ROLES_VIEW_ID));
         installAccelerators(controller, sidebar);
     }
 }

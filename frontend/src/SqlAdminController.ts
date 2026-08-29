@@ -20,10 +20,8 @@ import { circle_nodes }                                                         
 import { file_lines }                                                                                                                                                                              from "@jimka/typescript-ui/glyphs/solid/file_lines";
 import { user }                                                                                                                                                                                    from "@jimka/typescript-ui/glyphs/solid/user";
 import type { TreeNode }                                                                                                                                                                           from "@jimka/typescript-ui/component/tree";
-import type { ExplorerTree }                                                                                                                                                                       from "./shell/explorerTree";
 import { showObjectMenu }                                                                                                                                                                          from "./navigator/objectMenu";
-import { matchesGrantedTable, matchesObject, matchesRelationName, matchesRole, matchesRoleSection }                                                                                                from "./navigator/revealMatch";
-import type { NodeMatch }                                                                                                                                                                          from "./navigator/revealMatch";
+import { matchesGrantedTable, matchesObject, matchesRelationName }                                                                                                                                 from "./navigator/revealMatch";
 import { objectPath, rolePath, databaseDiagramPath, notesPath, resolveAddressBarRoute }                                                                                                            from "./shell/routeTargets";
 import type { PanelRoute }                                                                                                                                                                         from "./shell/routeTargets";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                                                                                                                                     from "@jimka/typescript-ui/data";
@@ -103,6 +101,7 @@ import {
 } from "./controller/controllerText";
 import { PanelLoadError } from "./controller/panelHost";
 import type { PanelHost, OpenPanel, RecentTable, RoleGrants, AsyncPanelSpec } from "./controller/panelHost";
+import { RevealCoordinator } from "./controller/revealCoordinator";
 
 // The non-relation dock-tab glyphs (query / structure / definition / grants /
 // notes) plus the distinct diagram-tab glyphs: `diagram-project` is the FK
@@ -200,6 +199,10 @@ export class SqlAdminController implements PanelHost {
     // bind against it directly, and mirroring the whole store API onto the
     // controller would carry no information.
     readonly layout         : LayoutStore;
+    // The reveal-then-select wiring for the two sidebar trees. Constructed
+    // first among the collaborators (see the constructor) since ddl/panels/
+    // diagrams/roles all depend on it.
+    readonly reveal         : RevealCoordinator;
 
     private readonly _connectionId: string;
     private readonly _database    : string | undefined;
@@ -212,10 +215,6 @@ export class SqlAdminController implements PanelHost {
     // fallback for a panel with no _panelRoutes entry (openTable's view/matview
     // branch deliberately has none — see the plan's Architecture Decision).
     private readonly _queryPanelRuns: Map<string, number> = new Map();
-    private _navigator            : ExplorerTree | null = null;
-    // The Roles rail's tree, registered the same way the navigator is, so a role
-    // opened from a route or a link can drive its selection too.
-    private _rolesTree            : ExplorerTree | null = null;
     // The diagram panels' shared right-click menu, mirroring how NavigatorTree
     // and RolesTree each own one reusable Menu(). Named diagramContextMenu (see
     // below), not showObjectMenu, so the method does not shadow the imported
@@ -232,14 +231,12 @@ export class SqlAdminController implements PanelHost {
     private readonly _recentTables: RecentTable[] = [];
 
     // Shell-injected handles (mirroring how ActivityBar takes a SidebarSizer): one
-    // toggles the start-page deck, three select an activity-bar view (Queries,
-    // Database, Roles), one focuses a section (Saved/Recent) of the Queries view.
-    // The Database/Roles pair brings a revealed object's own tree forward, so a
-    // reveal never searches a tree whose deck page is hidden.
+    // toggles the start-page deck, one selects the Queries activity-bar view, one
+    // focuses a section (Saved/Recent) of the Queries view. The Database/Roles
+    // view selectors live on `reveal` instead (RevealCoordinator.setShowDatabaseView/
+    // setShowRolesView) — a reveal never searches a tree whose deck page is hidden.
     private _startToggle        : ((visible: boolean) => void) | null = null;
     private _showQueriesView    : (() => void) | null = null;
-    private _showDatabaseView   : (() => void) | null = null;
-    private _showRolesView      : (() => void) | null = null;
     // The address-bar sync hook, wired from SqlAdminApp.ts — see setSyncAddressBar.
     private _syncAddressBar     : ((path: string, query?: Record<string, string>) => void) | null = null;
     private _focusQueriesSection: ((section: QueriesSection) => void) | null = null;
@@ -314,6 +311,11 @@ export class SqlAdminController implements PanelHost {
         // No connectionId — layout is a property of the user's window, not of the
         // database being viewed, so it is scoped per user only (see data/layoutStore.ts).
         this.layout = new LayoutStore(userId, window.localStorage);
+
+        // The reveal-then-select coordinator for the two sidebar trees. Built
+        // before the rest of the collaborators land (a later plan phase), since
+        // ddl/panels/diagrams/roles will all depend on it.
+        this.reveal = new RevealCoordinator(connectionId, database);
 
         // The dock disposes a closed tab's content itself (destroying every
         // registered child in its subtree) and fires "close" only on genuine
@@ -401,22 +403,6 @@ export class SqlAdminController implements PanelHost {
      */
     private get _statusScope(): string {
         return this._database ?? this._connectionId;
-    }
-
-    /**
-     * Register the navigator tree so the focused tab can drive its
-     * selection and table-DDL launchers can trigger its top-level `refresh`.
-     */
-    setNavigator(tree: ExplorerTree): void {
-        this._navigator = tree;
-    }
-
-    /**
-     * Register the roles tree so a role open can drive its selection, mirroring
-     * {@link setNavigator}.
-     */
-    setRolesTree(tree: ExplorerTree): void {
-        this._rolesTree = tree;
     }
 
     /**
@@ -591,7 +577,7 @@ export class SqlAdminController implements PanelHost {
                     return;
                 }
 
-                this._navigator?.refresh?.();
+                this.reveal.refreshNavigator();
 
                 try {
                     const [reloadedDefinition, reloadedColumns] = await this.fetchDefinitionAndColumns(ref);
@@ -1063,7 +1049,7 @@ export class SqlAdminController implements PanelHost {
             generateSql: draft.generateSql,
             onSuccess:   () => {
                 this.dock.removePanel(id);
-                this._navigator?.refresh?.();
+                this.reveal.refreshNavigator();
             },
             ...this.ddlDefaults(spec.ref),
         });
@@ -1113,7 +1099,7 @@ export class SqlAdminController implements PanelHost {
             generateSql: async () =>
                 (await previewDropTable(ref, { schema: ref.schema!, name: ref.name!, ...form.readSpec() })).sql,
             onSuccess: () => {
-                this._navigator?.refresh?.();
+                this.reveal.refreshNavigator();
                 this.dock.removePanel(panelId(ref));
                 this.dock.removePanel(structurePanelId(ref));
             },
@@ -1139,7 +1125,7 @@ export class SqlAdminController implements PanelHost {
             form,
             generateSql: async () => (await previewAlterTable(ref, form.readSpec())).sql,
             onSuccess:   () => {
-                this._navigator?.refresh?.();
+                this.reveal.refreshNavigator();
                 this.dock.removePanel(panelId(ref));
                 this.dock.removePanel(structurePanelId(ref));
             },
@@ -1392,7 +1378,7 @@ export class SqlAdminController implements PanelHost {
                 cascade: form.readSpec().cascade,
             })).sql,
             onSuccess: () => {
-                this._navigator?.refresh?.();
+                this.reveal.refreshNavigator();
                 this.dock.removePanel(panelId(ref));
                 this.dock.removePanel(definitionPanelId(ref));
             },
@@ -1473,7 +1459,7 @@ export class SqlAdminController implements PanelHost {
             form,
             generateSql: async () =>
                 (await previewDropSchema(ref, buildDropSchemaSpec(ref.schema!, form.readSpec().cascade))).sql,
-            onSuccess: () => this._navigator?.refresh?.(),
+            onSuccess: () => this.reveal.refreshNavigator(),
             ...this.ddlDefaults(ref),
         });
     }
@@ -1493,7 +1479,7 @@ export class SqlAdminController implements PanelHost {
             form,
             generateSql: async () =>
                 (await previewRenameSchema(ref, buildRenameSchemaSpec(ref.schema!, form.newName()))).sql,
-            onSuccess: () => this._navigator?.refresh?.(),
+            onSuccess: () => this.reveal.refreshNavigator(),
             ...this.ddlDefaults(ref),
         });
     }
@@ -1534,7 +1520,7 @@ export class SqlAdminController implements PanelHost {
             form,
             generateSql: async () =>
                 (await previewDropSequence(ref, buildDropSequenceSpec(ref.schema!, ref.name!, form.readSpec().cascade))).sql,
-            onSuccess: () => this._navigator?.refresh?.(),
+            onSuccess: () => this.reveal.refreshNavigator(),
             ...this.ddlDefaults(ref),
         });
     }
@@ -1628,7 +1614,7 @@ export class SqlAdminController implements PanelHost {
                     return;
                 }
 
-                this._navigator?.refresh?.();
+                this.reveal.refreshNavigator();
 
                 try {
                     const reloaded = await getFunctionDefinition(ref, signature);
@@ -1695,7 +1681,7 @@ export class SqlAdminController implements PanelHost {
                 ref.schema!, ref.name!, kind, ref.signature ?? "", form.readSpec().cascade,
             ))).sql,
             onSuccess: () => {
-                this._navigator?.refresh?.();
+                this.reveal.refreshNavigator();
                 this.dock.removePanel(functionDefinitionPanelId(ref));
             },
             ...this.ddlDefaults(ref),
@@ -1820,7 +1806,7 @@ export class SqlAdminController implements PanelHost {
             form,
             generateSql: async () =>
                 (await previewDropType(ref, buildDropTypeSpec(ref.schema!, ref.name!, form.readSpec().cascade))).sql,
-            onSuccess: () => this._navigator?.refresh?.(),
+            onSuccess: () => this.reveal.refreshNavigator(),
             ...this.ddlDefaults(ref),
         });
     }
@@ -2389,10 +2375,7 @@ export class SqlAdminController implements PanelHost {
      * @param ref - The referenced table to open.
      */
     openReferencedTable(ref: DbObjectRef): void {
-        const revealed = this.revealNavigatorNode(matchesRelationName(ref));
-
-        void this.openTable(ref, revealed);
-        void revealed.then(node => { if (node) { this._navigator?.selectNode(node); } });
+        this.reveal.revealInNavigator(matchesRelationName(ref), { open: r => void this.openTable(ref, r) });
     }
 
     /**
@@ -2417,10 +2400,7 @@ export class SqlAdminController implements PanelHost {
      * @param ref - The sequence to open (kind "sequence").
      */
     openReferencedSequence(ref: DbObjectRef): void {
-        const revealed = this.revealObject(ref);
-
-        void this.openSequence(ref, revealed);
-        void revealed.then(node => { if (node) { this._navigator?.selectNode(node); } });
+        this.reveal.revealInNavigator(matchesObject(ref), { open: r => void this.openSequence(ref, r) });
     }
 
     /**
@@ -2432,138 +2412,7 @@ export class SqlAdminController implements PanelHost {
      * @param ref - The table whose structure to open (kind "table").
      */
     openReferencedStructure(ref: DbObjectRef): void {
-        const revealed = this.revealObject(ref);
-
-        void this.openStructure(ref, revealed);
-        void revealed.then(node => { if (node) { this._navigator?.selectNode(node); } });
-    }
-
-    /**
-     * Reveal an object's navigator node, expanding the path to it — loading
-     * lazy branches (unexpanded schemas) as needed — so the target is revealed
-     * even when the user never navigated to it.
-     *
-     * Matches on `kind` as well as database/schema/name (see
-     * {@link matchesObject}), unlike {@link openReferencedTable}'s kind-blind
-     * rule.
-     *
-     * @param ref - The object to reveal.
-     *
-     * @returns The revealed node, or undefined when no node matches.
-     */
-    private revealObject(ref: DbObjectRef): Promise<TreeNode | undefined> {
-        return this.revealNavigatorNode(matchesObject(ref));
-    }
-
-    /**
-     * Bring the Database view forward and reveal the first navigator node
-     * `match` accepts, once the navigator has finished loading.
-     *
-     * The view switch comes first because revealing means searching a tree and
-     * scrolling to the result, which is pointless while that tree's deck page
-     * is hidden. The `whenLoaded` wait is what makes a reveal issued at boot —
-     * a deep link's, or an early double-click's — search a populated tree
-     * instead of silently finding nothing in one still filling.
-     *
-     * @param match - Tests each node's `data` payload; see revealMatch.ts.
-     *
-     * @returns The revealed node, or undefined when no node matches.
-     */
-    private async revealNavigatorNode(match: NodeMatch): Promise<TreeNode | undefined> {
-        this.showDatabaseView();
-        await this._navigator?.whenLoaded();
-
-        return (await this._navigator?.revealByPredicate(match)) ?? undefined;
-    }
-
-    /**
-     * Bring the Roles view forward and reveal the first roles-tree node
-     * `match` accepts, once the role list has finished loading — the
-     * roles-side twin of {@link revealNavigatorNode}.
-     *
-     * @param match - Tests each node's `data` payload; see revealMatch.ts.
-     *
-     * @returns The revealed node, or undefined when no node matches.
-     */
-    private async revealRoleNode(match: NodeMatch): Promise<TreeNode | undefined> {
-        this.showRolesView();
-        await this._rolesTree?.whenLoaded();
-
-        return (await this._rolesTree?.revealByPredicate(match)) ?? undefined;
-    }
-
-    /**
-     * Bring the Database view forward and select `ref`'s navigator node.
-     *
-     * The caller-side reveal a route handler pairs with its own `open*` call,
-     * the same way {@link openReferencedTable} pairs one with `openTable` —
-     * the sidebar follows an *open*, not a focus, so `syncToPanel`'s
-     * focus-driven selection stays as it is. Best-effort and fire-and-forget:
-     * a ref naming no navigator node only switches the view.
-     *
-     * @param ref - The object just opened.
-     */
-    selectObject(ref: DbObjectRef): void {
-        // A database-wide ref names no navigator node (the tree is rooted at
-        // schemas — the app connects to one database per session), so switch the
-        // view and stop: revealByPredicate walks depth first, so a search would
-        // lazily fetch every schema's objects only to find nothing. Keyed on
-        // `schema` rather than `kind === "database"` so any future schema-less
-        // ref is covered by the same rule.
-        if (!ref.schema) {
-            this.showDatabaseView();
-
-            return;
-        }
-
-        void this.revealObject(ref).then(node => { if (node) { this._navigator?.selectNode(node); } });
-    }
-
-    /**
-     * Bring the Roles view forward and select `name`'s roles-tree node — the
-     * roles-side twin of {@link selectObject}. Best-effort and
-     * fire-and-forget: a name matching no leaf only switches the view.
-     *
-     * @param name - The role just opened.
-     */
-    selectRole(name: string): void {
-        void this.revealRoleNode(matchesRole(name)).then(node => { if (node) { this._rolesTree?.selectNode(node); } });
-    }
-
-    /**
-     * Switch the sidebar to the Database view and expand `schema`'s own
-     * navigator node (its category children become visible) — no tab opens.
-     * Best-effort, mirroring selectObject: a schema matching no navigator
-     * node only switches the view.
-     *
-     * @param schema - The schema to reveal.
-     */
-    revealSchema(schema: string): void {
-        const ref: DbObjectRef = { connectionId: this._connectionId, database: this._database ?? "", schema, kind: "schema" };
-
-        void this.revealNavigatorNode(matchesObject(ref)).then(node => {
-            if (node) {
-                this._navigator?.selectNode(node);
-                this._navigator?.expandNode(node);
-            }
-        });
-    }
-
-    /**
-     * Switch the sidebar to the Roles view and expand the named section's
-     * group node ("Users" / "Groups" / "Predefined") — its role leaves
-     * become visible — no tab opens. Best-effort, mirroring selectRole: a
-     * section matching no group node only switches the view.
-     *
-     * @param section - The RolesTree section label to reveal.
-     */
-    revealRoleSection(section: string): void {
-        void this.revealRoleNode(matchesRoleSection(section)).then(node => {
-            if (node) {
-                this._rolesTree?.selectNode(node);
-                this._rolesTree?.expandNode(node);
-            }
-        });
+        this.reveal.revealInNavigator(matchesObject(ref), { open: r => void this.openStructure(ref, r) });
     }
 
     /**
@@ -2954,26 +2803,6 @@ export class SqlAdminController implements PanelHost {
     }
 
     /**
-     * Register the shell's Database-view selector, so a navigator reveal can
-     * bring the tree it searches forward.
-     *
-     * @param select - Makes the Database activity-bar view the active one.
-     */
-    setShowDatabaseView(select: () => void): void {
-        this._showDatabaseView = select;
-    }
-
-    /**
-     * Register the shell's Roles-view selector, so a roles-tree reveal can
-     * bring the tree it searches forward.
-     *
-     * @param select - Makes the Roles activity-bar view the active one.
-     */
-    setShowRolesView(select: () => void): void {
-        this._showRolesView = select;
-    }
-
-    /**
      * Register the shell's address-bar sync callback, invoked with the
      * currently focused tab's own URL (see resolveAddressBarRoute) whenever
      * that URL might have changed, so the shell can write it in place
@@ -3000,17 +2829,6 @@ export class SqlAdminController implements PanelHost {
         const route = resolveAddressBarRoute(id, this._panelRoutes, this._queryPanelRuns, this._history.list());
 
         this._syncAddressBar?.(route.path, route.query);
-    }
-
-    // Bring the Database / Roles view forward. Absent only before the shell has
-    // wired them (and in the DOM-less path, which has no sidebar at all), so
-    // both are optional calls, exactly like _showQueriesView above.
-    private showDatabaseView(): void {
-        this._showDatabaseView?.();
-    }
-
-    private showRolesView(): void {
-        this._showRolesView?.();
     }
 
     /**
@@ -3351,7 +3169,7 @@ export class SqlAdminController implements PanelHost {
      */
     openGrantedTable(schema: string, table: string): void {
         void (async () => {
-            const node = await this.revealNavigatorNode(matchesGrantedTable(schema, table));
+            const node = await this.reveal.findInNavigator(matchesGrantedTable(schema, table));
 
             if (!node) {
                 this.status(`${schema}.${table}: not found in navigator`);
@@ -3360,7 +3178,7 @@ export class SqlAdminController implements PanelHost {
             }
 
             await this.openTable(node.data as DbObjectRef, node);
-            this._navigator?.selectNode(node);
+            this.reveal.selectNavigatorNode(node);
         })();
     }
 
@@ -3550,7 +3368,7 @@ export class SqlAdminController implements PanelHost {
         }
 
         if (panel.node) {
-            this._navigator?.selectNode(panel.node);
+            this.reveal.selectNavigatorNode(panel.node);
         }
 
         this.updateStatusFor(panel);

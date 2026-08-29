@@ -11,7 +11,7 @@
 // view-mode properties live in the query string" Architecture Decision.
 //
 // Every object-bearing route also reveals its object in the sidebar: one
-// `controller.selectObject(ref)` / `controller.selectRole(name)` statement per
+// `controller.reveal.selectObject(ref)` / `controller.reveal.selectRole(name)` statement per
 // handler, immediately before its `open*` call and after any view-segment
 // check, so an unknown view segment reveals nothing. That pairing is
 // caller-side by design — the reveal is not baked into the `open*` methods,
@@ -115,7 +115,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             kind        : "database",
         };
 
-        controller.selectObject(ref);
+        controller.reveal.selectObject(ref);
 
         return controller.openDatabaseDiagram(ref);
     }));
@@ -125,7 +125,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
     // Decision. Two segments, so matchPattern's exact-segment-count rule keeps
     // it distinct from the three-segment /schema/:schema/:view below.
     router.register("/schema/:schema", params => dispatch(controller, () => {
-        controller.revealSchema(params.schema);
+        controller.reveal.revealSchema(params.schema);
     }));
 
     router.register("/schema/:schema/:view", (params, path) => dispatch(controller, () => {
@@ -139,7 +139,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
         const ref: DbObjectRef = { connectionId: controller.connectionId, database: controller.database, schema: params.schema, kind: "schema" };
 
-        controller.selectObject(ref);
+        controller.reveal.selectObject(ref);
 
         switch (view) {
             case "diagram":      return controller.openSchemaDiagram(ref);
@@ -156,7 +156,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
         router.register(`/schema/:schema/${segment}/:name`, (params, _path, _fragment, query) => dispatch(controller, () => {
             const ref = relationRef(controller, kind, params.schema, params.name);
 
-            controller.selectObject(ref);
+            controller.reveal.selectObject(ref);
 
             return controller.openTable(ref, undefined, {
                 rotated: routeFlag(query.rotated),
@@ -175,7 +175,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
             const ref = relationRef(controller, kind, params.schema, params.name);
 
-            controller.selectObject(ref);
+            controller.reveal.selectObject(ref);
 
             switch (view) {
                 case "structure":    return controller.openStructure(ref);
@@ -196,7 +196,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             kind        : "sequence",
         };
 
-        controller.selectObject(ref);
+        controller.reveal.selectObject(ref);
 
         return controller.openSequence(ref);
     }));
@@ -210,7 +210,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             kind        : "index",
         };
 
-        controller.selectObject(ref);
+        controller.reveal.selectObject(ref);
 
         return controller.openIndex(ref);
     }));
@@ -224,7 +224,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             kind        : "type",
         };
 
-        controller.selectObject(ref);
+        controller.reveal.selectObject(ref);
 
         return controller.openType(ref);
     }));
@@ -245,7 +245,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
         // The reveal matches on name and kind, not signature, so an overloaded
         // routine selects its first leaf while the tab opens the exact overload.
-        controller.selectObject(ref);
+        controller.reveal.selectObject(ref);
 
         return controller.openFunctionDefinition(ref);
     }));
@@ -261,11 +261,11 @@ export function buildAppRouter(controller: SqlAdminController): Router {
         // the role-bucket twin of the bare /schema/:schema route above. Two
         // segments, distinct from the three-segment /role/:bucket/:role below.
         router.register(`/role/${bucket}`, () => dispatch(controller, () => {
-            controller.revealRoleSection(ROLE_BUCKET_SECTIONS[bucket]);
+            controller.reveal.revealRoleSection(ROLE_BUCKET_SECTIONS[bucket]);
         }));
 
         router.register(`/role/${bucket}/:role`, params => dispatch(controller, () => {
-            controller.selectRole(params.role);
+            controller.reveal.selectRole(params.role);
             controller.showRole(params.role);
         }));
 
@@ -278,7 +278,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
                 return;
             }
 
-            controller.selectRole(params.role);
+            controller.reveal.selectRole(params.role);
 
             switch (view) {
                 case "grants-diagram": return controller.openRoleGrantsDiagram(params.role);
