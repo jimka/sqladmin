@@ -58,11 +58,9 @@ import { IndexForm }                                                            
 import { ConfirmCascadeForm }                                                                                                                                                                      from "./dock/ConfirmCascadeForm";
 import { ViewForm }                                                                                                                                                                                from "./dock/ViewForm";
 import { MaterializedViewForm }                                                                                                                                                                    from "./dock/MaterializedViewForm";
-import { openDropRelationDialog, openRefreshMatviewDialog }                                                                                                                                        from "./dock/RelationDdlActions";
-import { stripTrailingSemicolon }                                                                                                                                                                  from "./dock/ddlSpecs";
-import { openDropSchemaDialog, openRenameSchemaDialog }                                                                                                                                            from "./dock/SchemaDdlForms";
-import { CreateSchemaForm }                                                                                                                                                                        from "./dock/SchemaDdlForms";
-import { openDropSequenceDialog }                                                                                                                                                                  from "./dock/SequenceDdlForms";
+import { RefreshMatviewForm }                                                                                                                                                                      from "./dock/RefreshMatviewForm";
+import { stripTrailingSemicolon, buildDropSchemaSpec, buildRenameSchemaSpec, buildDropSequenceSpec }                                                                                               from "./dock/ddlSpecs";
+import { CreateSchemaForm, RenameSchemaForm }                                                                                                                                                      from "./dock/SchemaDdlForms";
 import { CreateSequenceForm }                                                                                                                                                                      from "./dock/SequenceDdlForms";
 import { FunctionForm }                                                                                                                                                                            from "./dock/FunctionForm";
 import { EnumTypeForm }                                                                                                                                                                            from "./dock/EnumTypeForm";
@@ -1440,11 +1438,17 @@ export class SqlAdminController {
      * @param ref - The view/matview to drop.
      */
     dropRelation(ref: DbObjectRef): void {
-        openDropRelationDialog({
-            kind:    ref.kind,
-            schema:  ref.schema!,
-            name:    ref.name!,
-            preview: spec => ref.kind === "materializedView" ? previewDropMatview(ref, spec) : previewDropView(ref, spec),
+        const label = ref.kind === "materializedView" ? "materialized view" : "view";
+        const form  = new ConfirmCascadeForm(`Drop ${label} "${ref.schema}"."${ref.name}"?`);
+
+        openSqlPreviewDialog({
+            title: `Drop ${label}`,
+            form,
+            generateSql: async () => (await (ref.kind === "materializedView" ? previewDropMatview : previewDropView)(ref, {
+                schema:  ref.schema!,
+                name:    ref.name!,
+                cascade: form.readSpec().cascade,
+            })).sql,
             execute: sql => executeDdl(this._connectionId, sql),
             onSuccess: () => {
                 this._navigator?.refresh?.();
@@ -1464,10 +1468,17 @@ export class SqlAdminController {
      * @param ref - The matview to refresh.
      */
     refreshMaterializedView(ref: DbObjectRef): void {
-        openRefreshMatviewDialog({
-            schema:    ref.schema!,
-            name:      ref.name!,
-            preview:   spec => previewRefreshMatview(ref, spec),
+        const form = new RefreshMatviewForm();
+
+        openSqlPreviewDialog({
+            title: "Refresh materialized view",
+            form,
+            generateSql: async () => (await previewRefreshMatview(ref, {
+                schema:       ref.schema!,
+                name:         ref.name!,
+                concurrently: form.concurrently(),
+                withNoData:   form.withNoData(),
+            })).sql,
             execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: refreshed`),
             onError:   msg => this.notifyError(new Error(msg), ref),
@@ -1515,9 +1526,13 @@ export class SqlAdminController {
      * @param ref - the schema to drop.
      */
     dropSchema(ref: DbObjectRef): void {
-        openDropSchemaDialog({
-            name:      ref.schema!,
-            preview:   spec => previewDropSchema(ref, spec),
+        const form = new ConfirmCascadeForm(`Drop schema "${ref.schema}"? This drops every object it contains.`);
+
+        openSqlPreviewDialog({
+            title: "Drop schema",
+            form,
+            generateSql: async () =>
+                (await previewDropSchema(ref, buildDropSchemaSpec(ref.schema!, form.readSpec().cascade))).sql,
             execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this._navigator?.refresh?.(),
             onError:   msg => this.notifyError(new Error(msg), ref),
@@ -1532,9 +1547,13 @@ export class SqlAdminController {
      * @param ref - the schema to rename.
      */
     renameSchema(ref: DbObjectRef): void {
-        openRenameSchemaDialog({
-            name:      ref.schema!,
-            preview:   spec => previewRenameSchema(ref, spec),
+        const form = new RenameSchemaForm(ref.schema!);
+
+        openSqlPreviewDialog({
+            title: "Rename schema",
+            form,
+            generateSql: async () =>
+                (await previewRenameSchema(ref, buildRenameSchemaSpec(ref.schema!, form.newName()))).sql,
             execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this._navigator?.refresh?.(),
             onError:   msg => this.notifyError(new Error(msg), ref),
@@ -1570,10 +1589,13 @@ export class SqlAdminController {
      * @param ref - the sequence to drop.
      */
     dropSequence(ref: DbObjectRef): void {
-        openDropSequenceDialog({
-            schema:    ref.schema!,
-            name:      ref.name!,
-            preview:   spec => previewDropSequence(ref, spec),
+        const form = new ConfirmCascadeForm(`Drop sequence "${ref.schema}"."${ref.name}"?`);
+
+        openSqlPreviewDialog({
+            title: "Drop sequence",
+            form,
+            generateSql: async () =>
+                (await previewDropSequence(ref, buildDropSequenceSpec(ref.schema!, ref.name!, form.readSpec().cascade))).sql,
             execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this._navigator?.refresh?.(),
             onError:   msg => this.notifyError(new Error(msg), ref),
