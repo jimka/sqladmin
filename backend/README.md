@@ -54,8 +54,14 @@ poetry run pytest
 - `app/main.py` — FastAPI app, lifespan (idle-session sweep), exception handler, routes
 - `app/auth.py` — login/logout/whoami, the host allowlist, session + CSRF dependencies
 - `app/config.py` — `SERVER_PRESETS` / `ALLOW_USER_PRESETS` + the pre-auth `GET /api/config`
-- `app/operations/` — CQRS `Query`/`Command` handlers (introspection + rows)
+- `app/contract.py` — the wire contract's scalar types and shared value objects
+- `app/operations/` — CQRS `Query`/`Command` handlers (introspection + rows); `base.py`'s
+  `CatalogQuery` and `catalog.py`'s shared SQL fragments/mappers back the catalog reads
 - `app/sql/compiler.py` — pure `FilterCompiler`/`OrderCompiler` + `quote_ident`
+- `app/sql/ddl.py` — pure DDL SQL-builder primitives shared by every DDL phase
 - `app/wire.py` — Postgres/asyncpg -> wire-contract value mapping
+- `app/export_format.py` — the CSV/JSON export dialect + the export format registry
 - `app/connections.py` — per-session pool store; `app/errors.py` — exception taxonomy
 - `app/rate_limit.py` — in-process sliding-window rate limit on failed logins
+- `app/static.py` — serves the built frontend alongside the API from one container
+- `app/dev.py` — the `poetry run dev` launcher entry point
