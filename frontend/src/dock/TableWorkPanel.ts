@@ -10,59 +10,39 @@
 // table's structure opens in its own tab from the navigator's right-click menu
 // (see StructurePanel / SqlAdminController).
 //
-// Quick search (applyQuickSearch/syncQuickSearchStatus) is local: it narrows
-// which already-loaded rows the grid shows via the library's own
-// `Table.setQuickSearch`, with no network request. Matching runs against each
-// cell's displayed text (`Table.getCellText`) rather than the record's raw
-// stored value, so a formatted date/time/datetime or combo column matches the
-// same way it renders. The status line's match count and the record-view
-// stepper (`stepRecord`/`syncStepEnabled`) need to know which records
-// currently match too, and the grid exposes no query for that, so
-// gridQuickSearch.ts's `quickSearchFields`/`matchesQuery` (shared with
-// QueryResultView.ts's own grid quick search) recompute it from the same
-// public pieces `Table.setQuickSearch` itself uses — never from the raw
-// record. The grid's own header filter row (toggled from its right-click
-// context menu, via `Table.setFilterRowVisible`) is remote: each committed
-// keystroke there writes into the store's filter state, which reloads page 1
-// from the server. Both can be active at once — see
-// plans/implemented/table-local-filter.md's Architecture Decisions.
-//
-// The record-view toggle flips the same grid to the library's rotated
-// (field/value) display mode via `Table.setDisplayMode` — no second grid, no
-// app-side projection. The mode is read-only, so it never affects Save; only
-// Add changes meaning between the two views, since it needs the grid to fill
-// in a new row. Previous/Next step `store.getRecords()` narrowed to whatever
-// currently matches the live quick-search query (`recordNavigation.ts`'s
-// `visibleRecords`), then clamped at both ends by the pure `stepIndex`
-// helper — so stepping skips non-matching records. A record already
-// displayed when the query narrows past it stays displayed until the user
-// steps away: `visibleRecords(...).indexOf(current)` simply misses it (-1),
-// which `stepIndex` treats the same as "nothing displayed yet".
+// The record-view toggle, its Previous/Next steppers, and quick search all
+// live in the shared `RecordViewControls` (recordViewControls.ts) — the same
+// group `QueryResultView.ts`'s `QueryResultGrid` mounts. This panel adds only
+// the status line (`syncQuickSearchStatus`, through `notify`, which is why an
+// empty query leaves the last message alone) and the Add gating that follows
+// the display mode (`syncAddEnabled`). Quick search stays purely local (no
+// network request); the grid's own header filter row (toggled from its
+// right-click context menu, via `Table.setFilterRowVisible`) is the remote
+// counterpart — each committed keystroke there writes into the store's filter
+// state, which reloads page 1 from the server. Both can be active at once —
+// see plans/implemented/table-local-filter.md's Architecture Decisions.
 //
 // The panel can also open pre-seeded by a route's view-mode request (rotated,
-// a focused record, or both — see TableViewOptions): the record toggle's
-// initial state and Add's initial gating both read from `view?.rotated`, and
-// a requested record is focused once the store's first page loads via
-// `focusRecord`/`findRecordByKey` (see recordNavigation.ts). Both are
-// independent of each other and of quick search.
+// a focused record, or both — see TableViewOptions): once wiring is done, the
+// panel calls `controls.setRotated(true)`, and a requested record is focused
+// once the store's first page loads via `focusRecord`/`findRecordByKey` (see
+// recordNavigation.ts). Both are independent of each other and of quick search.
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): the panel `extends
 // Container`, inlining its own Border frame directly (the same shape
-// RoleGrantsPanel inlines too). The sync handlers, `toggleRecordView`,
-// `applyQuickSearch`, and `syncQuickSearchStatus` are arrow-function fields —
-// they're registered by reference on `store`/`dataGrid`/`recordToggle`/
-// `quickSearchField` events, which would drop `this` if they were plain
-// methods. `buildColumnSpec`/`save_`/`missingRequiredFields`/`confirmDelete`/
-// `stepRecord` stay stateless module-level functions.
+// RoleGrantsPanel inlines too). The sync handlers and `syncQuickSearchStatus`
+// are arrow-function fields — they're registered by reference on
+// `store`/`dataGrid` events, which would drop `this` if they were plain
+// methods. `buildColumnSpec`/`save_`/`missingRequiredFields`/`confirmDelete`
+// stay stateless module-level functions.
 
 import { Container, Panel, callable } from "@jimka/typescript-ui/core";
 import { Border as BorderLayout, Fit } from "@jimka/typescript-ui/layout";
 import { Placement }                   from "@jimka/typescript-ui/primitive";
 import { ToolBar, ToolBarSeparator }   from "@jimka/typescript-ui/component/menubar";
-import { Button, ToggleButton }        from "@jimka/typescript-ui/component/button";
+import { Button }                      from "@jimka/typescript-ui/component/button";
 import { Spacer }                      from "@jimka/typescript-ui/component/container";
-import { TextField }                   from "@jimka/typescript-ui/component/input";
-import { glyphButton, glyphToggleButton } from "./glyphButton";
+import { glyphButton }                 from "./glyphButton";
 import { Table }                       from "@jimka/typescript-ui/component/table";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
 import { Dialog, DialogButtons }       from "@jimka/typescript-ui/overlay";
@@ -71,20 +51,17 @@ import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/r
 import { plus }                        from "@jimka/typescript-ui/glyphs/solid/plus";
 import { minus }                       from "@jimka/typescript-ui/glyphs/solid/minus";
 import { save }                        from "@jimka/typescript-ui/glyphs/solid/save";
-import { table_list }                  from "@jimka/typescript-ui/glyphs/solid/table_list";
-import { angle_left }                  from "@jimka/typescript-ui/glyphs/solid/angle_left";
-import { angle_right }                 from "@jimka/typescript-ui/glyphs/solid/angle_right";
 import { file_import }                 from "@jimka/typescript-ui/glyphs/solid/file_import";
 import type { ColumnMeta, TablePrivileges } from "../contract";
 import { buildExportButton }           from "./exportButton";
 import { buildColumnSpec, missingRequiredFields } from "./tableWriteRules";
 import { quickSearchStatus }           from "./quickSearchModel";
-import { stepIndex, visibleRecords, findRecordByKey } from "./recordNavigation";
-import { quickSearchFields, matchesQuery } from "./gridQuickSearch";
+import { findRecordByKey }             from "./recordNavigation";
+import { RecordViewControls }          from "./recordViewControls";
 import { REFRESH_SHORTCUT }            from "../shell/queryShortcuts";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR } from "../theme";
 
-Glyph.register(refresh, plus, minus, save, table_list, angle_left, angle_right, file_import);
+Glyph.register(refresh, plus, minus, save, file_import);
 
 /** Surface a short status message (validation / save feedback) to the user. */
 export type Notify = (message: string) => void;
@@ -115,24 +92,14 @@ class TableWorkPanel extends Container {
     private readonly privileges:   TablePrivileges;
     private readonly canWrite:     boolean;
     private readonly notify:       Notify;
-    // Captured once at construction — see gridQuickSearch.ts's
-    // `quickSearchFields` doc comment for why this must never be recomputed
-    // from `dataGrid` once the record-view toggle can flip it into rotated
-    // mode.
-    private readonly searchFields: string[];
 
     // The buttons the sync handlers toggle need to be reachable as fields.
     // addButton is no longer a fixed capability: syncAddEnabled toggles it
     // with the record-view state as well as with `privileges.insert`.
-    // quickSearchField backs the local, network-free quick search; its
-    // status is reported through `notify` rather than a toolbar label.
-    private readonly addButton:        Button;
-    private readonly deleteButton:     Button;
-    private readonly saveButton:       Button;
-    private readonly recordToggle:     ToggleButton;
-    private readonly prevButton:       Button;
-    private readonly nextButton:       Button;
-    private readonly quickSearchField: TextField;
+    private readonly addButton:    Button;
+    private readonly deleteButton: Button;
+    private readonly saveButton:   Button;
+    private readonly controls:     RecordViewControls;
 
     constructor(
         store: AjaxStore, columns: ColumnMeta[], notify: Notify, onExport: ExportTable, onImport: ImportTable,
@@ -141,9 +108,17 @@ class TableWorkPanel extends Container {
         // `this` is unavailable until after `super()`, so the grid and toolbar
         // buttons are built as locals first.
         const dataGrid = Table(store, buildColumnSpec(columns, privileges.update));
-        // Captured now, while the grid is still guaranteed "normal" — see
-        // gridQuickSearch.ts's `quickSearchFields` doc comment.
-        const searchFields = quickSearchFields(dataGrid);
+        // Both arrows below reference `this` before `super()` has run; that
+        // compiles and is safe, because neither runs until after construction
+        // — RecordViewControls' own constructor only re-syncs the steppers,
+        // never flips the display mode or applies a search (the two actions
+        // that invoke these hooks).
+        const controls = new RecordViewControls({
+            grid:              dataGrid,
+            searchPlaceholder: "Quick search (loaded rows)",
+            onRotate:          () => this.syncAddEnabled(),
+            onQuery:           () => this.syncQuickSearchStatus(),
+        });
 
         // A change can only be persisted with at least one write privilege; Save
         // enables only when a *permitted* change is pending (Add/Delete and cell
@@ -172,19 +147,6 @@ class TableWorkPanel extends Container {
         const saveButton = glyphButton("save", PRIMARY_COLOR,
             canWrite ? "Save" : "Save (read-only — no write permission)", () => save_(store, columns, notify));
 
-        // Quick search: local, network-free row hiding over the loaded page,
-        // via Table.setQuickSearch. Its match-count status is reported
-        // through `notify` rather than a dedicated toolbar label.
-        const quickSearchField = new TextField({ placeholder: "Quick search (loaded rows)" });
-
-        // Record view: flips the grid to one record's field/value rows via
-        // Table.setDisplayMode. The toggle's handler needs `this` (to re-sync
-        // Add and the steppers), which is unavailable here, so it is wired
-        // after super() returns. The steppers only need the `dataGrid` local.
-        const recordToggle = glyphToggleButton("table-list", PRIMARY_COLOR, "Record view (one record as field/value rows)", view?.rotated === true);
-        const prevButton   = glyphButton("angle-left",  PRIMARY_COLOR, "Previous record", () => stepRecord(dataGrid, searchFields, -1, quickSearchField.getValue().trim()));
-        const nextButton   = glyphButton("angle-right", PRIMARY_COLOR, "Next record",     () => stepRecord(dataGrid, searchFields, 1, quickSearchField.getValue().trim()));
-
         // The full-relation export runs server-side (it streams the whole table, not
         // the grid's loaded page), so it stays correct regardless of paging, sort, or
         // filter — the table analogue of the query-result Export button.
@@ -195,9 +157,7 @@ class TableWorkPanel extends Container {
                 // Record view leads at the far left, set off from the edit actions by
                 // a separator — it's a view mode, not an edit, so it reads as its own
                 // group rather than one more button beside Add/Delete/Save.
-                recordToggle,
-                prevButton,
-                nextButton,
+                ...controls.buttons,
                 new ToolBarSeparator(),
                 addButton,
                 deleteButton,
@@ -206,7 +166,7 @@ class TableWorkPanel extends Container {
                 // Import, Export, Refresh) to the far right, away from the
                 // edit actions.
                 Spacer.flex(),
-                quickSearchField,
+                controls.searchField,
                 // Separator sets quick search off from the Import/Export/Refresh
                 // action group, since it's a view filter rather than an action.
                 new ToolBarSeparator(),
@@ -222,20 +182,16 @@ class TableWorkPanel extends Container {
 
         super({ layoutManager: new BorderLayout({ spacing: 0 }) });
 
-        this.store        = store;
-        this.dataGrid     = dataGrid;
-        this.privileges   = privileges;
-        this.canWrite     = canWrite;
-        this.notify       = notify;
-        this.searchFields = searchFields;
+        this.store      = store;
+        this.dataGrid   = dataGrid;
+        this.privileges = privileges;
+        this.canWrite   = canWrite;
+        this.notify     = notify;
 
-        this.addButton        = addButton;
-        this.deleteButton     = deleteButton;
-        this.saveButton       = saveButton;
-        this.recordToggle     = recordToggle;
-        this.prevButton       = prevButton;
-        this.nextButton       = nextButton;
-        this.quickSearchField = quickSearchField;
+        this.addButton    = addButton;
+        this.deleteButton = deleteButton;
+        this.saveButton   = saveButton;
+        this.controls     = controls;
 
         this.addComponent(toolbar, { placement: Placement.NORTH });
         this.addComponent(Panel({ layoutManager: new Fit(), components: [dataGrid] }), { placement: Placement.CENTER });
@@ -243,7 +199,6 @@ class TableWorkPanel extends Container {
         // Quick search narrows the loaded page live, with no network request;
         // re-derive its status message whenever the loaded records change under it
         // (an edit, or a fresh page from Refresh / a column-filter reload).
-        this.quickSearchField.on("change", this.applyQuickSearch);
         this.syncQuickSearchStatus();
         store.on("datachange", this.syncQuickSearchStatus);
         store.on("load", this.syncQuickSearchStatus);
@@ -251,10 +206,6 @@ class TableWorkPanel extends Container {
         // Add is no longer a fixed capability: it also disables while the
         // record view is showing, since only the grid can fill in a new row.
         this.syncAddEnabled();
-
-        // The record-view toggle flips the grid's display mode; re-sync Add
-        // and the steppers on every flip (both read getDisplayMode()).
-        this.recordToggle.on("action", this.toggleRecordView);
 
         // Save is only meaningful with unsaved edits/adds/removes AND some write
         // right; 'datachange' fires on each of those (and after a sync clears them).
@@ -268,24 +219,16 @@ class TableWorkPanel extends Container {
         dataGrid.on("selection", this.syncDeleteEnabled);
         store.on("datachange", this.syncDeleteEnabled);
 
-        // The steppers need a neighbour to exist in the loaded records;
-        // re-check on selection changes (stepping/toggling, and a reload or
-        // filter re-target, since Table re-emits 'selection' when it
-        // re-targets the rotated record after its source store reloads) and
-        // on 'datachange' (add/remove changes which records are loaded;
-        // 'datachange' does not fire on load, so it is 'selection', not this,
-        // that covers a reload).
-        this.syncStepEnabled();
-        dataGrid.on("selection", this.syncStepEnabled);
-        store.on("datachange", this.syncStepEnabled);
+        // 'datachange' covers add/remove while the 'selection' the controls
+        // registered (in their own constructor) covers stepping, toggling and
+        // a reload's re-target.
+        store.on("datachange", this.controls.syncStepEnabled);
 
-        // Apply the route's requested view mode last, so the two sync calls
-        // below act on the final state rather than being immediately
+        // Apply the route's requested view mode last, so setRotated's own sync
+        // calls act on the final state rather than being immediately
         // superseded by the listener wiring above.
         if (view?.rotated === true) {
-            this.dataGrid.setDisplayMode("rotated");
-            this.syncAddEnabled();
-            this.syncStepEnabled();
+            this.controls.setRotated(true);
         }
 
         if (view?.record !== undefined && view.record !== "") {
@@ -307,88 +250,35 @@ class TableWorkPanel extends Container {
         this.deleteButton.setEnabled(this.privileges.delete && hasLiveSelection);
     };
 
-    // Registered by reference on `quickSearchField` ("change"), which
-    // TextInput fires on every keystroke from its native `input` listener —
-    // arrow-function field. Installs a fresh predicate each call; null when
-    // the query is empty clears the filter entirely. Local and network-free:
-    // it only ever decides which of the already-loaded rows are shown, never
-    // reloads the store (that's the grid's own header filter row's job).
-    // Also re-syncs the steppers: their enabled state depends on the query
-    // too (see syncStepEnabled), and only 'selection'/'datachange' would
-    // otherwise trigger a re-check, lagging behind what was just typed.
-    private applyQuickSearch = (): void => {
-        this.dataGrid.setQuickSearch(this.quickSearchField.getValue().trim());
-        this.syncQuickSearchStatus();
-        this.syncStepEnabled();
-    };
-
-    // Registered by reference on `store` ("datachange", "load") and called
-    // directly from applyQuickSearch — arrow-function field. Recomputes the
-    // message from the CURRENT query against whatever is loaded now, and
-    // reports it through `notify` (the same shared, scoped status-bar line
-    // every other panel message goes through) instead of a dedicated toolbar
-    // label. An empty query leaves the status bar's last message alone rather
-    // than emitting a fresh one: `notify` is a one-shot point message here
-    // (Save, Refresh, …all write it the same way), not a continuously-synced
-    // label, so there's nothing new to report once the query is cleared.
+    // Registered by reference on `store` ("datachange", "load") — arrow-function
+    // field. Recomputes the message from the CURRENT query against whatever is
+    // loaded now, and reports it through `notify` (the same shared, scoped
+    // status-bar line every other panel message goes through) instead of a
+    // dedicated toolbar label. An empty query leaves the status bar's last
+    // message alone rather than emitting a fresh one: `notify` is a one-shot
+    // point message here (Save, Refresh, …all write it the same way), not a
+    // continuously-synced label, so there's nothing new to report once the
+    // query is cleared.
     private syncQuickSearchStatus = (): void => {
-        const query = this.quickSearchField.getValue().trim();
+        const query = this.controls.getQuery();
 
         if (query === "") {
             return;
         }
 
-        const needle  = query.toLowerCase();
         const loaded  = this.store.getRecords();
-        const matched = loaded.filter((r: ModelRecord) => matchesQuery(this.dataGrid, this.searchFields, r, needle)).length;
+        const matched = this.controls.matchingRecords().length;
 
         this.notify(quickSearchStatus(matched, loaded.length, this.store.getTotalCount()));
-    };
-
-    // Registered by reference on `recordToggle` ("action") — arrow-function field.
-    private toggleRecordView = (): void => {
-        const record = this.dataGrid.getSelectedRecord();
-
-        if (this.recordToggle.isSelected()) {
-            this.dataGrid.setDisplayMode("rotated");
-        } else {
-            this.dataGrid.setDisplayMode("normal");
-            // setDisplayMode re-selects the displayed record but does not reveal it;
-            // selectRecord's normal-mode path scrolls the row back into view.
-            this.dataGrid.selectRecord(record);
-        }
-
-        this.syncAddEnabled();
-        this.syncStepEnabled();
     };
 
     // Only ever called as this.syncAddEnabled(), but stays an arrow field to
     // match its siblings in this file (COMPONENT_CONVENTIONS.md (c)).
     private syncAddEnabled = (): void => {
-        const rotated = this.dataGrid.getDisplayMode() === "rotated";
+        const rotated = this.controls.isRotated();
 
         this.addButton.setEnabled(this.privileges.insert && !rotated);
         this.addButton.setDescription(rotated ? "Switch to the grid view to add a row" : "");
-    };
-
-    // Registered by reference on `dataGrid` ("selection"), `store`
-    // ("datachange"), and called directly from applyQuickSearch (the query
-    // is also part of the enabled/disabled calculation) — arrow-function
-    // field. Steps through `visibleRecords` — the currently matching
-    // records — not the full loaded set, so Previous/Next disable exactly
-    // when there is no matching neighbour to step to. A displayed record
-    // that no longer matches the query is simply absent from that filtered
-    // list (indexOf returns -1), which stepIndex treats like "nothing
-    // displayed yet" rather than an error.
-    private syncStepEnabled = (): void => {
-        const rotated = this.dataGrid.getDisplayMode() === "rotated";
-        const needle  = this.quickSearchField.getValue().trim().toLowerCase();
-        const records = visibleRecords(this.store.getRecords(), (r: ModelRecord) => matchesQuery(this.dataGrid, this.searchFields, r, needle));
-        const current = this.dataGrid.getSelectedRecord();
-        const index   = current ? records.indexOf(current) : -1;
-
-        this.prevButton.setEnabled(rotated && stepIndex(index, -1, records.length) !== null);
-        this.nextButton.setEnabled(rotated && stepIndex(index,  1, records.length) !== null);
     };
 
     /**
@@ -460,34 +350,6 @@ async function confirmDelete(store: AjaxStore, dataGrid: Table): Promise<void> {
 
     if (result === "confirm") {
         selected.forEach((r: ModelRecord) => store.remove(r));
-    }
-}
-
-/**
- * Step the record view's displayed record by `delta` positions within the
- * loaded, filtered/sorted records that currently match `query` (see
- * `visibleRecords`), clamped at both ends — so Previous/Next skip records
- * the live quick-search query doesn't match. A stateless helper so it can be
- * wired from the Previous/Next buttons while they are still pre-`super()`
- * locals, closing over `dataGrid` alone (no `this`); `query` is read live at
- * click time by the caller (`quickSearchField.getValue().trim()`), not
- * captured stale at construction.
- *
- * @param dataGrid - the table whose displayed record steps.
- * @param fields - the field names to test, captured once at construction
- *   (see gridQuickSearch.ts's `quickSearchFields` doc comment for why this
- *   is a parameter rather than recomputed here).
- * @param delta - -1 for the previous record, 1 for the next.
- * @param query - the current quick-search text; blank matches every record.
- */
-function stepRecord(dataGrid: Table, fields: string[], delta: number, query: string): void {
-    const needle  = query.toLowerCase();
-    const records = visibleRecords(dataGrid.getStore().getRecords(), (r: ModelRecord) => matchesQuery(dataGrid, fields, r, needle));
-    const current = dataGrid.getSelectedRecord();
-    const target  = stepIndex(current ? records.indexOf(current) : -1, delta, records.length);
-
-    if (target !== null) {
-        dataGrid.selectRecord(records[target]);
     }
 }
 
