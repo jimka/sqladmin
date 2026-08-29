@@ -312,17 +312,20 @@ class DiagramShell extends Panel {
 
         rootControl?.on("change", (v: string) => this.chooseRoot(v === ROOT_NONE ? null : v));
 
-        // Without this, the tab's first render falls back to DiagramView's own
-        // one-shot centring, which holds the configured (default 1×) zoom
-        // instead of fitting the graph to the viewport — the diagram opens
-        // looking zoomed out. Every later gesture already re-settles the
-        // viewport; the initial mount is just the one gesture-less case.
-        // Deferred to the view's first connected+sized layout: called straight
-        // from the constructor, `settleViewport` would race the ELK layout
-        // this view's own constructor kicks off against the browser's first
-        // layout pass, and — same as `zoomToFit` always has — silently no-op
-        // if the ELK pass lands first, since the view has no width/height yet.
-        view.onFirstLayout(() => this.settleViewport());
+        // DiagramView now opens every view already fitted to the viewport on
+        // its own (its fitOnLoad option, default true), so an unrooted panel
+        // needs nothing further here. A panel that already has a root at
+        // construction (fixedRoot, or a SelectableRoot opened with one) still
+        // does: the library has no notion of this shell's root, so its own
+        // fit shows the whole graph rather than the chosen root. Deferred to
+        // the view's first connected+sized layout: called straight from the
+        // constructor, `settleViewport` would race the ELK layout this view's
+        // own constructor kicks off against the browser's first sizing pass,
+        // and could silently no-op if the ELK pass lands first, since the
+        // view would have no width/height yet.
+        if (this.rootId !== null) {
+            view.onFirstLayout(() => this.settleViewport());
+        }
     }
 
     /**
