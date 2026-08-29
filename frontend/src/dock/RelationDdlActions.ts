@@ -6,9 +6,10 @@
 
 import { Panel }             from "@jimka/typescript-ui/core";
 import { VBox }              from "@jimka/typescript-ui/layout";
-import { Checkbox, Text }    from "@jimka/typescript-ui/component/input";
+import { Checkbox }          from "@jimka/typescript-ui/component/input";
 import type { DbObjectKind, DdlPreview, DropSpec, QueryStatusResult, RefreshMatviewSpec } from "../contract";
 import { openSqlPreviewDialog } from "./SqlPreviewDialog";
+import { ConfirmCascadeForm } from "./ConfirmCascadeForm";
 
 /** Dependencies for {@link openDropRelationDialog}. */
 export interface DropDialogDeps {
@@ -30,25 +31,6 @@ export interface DropDialogDeps {
     onError: (message: string) => void;
 }
 
-/** The drop-confirmation form: a summary line plus an optional CASCADE checkbox. */
-class DropRelationForm extends Panel {
-    private readonly _cascadeBox: Checkbox;
-
-    /** @param summary - a one-line description of what is being dropped. */
-    constructor(summary: string) {
-        const cascadeBox = Checkbox({ label: "CASCADE (also drop dependent objects)", selected: false });
-
-        super({ layoutManager: new VBox({ itemAlign: "stretch" }), components: [new Text(summary), cascadeBox] });
-
-        this._cascadeBox = cascadeBox;
-    }
-
-    /** @returns whether the CASCADE checkbox is checked. */
-    cascade(): boolean {
-        return this._cascadeBox.getValue();
-    }
-}
-
 /** The label used in the drop dialog's title/summary for each relation kind. */
 function relationLabel(kind: DbObjectKind): string {
     return kind === "materializedView" ? "materialized view" : "view";
@@ -61,7 +43,7 @@ function relationLabel(kind: DbObjectKind): string {
  */
 export function openDropRelationDialog(deps: DropDialogDeps): void {
     const label = relationLabel(deps.kind);
-    const form = new DropRelationForm(`Drop ${label} "${deps.schema}"."${deps.name}"?`);
+    const form = new ConfirmCascadeForm(`Drop ${label} "${deps.schema}"."${deps.name}"?`);
 
     openSqlPreviewDialog({
         title: `Drop ${label}`,
@@ -69,7 +51,7 @@ export function openDropRelationDialog(deps: DropDialogDeps): void {
         generateSql: async () => (await deps.preview({
             schema: deps.schema,
             name:   deps.name,
-            cascade: form.cascade(),
+            cascade: form.readSpec().cascade,
         })).sql,
         execute:   deps.execute,
         onSuccess: deps.onSuccess,
