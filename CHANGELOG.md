@@ -4,6 +4,50 @@ All notable changes to SQLAdmin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-08-29
+
+### Added
+- **Import table data from a CSV or JSON file.** A table's Data tab gains an
+  Import action: drop or pick a file, preview the parsed rows with per-row
+  validation errors, then commit them all-or-nothing in one transaction.
+- **A table's columns are now editable in place on the Structure tab.**
+  Rename a column, retype it, toggle NOT NULL, set or clear a default, or
+  add/remove a row, then Save — the same editable SQL preview every DDL
+  action uses shows the generated `ALTER TABLE` statements for review
+  before they run.
+- **The navigator's Types category gets a read-only info tab**, matching
+  the existing Sequence and Index info tabs. Double-clicking a type leaf
+  (or its new "Show info" context-menu item) opens a tab showing the
+  type's category, owning role, and its ordered enum labels or composite
+  attributes.
+- **Connection presets now save the entered username** alongside
+  host/port/database (the password stays per-login, never stored), and one
+  preset can be flagged as the default. The login dialog auto-selects the
+  default preset on a fresh open, and focuses the first field a selected
+  preset leaves blank instead of always focusing the preset picker first.
+- **A Debug button in the About dialog** opens the library's
+  DiagnosticsOverlay — live FPS, JS heap, DOM node count, and
+  component/listener counts — one click away instead of a manual symlink
+  and script setup.
+
+### Changed
+- **The Import Rows and Run/Execute confirmation dialogs now show a failed
+  validation or run as an in-content error banner instead of closing and
+  popping a Notification behind the modal backdrop.** Both dialogs' action
+  buttons now live in the dialog's chrome bar and validate on click before
+  running.
+
+### Fixed
+- **A diagram tab now fits its graph to the viewport on first render**,
+  instead of opening at a fixed 1x zoom adrift in a mostly-empty canvas
+  until some later gesture (or a manual Fit to view) recentred it.
+- **Switching the database diagram's Mode, or drilling into it from the
+  Overview, now recentres the view when the new graph lands off-screen** —
+  previously only the diagram's other control gestures did.
+
+### Internal
+- Migrated to `@jimka/typescript-ui` 0.8.0.
+
 ## [0.7.0] — 2026-08-22
 
 ### Changed
@@ -235,6 +279,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 First public release: browse schemas and roles, edit rows, run and EXPLAIN SQL,
 and visualize schema and role relationships as diagrams.
 
+[0.8.0]: https://github.com/jimka/sqladmin/releases/tag/v0.8.0
 [0.7.0]: https://github.com/jimka/sqladmin/releases/tag/v0.7.0
 [0.6.0]: https://github.com/jimka/sqladmin/releases/tag/v0.6.0
 [0.5.0]: https://github.com/jimka/sqladmin/releases/tag/v0.5.0
