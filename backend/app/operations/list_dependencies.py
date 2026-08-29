@@ -8,10 +8,7 @@ from __future__ import annotations
 import asyncpg
 
 from .base import CatalogQuery
-
-# pg_class.relkind -> the contract DbObjectKind. Partitioned ('p') and foreign
-# ('f') tables collapse to "table"; fixed by the catalog format.
-_RELKIND_KIND: dict[str, str] = {"r": "table", "p": "table", "f": "table", "v": "view", "m": "materializedView"}
+from .catalog import RELKIND_CODES, edge_rows
 
 
 class ListDependenciesQuery(CatalogQuery):
@@ -20,16 +17,20 @@ class ListDependenciesQuery(CatalogQuery):
     target = the underlying relation it reads (``pg_depend``/``pg_rewrite``/
     ``pg_class``). Schema-scoped on the dependent's namespace; a dependent view
     living in a different schema than the table it reads is not discovered.
+    Filters the target's relkind against ``RELKIND_CODES`` both in SQL and
+    again in ``edge_rows()`` (the dependent side stays a fixed ``'v', 'm'`` —
+    only a view/matview can depend on anything at all) — see the plan's
+    "Unknown relkinds are dropped in SQL and again in the shaper".
     """
 
     _SQL = """
         SELECT DISTINCT
-            dn.nspname       AS dependent_schema,
-            dc.relname       AS dependent_name,
-            dc.relkind::text AS dependent_kind,
-            sn.nspname       AS source_schema,
-            sc.relname       AS source_name,
-            sc.relkind::text AS source_kind
+            dn.nspname       AS source_schema,
+            dc.relname       AS source_name,
+            dc.relkind::text AS source_kind,
+            sn.nspname       AS target_schema,
+            sc.relname       AS target_name,
+            sc.relkind::text AS target_kind
         FROM pg_depend d
         JOIN pg_rewrite r    ON r.oid = d.objid AND d.classid = 'pg_rewrite'::regclass
         JOIN pg_class dc     ON dc.oid = r.ev_class
@@ -39,15 +40,15 @@ class ListDependenciesQuery(CatalogQuery):
         WHERE dn.nspname = $1
           AND dc.oid <> sc.oid
           AND dc.relkind IN ('v', 'm')
-          AND sc.relkind IN ('r', 'v', 'm', 'p', 'f')
-        ORDER BY dependent_name, source_name
+          AND sc.relkind = ANY($2::text[])
+        ORDER BY source_name, target_name
     """
 
     def __init__(self, conn: asyncpg.Connection, schema: str) -> None:
         """
         Capture the connection and the schema to introspect.
         """
-        super().__init__(conn, schema)
+        super().__init__(conn, schema, list(RELKIND_CODES))
 
     def get_result(self) -> list[dict]:
         """
@@ -61,18 +62,4 @@ class ListDependenciesQuery(CatalogQuery):
             ``[{"source": {schema, name, kind}, "target": {schema, name, kind}}]``
             where source is the dependent view and target is the relation it reads.
         """
-        return [
-            {
-                "source": {
-                    "schema": r["dependent_schema"],
-                    "name": r["dependent_name"],
-                    "kind": _RELKIND_KIND[r["dependent_kind"]],
-                },
-                "target": {
-                    "schema": r["source_schema"],
-                    "name": r["source_name"],
-                    "kind": _RELKIND_KIND[r["source_kind"]],
-                },
-            }
-            for r in self._rows()
-        ]
+        return edge_rows(self._rows())

@@ -7,8 +7,7 @@ from __future__ import annotations
 import asyncpg
 
 from .base import CatalogQuery
-
-_SYSTEM_SCHEMAS = ("pg_catalog", "information_schema")
+from .catalog import SYSTEM_SCHEMAS
 
 
 class ListSchemasQuery(CatalogQuery):
@@ -27,7 +26,7 @@ class ListSchemasQuery(CatalogQuery):
         """
         Capture the connection and the (multi-DB seam) database name.
         """
-        super().__init__(conn, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, list(SYSTEM_SCHEMAS))
         self._database: str = database  # carried for the multi-DB seam
 
     def get_result(self) -> list[dict]:

@@ -17,11 +17,8 @@ import asyncpg
 from ..contract import ColumnMeta, SequenceRef
 from ..wire import pg_type_to_wire
 from .base import CatalogQuery
+from .catalog import SYSTEM_SCHEMAS
 from .table_structure import _CONSTRAINT_TYPES, _FK_ACTIONS
-
-# Excluded from every schema/database-wide query below, mirroring
-# list_schemas.py's own copy of this same catalog-scoping constant.
-_SYSTEM_SCHEMAS = ("pg_catalog", "information_schema")
 
 
 class SchemaTablesQuery(CatalogQuery):
@@ -45,7 +42,7 @@ class SchemaTablesQuery(CatalogQuery):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        super().__init__(conn, schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -139,7 +136,7 @@ class SchemaColumnsQuery(CatalogQuery):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        super().__init__(conn, schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -207,7 +204,7 @@ class SchemaIndexesQuery(CatalogQuery):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        super().__init__(conn, schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -266,7 +263,7 @@ class SchemaConstraintsQuery(CatalogQuery):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        super().__init__(conn, schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -336,7 +333,7 @@ class SchemaForeignKeysQuery(CatalogQuery):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        super().__init__(conn, schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """

@@ -16,12 +16,12 @@ def test_declarative_partitioning_maps_both_sides_to_table() -> None:
     op = ListInheritanceQuery(NO_CONN, "public")
     op._raw = [
         {
-            "parent_schema": "public",
-            "parent_name": "events",
-            "parent_kind": "p",
-            "child_schema": "public",
-            "child_name": "events_2024",
-            "child_kind": "r",
+            "source_schema": "public",
+            "source_name": "events",
+            "source_kind": "p",
+            "target_schema": "public",
+            "target_name": "events_2024",
+            "target_kind": "r",
         }
     ]
 
@@ -37,12 +37,12 @@ def test_classic_inheritance_maps_both_sides_to_table() -> None:
     op = ListInheritanceQuery(NO_CONN, "public")
     op._raw = [
         {
-            "parent_schema": "public",
-            "parent_name": "vehicles",
-            "parent_kind": "r",
-            "child_schema": "public",
-            "child_name": "cars",
-            "child_kind": "r",
+            "source_schema": "public",
+            "source_name": "vehicles",
+            "source_kind": "r",
+            "target_schema": "public",
+            "target_name": "cars",
+            "target_kind": "r",
         }
     ]
 
@@ -56,12 +56,12 @@ def test_source_is_parent_target_is_child() -> None:
     op = ListInheritanceQuery(NO_CONN, "public")
     op._raw = [
         {
-            "parent_schema": "public",
-            "parent_name": "events",
-            "parent_kind": "p",
-            "child_schema": "public",
-            "child_name": "events_2024",
-            "child_kind": "r",
+            "source_schema": "public",
+            "source_name": "events",
+            "source_kind": "p",
+            "target_schema": "public",
+            "target_name": "events_2024",
+            "target_kind": "r",
         }
     ]
 
@@ -83,3 +83,57 @@ def test_get_result_before_apply_raises() -> None:
 
     with pytest.raises(RuntimeError):
         op.get_result()
+
+
+def test_partitioned_index_row_is_dropped_not_a_key_error() -> None:
+    # The live bug this plan fixes: pg_inherits carries 'I'/'i' (partitioned
+    # index) rows Postgres 11+ records for a partitioned index's own child
+    # indexes. Neither code is in RELKIND_KIND, so the row must be silently
+    # dropped by edge_rows() rather than raise KeyError.
+    op = ListInheritanceQuery(NO_CONN, "public")
+    op._raw = [
+        {
+            "source_schema": "public",
+            "source_name": "t_d_idx",
+            "source_kind": "I",
+            "target_schema": "public",
+            "target_name": "t_2024_d_idx",
+            "target_kind": "i",
+        }
+    ]
+
+    assert op.get_result() == []
+
+
+def test_mixed_list_keeps_only_the_mappable_edge() -> None:
+    op = ListInheritanceQuery(NO_CONN, "public")
+    op._raw = [
+        {
+            "source_schema": "public",
+            "source_name": "t",
+            "source_kind": "p",
+            "target_schema": "public",
+            "target_name": "t_2024",
+            "target_kind": "r",
+        },
+        {
+            "source_schema": "public",
+            "source_name": "t_d_idx",
+            "source_kind": "I",
+            "target_schema": "public",
+            "target_name": "t_2024_d_idx",
+            "target_kind": "i",
+        },
+    ]
+
+    result = op.get_result()
+
+    assert len(result) == 1
+    assert result[0]["source"]["name"] == "t"
+    assert result[0]["target"]["name"] == "t_2024"
+
+
+def test_constructor_binds_relkind_codes() -> None:
+    op = ListInheritanceQuery(NO_CONN, "public")
+
+    assert op._args == ("public", ["r", "p", "f", "v", "m"])
