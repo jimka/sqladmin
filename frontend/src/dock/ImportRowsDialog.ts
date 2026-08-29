@@ -6,10 +6,9 @@
 // Files note).
 //
 // Import is a chrome button, always enabled, mirroring SqlPreviewDialog's
-// Cancel/Execute pair — but unlike SqlPreviewDialog (whose Execute always
-// succeeds at closing and retries by rebuilding a fresh Dialog on a failed
-// execute), Import's own click is validated in place via `DialogButtonConfig.
-// onClick`: it returns `false` to veto the close (blocked — no valid preview
+// Cancel/Execute pair: its click is validated in place via
+// `DialogButtonConfig.onClick`, the same guard SqlPreviewDialog's Execute
+// uses. It returns `false` to veto the close (blocked — no valid preview
 // yet; or failed — the commit rejected), keeping this SAME Dialog instance
 // open, or `true` once `executeImportRows` actually succeeds. No retry loop,
 // no RetainedContentDialog: the dialog never closes on a blocked/failed

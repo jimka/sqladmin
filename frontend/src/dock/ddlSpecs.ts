@@ -1,10 +1,11 @@
-// Pure spec-assembly helpers for the table-DDL dialog forms: translate a
-// form's collected rows/fields into the wire spec the matching preview
-// client sends. Kept DOM-free (see memory "tsui DOM module side effects") so
-// vitest (node-only) can pin them; each form (CreateTableForm, ConstraintForm,
-// IndexForm, ColumnChecklist) is a thin collector that hands its inputs to
-// one of these — as is StructurePanel's Columns-grid Save flow, via
-// diffColumnSpecs/describeColumnSpecs below.
+// Pure spec-assembly helpers for the app's DDL flows: translate a form's
+// collected rows/fields into the wire spec the matching preview client
+// sends. Kept DOM-free (see memory "tsui DOM module side effects") so vitest
+// (node-only) can pin them. Every DDL form under dock/ is a thin collector
+// that hands its inputs to one of these; so are the two in-tab Save flows
+// (StructurePanel's Columns-grid diff, via diffColumnSpecs/
+// describeColumnSpecs below, and SequenceInfoPanel's, via diffSequenceSpecs)
+// and SqlAdminController's own drop launchers.
 
 import type {
     AlterColumnAction,
