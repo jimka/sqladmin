@@ -288,10 +288,9 @@ function buildWorkArea(sidebar: ActivityBar, controller: SqlAdminController): Co
 
 /**
  * The CENTER Card deck: the Dock work area and the empty-workspace start page,
- * one visible at a time. The Dock exposes no emptyContent hook or "became empty"
- * event (see StartPage / the plan's Dock investigation), so the controller
- * tracks an open-panel count and drives this deck through the injected toggle —
- * mirroring how the ActivityBar takes a SidebarSizer.
+ * one visible at a time. The Dock emits an "emptychange" event, which the
+ * controller subscribes to in its constructor, driving this deck through the
+ * injected toggle — mirroring how the ActivityBar takes a SidebarSizer.
  *
  * @param controller - The mediator owning the Dock and the panel count.
  *
@@ -447,9 +446,9 @@ async function confirmSignOut(): Promise<void> {
 
 /**
  * WEST sidebar: a VSCode-style activity bar whose icon rail toggles its deck.
- * Phase 1 ships one view — the Database explorer (navigator + properties
- * accordion) — which is also the documented Phase-2 seam (one more rail button +
- * one more deck page adds a view).
+ * Ships three views — Database (navigator + properties accordion), Roles, and
+ * Queries — over a seam that stays open: one more rail button + one more
+ * deck page adds a view.
  */
 function buildSidebar(controller: SqlAdminController, onLogout: () => void): ActivityBar {
     const explorer = new DatabaseExplorerView(controller, DATABASE_VIEW_ID);

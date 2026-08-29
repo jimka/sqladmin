@@ -1,8 +1,8 @@
 // The keyboard-shortcut registry: the single source of truth the shortcut legend
 // (start page + Keyboard Shortcuts dialog) renders from. It is a DISPLAY view
 // over queryShortcuts.ts — it re-uses that module's key strings (never literals)
-// and adds only the display metadata the keys don't carry (label, category,
-// scope). Key MATCHING stays in queryShortcuts' isXChord helpers; this module
+// and adds only the display metadata the keys don't carry (label, category).
+// Key MATCHING stays in queryShortcuts' isXChord helpers; this module
 // defines no matching logic. Pure data + grouping, no typescript-ui import, so it
 // runs under the project's DOM-less node vitest (mirroring startPageWelcome.ts).
 
@@ -17,9 +17,6 @@ import {
 /** The legend's display grouping. */
 export type ShortcutCategory = "editor" | "query" | "navigation";
 
-/** Where a shortcut is actually bound (documentation only). */
-export type ShortcutScope = "editor" | "global";
-
 /** One shortcut's display record. */
 export interface ShortcutEntry {
     /** Stable id (e.g. "run", "new-query"). */
@@ -30,8 +27,6 @@ export interface ShortcutEntry {
     label: string;
     /** Display grouping. */
     category: ShortcutCategory;
-    /** Where the key is actually bound (documentation only). */
-    scope: ShortcutScope;
 }
 
 /** A category's entries under a human heading, for the rendered legend. */
@@ -44,20 +39,20 @@ export interface ShortcutGroup {
 
 /** Every app shortcut, the source of truth for the legend. */
 export const SHORTCUTS: readonly ShortcutEntry[] = [
-    { id: "run",             keys: RUN_SHORTCUT,             label: "Run the query",                 category: "editor",     scope: "editor" },
-    { id: "save",            keys: SAVE_SHORTCUT,            label: "Save the query",                category: "editor",     scope: "editor" },
-    { id: "clear",           keys: CLEAR_SHORTCUT,           label: "Clear the editor",              category: "editor",     scope: "editor" },
-    { id: "history-recall",  keys: HISTORY_RECALL_SHORTCUT,  label: "Browse query history",          category: "editor",     scope: "editor" },
-    { id: "explain",         keys: EXPLAIN_SHORTCUT,         label: "Explain the statement",         category: "editor",     scope: "editor" },
-    { id: "explain-analyze", keys: EXPLAIN_ANALYZE_SHORTCUT, label: "Explain Analyze the statement", category: "editor",     scope: "editor" },
-    { id: "new-query",       keys: NEW_QUERY_SHORTCUT,       label: "New query",                     category: "query",      scope: "global" },
-    { id: "open-saved",      keys: OPEN_SAVED_SHORTCUT,      label: "Open saved queries",            category: "query",      scope: "global" },
-    { id: "query-history",   keys: QUERY_HISTORY_SHORTCUT,   label: "Query history",                 category: "query",      scope: "global" },
-    { id: "databases-rail",  keys: DATABASES_RAIL_SHORTCUT,  label: "Databases rail",                category: "navigation", scope: "global" },
-    { id: "roles-rail",      keys: ROLES_RAIL_SHORTCUT,      label: "Roles rail",                    category: "navigation", scope: "global" },
-    { id: "queries-rail",    keys: QUERIES_RAIL_SHORTCUT,    label: "Queries rail",                  category: "navigation", scope: "global" },
-    { id: "refresh",         keys: REFRESH_SHORTCUT,         label: "Refresh the active view",       category: "navigation", scope: "global" },
-    { id: "help",            keys: HELP_SHORTCUT,            label: "Keyboard shortcuts",            category: "navigation", scope: "global" },
+    { id: "run",             keys: RUN_SHORTCUT,             label: "Run the query",                 category: "editor" },
+    { id: "save",            keys: SAVE_SHORTCUT,            label: "Save the query",                category: "editor" },
+    { id: "clear",           keys: CLEAR_SHORTCUT,           label: "Clear the editor",              category: "editor" },
+    { id: "history-recall",  keys: HISTORY_RECALL_SHORTCUT,  label: "Browse query history",          category: "editor" },
+    { id: "explain",         keys: EXPLAIN_SHORTCUT,         label: "Explain the statement",         category: "editor" },
+    { id: "explain-analyze", keys: EXPLAIN_ANALYZE_SHORTCUT, label: "Explain Analyze the statement", category: "editor" },
+    { id: "new-query",       keys: NEW_QUERY_SHORTCUT,       label: "New query",                     category: "query" },
+    { id: "open-saved",      keys: OPEN_SAVED_SHORTCUT,      label: "Open saved queries",            category: "query" },
+    { id: "query-history",   keys: QUERY_HISTORY_SHORTCUT,   label: "Query history",                 category: "query" },
+    { id: "databases-rail",  keys: DATABASES_RAIL_SHORTCUT,  label: "Databases rail",                category: "navigation" },
+    { id: "roles-rail",      keys: ROLES_RAIL_SHORTCUT,      label: "Roles rail",                    category: "navigation" },
+    { id: "queries-rail",    keys: QUERIES_RAIL_SHORTCUT,    label: "Queries rail",                  category: "navigation" },
+    { id: "refresh",         keys: REFRESH_SHORTCUT,         label: "Refresh the active view",       category: "navigation" },
+    { id: "help",            keys: HELP_SHORTCUT,            label: "Keyboard shortcuts",            category: "navigation" },
 ];
 
 // The canonical category order the legend renders in, paired with each group's
