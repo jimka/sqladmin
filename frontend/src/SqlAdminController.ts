@@ -56,8 +56,8 @@ import { RenameTableForm }                                                      
 import { ConstraintForm }                                                                                                                                                                          from "./dock/ConstraintForm";
 import { IndexForm }                                                                                                                                                                               from "./dock/IndexForm";
 import { ConfirmCascadeForm }                                                                                                                                                                      from "./dock/ConfirmCascadeForm";
-import { openViewDialog }                                                                                                                                                                          from "./dock/ViewFormDialog";
-import { openMaterializedViewDialog }                                                                                                                                                              from "./dock/MaterializedViewFormDialog";
+import { ViewForm }                                                                                                                                                                                from "./dock/ViewForm";
+import { MaterializedViewForm }                                                                                                                                                                    from "./dock/MaterializedViewForm";
 import { openDropRelationDialog, openRefreshMatviewDialog }                                                                                                                                        from "./dock/RelationDdlActions";
 import { stripTrailingSemicolon }                                                                                                                                                                  from "./dock/ddlSpecs";
 import { openDropSchemaDialog, openRenameSchemaDialog }                                                                                                                                            from "./dock/SchemaDdlForms";
@@ -1219,13 +1219,13 @@ export class SqlAdminController {
         let schemas: string[] = [];
 
         if (kind === "foreignKey") {
-            try {
-                schemas = (await getSchemas(ref.connectionId, ref.database!)).map(s => s.name);
-            } catch (err) {
-                this.notifyError(err, ref);
+            const fetched = await this.fetchSchemaNames(ref);
 
+            if (fetched === null) {
                 return;
             }
+
+            schemas = fetched;
         }
 
         const form = new ConstraintForm(ref.schema!, ref.name!, kind, columns, schemas);
@@ -1345,59 +1345,91 @@ export class SqlAdminController {
     }
 
     /**
-     * Open the CREATE VIEW dialog for a schema (the navigator's schema
-     * context-menu launcher). Fetches the connection's schema list for the
-     * form's schema ComboBox. Success refreshes the navigator, since a new
-     * view changes the schema's object list.
+     * The connection's schema names, for a form's schema combo or a
+     * referenced-schema list. Every DDL launcher that needs the connection's
+     * schemas shares this one preamble.
      *
-     * @param ref - The target schema (kind "schema"; database + schema set).
+     * @param ref - Identifies the connection/database to fetch from; also
+     *   the target passed to `notifyError` on a failed fetch.
+     * @returns the schema names, or `null` after reporting the failure —
+     *   the caller returns without opening anything on `null`.
      */
-    async createView(ref: DbObjectRef): Promise<void> {
-        let schemas: string[];
-
+    private async fetchSchemaNames(ref: DbObjectRef): Promise<string[] | null> {
         try {
-            schemas = (await getSchemas(ref.connectionId, ref.database!)).map(s => s.name);
+            return (await getSchemas(ref.connectionId, ref.database!)).map(s => s.name);
         } catch (err) {
             this.notifyError(err, ref);
+
+            return null;
+        }
+    }
+
+    /**
+     * The shared body of {@link createView} and {@link createMaterializedView}:
+     * fetch the connection's schema list for the form's schema combo, then
+     * open (or focus) the matching draft tab. A successful execute closes
+     * the tab and refreshes the navigator, since a new relation changes the
+     * schema's object list.
+     *
+     * @param ref - The target schema (kind "schema"; database + schema set).
+     * @param kind - Which relation flow to open.
+     */
+    private async createRelationDraft(ref: DbObjectRef, kind: "view" | "materializedView"): Promise<void> {
+        const schemas = await this.fetchSchemaNames(ref);
+
+        if (schemas === null) {
+            return;
+        }
+
+        if (kind === "view") {
+            this.openDdlPanel({
+                ref,
+                slug:        "view",
+                title:       `New view (${ref.schema})`,
+                glyph:       KIND_GLYPH.view,
+                reviewTitle: "Create view",
+                build:       () => {
+                    const form = new ViewForm(ref, schemas);
+
+                    return { form, generateSql: async () => (await previewCreateView(ref, form.readSpec())).sql };
+                },
+            });
 
             return;
         }
 
-        openViewDialog({
+        this.openDdlPanel({
             ref,
-            schemas,
-            preview:   spec => previewCreateView(ref, spec),
-            execute:   sql => executeDdl(this._connectionId, sql),
-            onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            slug:        "matview",
+            title:       `New materialized view (${ref.schema})`,
+            glyph:       KIND_GLYPH.materializedView,
+            reviewTitle: "Create materialized view",
+            build:       () => {
+                const form = new MaterializedViewForm(ref, schemas);
+
+                return { form, generateSql: async () => (await previewCreateMatview(ref, form.readSpec())).sql };
+            },
         });
     }
 
     /**
-     * Open the CREATE MATERIALIZED VIEW dialog for a schema (the
-     * navigator's schema context-menu launcher). Mirrors {@link createView}.
+     * Open (or focus) the CREATE VIEW draft tab for a schema (the
+     * navigator's schema context-menu launcher).
+     *
+     * @param ref - The target schema (kind "schema"; database + schema set).
+     */
+    async createView(ref: DbObjectRef): Promise<void> {
+        await this.createRelationDraft(ref, "view");
+    }
+
+    /**
+     * Open (or focus) the CREATE MATERIALIZED VIEW draft tab for a schema
+     * (the navigator's schema context-menu launcher). Mirrors {@link createView}.
      *
      * @param ref - The target schema (kind "schema"; database + schema set).
      */
     async createMaterializedView(ref: DbObjectRef): Promise<void> {
-        let schemas: string[];
-
-        try {
-            schemas = (await getSchemas(ref.connectionId, ref.database!)).map(s => s.name);
-        } catch (err) {
-            this.notifyError(err, ref);
-
-            return;
-        }
-
-        openMaterializedViewDialog({
-            ref,
-            schemas,
-            createPreview:  spec => previewCreateMatview(ref, spec),
-            execute:        sql => executeDdl(this._connectionId, sql),
-            onSuccess:      () => this._navigator?.refresh?.(),
-            onError:        msg => this.notifyError(new Error(msg), ref),
-        });
+        await this.createRelationDraft(ref, "materializedView");
     }
 
     /**

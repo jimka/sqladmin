@@ -437,7 +437,7 @@ export function parseColumnList(text: string): string[] {
  * fetched view/matview definition before it goes back into a `select` spec
  * field. `getViewDefinition` (pg_get_viewdef) always terminates its output
  * with a semicolon, but `CreateViewSpec.select` / `ReplaceMatviewSpec.select`
- * expect a bare SELECT body with none — see ViewFormDialog's
+ * expect a bare SELECT body with none — see ViewForm's
  * `NEW_VIEW_SELECT_SKELETON`. A CREATE VIEW harmlessly absorbs a stray
  * trailing semicolon into its own statement terminator, but a materialized
  * view's DROP+CREATE replace pair appends `WITH DATA` right after the select
