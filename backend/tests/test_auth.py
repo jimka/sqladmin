@@ -18,6 +18,17 @@ from app.auth import is_host_allowed, require_session
 from app.connections import Session, session_pool_for, sweep_idle_sessions
 from app.errors import NotFound
 from app.main import app
+from app.rate_limit import LOGIN_FAILURE_LIMIT
+
+# asyncpg.PostgresError subclasses with no dedicated except clause in `login` —
+# each must fall through to the generic "Login failed" 401 and still count
+# toward the rate limit, per the Architecture Decisions table.
+_OTHER_PG_ERRORS = [
+    asyncpg.InsufficientPrivilegeError,
+    asyncpg.TooManyConnectionsError,
+    asyncpg.ClientCannotConnectError,
+    asyncpg.ProtocolViolationError,
+]
 
 
 # --- pure logic ----------------------------------------------------------
@@ -125,6 +136,107 @@ async def test_login_unreachable_host_is_401(monkeypatch) -> None:
     assert "supersecret" not in resp.text
     assert "set-cookie" not in resp.headers
     assert "SQLADMIN_ALLOWED_HOSTS" not in resp.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "error, expected_detail",
+    [
+        (asyncpg.InvalidPasswordError("bad password"), "Invalid credentials"),
+        (asyncpg.InvalidAuthorizationSpecificationError("bad auth"), "Invalid credentials"),
+        (asyncpg.InvalidCatalogNameError('database "d" does not exist'), "Cannot open target database"),
+        # A PostgresError subclass, so it must keep its own mapping instead of
+        # falling into the new bare `except asyncpg.PostgresError` clause below
+        # it — the ordering the Architecture Decisions section calls out.
+        (asyncpg.CannotConnectNowError("the database system is starting up"), "Cannot reach database"),
+        (OSError("connection refused"), "Cannot reach database"),
+    ],
+)
+async def test_login_existing_pg_error_mappings_are_unchanged(monkeypatch, error, expected_detail) -> None:
+    monkeypatch.setenv("SQLADMIN_ALLOWED_HOSTS", "h:5432")
+
+    async def _raise_error(parts) -> Session:
+        raise error
+
+    monkeypatch.setattr("app.auth.create_session", _raise_error)
+
+    async with _client() as client:
+        resp = await client.post(
+            "/api/login",
+            json={"host": "h", "port": 5432, "database": "d",
+                  "username": "u", "password": "p"},
+        )
+
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == expected_detail
+
+
+async def test_login_non_postgres_error_is_not_converted_to_401(monkeypatch) -> None:
+    # A bug in SQLAdmin's own login path (not a driver rejection) must surface
+    # as-is rather than being disguised as a plausible-looking auth failure —
+    # the reason the new clause catches asyncpg.PostgresError and not Exception.
+    monkeypatch.setenv("SQLADMIN_ALLOWED_HOSTS", "h:5432")
+
+    async def _raise_bug(parts) -> Session:
+        raise KeyError("not a postgres error")
+
+    monkeypatch.setattr("app.auth.create_session", _raise_bug)
+
+    async with _client() as client:
+        with pytest.raises(KeyError):
+            await client.post(
+                "/api/login",
+                json={"host": "h", "port": 5432, "database": "d",
+                      "username": "u", "password": "p"},
+            )
+
+
+@pytest.mark.parametrize("error_cls", _OTHER_PG_ERRORS)
+async def test_login_other_pg_error_is_generic_401(monkeypatch, error_cls) -> None:
+    monkeypatch.setenv("SQLADMIN_ALLOWED_HOSTS", "h:5432")
+
+    async def _raise_pg_error(parts) -> Session:
+        raise error_cls('permission denied for database "d"')
+
+    monkeypatch.setattr("app.auth.create_session", _raise_pg_error)
+
+    async with _client() as client:
+        resp = await client.post(
+            "/api/login",
+            json={"host": "h", "port": 5432, "database": "d",
+                  "username": "u", "password": "supersecret"},
+        )
+
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Login failed"
+    assert "permission denied" not in resp.text
+    assert "supersecret" not in resp.text
+    assert "set-cookie" not in resp.headers
+
+
+async def test_login_other_pg_error_counts_toward_the_rate_limit(monkeypatch) -> None:
+    monkeypatch.setenv("SQLADMIN_ALLOWED_HOSTS", "h:5432")
+
+    async def _raise_pg_error(parts) -> Session:
+        raise asyncpg.InsufficientPrivilegeError('permission denied for database "d"')
+
+    monkeypatch.setattr("app.auth.create_session", _raise_pg_error)
+
+    async with _client() as client:
+        for _ in range(LOGIN_FAILURE_LIMIT):
+            resp = await client.post(
+                "/api/login",
+                json={"host": "h", "port": 5432, "database": "d",
+                      "username": "u", "password": "p"},
+            )
+            assert resp.status_code == 401
+
+        eleventh = await client.post(
+            "/api/login",
+            json={"host": "h", "port": 5432, "database": "d",
+                  "username": "u", "password": "p"},
+        )
+
+    assert eleventh.status_code == 429
 
 
 async def test_protected_route_without_cookie_is_401() -> None:

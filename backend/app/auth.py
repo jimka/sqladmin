@@ -221,16 +221,18 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
     """
     Authenticate against the target database and start a session.
 
-    Route: ``POST /api/login``.
+    Route: ``POST /api/login``. Every failure raised after the rate-limit check
+    counts toward this client's failed-attempt budget.
 
     Raises:
         TooManyRequests: if this client has too many recent failed attempts
             (429), before any validation or dial.
         ValidationError: on a malformed body (422).
         Forbidden: if the host is not allowlisted (403), before any dial.
-        Unauthorized: if Postgres rejects the credentials, the database is
-            missing, or the host is unreachable (401) — with a generic detail
-            that never echoes the password or raw driver text.
+        Unauthorized: if the dial fails for any reason — rejected credentials,
+            a missing database, an unreachable host, or any other server-side
+            rejection (401). The detail is always one of a fixed set of generic
+            messages; neither the password nor raw driver text is echoed.
 
     Returns:
         ``{connectionId, csrfToken, username, database}`` and a ``Set-Cookie``.
@@ -257,6 +259,14 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
             raise Unauthorized("Cannot open target database") from err
         except (OSError, ConnectionError, asyncpg.CannotConnectNowError, asyncio.TimeoutError) as err:
             raise Unauthorized("Cannot reach database") from err
+        except asyncpg.PostgresError as err:
+            # Catch-all for every other server-side rejection: no CONNECT grant,
+            # max_connections reached, a protocol violation. Without it these
+            # reach main.py's generic driver handler as a 400 carrying Postgres's
+            # own message, and never count toward the login rate limit.
+            _logger.warning("Login rejected by Postgres: %s", err)
+
+            raise Unauthorized("Login failed") from err
     except DomainError:
         record_login_failure(request)
         raise
