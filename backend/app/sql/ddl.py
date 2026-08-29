@@ -11,7 +11,7 @@ as the user typed them and reviewed in the editable preview before execute
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,6 +21,7 @@ from .compiler import quote_ident
 __all__ = [
     "quote_ident",
     "qualify",
+    "ident_list",
     "quote_literal",
     "require_text",
     "create_table",
@@ -84,6 +85,20 @@ def qualify(schema: str, name: str) -> str:
         ``"schema"."name"``, with each part independently quoted.
     """
     return f"{quote_ident(schema)}.{quote_ident(name)}"
+
+
+def ident_list(names: Iterable[str]) -> str:
+    """
+    Return a comma-separated list of double-quoted identifiers, for a
+    ``(col1, col2, ...)`` clause.
+
+    Args:
+        names: the identifiers to quote and join, in order.
+
+    Returns:
+        Each name double-quoted, joined by ``", "`` — ``""`` for an empty input.
+    """
+    return ", ".join(quote_ident(n) for n in names)
 
 
 def quote_literal(value: str) -> str:
@@ -233,8 +248,7 @@ def create_table(
     pk_columns = [c["name"] for c in columns if c.get("primary_key")]
 
     if pk_columns:
-        pk_list = ", ".join(quote_ident(c) for c in pk_columns)
-        lines.append(f"PRIMARY KEY ({pk_list})")
+        lines.append(f"PRIMARY KEY ({ident_list(pk_columns)})")
 
     body = ",\n".join(f"{_CREATE_TABLE_INDENT}{line}" for line in lines)
     exists_clause = "IF NOT EXISTS " if if_not_exists else ""
@@ -461,11 +475,9 @@ def _add_key_constraint(
     if not columns:
         raise ValidationError(f"{keyword} requires at least one column")
 
-    col_list = ", ".join(quote_ident(c) for c in columns)
-
     return (
         f"ALTER TABLE {qualify(schema, name)} "
-        f"{_constraint_prefix(constraint_name)}{keyword} ({col_list})"
+        f"{_constraint_prefix(constraint_name)}{keyword} ({ident_list(columns)})"
     )
 
 
@@ -591,8 +603,6 @@ def add_foreign_key(
         if action is not None and action not in _REFERENTIAL_ACTIONS:
             raise ValidationError(f"Unknown {label} action '{action}'")
 
-    col_list = ", ".join(quote_ident(c) for c in columns)
-    ref_col_list = ", ".join(quote_ident(c) for c in ref_columns)
     action_clause = "".join(
         f" {label} {action}"
         for action, label in ((on_update, "ON UPDATE"), (on_delete, "ON DELETE"))
@@ -601,8 +611,8 @@ def add_foreign_key(
 
     return (
         f"ALTER TABLE {qualify(schema, name)} "
-        f"{_constraint_prefix(constraint_name)}FOREIGN KEY ({col_list}) "
-        f"REFERENCES {qualify(ref_schema, ref_table)} ({ref_col_list}){action_clause}"
+        f"{_constraint_prefix(constraint_name)}FOREIGN KEY ({ident_list(columns)}) "
+        f"REFERENCES {qualify(ref_schema, ref_table)} ({ident_list(ref_columns)}){action_clause}"
     )
 
 
@@ -667,8 +677,6 @@ def create_index(
     if method is not None and method not in _INDEX_METHODS:
         raise ValidationError(f"Unknown index method '{method}'")
 
-    col_list = ", ".join(quote_ident(c) for c in columns)
-
     tokens = [
         "CREATE",
         "UNIQUE" if unique else None,
@@ -678,7 +686,7 @@ def create_index(
         "ON",
         qualify(schema, table),
         f"USING {method}" if method else None,
-        f"({col_list})",
+        f"({ident_list(columns)})",
     ]
 
     return " ".join(t for t in tokens if t is not None)
@@ -741,7 +749,7 @@ def create_view(
         <select>``.
     """
     replace_clause = "OR REPLACE " if or_replace else ""
-    columns_clause = f" ({', '.join(quote_ident(c) for c in columns)})" if columns else ""
+    columns_clause = f" ({ident_list(columns)})" if columns else ""
 
     return f"CREATE {replace_clause}VIEW {qualify(schema, name)}{columns_clause} AS\n{select}"
 

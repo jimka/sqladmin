@@ -11,7 +11,7 @@ import asyncpg
 
 from ..contract import ColumnMeta, TableRef
 from ..errors import ValidationError
-from ..sql.compiler import quote_ident
+from ..sql.ddl import ident_list
 from ..wire import from_wire_value, rows_to_wire
 from .base import Command
 from .common import qualified
@@ -62,7 +62,7 @@ class InsertRowCommand(Command):
         Insert the row in a transaction and capture it via ``RETURNING *``.
         """
         if self._cols:
-            cols_sql = ", ".join(quote_ident(c) for c in self._cols)
+            cols_sql = ident_list(self._cols)
             ph = ", ".join(f"${i + 1}" for i in range(len(self._values)))
             sql = f"INSERT INTO {qualified(self._table)} ({cols_sql}) VALUES ({ph}) RETURNING *"
         else:
