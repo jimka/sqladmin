@@ -7,34 +7,46 @@
 // authoritative" decision). A "Regenerate SQL" button re-runs generateSql(),
 // discarding any manual edit; infra otherwise only seeds once, on open.
 //
-// Execute is a show/retry loop, not a one-shot resolve: a failed execute must
-// leave the dialog open with the SQL intact for a retry/edit, the same shape
-// showLoginDialog uses to re-prompt after a failed login (see
-// shell/LoginDialog.ts). Dialog now owns its content's recursive teardown the
-// same way Dock owns a tab's (see
-// plans/implemented/adopt-dock-owned-teardown.md): hide() destructs the
-// Dialog instance before show()'s promise resolves, so a retry cannot re-show
-// the same instance. RetainedContentDialog rescues the persistent content
-// (the phase's form + the editor) from that teardown by detaching it one step
-// earlier, in its own destructor() override, mirroring QueryPanelContent's
-// destructor() override in dock/QueryPanel.ts; the rescued content is then
-// re-wrapped in a fresh Dialog for the retry, so the form's and the editor's
-// own state (and the Component objects themselves) survive. showExecuteRetryLoop's
-// caller disposes content itself, once, when the loop concludes.
+// Execute is a chrome button, validated on click via `DialogButtonConfig.
+// onClick` (mirroring ImportRowsDialog.ts's Import button): it returns
+// `false` on a failed execute, vetoing the close and keeping this SAME Dialog
+// instance open with the form and SQL intact, or `true` once `options.
+// execute` actually succeeds. No retry loop, no RetainedContentDialog: the
+// dialog never closes on a failed execute in the first place, so there's
+// nothing to rebuild.
+//
+// Every failure — a failed generateSql (initial seed or "Regenerate SQL") and
+// a failed execute — still calls the caller's `onError` (or the default
+// Notification) exactly as before, preserving StatusBar/Notification-history
+// side effects, but ALSO shows an in-content banner (ensureErrorBanner/
+// showError/hideErrorBanner, mirroring QueryPanel.ts's durable error banner
+// and ImportRowsDialog.ts's identical copy of it): a Notification's z-index
+// (10002) sits below the Dialog band (11000, see LayerManager's
+// Z_BAND_DIALOG), so a toast fired while this dialog is open — every failure
+// here except the very first seed, before the dialog exists — would render
+// invisibly behind the modal backdrop.
 //
 // The Dialog exposes only three result codes ("confirm" | "cancel" | "close"),
 // and every dismiss gesture (Escape, backdrop, the always-present title-bar
 // close) resolves to "close". So: Execute = "confirm" (primary), Cancel =
 // "close" (shares the dismiss code, so dismissing == Cancel == do nothing).
 
-import { Panel }                   from "@jimka/typescript-ui/core";
+import { Panel, Container }        from "@jimka/typescript-ui/core";
 import type { Component }          from "@jimka/typescript-ui/core";
-import { VBox }                    from "@jimka/typescript-ui/layout";
+import { VBox, HBox }              from "@jimka/typescript-ui/layout";
 import { Button }                  from "@jimka/typescript-ui/component/button";
 import { CodeEditor }              from "@jimka/typescript-ui/component/editor";
+import { Text }                    from "@jimka/typescript-ui/component/input";
+import { Glyph }                   from "@jimka/typescript-ui/component/display";
+import { circle_exclamation }      from "@jimka/typescript-ui/glyphs/solid/circle_exclamation";
+import { xmark }                   from "@jimka/typescript-ui/glyphs/solid/xmark";
 import { Dialog, Notification }    from "@jimka/typescript-ui/overlay";
-import type { DialogButtonConfig, DialogConfig } from "@jimka/typescript-ui/overlay";
+import type { DialogButtonConfig } from "@jimka/typescript-ui/overlay";
+import { glyphButton }             from "./glyphButton";
+import { DESTRUCTIVE_COLOR, NEUTRAL_COLOR } from "../theme";
 import type { QueryStatusResult }  from "../contract";
+
+Glyph.register(circle_exclamation, xmark);
 
 // A comfortable modal width for a structured DDL form plus the SQL preview
 // editor beneath it — a bit wider than this app's narrower dialogs (~500px)
@@ -63,6 +75,12 @@ const SQL_PREVIEW_MAX_ROWS = 24;
 // for a consistent dialog rhythm.
 const CONTENT_SPACING = 8;
 
+// The error banner's background — same token/fallback as QueryPanel.ts's own
+// (private) ERROR_BANNER_BG and ImportRowsDialog.ts's copy of it; duplicated
+// rather than shared since none of the three export it and it's a single
+// CSS-var literal.
+const ERROR_BANNER_BG = "var(--ts-ui-notification-error-bg, rgba(244, 214, 214, 0.75))";
+
 /** Options for {@link openSqlPreviewDialog}. */
 export interface SqlPreviewDialogOptions {
     /** Dialog title, e.g. "Create table". */
@@ -90,18 +108,13 @@ export interface SqlPreviewDialogOptions {
     width?: number;
 }
 
-// Execute takes "confirm" (primary); Cancel shares "close" with every dismiss
-// gesture, so dismissing behaves exactly like Cancel — no third result code
-// is needed.
-const EXECUTE_BUTTON: DialogButtonConfig = { text: "Execute", result: "confirm", primary: true };
-
-/** Cancel button — shares "close" with every dismiss gesture. */
+/** Cancel has no onClick guard — every dismiss gesture should always work. */
 const CANCEL_BUTTON: DialogButtonConfig = { text: "Cancel", result: "close" };
 
 /**
  * Open the shared DDL preview/confirm dialog: seed the SQL editor from
- * `generateSql()`, then run the show/execute/retry loop until the user
- * cancels or an execute succeeds.
+ * `generateSql()`, then show it until the user cancels or an execute
+ * succeeds.
  *
  * @param options - the phase's form, SQL generator, and execute/callbacks.
  */
@@ -110,19 +123,13 @@ export function openSqlPreviewDialog(options: SqlPreviewDialogOptions): void {
 }
 
 /**
- * Build the dialog's content, seed the preview, and run the loop. Kept
- * separate from {@link openSqlPreviewDialog} so the public entry point stays
- * synchronous (void) — this app's open/run dialog split.
+ * Build the dialog, seed the preview, and show it. Kept separate from
+ * {@link openSqlPreviewDialog} so the public entry point stays synchronous
+ * (void) — this app's open/run dialog split.
  *
  * @param options - the phase's form, SQL generator, and execute/callbacks.
  */
 async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<void> {
-    // Re-fit hook for the current Dialog. Wired to a real dialog only once
-    // showExecuteRetryLoop builds one — needed because the editor (and its
-    // "heightchange" listener) is built before any Dialog exists, and
-    // showExecuteRetryLoop rebuilds `dialog` again on every failed-execute retry.
-    const resizer = { fit: () => {} };
-
     const editor = new CodeEditor("", {
         language:          "sql",
         autoHeightMaxRows: SQL_PREVIEW_MAX_ROWS,
@@ -132,146 +139,150 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
     // Once the editor has real measured content — first mount, and every
     // "Regenerate SQL"/manual edit that changes its row count after — drop the
     // seed preferredSize constraint (see EDITOR_SEED_HEIGHT's comment above)
-    // and re-fit the current dialog to the new height (Dialog does not do
-    // this on its own past its one-time post-open resizeToContent()).
+    // and re-fit the dialog to the new height (Dialog does not do this on its
+    // own past its one-time post-open resizeToContent()). `dialog` is defined
+    // further down, but this closure only ever runs once the editor has
+    // mounted — i.e. after `dialog` is assigned below.
     editor.on("heightchange", () => {
         editor.clearPreferredSize();
-        resizer.fit();
+        dialog.resizeToContent();
     });
 
     const regenerateButton = Button({ text: "Regenerate SQL", compact: true });
-    regenerateButton.on("action", () => void refreshPreview(editor, options));
+    regenerateButton.on("action", () => void refreshPreview());
 
     const content = Panel({
         layoutManager: VBox({ itemAlign: "stretch", spacing: CONTENT_SPACING }),
         components:    [options.form, regenerateButton, editor],
     });
 
-    try {
-        await refreshPreview(editor, options);
-        await showExecuteRetryLoop(content, editor, options, resizer);
-    } finally {
-        // RetainedContentDialog detaches `content` from every dialog it
-        // wraps instead of letting the base class's owned teardown dispose
-        // it (see showExecuteRetryLoop's doc comment), so this is the one
-        // place that disposes it — exactly once, on every exit path.
-        // Cascades to editor, the "Regenerate SQL" button, and
-        // options.form, since all three are still its registered children.
-        content.dispose();
-    }
-}
+    let errorBanner: Container | null = null;
+    let errorBannerText: Text | null = null;
+    let errorBannerShown = false;
 
-/**
- * Regenerate the preview SQL from the form's current state and load it into
- * the editor. A rejection is reported (via `onError`/Notification) and leaves
- * the editor's current text untouched.
- *
- * @param editor - the preview editor to load the generated SQL into.
- * @param options - carries `generateSql` and the error reporter.
- */
-async function refreshPreview(editor: CodeEditor, options: SqlPreviewDialogOptions): Promise<void> {
-    try {
-        editor.setValue(await options.generateSql());
-    } catch (err) {
-        reportError(err, options.onError);
-    }
-}
+    /** Build the banner row on first use: warning glyph, wrapping message text, dismiss button. */
+    function ensureErrorBanner(): Container {
+        if (!errorBanner) {
+            const icon    = new Glyph("circle-exclamation", { foregroundColor: DESTRUCTIVE_COLOR });
+            const dismiss = glyphButton("xmark", NEUTRAL_COLOR, "Dismiss", () => hideErrorBanner());
+            const banner  = Container({ layoutManager: new HBox({ spacing: 8, itemAlign: "stretch" }) });
 
-/**
- * Show the dialog and, on Execute, run it; a failed execute reports the
- * error and re-shows a fresh dialog wrapping the same, still-live content
- * — so the form and the SQL text survive the retry. Every dialog built
- * here is a RetainedContentDialog, which detaches `content` from itself
- * before its own teardown can reach it, so `content` is never disposed as
- * a side effect of hide() — the caller disposes it once this resolves.
- * Returns once the user cancels/dismisses or an execute succeeds.
- *
- * @param content - the persistent form + editor content, reused across
- *     retries and disposed by the caller once this resolves.
- * @param editor - the preview editor executed SQL is read from.
- * @param options - carries `execute`, `onSuccess`, and the error reporter.
- * @param resizer - rewired to the current Dialog on every build, so the
- *     editor's "heightchange" listener always re-fits the live dialog even
- *     after a failed-execute retry rebuilds it.
- */
-async function showExecuteRetryLoop(
-    content: Component,
-    editor: CodeEditor,
-    options: SqlPreviewDialogOptions,
-    resizer: { fit: () => void },
-): Promise<void> {
-    let dialog = buildDialog(content, options);
-    resizer.fit = () => dialog.resizeToContent();
+            errorBannerText = new Text("", { whiteSpace: "normal", truncate: false });
 
-    for (;;) {
-        const result = await dialog.show();
+            banner.addComponent(icon);
+            banner.addComponent(errorBannerText, { weight: 1 });
+            banner.addComponent(dismiss);
+            banner.setBackgroundColor(ERROR_BANNER_BG);
 
-        if (result !== "confirm") {
-            return; // Cancel, or any dismiss gesture — do nothing.
+            errorBanner = banner;
         }
+
+        return errorBanner;
+    }
+
+    /**
+     * Report `err` through the caller's `onError`/Notification (unchanged
+     * side effect — StatusBar text, Notification history) and additionally
+     * show it in the in-content banner, refreshing the text if already shown.
+     */
+    function showError(err: unknown): void {
+        reportError(err, options.onError);
+
+        const banner = ensureErrorBanner();
+
+        errorBannerText!.setText(err instanceof Error ? err.message : String(err));
+
+        if (!errorBannerShown) {
+            content.addComponent(banner);
+            errorBannerShown = true;
+        }
+
+        dialog.resizeToContent();
+    }
+
+    /** Hide the error banner (Dismiss, or a new generate/execute attempt starting). A no-op when not showing. */
+    function hideErrorBanner(): void {
+        if (errorBannerShown) {
+            content.removeComponent(errorBanner!);
+            errorBannerShown = false;
+            dialog.resizeToContent();
+        }
+    }
+
+    /**
+     * Dispose the error banner if it exists but isn't currently attached to
+     * `content` — Dialog's own teardown only cascades into content's
+     * CURRENTLY attached children, so a dismissed (detached) banner would
+     * otherwise leak (same reasoning as QueryPanel.ts's own errorBanner
+     * teardown). A separate function, not inlined at the call site: see
+     * ImportRowsDialog.ts's identical helper for why (a `never`-narrowing
+     * quirk in TypeScript's control-flow analysis inside `try/finally`).
+     */
+    function disposeDetachedErrorBanner(): void {
+        if (!errorBannerShown && errorBanner) {
+            errorBanner.dispose();
+        }
+    }
+
+    /**
+     * Regenerate the preview SQL from the form's current state and load it
+     * into the editor. A rejection is reported and shown in the banner,
+     * leaving the editor's current text untouched.
+     */
+    async function refreshPreview(): Promise<void> {
+        hideErrorBanner();
+
+        try {
+            editor.setValue(await options.generateSql());
+        } catch (err) {
+            showError(err);
+        }
+    }
+
+    /**
+     * Execute's `onClick` guard: runs the (possibly edited) SQL and reports
+     * success, returning `true` only when the commit actually succeeds, so
+     * the Dialog library closes on success and stays open (with the failure
+     * shown) otherwise.
+     */
+    async function tryExecute(): Promise<boolean> {
+        hideErrorBanner();
 
         try {
             const status = await options.execute(editor.getValue());
 
             options.onSuccess(status);
 
-            return;
+            return true;
         } catch (err) {
-            reportError(err, options.onError);
+            showError(err);
 
-            // RetainedContentDialog already detached `content` from the spent
-            // dialog during its own teardown (see its class doc) — content
-            // survived and is ready to re-wrap in a fresh dialog for the retry.
-            dialog = buildDialog(content, options);
-            resizer.fit = () => dialog.resizeToContent();
+            return false;
         }
     }
-}
 
-/**
- * A Dialog that keeps `content` alive across the base class's owned-teardown
- * recursion, by detaching it in `destructor()` before `super.destructor()`
- * runs. Every dialog `buildDialog` constructs is one of these, so
- * `showExecuteRetryLoop` can pull `content` out of a spent dialog and
- * re-wrap it in a fresh one on a failed-execute retry, and the form's and
- * editor's own state survive. `content` is never disposed here — the loop
- * that owns it disposes it exactly once, when it actually concludes.
- */
-class RetainedContentDialog extends Dialog {
-    private readonly _content: Component;
+    const executeButton: DialogButtonConfig = {
+        text:    "Execute",
+        result:  "confirm",
+        primary: true,
+        onClick: tryExecute,
+    };
 
-    /**
-     * @param content - The persistent form + editor content this dialog
-     *     wraps; detached, not disposed, on teardown. Must be the same
-     *     component passed as `config.contentComponent`.
-     * @param config - The Dialog configuration.
-     */
-    constructor(content: Component, config: DialogConfig) {
-        super(config);
-
-        this._content = content;
-    }
-
-    protected destructor(): void {
-        this.getContentComponent().removeComponent(this._content);
-
-        super.destructor();
-    }
-}
-
-/**
- * Build the Cancel/Execute dialog wrapping `content`.
- *
- * @param content - the form + editor content to host.
- * @param options - carries the title and width.
- */
-function buildDialog(content: Component, options: SqlPreviewDialogOptions): Dialog {
-    return new RetainedContentDialog(content, {
+    const dialog = new Dialog({
         title:            options.title,
         contentComponent: content,
-        buttons:          [CANCEL_BUTTON, EXECUTE_BUTTON],
+        buttons:          [CANCEL_BUTTON, executeButton],
         width:            options.width ?? DEFAULT_DIALOG_WIDTH,
     });
+
+    // `content` itself is never disposed here: Dialog owns that as part of
+    // its own teardown (see LoginDialog.ts's identical plain-Dialog pattern).
+    try {
+        await refreshPreview();
+        await dialog.show();
+    } finally {
+        disposeDetachedErrorBanner();
+    }
 }
 
 /**

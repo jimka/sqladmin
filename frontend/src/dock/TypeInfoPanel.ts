@@ -30,10 +30,10 @@ import { Text }                        from "@jimka/typescript-ui/component/inpu
 import { LabeledFieldSet, Spacer }     from "@jimka/typescript-ui/component/container";
 import { Glyph }                       from "@jimka/typescript-ui/component/display";
 import { Table }                       from "@jimka/typescript-ui/component/table";
+import type { ColumnSpec }             from "@jimka/typescript-ui/component/table";
 import { MemoryStore, Model }          from "@jimka/typescript-ui/data";
 import type { FieldOptions }           from "@jimka/typescript-ui/data";
 import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
-import { readOnlyTable }               from "./columnsGrid";
 import { glyphButton }                 from "./glyphButton";
 import { PRIMARY_COLOR }               from "../theme";
 import { categoryLabel, enumLabelRows } from "./typeInfoRows";
@@ -41,17 +41,55 @@ import type { TypeDefinition }         from "../contract";
 
 Glyph.register(refresh);
 
-/** The enum body grid's fields: 1-based catalog order, then the label text. */
+// This grid's own auto-width cap, matching columnsGrid.ts's CONTENT_WIDTH_CAP:
+// declaring it on every column but `filler` excludes those columns from the
+// library's leftover-width split, so `filler` alone absorbs whatever width
+// remains instead of Name/Type stretching to fill the panel (see
+// columnsGrid.ts's CONTENT_WIDTH_CAP comment for the full mechanism).
+const CONTENT_WIDTH_CAP = 400;
+
+// Vertical gap between the fieldset and the body grid — this app's usual
+// dialog/panel content spacing (see e.g. ImportRowsDialog.ts's and
+// SqlPreviewDialog.ts's own CONTENT_SPACING).
+const CONTENT_SPACING = 8;
+
+/** The enum body grid's fields: 1-based catalog order, the label text, then a blank filler. */
 const ENUM_FIELDS: FieldOptions[] = [
     { name: "position", type: "number", description: "Order", order: 1 },
     { name: "label",    type: "string", description: "Label", order: 2 },
+    { name: "filler",   type: "string", description: "",      order: 3 },
 ];
 
-/** The composite body grid's fields: attribute name, then its type. */
+/** The composite body grid's fields: attribute name, its type, then a blank filler. */
 const ATTRIBUTE_FIELDS: FieldOptions[] = [
-    { name: "name", type: "string", description: "Attribute", order: 1 },
-    { name: "type", type: "string", description: "Type",      order: 2 },
+    { name: "name",   type: "string", description: "Attribute", order: 1 },
+    { name: "type",   type: "string", description: "Type",      order: 2 },
+    { name: "filler", type: "string", description: "",          order: 3 },
 ];
+
+/**
+ * A read-only grid over `store`, with `realColumns` capped at
+ * {@link CONTENT_WIDTH_CAP} and a blank `filler` column absorbing the panel's
+ * leftover width — mirrors columnsGrid.ts's `linkedColumnsTable`, which
+ * applies the same pattern to the Columns grid.
+ *
+ * @param store - the grid's backing store.
+ * @param realColumns - the store's fields to show, in display order (`filler`
+ *   excluded — it's appended here).
+ */
+function bodyTable(store: MemoryStore, realColumns: string[]): Table {
+    const spec: ColumnSpec = {
+        columns: [
+            ...realColumns.map((field) => ({ field, maxWidth: CONTENT_WIDTH_CAP })),
+            { field: "filler", headerText: "", minWidth: 0, unhideable: true, readOnly: true },
+        ],
+        autoSizeColumns: true,
+        appendUnlisted:  false,
+        rowReadOnly:     () => true,
+    };
+
+    return Table(store, spec);
+}
 
 /**
  * The body grid's row data for a detail: an enum's labels numbered 1..n, or a
@@ -68,10 +106,12 @@ function bodyRows(detail: TypeDefinition): object[] {
  * tabs never share one.
  */
 function buildBodyGrid(detail: TypeDefinition): { grid: Table; store: MemoryStore } {
-    const fields = detail.category === "enum" ? ENUM_FIELDS : ATTRIBUTE_FIELDS;
-    const store  = new MemoryStore({ model: new Model({ fields }), data: bodyRows(detail), autoLoad: true });
+    const isEnum      = detail.category === "enum";
+    const fields      = isEnum ? ENUM_FIELDS : ATTRIBUTE_FIELDS;
+    const realColumns = isEnum ? ["position", "label"] : ["name", "type"];
+    const store       = new MemoryStore({ model: new Model({ fields }), data: bodyRows(detail), autoLoad: true });
 
-    return { grid: readOnlyTable(store), store };
+    return { grid: bodyTable(store, realColumns), store };
 }
 
 /** Dependencies {@link TypeInfoPanel} needs for its fieldset legend and Refresh. */
@@ -125,8 +165,12 @@ class TypeInfoPanel extends Container {
 
         // The fieldset and grid sit in a nested Border below the toolbar —
         // the toolbar already claims the root's NORTH placement, mirroring
-        // IndexInfoPanel's identical nesting.
-        const content = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
+        // IndexInfoPanel's identical nesting. Unlike IndexInfoPanel (whose
+        // CENTER is a CodeEditor that already carries its own visual
+        // padding), this CENTER is a Table butted directly against the
+        // fieldset below it, so this inner Border needs its own spacing —
+        // CONTENT_SPACING, this app's usual dialog/panel content gap.
+        const content = Container({ layoutManager: new BorderLayout({ spacing: CONTENT_SPACING }) });
         content.addComponent(fieldSet, { placement: Placement.NORTH });
         content.addComponent(grid, { placement: Placement.CENTER });
 
