@@ -38,7 +38,7 @@ SESSION_COOKIE_NAME = "sqladmin_session"
 
 # Env var holding the comma-separated allowlist of dial-able ``host`` /
 # ``host:port`` targets. Unset/empty means deny all (default-deny).
-_ALLOWED_HOSTS_ENV = "SQLADMIN_ALLOWED_HOSTS"
+ALLOWED_HOSTS_ENV = "SQLADMIN_ALLOWED_HOSTS"
 
 # Header carrying the CSRF synchronizer token on mutating requests.
 _CSRF_HEADER = "X-CSRF-Token"
@@ -68,7 +68,7 @@ def allowed_hosts() -> set[str]:
     Returns:
         The set of allowed ``host`` and/or ``host:port`` strings.
     """
-    raw = os.environ.get(_ALLOWED_HOSTS_ENV, "")
+    raw = os.environ.get(ALLOWED_HOSTS_ENV, "")
 
     return {entry.strip().lower() for entry in raw.split(",") if entry.strip()}
 
@@ -130,11 +130,11 @@ def log_dial_policy() -> None:
         _logger.warning(
             "%s is unset — every login will be rejected with 403. Set it to the "
             "host:port of the database(s) this instance may dial.",
-            _ALLOWED_HOSTS_ENV,
+            ALLOWED_HOSTS_ENV,
         )
         return
 
-    _logger.info("%s allows: %s", _ALLOWED_HOSTS_ENV, ", ".join(allowed))
+    _logger.info("%s allows: %s", ALLOWED_HOSTS_ENV, ", ".join(allowed))
 
 
 async def require_session(request: Request) -> Session:
@@ -251,7 +251,7 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
         if not is_host_allowed(parts.host, parts.port):
             raise Forbidden(
                 f"Host not allowed: '{parts.host}:{parts.port}' is not in "
-                f"{_ALLOWED_HOSTS_ENV}"
+                f"{ALLOWED_HOSTS_ENV}"
             )
 
         try:

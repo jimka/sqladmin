@@ -12,6 +12,8 @@ import os
 
 import uvicorn
 
+from .auth import ALLOWED_HOSTS_ENV
+
 # Mirror the README's documented dev command.
 _DEFAULT_ALLOWED_HOSTS = "localhost:5432"
 _PORT = 8000
@@ -25,7 +27,7 @@ def main() -> None:
     still overrides the localhost default. The value is set before
     ``uvicorn.run`` so the reloader's worker subprocess inherits it.
     """
-    os.environ.setdefault("SQLADMIN_ALLOWED_HOSTS", _DEFAULT_ALLOWED_HOSTS)
+    os.environ.setdefault(ALLOWED_HOSTS_ENV, _DEFAULT_ALLOWED_HOSTS)
 
     # Pass the import string (not the app object) — uvicorn's reloader needs it
     # to re-import the app in the worker subprocess on each change.
