@@ -311,6 +311,53 @@ async def test_sweep_evicts_idle_session() -> None:
         connections._sessions.pop("old", None)
 
 
+async def test_relogin_invalidates_the_previous_session(monkeypatch) -> None:
+    # A second successful login while the caller still holds a session cookie
+    # must revoke the old session, not just add a second live one — a request
+    # carrying the old cookie afterwards gets 401.
+    monkeypatch.setenv("SQLADMIN_ALLOWED_HOSTS", "h:5432")
+
+    class _DummyPool:
+        async def close(self) -> None:
+            pass
+
+    issued: list[str] = []
+
+    async def _mock_create_session(parts) -> Session:
+        session = _fake_session(csrf=f"tok-{len(issued)}")
+        session.id = f"sid-{len(issued)}"
+        session.pool = cast(asyncpg.Pool, _DummyPool())
+        issued.append(session.id)
+        connections._sessions[session.id] = session
+
+        return session
+
+    monkeypatch.setattr("app.auth.create_session", _mock_create_session)
+
+    body = {"host": "h", "port": 5432, "database": "d", "username": "u", "password": "p"}
+
+    try:
+        async with _client() as client:
+            first = await client.post("/api/login", json=body)
+            old_cookie = first.cookies.get(SESSION_COOKIE_NAME)
+
+            second = await client.post("/api/login", json=body)
+
+        assert second.status_code == 200
+        assert old_cookie is not None
+        assert old_cookie != second.cookies.get(SESSION_COOKIE_NAME)
+        assert old_cookie not in connections._sessions
+
+        async with _client() as stale_client:
+            stale_client.cookies.set(SESSION_COOKIE_NAME, old_cookie)
+            resp = await stale_client.get("/api/whoami")
+
+        assert resp.status_code == 401
+    finally:
+        for sid in issued:
+            connections._sessions.pop(sid, None)
+
+
 # --- cookie Secure derivation ---------------------------------------------
 
 

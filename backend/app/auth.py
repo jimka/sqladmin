@@ -225,7 +225,10 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
     Authenticate against the target database and start a session.
 
     Route: ``POST /api/login``. Every failure raised after the rate-limit check
-    counts toward this client's failed-attempt budget.
+    counts toward this client's failed-attempt budget. A caller who was already
+    holding a session cookie has that previous session revoked on success —
+    ``close_session`` is a no-op for an absent or already-unknown token, so a
+    first-time login is unaffected.
 
     Raises:
         TooManyRequests: if this client has too many recent failed attempts
@@ -273,6 +276,11 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
     except DomainError:
         record_login_failure(request)
         raise
+
+    # Re-logging in revokes the caller's previous session: without this the old
+    # token stays live in the registry, and every request under it re-bumps
+    # last_seen, deferring the idle sweep indefinitely.
+    await close_session(request.cookies.get(SESSION_COOKIE_NAME))
 
     clear_login_failures(request)
 
