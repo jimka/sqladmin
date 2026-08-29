@@ -1757,17 +1757,17 @@ export class SqlAdminController {
     }
 
     /**
-     * Open the edit dialog for an existing type (the navigator's "Edit
+     * Open the edit flow for an existing type (the navigator's "Edit
      * type…" launcher). Introspects the type first, then routes on its
-     * category: an enum offers `ALTER TYPE ... ADD VALUE` (append-only —
-     * Postgres has no `CREATE OR REPLACE TYPE`); a composite offers a
-     * recreate/clone form prefilled with its current attributes (restructuring
-     * an existing composite in place is a stated Non-Goal — see the
-     * function-type-ddl plan's "enum edits are append-only" decision).
-     * Success refreshes the navigator only for the composite path (a new
-     * `CREATE TYPE` statement); an enum `ADD VALUE` does not change the
-     * object list, so it only sets a status message, mirroring
-     * `alterSequence`.
+     * category: an enum offers `ALTER TYPE ... ADD VALUE` in a dialog
+     * (append-only — Postgres has no `CREATE OR REPLACE TYPE`); a composite
+     * opens a recreate/clone draft tab prefilled with its current attributes
+     * (restructuring an existing composite in place is a stated Non-Goal —
+     * see the function-type-ddl plan's "enum edits are append-only"
+     * decision). The composite path's successful execute closes the tab and
+     * refreshes the navigator (a new `CREATE TYPE` statement); an enum
+     * `ADD VALUE` does not change the object list, so it only sets a status
+     * message, mirroring `alterSequence`.
      *
      * @param ref - the type leaf to edit.
      */
@@ -1782,8 +1782,6 @@ export class SqlAdminController {
             return;
         }
 
-        const onError = (msg: string): void => this.notifyError(new Error(msg), ref);
-
         if (definition.category === "enum") {
             const form = new AddEnumValueForm({
                 schema: ref.schema!, name: ref.name!, existingLabels: definition.labels,
@@ -1795,21 +1793,26 @@ export class SqlAdminController {
                 generateSql: async () => (await previewAlterTypeAddValue(ref, form.readSpec())).sql,
                 execute:     sql => executeDdl(this._connectionId, sql),
                 onSuccess:   () => this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: altered`),
-                onError,
+                onError:     msg => this.notifyError(new Error(msg), ref),
             });
 
             return;
         }
 
-        const form = new CompositeTypeForm({ schema: ref.schema!, prefill: definition.attributes });
+        this.openDdlPanel({
+            ref,
+            slug:        "composite-type",
+            title:       `Recreate ${ref.name} (composite type)`,
+            glyph:       KIND_GLYPH.type,
+            reviewTitle: "Edit composite type (recreate)",
+            build:       () => {
+                const form = new CompositeTypeForm({ schema: ref.schema!, prefill: definition.attributes });
 
-        openSqlPreviewDialog({
-            title:       "Edit composite type (recreate)",
-            form,
-            generateSql: async () => (await previewCreateCompositeType(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
-            onSuccess:   () => this._navigator?.refresh?.(),
-            onError,
+                return {
+                    form,
+                    generateSql: async () => (await previewCreateCompositeType(ref, form.readSpec())).sql,
+                };
+            },
         });
     }
 
