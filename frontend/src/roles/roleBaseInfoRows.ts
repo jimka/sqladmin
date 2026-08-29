@@ -4,7 +4,8 @@
 // (RoleGrantsPanel). Kept separate from the panel component so the mapping is
 // unit-testable in the node test env (no Table/DOM import).
 
-import type { RoleDetail } from "../contract";
+import { yesNo }            from "../textFormat";
+import type { RoleDetail }  from "../contract";
 
 /** One Property/Value row in the role base-info inspector grid. */
 export interface RoleBaseInfoRow {
@@ -39,8 +40,4 @@ export function roleBaseInfoRows(detail: RoleDetail): RoleBaseInfoRow[] {
     }
 
     return rows;
-}
-
-function yesNo(value: boolean): string {
-    return value ? "Yes" : "No";
 }
