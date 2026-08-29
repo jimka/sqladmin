@@ -62,7 +62,8 @@ import { openDropRelationDialog, openRefreshMatviewDialog }                     
 import { stripTrailingSemicolon }                                                                                                                                                                  from "./dock/ddlSpecs";
 import { openDropSchemaDialog, openRenameSchemaDialog }                                                                                                                                            from "./dock/SchemaDdlForms";
 import { CreateSchemaForm }                                                                                                                                                                        from "./dock/SchemaDdlForms";
-import { openCreateSequenceDialog, openDropSequenceDialog }                                                                                                                                        from "./dock/SequenceDdlForms";
+import { openDropSequenceDialog }                                                                                                                                                                  from "./dock/SequenceDdlForms";
+import { CreateSequenceForm }                                                                                                                                                                      from "./dock/SequenceDdlForms";
 import { FunctionForm }                                                                                                                                                                            from "./dock/FunctionForm";
 import { EnumTypeForm }                                                                                                                                                                            from "./dock/EnumTypeForm";
 import { CompositeTypeForm }                                                                                                                                                                       from "./dock/CompositeTypeForm";
@@ -1516,12 +1517,17 @@ export class SqlAdminController {
      * @param ref - the target schema (kind "schema"; database + schema set).
      */
     createSequence(ref: DbObjectRef): void {
-        openCreateSequenceDialog({
-            schema:    ref.schema!,
-            preview:   spec => previewCreateSequence(ref, spec),
-            execute:   sql => executeDdl(this._connectionId, sql),
-            onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+        this.openDdlPanel({
+            ref,
+            slug:        "sequence",
+            title:       `New sequence (${ref.schema})`,
+            glyph:       KIND_GLYPH.sequence,
+            reviewTitle: "Create sequence",
+            build:       () => {
+                const form = new CreateSequenceForm(ref.schema!);
+
+                return { form, generateSql: async () => (await previewCreateSequence(ref, form.readSpec())).sql };
+            },
         });
     }
 

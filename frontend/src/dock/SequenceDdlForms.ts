@@ -6,7 +6,7 @@
 // which reuses buildAlterSequenceSpec/buildSequenceOwnerSpec via
 // ddlSpecs.ts's diffSequenceSpecs instead of a form here.
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
 import { Checkbox, TextField } from "@jimka/typescript-ui/component/input";
 import type {
@@ -25,26 +25,11 @@ import {
 
 // --- Create -----------------------------------------------------------------
 
-/** Dependencies for {@link openCreateSequenceDialog}. */
-export interface CreateSequenceDialogDeps {
-    /** The schema the new sequence is created in (fixed — the launcher is
-     *  invoked from that schema's navigator node). */
-    schema: string;
-
-    /** Preview the CREATE SEQUENCE statement for the form's current fields. */
-    preview: (spec: CreateSequenceSpec) => Promise<DdlPreview>;
-
-    /** Execute the (possibly edited) previewed SQL. */
-    execute: (sql: string) => Promise<QueryStatusResult>;
-
-    /** Called after a successful execute. */
-    onSuccess: (result: QueryStatusResult) => void;
-
-    /** Reports a preview/execute error. */
-    onError: (message: string) => void;
-}
-
-/** The CREATE SEQUENCE form: a name field, the optional numeric options, and CYCLE. */
+/**
+ * The CREATE SEQUENCE form: a name field, the optional numeric options, and
+ * CYCLE. Embedded as a `DdlFormPanel` dock tab's form by the controller's
+ * `createSequence` launcher.
+ */
 class CreateSequenceForm extends Panel {
     private readonly _schema: string;
     private readonly _nameField: TextField;
@@ -102,23 +87,9 @@ class CreateSequenceForm extends Panel {
     }
 }
 
-/**
- * Open the CREATE SEQUENCE dialog.
- *
- * @param deps - the target schema and preview/execute callbacks.
- */
-export function openCreateSequenceDialog(deps: CreateSequenceDialogDeps): void {
-    const form = new CreateSequenceForm(deps.schema);
-
-    openSqlPreviewDialog({
-        title: "Create sequence",
-        form,
-        generateSql: async () => (await deps.preview(form.readSpec())).sql,
-        execute:     deps.execute,
-        onSuccess:   deps.onSuccess,
-        onError:     deps.onError,
-    });
-}
+const CreateSequenceFormCallable = callable(CreateSequenceForm);
+type CreateSequenceFormCallable = CreateSequenceForm;
+export { CreateSequenceFormCallable as CreateSequenceForm };
 
 // --- Drop --------------------------------------------------------------------
 
