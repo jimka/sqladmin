@@ -1,5 +1,5 @@
-// The CREATE TABLE dialog form: a table-name field plus an add/remove-row
-// column grid — a weighted Grid whose tracks share the dialog width (see
+// The CREATE TABLE form: a table-name field plus an add/remove-row column
+// grid — a weighted Grid whose tracks share the tab's width (see
 // COLUMN_WEIGHT below), so the inputs stretch to fill it instead of sitting
 // squished at a fixed width. The column rows themselves collect raw
 // name/type/default/nullable/primaryKey fields; readSpec() hands them to the
@@ -31,7 +31,7 @@ const DEFAULT_WEIGHT = 130;
 
 /**
  * The CREATE TABLE form: a table-name field over an add/remove-row column
- * grid. Embedded as the `form` of a `SqlPreviewDialog` by the controller's
+ * grid. Embedded as a `DdlFormPanel` dock tab's form by the controller's
  * `createTable` launcher.
  */
 class CreateTableForm extends RowGridPanel<ColumnRow> {

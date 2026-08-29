@@ -49,6 +49,8 @@ import { openImportRowsDialog }                                                 
 import { StructurePanel }                                                                                                                                                                          from "./dock/StructurePanel";
 import type { StructureActions, StructureRefresh }                                                                                                                                                from "./dock/StructurePanel";
 import { openSqlPreviewDialog }                                                                                                                                                                    from "./dock/SqlPreviewDialog";
+import { DdlFormPanel }                                                                                                                                                                            from "./dock/DdlFormPanel";
+import type { DdlDraft, DdlExecuteDeps }                                                                                                                                                           from "./dock/DdlFormPanel";
 import { CreateTableForm }                                                                                                                                                                         from "./dock/CreateTableForm";
 import { RenameTableForm }                                                                                                                                                                         from "./dock/RenameTableForm";
 import { ConstraintForm }                                                                                                                                                                          from "./dock/ConstraintForm";
@@ -1074,22 +1076,74 @@ export class SqlAdminController {
     }
 
     /**
-     * Open the CREATE TABLE dialog for a schema (the navigator's schema
-     * context-menu launcher). Success refreshes the navigator, since a new
-     * table changes the schema's object list.
+     * The execute + error-report pair every DDL flow — tab-hosted or
+     * dialog-hosted — wires the same way: run the previewed SQL through
+     * `executeDdl`, and report a preview/execute failure through
+     * `notifyError`.
+     *
+     * @param ref - The DDL flow's target, threaded through to `notifyError`.
+     */
+    private ddlDefaults(ref: DbObjectRef): DdlExecuteDeps {
+        return {
+            execute: sql => executeDdl(this._connectionId, sql),
+            onError: msg => this.notifyError(new Error(msg), ref),
+        };
+    }
+
+    /**
+     * Open (or focus) a DDL draft tab: a `DdlFormPanel` hosting `spec.build()`'s
+     * form, deduped by `ddlPanelId`. `build` is a factory so nothing is
+     * constructed on the dedup (already-open) path. A successful execute
+     * closes the tab and refreshes the navigator.
+     *
+     * @param spec - The draft's target ref/slug (together the panel id), its
+     *   tab title/glyph, its review dialog's title, and the form factory.
+     */
+    private openDdlPanel(spec: {
+        ref: DbObjectRef; slug: string; title: string; glyph: string;
+        reviewTitle: string; build: () => DdlDraft;
+    }): void {
+        const id = this.ddlPanelId(spec.ref, spec.slug);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const draft = spec.build();
+        const panel = new DdlFormPanel({
+            reviewTitle: spec.reviewTitle,
+            form:        draft.form,
+            generateSql: draft.generateSql,
+            onSuccess:   () => {
+                this.dock.removePanel(id);
+                this._navigator?.refresh?.();
+            },
+            ...this.ddlDefaults(spec.ref),
+        });
+
+        this.dock.addPanel({ id, title: spec.title, glyph: spec.glyph, content: panel });
+    }
+
+    /**
+     * Open (or focus) the CREATE TABLE draft tab for a schema (the
+     * navigator's schema context-menu launcher). A successful execute closes
+     * the tab and refreshes the navigator, since a new table changes the
+     * schema's object list.
      *
      * @param ref - The target schema (kind "schema"; database + schema set).
      */
     createTable(ref: DbObjectRef): void {
-        const form = new CreateTableForm(ref.schema!);
+        this.openDdlPanel({
+            ref,
+            slug:        "table",
+            title:       `New table (${ref.schema})`,
+            glyph:       KIND_GLYPH.table,
+            reviewTitle: "Create table",
+            build:       () => {
+                const form = new CreateTableForm(ref.schema!);
 
-        openSqlPreviewDialog({
-            title:       "Create table",
-            form,
-            generateSql: async () => (await previewCreateTable(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
-            onSuccess:   () => this._navigator?.refresh?.(),
-            onError:     msg => this.notifyError(new Error(msg), ref),
+                return { form, generateSql: async () => (await previewCreateTable(ref, form.readSpec())).sql };
+            },
         });
     }
 
@@ -3387,6 +3441,11 @@ export class SqlAdminController {
     /** Stable id for a type's info tab, distinct from any relation tab. */
     private typeInfoPanelId(ref: DbObjectRef): string {
         return `${this.panelId(ref)}::type`;
+    }
+
+    /** Stable id for a DDL draft tab. See the id table in `## Architecture Decisions`. */
+    private ddlPanelId(ref: DbObjectRef, slug: string): string {
+        return `${ref.connectionId}/${ref.database}/${ref.schema ?? ""}/${ref.name ?? ""}::ddl-${slug}`;
     }
 
     /**
