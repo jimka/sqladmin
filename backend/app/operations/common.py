@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from ..contract import ColumnMeta, TableRef
 from ..errors import ValidationError
-from ..sql.compiler import quote_ident
+from ..sql.ddl import qualify
 
 # The app's one row-budget policy: the ad-hoc query result cap, the list-rows
 # page-size ceiling, and the import row ceiling. One number because a
@@ -18,7 +18,7 @@ def qualified(table: TableRef) -> str:
     """
     Return the schema-qualified, quoted table name for use in SQL.
     """
-    return f"{quote_ident(table.schema)}.{quote_ident(table.name)}"
+    return qualify(table.schema, table.name)
 
 
 def affected(status: str | None) -> int:
