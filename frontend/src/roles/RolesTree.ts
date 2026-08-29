@@ -61,7 +61,7 @@ class RolesTree extends ExplorerTreeBase<RoleSummary[]> implements ExplorerTree 
             const name = nodes[0]?.data;
 
             if (typeof name === "string") {
-                void this.controller.showRoleProperties(name);
+                void this.controller.roles.showRoleProperties(name);
             }
         });
 
@@ -71,7 +71,7 @@ class RolesTree extends ExplorerTreeBase<RoleSummary[]> implements ExplorerTree 
             const name = node.data;
 
             if (typeof name === "string") {
-                void this.controller.showRole(name);
+                void this.controller.roles.showRole(name);
             }
         });
 
@@ -88,13 +88,13 @@ class RolesTree extends ExplorerTreeBase<RoleSummary[]> implements ExplorerTree 
             this.contextMenu.show(event.clientX, event.clientY, [
                 // "Show data" mirrors the double-click: show the role and open its grants
                 // tab. Glyphs match the grants tab and the export formats.
-                { text: "Show data", glyph: "key", action: () => void this.controller.showRole(name) },
+                { text: "Show data", glyph: "key", action: () => void this.controller.roles.showRole(name) },
                 { separator: true },
-                { text: "Show membership graph", glyph: "diagram-project", action: () => void this.controller.openRoleMembershipDiagram(name) },
-                { text: "Show grants graph", glyph: "diagram-project", action: () => void this.controller.openRoleGrantsDiagram(name) },
+                { text: "Show membership graph", glyph: "diagram-project", action: () => void this.controller.roles.openRoleMembershipDiagram(name) },
+                { text: "Show grants graph", glyph: "diagram-project", action: () => void this.controller.roles.openRoleGrantsDiagram(name) },
                 { separator: true },
                 { text: "Export grants", glyph: "file-export", submenu: { label: "Export grants",
-                    items: buildTableExportItems(format => void this.controller.exportRole(name, format)) } },
+                    items: buildTableExportItems(format => void this.controller.roles.exportRole(name, format)) } },
             ]);
         });
 
@@ -107,7 +107,7 @@ class RolesTree extends ExplorerTreeBase<RoleSummary[]> implements ExplorerTree 
 
     // (Re)load the role list; used for the initial load and the refresh tool.
     protected load(): Promise<RoleSummary[]> {
-        return this.controller.loadRoles();
+        return this.controller.roles.loadRoles();
     }
 
     // setNodes collapses every group, so applyDefaultExpansion below reveals

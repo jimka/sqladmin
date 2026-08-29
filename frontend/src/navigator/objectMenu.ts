@@ -18,7 +18,6 @@ import type { Menu }             from "@jimka/typescript-ui/overlay";
 import type { MenuItemConfig }   from "@jimka/typescript-ui/component/container";
 import type { TreeNode }         from "@jimka/typescript-ui/component/tree";
 import type { DbObjectRef }      from "../contract";
-import type { SqlAdminController } from "../SqlAdminController";
 import type { DdlLaunchers }     from "../controller/ddlLaunchers";
 import type { QueryWorkspace }   from "../controller/queryWorkspace";
 import type { ObjectPanels }     from "../controller/objectPanels";
@@ -51,15 +50,17 @@ export type DiagramMenuActions = Pick<DiagramPanels,
 /**
  * The controller slices the object context menu invokes. SqlAdminController
  * satisfies this structurally through its own collaborator fields, so both
- * callers still pass the controller itself. The import above is `import
- * type`, erased at runtime, so no cycle forms even though the controller
- * imports this module at runtime for `showObjectMenu`.
+ * callers still pass the controller itself — no `import type { SqlAdminController }`
+ * is needed here, which is what keeps this module's own import graph free of
+ * the coordinator entirely.
  */
-export interface ObjectMenuActions extends Pick<SqlAdminController, "exportTable"> {
+export interface ObjectMenuActions {
     readonly panels: ObjectPanelMenuActions;
     readonly diagrams: DiagramMenuActions;
     readonly ddl: DdlMenuActions;
     readonly workspace: WorkspaceMenuActions;
+    /** Streams a relation's full contents server-side (the coordinator's own route). */
+    exportTable(ref: DbObjectRef, format: "csv" | "json"): void;
 }
 
 /**

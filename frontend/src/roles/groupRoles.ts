@@ -39,7 +39,7 @@ const SECTIONS: readonly { section: string; glyph: string; match: (role: RoleSum
  * TreeNode per non-empty section, in section order, each parent's children the
  * role leaves in the order they arrived (the backend orders roles by name).
  *
- * @param roles - The flat role list, e.g. from `controller.loadRoles()`.
+ * @param roles - The flat role list, e.g. from `controller.roles.loadRoles()`.
  * @returns Group-parent nodes for `Tree.setNodes`; an empty section is omitted.
  */
 export function groupRoles(roles: RoleSummary[]): TreeNode[] {

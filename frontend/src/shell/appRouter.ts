@@ -266,7 +266,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
         router.register(`/role/${bucket}/:role`, params => dispatch(controller, () => {
             controller.reveal.selectRole(params.role);
-            controller.showRole(params.role);
+            controller.roles.showRole(params.role);
         }));
 
         router.register(`/role/${bucket}/:role/:view`, (params, path, _fragment, query) => dispatch(controller, () => {
@@ -281,8 +281,8 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             controller.reveal.selectRole(params.role);
 
             switch (view) {
-                case "grants-diagram": return controller.openRoleGrantsDiagram(params.role);
-                case "membership":     return controller.openRoleMembershipDiagram(params.role, query.depth);
+                case "grants-diagram": return controller.roles.openRoleGrantsDiagram(params.role);
+                case "membership":     return controller.roles.openRoleMembershipDiagram(params.role, query.depth);
             }
         }));
     }

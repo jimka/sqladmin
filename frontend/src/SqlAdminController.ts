@@ -4,7 +4,7 @@
 
 import { Dock, Menu, Notification, NotificationHistoryButton, Tooltip }                                                                                                                            from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent, DockExceptionEvent }                                                                                                                                                 from "@jimka/typescript-ui/overlay";
-import { Component, Util }                                                                                                                                                                         from "@jimka/typescript-ui/core";
+import { Component }                                                                                                                                                                               from "@jimka/typescript-ui/core";
 import { HBox }                                                                                                                                                                                    from "@jimka/typescript-ui/layout";
 import { StatusBar }                                                                                                                                                                               from "@jimka/typescript-ui/component/container";
 import { Text }                                                                                                                                                                                    from "@jimka/typescript-ui/component/input";
@@ -20,28 +20,20 @@ import { circle_nodes }                                                         
 import { file_lines }                                                                                                                                                                              from "@jimka/typescript-ui/glyphs/solid/file_lines";
 import { user }                                                                                                                                                                                    from "@jimka/typescript-ui/glyphs/solid/user";
 import { showObjectMenu }                                                                                                                                                                          from "./navigator/objectMenu";
-import { matchesGrantedTable }                                                                                                                                                                     from "./navigator/revealMatch";
-import { rolePath, resolveAddressBarRoute }                                                                                                                                                        from "./shell/routeTargets";
+import { resolveAddressBarRoute }                                                                                                                                                                  from "./shell/routeTargets";
 import type { PanelRoute }                                                                                                                                                                         from "./shell/routeTargets";
-import type { ColumnMeta, DbObjectRef, RoleDetail, RolePrivilege, RoleSummary } from "./contract";
-import { getColumns, getRoleDetail, getRoles, tableExportUrl } from "./data/api";
+import type { ColumnMeta, DbObjectRef } from "./contract";
+import { getColumns, tableExportUrl } from "./data/api";
 import { exportQueryResult }                                                                                                                                                                       from "./dock/exportQueryResult";
 import { exportExplainPlan }                                                                                                                                                                       from "./dock/exportExplainResult";
 import type { ActiveExport }                                                                                                                                                                       from "./data/explain";
-import { buildRoleMembershipDiagram }                                                                                                                                                              from "./data/buildRoleMembershipDiagram";
-import { buildRoleGrantsDiagram }                                                                                                                                                                  from "./data/buildRoleGrantsDiagram";
-import { RoleGrantsPanel }                                                                                                                                                                         from "./dock/RoleGrantsPanel";
 import { exportRoleGrants }                                                                                                                                                                        from "./dock/exportRoleGrants";
-import { RoleGrantsDiagramPanel }                                                                                                                                                                  from "./dock/RoleGrantsDiagramPanel";
-import { RoleMembershipDiagramPanel }                                                                                                                                                              from "./dock/RoleMembershipDiagramPanel";
-import type { DiagramNodeData }                                                                                                                                                                    from "@jimka/typescript-ui/component/diagram";
 import { PropertiesPanel }                                                                                                                                                                          from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                                                                                                                                                    from "./roles/RolesPropertiesPanel";
 import { kindDisplayLabel }                                                                                                                                                                        from "./navigator/objectKinds";
 import { LayoutStore }                                                                                                                                                                             from "./data/layoutStore";
 import {
     panelId, structurePanelId,
-    roleGrantsPanelId, roleGrantsDiagramPanelId, roleMembershipDiagramPanelId,
     panelTooltip as buildPanelTooltip, errorMessage, panelIdsFor, tableExportFilename,
 } from "./controller/controllerText";
 import { downloadUrl } from "./data/download";
@@ -52,6 +44,7 @@ import { DdlLaunchers } from "./controller/ddlLaunchers";
 import { QueryWorkspace } from "./controller/queryWorkspace";
 import { ObjectPanels } from "./controller/objectPanels";
 import { DiagramPanels } from "./controller/diagramPanels";
+import { RoleActions } from "./controller/roleActions";
 
 // The non-relation dock-tab glyphs (query / structure / definition / grants /
 // notes) plus the distinct diagram-tab glyphs: `diagram-project` is the FK
@@ -134,6 +127,10 @@ export class SqlAdminController implements PanelHost {
     // Every diagram/graph opener (schema/database ER diagrams, a
     // relation-rooted FK diagram, and the dependency/inheritance graphs).
     readonly diagrams       : DiagramPanels;
+    // Every role-inspection and role-diagram action (the roles rail's list
+    // fetch, the grants tab, the membership/grants-graph diagrams, the
+    // per-role export).
+    readonly roles          : RoleActions;
 
     private readonly _connectionId: string;
     private readonly _database    : string | undefined;
@@ -181,9 +178,6 @@ export class SqlAdminController implements PanelHost {
     private readonly _activeRoleGrants: Map<string, RoleGrants> = new Map();
     private _activePanelId: string | null = null;
 
-    // The same monotonic guard for the Roles view's detail fetch.
-    private _roleSeq: number = 0;
-
     /**
      * Wire the Dock, StatusBar, and Properties inspector, and subscribe to the
      * Dock's panel-close and focus events.
@@ -226,6 +220,7 @@ export class SqlAdminController implements PanelHost {
         this.workspace = new QueryWorkspace(this, this.ddl, username);
         this.panels    = new ObjectPanels(this, this.reveal, this.ddl, this.workspace);
         this.diagrams  = new DiagramPanels(this, this.panels, contextMenu);
+        this.roles     = new RoleActions(this, this.reveal, this.panels, contextMenu);
 
         // The dock disposes a closed tab's content itself (destroying every
         // registered child in its subtree) and fires "close" only on genuine
@@ -424,34 +419,6 @@ export class SqlAdminController implements PanelHost {
     }
 
     /**
-     * Fetch a role's detail and export its full grant set as CSV or JSON — the
-     * roles context-menu convenience, usable on a role whose tab is not open.
-     * Notifies when the role has no table grants.
-     *
-     * @param role - The role to export.
-     * @param format - The export format, "csv" or "json".
-     */
-    async exportRole(role: string, format: "csv" | "json"): Promise<void> {
-        let privileges: RolePrivilege[];
-
-        try {
-            privileges = (await getRoleDetail(this._connectionId, role)).privileges;
-        } catch (err) {
-            this.notifyError(err);
-
-            return;
-        }
-
-        if (privileges.length === 0) {
-            this.statusBar.setMessage(`${role} has no table grants to export`);
-
-            return;
-        }
-
-        exportRoleGrants(role, privileges, format);
-    }
-
-    /**
      * Open the backend streaming export for a table/view: navigate a hidden
      * anchor to the export URL so the `attachment` response downloads the full
      * relation without buffering it in the browser (a big table exports without
@@ -586,225 +553,6 @@ export class SqlAdminController implements PanelHost {
                 this.notifyError(err, ref);
             }
         }
-    }
-
-    /**
-     * Fetch the role list for the Roles view's tree. The connection id stays
-     * encapsulated here; the caller maps the result to nodes and reports any
-     * failure via {@link notifyError}.
-     */
-    loadRoles(): Promise<RoleSummary[]> {
-        return getRoles(this._connectionId);
-    }
-
-    /**
-     * Open (or focus) the selected role's grants tab in the Dock work area and
-     * show its base info (attributes + memberships) in the roles inspector. The
-     * grants tab opens at once behind the library's spinner, with the role detail
-     * fetched behind it — so a slow fetch never blocks the tab from appearing
-     * (mirroring how openTable defers a table's fetch). Reached by a double-click
-     * or the roles rail's "Show data".
-     */
-    showRole(name: string): void {
-        this.openRoleGrants(name);
-    }
-
-    /**
-     * Show the selected role's base info (attributes + memberships) in the roles
-     * inspector only, without opening its grants tab — the single-click preview.
-     * Opening the grants tab is {@link showRole} (double-click / "Show data").
-     */
-    async showRoleProperties(name: string): Promise<void> {
-        const detail = await this.fetchRoleDetail(name);
-
-        if (detail) {
-            this.rolesProperties.show(detail);
-        }
-    }
-
-    /**
-     * Fetch a role's detail under the monotonic role guard, returning it only
-     * while it is still the current selection (otherwise `null`); a failed fetch
-     * reports the error and returns `null`. Shared by {@link showRole} and
-     * {@link showRoleProperties} so rapid role clicks never render a stale role.
-     */
-    private async fetchRoleDetail(name: string): Promise<RoleDetail | null> {
-        const seq = ++this._roleSeq;
-
-        try {
-            const detail = await getRoleDetail(this._connectionId, name);
-
-            return seq === this._roleSeq ? detail : null;
-        } catch (err) {
-            if (seq === this._roleSeq) {
-                this.notifyError(err);
-            }
-
-            return null;
-        }
-    }
-
-    /**
-     * Open the role's table grants in a Dock tab, or focus the existing one, and
-     * refresh the roles inspector for the selection. The tab is deduped by role
-     * (mirroring how a table opens its data tab); the grids are read-only and a
-     * role's grants do not change within a session, so a re-selection focuses the
-     * open tab and only re-previews the inspector, without rebuilding the grid.
-     *
-     * The role detail is fetched behind the tab's own spinner (not before the tab
-     * opens) so opening never blocks on the round-trip, and it feeds both the
-     * grants grid and the inspector. Unlike the transient inspector preview
-     * (fetchRoleDetail), the fetch here is unguarded: a grants tab is deduped and
-     * persistent, so there is no stale selection to discard — a failure closes
-     * the tab and reports through the Dock "exception" handler.
-     */
-    private openRoleGrants(role: string): void {
-        const id = roleGrantsPanelId(this._connectionId, role);
-
-        if (this.dock.focusPanel(id)) {
-            void this.showRoleProperties(role);
-
-            return;
-        }
-
-        const route = rolePath(role);
-
-        this.openAsyncPanel({ id, title: `Grants: ${role}`, glyph: "key", route }, async () => {
-            const detail = await getRoleDetail(this._connectionId, role);
-
-            this.rolesProperties.show(detail);
-
-            // Track the grant set so the active-tab export (Tools menu) can reach
-            // it while this tab is focused, mirroring _activeQueryResult for query
-            // panels.
-            this._activeRoleGrants.set(id, { role, privileges: detail.privileges });
-
-            return RoleGrantsPanel(role, detail.privileges);
-        });
-    }
-
-    /**
-     * Open (or focus) the role-membership graph rooted at `name`: every role as
-     * a node, `role -> parent` edges from each role's `memberOf`, driven by
-     * RoleMembershipDiagramPanel (direction / depth / legend). The membership
-     * DAG needs every role's detail, so this fans out N per-role fetches —
-     * unlike buildSchemaGraphData/buildDatabaseGraphData's single bulk `/graph`
-     * request, there is no combined role-detail endpoint to collapse this into,
-     * but N is a small role list, so the fan-out is acceptable. Double-clicking
-     * another role node shows its properties in the inspector; it does not
-     * open a table tab.
-     *
-     * @param name - The role to root the graph at.
-     * @param depth - A `DEPTH_CHOICES` entry (see `depthChoices.ts`) the Depth
-     *   control opens at; anything else opens at the default.
-     */
-    async openRoleMembershipDiagram(name: string, depth?: string): Promise<void> {
-        const id = roleMembershipDiagramPanelId(this._connectionId, name);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const built = rolePath(name, "membership");
-        const route: PanelRoute = { path: built.path, query: depth ? { depth } : undefined };
-
-        this.openAsyncPanel({
-            id,
-            title         : `${name} (membership)`,
-            glyph         : "diagram-project",
-            route,
-        }, async () => {
-            // The fetch now runs behind the library's spinner. A throw here closes
-            // the tab and reaches the "exception" handler — so no local catch.
-            const roles   = await this.loadRoles();
-            const details = await Promise.all(roles.map(r => getRoleDetail(this._connectionId, r.name)));
-
-            const full = buildRoleMembershipDiagram(details, Util.measureTextWidths);
-            const root: DiagramNodeData = { id: name, label: name, glyph: ROLE_GLYPH };
-
-            this.status(`${name}: membership (${full.nodes.length} roles)`);
-
-            return RoleMembershipDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName), depth);
-        });
-    }
-
-    /**
-     * Open (or focus) the per-role grants graph for `name`: the role node at
-     * the centre, one node per distinct table it holds a privilege on.
-     * Double-clicking a table node reveals + opens it via openGrantedTable.
-     *
-     * @param name - The role whose grants to graph.
-     */
-    async openRoleGrantsDiagram(name: string): Promise<void> {
-        const id = roleGrantsDiagramPanelId(this._connectionId, name);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const route = rolePath(name, "grants-diagram");
-
-        this.openAsyncPanel({
-            id,
-            title         : `${name} (grants graph)`,
-            glyph         : "diagram-project",
-            route,
-        }, async () => {
-            const detail = await this.fetchRoleDetail(name);
-
-            if (!detail) {
-                // The helper already reported. Throwing closes the tab without a second toast.
-                throw new PanelLoadError(null, undefined, true);
-            }
-
-            const data = buildRoleGrantsDiagram(name, detail.privileges, Util.measureTextWidths);
-
-            this.status(`${name}: grants graph (${data.nodes.length - 1} tables)`);
-
-            return RoleGrantsDiagramPanel(
-                data,
-                (schema, table) => this.openGrantedTable(schema, table),
-                // Grants are within the connected database (RolePrivilege carries
-                // no database of its own), so the ref is built with the session
-                // db — the same database every navigator object lives in.
-                (schema, table, event) => this.diagramContextMenu({
-                    connectionId: this._connectionId,
-                    database    : this._database,
-                    schema,
-                    name        : table,
-                    kind        : "table",
-                }, event),
-            );
-        });
-    }
-
-    /**
-     * Reveal a granted table in the navigator by schema+name and open it
-     * (best-effort). `RolePrivilege` carries no database (the roles endpoint is
-     * not database-scoped), so — unlike openReferencedTable, which matches on
-     * database + schema + name — this matches on schema + name only and adopts
-     * whichever database the first matching revealed navigator node carries.
-     * The reveal waits for the navigator's own load first, so an early
-     * double-click in a grants graph no longer misses a tree that is still
-     * filling; if no node genuinely matches (the table's database was never
-     * browsed), status-bars a "not found" message and opens nothing.
-     *
-     * @param schema - The granted table's schema.
-     * @param table - The granted table's name.
-     */
-    openGrantedTable(schema: string, table: string): void {
-        void (async () => {
-            const node = await this.reveal.findInNavigator(matchesGrantedTable(schema, table));
-
-            if (!node) {
-                this.status(`${schema}.${table}: not found in navigator`);
-
-                return;
-            }
-
-            await this.panels.openTable(node.data as DbObjectRef, node);
-            this.reveal.selectNavigatorNode(node);
-        })();
     }
 
     /**
