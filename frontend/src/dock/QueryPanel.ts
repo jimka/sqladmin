@@ -3,7 +3,7 @@
 // query is executed, the editor fills the panel and no result pane is shown. A
 // result adds a resizable pane below the editor (a draggable Split gutter),
 // seeded so the editor starts ~150px tall; the pane is a TabPanel holding up to
-// three independently-refreshed tabs:
+// four independently-refreshed tabs:
 //
 //   * Data    — the read-only results grid (a query result has no PK and is
 //               never written back). Driven by Run; present for every rows result.
@@ -23,12 +23,18 @@
 //               QueryResultView.
 //   * Explain — a read-only, SQL-highlighted CodeEditor holding an EXPLAIN or
 //               EXPLAIN ANALYZE plan; closeable.
+//   * Diagram — the plan tree plus its ELK diagram, built from the shown
+//               Explain plan re-fetched as FORMAT JSON; opened and refreshed
+//               by the Explain-diagram toolbar button (enabled only while a
+//               plan is on screen) and closeable. See ExplainDiagramPanel /
+//               showDiagram.
 //
 // Each tab is owned by its own toolbar action and they persist independently:
-// Run refreshes only Data, the Chart button only Chart, Explain only Explain —
-// EXPLAIN no longer destroys the data view, and a re-run does not disturb an open
-// Chart/Explain tab. The pane appears with the first tab and vanishes with the
-// last (the Tab "empty" event). A non-row statement (INSERT/UPDATE/DDL) reports
+// Run refreshes only Data, the Chart button only Chart, Explain only Explain,
+// and the Explain-diagram button only Diagram — EXPLAIN no longer destroys the
+// data view, and a re-run does not disturb an open Chart/Explain/Diagram tab.
+// The pane appears with the first tab and vanishes with the last (the Tab
+// "empty" event). A non-row statement (INSERT/UPDATE/DDL) reports
 // its command tag and drops only the Data tab, leaving any Chart/Explain tab. A
 // re-run's fetch error or non-rows result never discards an already-loaded Data
 // tab — the old tab is only removed once the new fetch is confirmed to hold
