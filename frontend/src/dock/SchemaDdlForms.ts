@@ -7,7 +7,7 @@
 // plans/implemented/schema-sequence-ddl.md's drift notes). Rename/drop act on
 // an existing schema node directly.
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
 import { TextField } from "@jimka/typescript-ui/component/input";
 import type { CreateSchemaSpec, DdlPreview, DropSchemaSpec, QueryStatusResult, RenameSchemaSpec } from "../contract";
@@ -15,22 +15,11 @@ import { openSqlPreviewDialog } from "./SqlPreviewDialog";
 import { buildCreateSchemaSpec, buildDropSchemaSpec, buildRenameSchemaSpec } from "./ddlSpecs";
 import { ConfirmCascadeForm } from "./ConfirmCascadeForm";
 
-/** Dependencies for {@link openCreateSchemaDialog}. */
-export interface CreateSchemaDialogDeps {
-    /** Preview the CREATE SCHEMA statement for the form's current fields. */
-    preview: (spec: CreateSchemaSpec) => Promise<DdlPreview>;
-
-    /** Execute the (possibly edited) previewed SQL. */
-    execute: (sql: string) => Promise<QueryStatusResult>;
-
-    /** Called after a successful execute. */
-    onSuccess: (result: QueryStatusResult) => void;
-
-    /** Reports a preview/execute error. */
-    onError: (message: string) => void;
-}
-
-/** The CREATE SCHEMA form: a name field and an optional owner (AUTHORIZATION) field. */
+/**
+ * The CREATE SCHEMA form: a name field and an optional owner (AUTHORIZATION)
+ * field. Embedded as a `DdlFormPanel` dock tab's form by the controller's
+ * `createSchema` launcher.
+ */
 class CreateSchemaForm extends Panel {
     private readonly _nameField: TextField;
     private readonly _authField: TextField;
@@ -51,23 +40,9 @@ class CreateSchemaForm extends Panel {
     }
 }
 
-/**
- * Open the CREATE SCHEMA dialog.
- *
- * @param deps - the preview/execute callbacks.
- */
-export function openCreateSchemaDialog(deps: CreateSchemaDialogDeps): void {
-    const form = new CreateSchemaForm();
-
-    openSqlPreviewDialog({
-        title: "Create schema",
-        form,
-        generateSql: async () => (await deps.preview(form.readSpec())).sql,
-        execute:     deps.execute,
-        onSuccess:   deps.onSuccess,
-        onError:     deps.onError,
-    });
-}
+const CreateSchemaFormCallable = callable(CreateSchemaForm);
+type CreateSchemaFormCallable = CreateSchemaForm;
+export { CreateSchemaFormCallable as CreateSchemaForm };
 
 /** Dependencies for {@link openDropSchemaDialog}. */
 export interface DropSchemaDialogDeps {

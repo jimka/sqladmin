@@ -60,7 +60,8 @@ import { openViewDialog }                                                       
 import { openMaterializedViewDialog }                                                                                                                                                              from "./dock/MaterializedViewFormDialog";
 import { openDropRelationDialog, openRefreshMatviewDialog }                                                                                                                                        from "./dock/RelationDdlActions";
 import { stripTrailingSemicolon }                                                                                                                                                                  from "./dock/ddlSpecs";
-import { openCreateSchemaDialog, openDropSchemaDialog, openRenameSchemaDialog }                                                                                                                    from "./dock/SchemaDdlForms";
+import { openDropSchemaDialog, openRenameSchemaDialog }                                                                                                                                            from "./dock/SchemaDdlForms";
+import { CreateSchemaForm }                                                                                                                                                                        from "./dock/SchemaDdlForms";
 import { openCreateSequenceDialog, openDropSequenceDialog }                                                                                                                                        from "./dock/SequenceDdlForms";
 import { FunctionForm }                                                                                                                                                                            from "./dock/FunctionForm";
 import { EnumTypeForm }                                                                                                                                                                            from "./dock/EnumTypeForm";
@@ -1452,11 +1453,25 @@ export class SqlAdminController {
      * @param ref - the launching schema node (its database is the target).
      */
     createSchema(ref: DbObjectRef): void {
-        openCreateSchemaDialog({
-            preview:   spec => previewCreateSchema(ref, spec),
-            execute:   sql => executeDdl(this._connectionId, sql),
-            onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+        // CREATE SCHEMA is database-scoped, but the launcher is a schema
+        // node's context menu (see this module's header) — synthesizing the
+        // database-level target here keys the draft tab on the database, not
+        // the launching schema, so every schema node's "Create schema…"
+        // focuses the same draft (see the plan's "database-scoped schema"
+        // Architecture Decision).
+        const target: DbObjectRef = { connectionId: ref.connectionId, database: ref.database, kind: "database" };
+
+        this.openDdlPanel({
+            ref:         target,
+            slug:        "schema",
+            title:       `New schema (${ref.database})`,
+            glyph:       KIND_GLYPH.schema,
+            reviewTitle: "Create schema",
+            build:       () => {
+                const form = new CreateSchemaForm();
+
+                return { form, generateSql: async () => (await previewCreateSchema(target, form.readSpec())).sql };
+            },
         });
     }
 
