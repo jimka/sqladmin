@@ -199,3 +199,17 @@ def test_index_detail_raises_not_found_when_absent() -> None:
 
     with pytest.raises(NotFound):
         op.get_result()
+
+
+def test_list_indexes_binds_schema_table_and_no_index_name() -> None:
+    # ListIndexesQuery shares INDEX_FROM with IndexDetailQuery/SchemaIndexesQuery,
+    # which binds a NULL-guarded $3 for the index-name scope this query doesn't use.
+    op = ListIndexesQuery(NO_CONN, TABLE)
+
+    assert op._args == ("public", "customers", None)
+
+
+def test_index_detail_binds_schema_index_name_and_no_table() -> None:
+    op = IndexDetailQuery(NO_CONN, _INDEX)
+
+    assert op._args == ("public", None, "customers_pkey")

@@ -30,6 +30,160 @@ RELKIND_KIND: dict[str, str] = {"r": "table", "p": "table", "f": "table", "v": "
 # with the map edge_rows() shapes against.
 RELKIND_CODES: tuple[str, ...] = tuple(RELKIND_KIND)
 
+# Map the single-char referential-action codes Postgres stores in
+# ``pg_constraint.confupdtype``/``confdeltype`` to the SQL clause they render as.
+# These five codes are fixed by the catalog format, not tunable.
+FK_ACTIONS: dict[str, str] = {
+    "a": "NO ACTION",
+    "r": "RESTRICT",
+    "c": "CASCADE",
+    "n": "SET NULL",
+    "d": "SET DEFAULT",
+}
+
+# Map the ``pg_constraint.contype`` code for the non-FK constraint kinds these
+# queries surface to the contract's constraint-type string. Fixed by the catalog.
+CONSTRAINT_TYPES: dict[str, str] = {
+    "p": "primaryKey",
+    "u": "unique",
+    "c": "check",
+}
+
+# Every caller binds $1 = schema (or NULL for "every schema") and $2 = relation
+# name (or NULL for "every relation"); a fragment needing a third key defines
+# it (INDEX_FROM's $3 index-name scope), and each caller may add further
+# parameters of its own after the fragment's own — see the plan's "Every
+# shared SQL fragment binds $1 = schema and $2 = relation name".
+
+INDEX_SELECT = """
+    i.indexname     AS name,
+    i.indexdef      AS definition,
+    ix.indisunique  AS unique,
+    ix.indisprimary AS primary
+"""
+
+INDEX_FROM = """
+    FROM pg_indexes i
+    JOIN pg_class ic     ON ic.relname = i.indexname
+    JOIN pg_namespace n  ON n.oid = ic.relnamespace
+    JOIN pg_index ix     ON ix.indexrelid = ic.oid
+    WHERE n.nspname = i.schemaname
+      AND ($1::text IS NULL OR i.schemaname = $1)
+      AND ($2::text IS NULL OR i.tablename  = $2)
+      AND ($3::text IS NULL OR i.indexname  = $3)
+"""
+
+CONSTRAINT_SELECT = """
+    con.conname AS name,
+    con.contype::text AS contype,
+    pg_get_constraintdef(con.oid) AS definition,
+    ARRAY(
+        SELECT a.attname
+        FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+        JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
+        ORDER BY k.ord
+    ) AS columns
+"""
+
+CONSTRAINT_FROM = """
+    FROM pg_constraint con
+    JOIN pg_class c     ON c.oid = con.conrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE con.contype IN ('p', 'u', 'c')
+      AND ($1::text IS NULL OR n.nspname = $1)
+      AND ($2::text IS NULL OR c.relname = $2)
+"""
+
+FOREIGN_KEY_SELECT = """
+    con.conname AS name,
+    con.confupdtype::text AS on_update,
+    con.confdeltype::text AS on_delete,
+    nr.nspname AS ref_schema,
+    cr.relname AS ref_table,
+    ARRAY(
+        SELECT a.attname
+        FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+        JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
+        ORDER BY k.ord
+    ) AS columns,
+    ARRAY(
+        SELECT a.attname
+        FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
+        JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum
+        ORDER BY k.ord
+    ) AS ref_columns
+"""
+
+FOREIGN_KEY_FROM = """
+    FROM pg_constraint con
+    JOIN pg_class c      ON c.oid = con.conrelid
+    JOIN pg_namespace n  ON n.oid = c.relnamespace
+    JOIN pg_class cr     ON cr.oid = con.confrelid
+    JOIN pg_namespace nr ON nr.oid = cr.relnamespace
+    WHERE con.contype = 'f'
+      AND ($1::text IS NULL OR n.nspname = $1)
+      AND ($2::text IS NULL OR c.relname = $2)
+"""
+
+
+def index_payload(row: Mapping[str, Any]) -> dict:
+    """
+    Map one ``INDEX_SELECT`` row to its contract payload.
+
+    Args:
+        row: a row carrying ``INDEX_SELECT``'s columns.
+
+    Returns:
+        ``{name, definition, unique, primary}``.
+    """
+    return {
+        "name": row["name"],
+        "definition": row["definition"],
+        "unique": bool(row["unique"]),
+        "primary": bool(row["primary"]),
+    }
+
+
+def constraint_payload(row: Mapping[str, Any]) -> dict:
+    """
+    Map one ``CONSTRAINT_SELECT`` row to its contract payload.
+
+    Args:
+        row: a row carrying ``CONSTRAINT_SELECT``'s columns.
+
+    Returns:
+        ``{name, type, columns, definition}``, ``type`` mapped through
+        ``CONSTRAINT_TYPES``.
+    """
+    return {
+        "name": row["name"],
+        "type": CONSTRAINT_TYPES[row["contype"]],
+        "columns": list(row["columns"]),
+        "definition": row["definition"],
+    }
+
+
+def foreign_key_payload(row: Mapping[str, Any]) -> dict:
+    """
+    Map one ``FOREIGN_KEY_SELECT`` row to its contract payload.
+
+    Args:
+        row: a row carrying ``FOREIGN_KEY_SELECT``'s columns.
+
+    Returns:
+        ``{name, columns, refSchema, refTable, refColumns, onUpdate,
+        onDelete}``, the action codes mapped through ``FK_ACTIONS``.
+    """
+    return {
+        "name": row["name"],
+        "columns": list(row["columns"]),
+        "refSchema": row["ref_schema"],
+        "refTable": row["ref_table"],
+        "refColumns": list(row["ref_columns"]),
+        "onUpdate": FK_ACTIONS[row["on_update"]],
+        "onDelete": FK_ACTIONS[row["on_delete"]],
+    }
+
 
 def _endpoint(row: Mapping[str, Any], side: str) -> dict:
     """

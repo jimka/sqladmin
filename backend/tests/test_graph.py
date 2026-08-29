@@ -146,6 +146,20 @@ def test_foreign_keys_maps_action_codes() -> None:
     ]
 
 
+def test_schema_indexes_binds_schema_no_table_no_index_and_system_schemas() -> None:
+    # SchemaIndexesQuery shares INDEX_FROM with ListIndexesQuery/IndexDetailQuery
+    # (whose $2/$3 it always binds NULL) plus its own $4 system-schema exclusion.
+    op = _query(SchemaIndexesQuery)
+
+    assert op._args == ("public", None, None, ["pg_catalog", "information_schema"])
+
+
+def test_schema_indexes_none_schema_scopes_the_whole_database() -> None:
+    op = SchemaIndexesQuery(NO_CONN, None)
+
+    assert op._args[0] is None
+
+
 def test_get_result_before_apply_raises_for_all_five() -> None:
     for cls in (
         SchemaTablesQuery,

@@ -17,8 +17,18 @@ import asyncpg
 from ..contract import ColumnMeta, SequenceRef
 from ..wire import pg_type_to_wire
 from .base import CatalogQuery
-from .catalog import SYSTEM_SCHEMAS
-from .table_structure import _CONSTRAINT_TYPES, _FK_ACTIONS
+from .catalog import (
+    CONSTRAINT_FROM,
+    CONSTRAINT_SELECT,
+    FOREIGN_KEY_FROM,
+    FOREIGN_KEY_SELECT,
+    INDEX_FROM,
+    INDEX_SELECT,
+    SYSTEM_SCHEMAS,
+    constraint_payload,
+    foreign_key_payload,
+    index_payload,
+)
 
 
 class SchemaTablesQuery(CatalogQuery):
@@ -177,34 +187,17 @@ class SchemaIndexesQuery(CatalogQuery):
     Every base table's indexes in scope, generalizing ``ListIndexesQuery``.
     """
 
-    # The original's `n.nspname = $1` join predicate is redundant with
-    # `i.schemaname = $1` under a single-table filter (both sides always equal
-    # the same schema), but scoped to many schemas that redundancy would drop
-    # rows outside `$1` even when `$1` is NULL — replaced with `n.nspname =
-    # i.schemaname` so the join stays correct across every schema in scope.
-    _SQL = """
-        SELECT
-            i.schemaname AS schema,
-            i.tablename  AS table,
-            i.indexname   AS name,
-            i.indexdef    AS definition,
-            ix.indisunique  AS unique,
-            ix.indisprimary AS primary
-        FROM pg_indexes i
-        JOIN pg_class ic     ON ic.relname = i.indexname
-        JOIN pg_namespace n  ON n.oid = ic.relnamespace
-        JOIN pg_index ix     ON ix.indexrelid = ic.oid
-        WHERE n.nspname = i.schemaname
-          AND ($1::text IS NULL OR i.schemaname = $1)
-          AND i.schemaname <> ALL($2::text[])
-        ORDER BY i.schemaname, i.tablename, i.indexname
-    """
+    _SQL = (
+        f"SELECT i.schemaname AS schema, i.tablename AS table, {INDEX_SELECT} {INDEX_FROM} "
+        "AND i.schemaname <> ALL($4::text[]) "
+        "ORDER BY i.schemaname, i.tablename, i.indexname"
+    )
 
     def __init__(self, conn: asyncpg.Connection, schema: str | None) -> None:
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        super().__init__(conn, schema, list(SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, None, None, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -216,19 +209,7 @@ class SchemaIndexesQuery(CatalogQuery):
         Returns:
             ``[{"schema", "table", "payload": {name, definition, unique, primary}}]``.
         """
-        return [
-            {
-                "schema": r["schema"],
-                "table": r["table"],
-                "payload": {
-                    "name": r["name"],
-                    "definition": r["definition"],
-                    "unique": bool(r["unique"]),
-                    "primary": bool(r["primary"]),
-                },
-            }
-            for r in self._rows()
-        ]
+        return [{"schema": r["schema"], "table": r["table"], "payload": index_payload(r)} for r in self._rows()]
 
 
 class SchemaConstraintsQuery(CatalogQuery):
@@ -237,33 +218,17 @@ class SchemaConstraintsQuery(CatalogQuery):
     ``ListConstraintsQuery``.
     """
 
-    _SQL = """
-        SELECT
-            n.nspname AS schema,
-            c.relname AS table,
-            con.conname AS name,
-            con.contype::text AS contype,
-            pg_get_constraintdef(con.oid) AS definition,
-            ARRAY(
-                SELECT a.attname
-                FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-                JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
-                ORDER BY k.ord
-            ) AS columns
-        FROM pg_constraint con
-        JOIN pg_class c     ON c.oid = con.conrelid
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE con.contype IN ('p', 'u', 'c')
-          AND ($1::text IS NULL OR n.nspname = $1)
-          AND n.nspname <> ALL($2::text[])
-        ORDER BY n.nspname, c.relname, con.contype, con.conname
-    """
+    _SQL = (
+        f"SELECT n.nspname AS schema, c.relname AS table, {CONSTRAINT_SELECT} {CONSTRAINT_FROM} "
+        "AND n.nspname <> ALL($3::text[]) "
+        "ORDER BY n.nspname, c.relname, con.contype, con.conname"
+    )
 
     def __init__(self, conn: asyncpg.Connection, schema: str | None) -> None:
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        super().__init__(conn, schema, list(SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, None, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -277,16 +242,7 @@ class SchemaConstraintsQuery(CatalogQuery):
             ``[{"schema", "table", "payload": {name, type, columns, definition}}]``.
         """
         return [
-            {
-                "schema": r["schema"],
-                "table": r["table"],
-                "payload": {
-                    "name": r["name"],
-                    "type": _CONSTRAINT_TYPES[r["contype"]],
-                    "columns": list(r["columns"]),
-                    "definition": r["definition"],
-                },
-            }
+            {"schema": r["schema"], "table": r["table"], "payload": constraint_payload(r)}
             for r in self._rows()
         ]
 
@@ -297,43 +253,17 @@ class SchemaForeignKeysQuery(CatalogQuery):
     ``ListForeignKeysQuery``.
     """
 
-    _SQL = """
-        SELECT
-            n.nspname AS schema,
-            c.relname AS table,
-            con.conname AS name,
-            con.confupdtype::text AS on_update,
-            con.confdeltype::text AS on_delete,
-            nr.nspname AS ref_schema,
-            cr.relname AS ref_table,
-            ARRAY(
-                SELECT a.attname
-                FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-                JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
-                ORDER BY k.ord
-            ) AS columns,
-            ARRAY(
-                SELECT a.attname
-                FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
-                JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum
-                ORDER BY k.ord
-            ) AS ref_columns
-        FROM pg_constraint con
-        JOIN pg_class c      ON c.oid = con.conrelid
-        JOIN pg_namespace n  ON n.oid = c.relnamespace
-        JOIN pg_class cr     ON cr.oid = con.confrelid
-        JOIN pg_namespace nr ON nr.oid = cr.relnamespace
-        WHERE con.contype = 'f'
-          AND ($1::text IS NULL OR n.nspname = $1)
-          AND n.nspname <> ALL($2::text[])
-        ORDER BY n.nspname, c.relname, con.conname
-    """
+    _SQL = (
+        f"SELECT n.nspname AS schema, c.relname AS table, {FOREIGN_KEY_SELECT} {FOREIGN_KEY_FROM} "
+        "AND n.nspname <> ALL($3::text[]) "
+        "ORDER BY n.nspname, c.relname, con.conname"
+    )
 
     def __init__(self, conn: asyncpg.Connection, schema: str | None) -> None:
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        super().__init__(conn, schema, list(SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, None, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -348,19 +278,7 @@ class SchemaForeignKeysQuery(CatalogQuery):
             refTable, refColumns, onUpdate, onDelete}}]``.
         """
         return [
-            {
-                "schema": r["schema"],
-                "table": r["table"],
-                "payload": {
-                    "name": r["name"],
-                    "columns": list(r["columns"]),
-                    "refSchema": r["ref_schema"],
-                    "refTable": r["ref_table"],
-                    "refColumns": list(r["ref_columns"]),
-                    "onUpdate": _FK_ACTIONS[r["on_update"]],
-                    "onDelete": _FK_ACTIONS[r["on_delete"]],
-                },
-            }
+            {"schema": r["schema"], "table": r["table"], "payload": foreign_key_payload(r)}
             for r in self._rows()
         ]
 
