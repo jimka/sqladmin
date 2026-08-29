@@ -44,7 +44,7 @@ services:
     # this tree and tags it; `docker compose pull` fetches the published one.
     build:
       context: .
-    image: ghcr.io/jimka/sqladmin:0.6.0
+    image: ghcr.io/jimka/sqladmin:0.8.0
     container_name: sqladmin-app
     restart: unless-stopped
     environment:
