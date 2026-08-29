@@ -15,10 +15,10 @@ import asyncpg
 from .base import CatalogQuery
 
 # One SELECT per object kind, UNION ALL'd into the query below. A phase that
-# adds a new listed kind (schema-sequence-ddl added the sequence fragment;
-# function-type-ddl adds functions/types) appends one element here — a
-# distinct, additive line rather than an edit to one shared string, so two
-# phases adding kinds in parallel don't collide on the same line.
+# adds a new listed kind (schema-sequence-ddl added the sequence fragment)
+# appends one element here — a distinct, additive line rather than an edit to
+# one shared string, so two phases adding kinds in parallel don't collide on
+# the same line.
 _OBJECT_SELECTS: tuple[str, ...] = (
     # tables + regular views (information_schema)
     "SELECT table_name AS name, "
