@@ -25,14 +25,12 @@ _SERVER_PRESETS_ENV = "SERVER_PRESETS"
 # Env var toggling whether users may save their own (browser-local) presets.
 _ALLOW_USER_PRESETS_ENV = "ALLOW_USER_PRESETS"
 
-# The only values that turn ``ALLOW_USER_PRESETS`` off; anything else (including
-# unset) leaves it on.
-_FALSEY = frozenset({"0", "false", "no"})
-
 # Env var opting the FastAPI docs UIs (/docs, /redoc, /openapi.json) back on.
 _ENABLE_DOCS_ENV = "SQLADMIN_ENABLE_DOCS"
 
-# Recognized flag spellings, case-insensitive. Anything else is "unrecognized".
+# Recognized flag spellings, case-insensitive, shared by every boolean env var
+# this module (and auth.py's cookie_secure) reads. Anything else is
+# "unrecognized".
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
@@ -98,13 +96,13 @@ def allow_user_presets() -> bool:
     """
     Whether users may create/delete their own localStorage presets.
 
-    Defaults to True (including when unset); only ``"0"``/``"false"``/``"no"``
-    (case-insensitive) turn it off.
+    Defaults to True (including when unset or unrecognized); only
+    ``"0"``/``"false"``/``"no"``/``"off"`` (case-insensitive) turn it off.
 
     Returns:
         The flag.
     """
-    return os.environ.get(_ALLOW_USER_PRESETS_ENV, "").strip().lower() not in _FALSEY
+    return parse_bool(os.environ.get(_ALLOW_USER_PRESETS_ENV)) is not False
 
 
 def parse_bool(raw: str | None) -> bool | None:
