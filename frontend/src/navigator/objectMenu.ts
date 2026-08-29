@@ -19,30 +19,37 @@ import type { MenuItemConfig }   from "@jimka/typescript-ui/component/container"
 import type { TreeNode }         from "@jimka/typescript-ui/component/tree";
 import type { DbObjectRef }      from "../contract";
 import type { SqlAdminController } from "../SqlAdminController";
+import type { DdlLaunchers }     from "../controller/ddlLaunchers";
 import { isRelationKind }        from "./objectKinds";
 import { buildTableExportItems } from "../dock/menuItems";
 
+/** The sixteen DDL launchers the object context menu invokes. */
+export type DdlMenuActions = Pick<DdlLaunchers,
+    | "createTable" | "createView" | "createMaterializedView" | "createSequence"
+    | "createType" | "createFunction"
+    | "renameTable" | "renameSchema"
+    | "dropTable" | "dropRelation" | "refreshMaterializedView"
+    | "dropSchema" | "dropSequence" | "dropFunction" | "editType" | "dropType">;
+
 /**
- * The controller methods the object context menu invokes. A narrowed slice of
- * SqlAdminController so the tree and the diagram panels build identical menus
- * without the builder depending on the whole controller. The controller (and
- * `this.controller` in the tree) satisfies it structurally. The import above
- * is `import type`, erased at runtime, so no cycle forms even though the
- * controller imports this module at runtime for `showObjectMenu`.
+ * The controller methods (and, for DDL, the `ddl` collaborator's methods) the
+ * object context menu invokes. A narrowed slice of SqlAdminController so the
+ * tree and the diagram panels build identical menus without the builder
+ * depending on the whole controller. The controller (and `this.controller` in
+ * the tree) satisfies it structurally. The import above is `import type`,
+ * erased at runtime, so no cycle forms even though the controller imports
+ * this module at runtime for `showObjectMenu`.
  */
-export type ObjectMenuActions = Pick<SqlAdminController,
+export interface ObjectMenuActions extends Pick<SqlAdminController,
     | "openTable" | "openQueryFor" | "openStructure" | "openDefinition"
     | "openSequence" | "openFunctionDefinition" | "executeFunction"
     | "openRelationDiagram" | "openRelationDependencyGraph" | "openRelationInheritanceGraph"
     | "openSchemaDiagram" | "openSchemaDependencyGraph" | "openSchemaInheritanceGraph"
-    | "renameTable" | "dropTable" | "dropRelation" | "refreshMaterializedView"
-    | "renameSchema" | "dropSchema"
-    | "createTable" | "createView" | "createMaterializedView" | "createSequence"
-    | "createType" | "createFunction"
-    | "dropSequence" | "dropFunction" | "editType" | "dropType"
     | "exportTable"
     | "openIndex" | "openReferencedStructure"
-    | "openType">;
+    | "openType"> {
+    readonly ddl: DdlMenuActions;
+}
 
 /**
  * Build the schema node's own menu: its identity actions (rename/drop) above a
@@ -52,17 +59,17 @@ export type ObjectMenuActions = Pick<SqlAdminController,
  */
 function schemaMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: TreeNode): MenuItemConfig[] {
     return [
-        { text: "Rename", glyph: "pencil", action: () => actions.renameSchema(ref) },
-        { text: "Drop", glyph: "trash", action: () => actions.dropSchema(ref) },
+        { text: "Rename", glyph: "pencil", action: () => actions.ddl.renameSchema(ref) },
+        { text: "Drop", glyph: "trash", action: () => actions.ddl.dropSchema(ref) },
         { separator: true },
         { text: "Create", glyph: "plus", submenu: { label: "Create", items: [
-            { text: "Composite type", action: () => actions.createType(ref, "composite") },
-            { text: "Enum type", action: () => actions.createType(ref, "enum") },
-            { text: "Function", action: () => actions.createFunction(ref) },
-            { text: "Materialized view", action: () => void actions.createMaterializedView(ref) },
-            { text: "Sequence", action: () => actions.createSequence(ref) },
-            { text: "Table", action: () => actions.createTable(ref) },
-            { text: "View", action: () => void actions.createView(ref) },
+            { text: "Composite type", action: () => actions.ddl.createType(ref, "composite") },
+            { text: "Enum type", action: () => actions.ddl.createType(ref, "enum") },
+            { text: "Function", action: () => actions.ddl.createFunction(ref) },
+            { text: "Materialized view", action: () => void actions.ddl.createMaterializedView(ref) },
+            { text: "Sequence", action: () => actions.ddl.createSequence(ref) },
+            { text: "Table", action: () => actions.ddl.createTable(ref) },
+            { text: "View", action: () => void actions.ddl.createView(ref) },
         ] } },
         { text: "Show", glyph: "diagram-project", submenu: { label: "Show", items: [
             { text: "Dependency graph", glyph: "share-nodes",    action: () => void actions.openSchemaDependencyGraph(ref, node) },
@@ -76,7 +83,7 @@ function schemaMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: Tr
 function sequenceMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: TreeNode): MenuItemConfig[] {
     return [
         { text: "Show info", glyph: "arrow-up-1-9", action: () => void actions.openSequence(ref, node) },
-        { text: "Drop", glyph: "trash", action: () => actions.dropSequence(ref) },
+        { text: "Drop", glyph: "trash", action: () => actions.ddl.dropSequence(ref) },
     ];
 }
 
@@ -89,7 +96,7 @@ function functionMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
         { text: ref.isProcedure ? "Call" : "Execute", glyph: "play", action: () => actions.executeFunction(ref) },
         { separator: true },
         { text: "Show definition", glyph: "file-code", action: () => void actions.openFunctionDefinition(ref, node) },
-        { text: "Drop", glyph: "trash", action: () => actions.dropFunction(ref) },
+        { text: "Drop", glyph: "trash", action: () => actions.ddl.dropFunction(ref) },
     ];
 }
 
@@ -97,8 +104,8 @@ function functionMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
 function typeMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: TreeNode): MenuItemConfig[] {
     return [
         { text: "Show info", glyph: "cube", action: () => void actions.openType(ref, node) },
-        { text: "Edit", glyph: "pencil", action: () => void actions.editType(ref) },
-        { text: "Drop", glyph: "trash", action: () => actions.dropType(ref) },
+        { text: "Edit", glyph: "pencil", action: () => void actions.ddl.editType(ref) },
+        { text: "Drop", glyph: "trash", action: () => actions.ddl.dropType(ref) },
     ];
 }
 
@@ -170,8 +177,8 @@ function relationMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
     // mutate, unlike everything above.
     if (ref.kind === "table") {
         items.push({ separator: true });
-        items.push({ text: "Rename", glyph: "pencil", action: () => actions.renameTable(ref, node) });
-        items.push({ text: "Drop", glyph: "trash", action: () => actions.dropTable(ref, node) });
+        items.push({ text: "Rename", glyph: "pencil", action: () => actions.ddl.renameTable(ref, node) });
+        items.push({ text: "Drop", glyph: "trash", action: () => actions.ddl.dropTable(ref, node) });
     }
 
     // Structural launchers (view-matview-ddl phase): drop this view or
@@ -179,11 +186,11 @@ function relationMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
     // section, mirroring the table launchers above.
     if (ref.kind === "view") {
         items.push({ separator: true });
-        items.push({ text: "Drop", glyph: "trash", action: () => actions.dropRelation(ref) });
+        items.push({ text: "Drop", glyph: "trash", action: () => actions.ddl.dropRelation(ref) });
     } else if (ref.kind === "materializedView") {
         items.push({ separator: true });
-        items.push({ text: "Refresh", glyph: "refresh", action: () => actions.refreshMaterializedView(ref) });
-        items.push({ text: "Drop", glyph: "trash", action: () => actions.dropRelation(ref) });
+        items.push({ text: "Refresh", glyph: "refresh", action: () => actions.ddl.refreshMaterializedView(ref) });
+        items.push({ text: "Drop", glyph: "trash", action: () => actions.ddl.dropRelation(ref) });
     }
 
     // Export streams the full relation server-side (not the loaded page), so a

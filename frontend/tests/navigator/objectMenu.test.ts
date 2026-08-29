@@ -25,14 +25,16 @@ function stubActions(): ObjectMenuActions {
         openSequence: vi.fn(), openFunctionDefinition: vi.fn(), executeFunction: vi.fn(),
         openRelationDiagram: vi.fn(), openRelationDependencyGraph: vi.fn(), openRelationInheritanceGraph: vi.fn(),
         openSchemaDiagram: vi.fn(), openSchemaDependencyGraph: vi.fn(), openSchemaInheritanceGraph: vi.fn(),
-        renameTable: vi.fn(), dropTable: vi.fn(), dropRelation: vi.fn(), refreshMaterializedView: vi.fn(),
-        renameSchema: vi.fn(), dropSchema: vi.fn(),
-        createTable: vi.fn(), createView: vi.fn(), createMaterializedView: vi.fn(), createSequence: vi.fn(),
-        createType: vi.fn(), createFunction: vi.fn(),
-        dropSequence: vi.fn(), dropFunction: vi.fn(), editType: vi.fn(), dropType: vi.fn(),
         exportTable: vi.fn(),
         openIndex: vi.fn(), openReferencedStructure: vi.fn(),
         openType: vi.fn(),
+        ddl: {
+            renameTable: vi.fn(), dropTable: vi.fn(), dropRelation: vi.fn(), refreshMaterializedView: vi.fn(),
+            renameSchema: vi.fn(), dropSchema: vi.fn(),
+            createTable: vi.fn(), createView: vi.fn(), createMaterializedView: vi.fn(), createSequence: vi.fn(),
+            createType: vi.fn(), createFunction: vi.fn(),
+            dropSequence: vi.fn(), dropFunction: vi.fn(), editType: vi.fn(), dropType: vi.fn(),
+        },
     } as unknown as ObjectMenuActions;
 }
 
@@ -206,7 +208,7 @@ describe("buildObjectMenuItems", () => {
         expect(actions.openTable).toHaveBeenCalledWith(ref, undefined);
 
         items.find(i => i.text === "Drop")?.action?.();
-        expect(actions.dropTable).toHaveBeenCalledWith(ref, undefined);
+        expect(actions.ddl.dropTable).toHaveBeenCalledWith(ref, undefined);
 
         const exportSubmenu = items.find(i => i.text === "Export");
         submenuItems(exportSubmenu).find(i => i.text === "CSV (.csv)")?.action?.();

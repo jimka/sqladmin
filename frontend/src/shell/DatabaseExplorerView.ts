@@ -26,7 +26,7 @@ class DatabaseExplorerView extends TreeExplorerView {
             treeLabel:      "Database",
             treeGlyph:      "database",
             treeTools:      [
-                createSchemaTool(() => controller.createSchema({
+                createSchemaTool(() => controller.ddl.createSchema({
                     connectionId: controller.connectionId,
                     database:     controller.database,
                     kind:         "database",
