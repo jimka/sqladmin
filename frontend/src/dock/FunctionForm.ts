@@ -1,4 +1,4 @@
-// The CREATE FUNCTION dialog form: editable name/kind/language/args/returns/
+// The CREATE FUNCTION form: editable name/kind/language/args/returns/
 // volatility/replace fields, with a stub body seeded once into the SQL preview
 // editor (the user fills it in there). No CodeEditor is embedded here — the
 // body/SQL is authored in phase-1's shared preview editor, per the
@@ -45,7 +45,8 @@ const DEFAULT_WEIGHT = 110;
 /**
  * The CREATE FUNCTION form: a structural field group plus an add/remove-row
  * argument grid. The body is authored in the shared SQL preview editor, seeded
- * with a stub.
+ * with a stub. Embedded as a `DdlFormPanel` dock tab's form by the
+ * controller's `createFunction` launcher.
  */
 class FunctionForm extends RowGridPanel<FunctionArgRow> {
     private readonly _schema: string;

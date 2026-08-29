@@ -1549,22 +1549,25 @@ export class SqlAdminController {
     }
 
     /**
-     * Open the CREATE FUNCTION/PROCEDURE dialog for a schema (the
-     * navigator's context-menu launcher). Success refreshes the navigator,
-     * since a new routine changes the schema's object list.
+     * Open (or focus) the CREATE FUNCTION/PROCEDURE draft tab for a schema
+     * (the navigator's context-menu launcher). A successful execute closes
+     * the tab and refreshes the navigator, since a new routine changes the
+     * schema's object list.
      *
      * @param ref - the target schema (kind "schema"; database + schema set).
      */
     createFunction(ref: DbObjectRef): void {
-        const form = new FunctionForm({ schema: ref.schema! });
+        this.openDdlPanel({
+            ref,
+            slug:        "function",
+            title:       `New function (${ref.schema})`,
+            glyph:       KIND_GLYPH.function,
+            reviewTitle: "Create function",
+            build:       () => {
+                const form = new FunctionForm({ schema: ref.schema! });
 
-        openSqlPreviewDialog({
-            title:       "Create function",
-            form,
-            generateSql: async () => (await previewCreateFunction(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
-            onSuccess:   () => this._navigator?.refresh?.(),
-            onError:     msg => this.notifyError(new Error(msg), ref),
+                return { form, generateSql: async () => (await previewCreateFunction(ref, form.readSpec())).sql };
+            },
         });
     }
 
