@@ -21,9 +21,11 @@ const SCHEMA = "public";
 /** A minimal ObjectMenuActions with every controller method a no-op spy. */
 function stubActions(): ObjectMenuActions {
     return {
-        openRelationDiagram: vi.fn(), openRelationDependencyGraph: vi.fn(), openRelationInheritanceGraph: vi.fn(),
-        openSchemaDiagram: vi.fn(), openSchemaDependencyGraph: vi.fn(), openSchemaInheritanceGraph: vi.fn(),
         exportTable: vi.fn(),
+        diagrams: {
+            openRelationDiagram: vi.fn(), openRelationDependencyGraph: vi.fn(), openRelationInheritanceGraph: vi.fn(),
+            openSchemaDiagram: vi.fn(), openSchemaDependencyGraph: vi.fn(), openSchemaInheritanceGraph: vi.fn(),
+        },
         panels: {
             openTable: vi.fn(), openStructure: vi.fn(), openDefinition: vi.fn(),
             openSequence: vi.fn(), openFunctionDefinition: vi.fn(),

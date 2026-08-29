@@ -117,7 +117,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
         controller.reveal.selectObject(ref);
 
-        return controller.openDatabaseDiagram(ref);
+        return controller.diagrams.openDatabaseDiagram(ref);
     }));
 
     // Reveals the schema container in the sidebar without opening a tab — see
@@ -142,9 +142,9 @@ export function buildAppRouter(controller: SqlAdminController): Router {
         controller.reveal.selectObject(ref);
 
         switch (view) {
-            case "diagram":      return controller.openSchemaDiagram(ref);
-            case "dependencies": return controller.openSchemaDependencyGraph(ref);
-            case "inheritance":  return controller.openSchemaInheritanceGraph(ref);
+            case "diagram":      return controller.diagrams.openSchemaDiagram(ref);
+            case "dependencies": return controller.diagrams.openSchemaDependencyGraph(ref);
+            case "inheritance":  return controller.diagrams.openSchemaInheritanceGraph(ref);
         }
     }));
 
@@ -180,9 +180,9 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             switch (view) {
                 case "structure":    return controller.panels.openStructure(ref);
                 case "definition":   return controller.panels.openDefinition(ref);
-                case "diagram":      return controller.openRelationDiagram(ref, undefined, query.depth);
-                case "dependencies": return controller.openRelationDependencyGraph(ref, undefined, query.depth);
-                case "inheritance":  return controller.openRelationInheritanceGraph(ref, undefined, query.depth);
+                case "diagram":      return controller.diagrams.openRelationDiagram(ref, undefined, query.depth);
+                case "dependencies": return controller.diagrams.openRelationDependencyGraph(ref, undefined, query.depth);
+                case "inheritance":  return controller.diagrams.openRelationInheritanceGraph(ref, undefined, query.depth);
             }
         }));
     }

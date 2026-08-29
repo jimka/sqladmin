@@ -31,7 +31,7 @@ class DatabaseExplorerView extends TreeExplorerView {
                     database:     controller.database,
                     kind:         "database",
                 })),
-                showDatabaseDiagramTool(() => void controller.openDatabaseDiagram({
+                showDatabaseDiagramTool(() => void controller.diagrams.openDatabaseDiagram({
                     connectionId: controller.connectionId,
                     database:     controller.database,
                     kind:         "database",

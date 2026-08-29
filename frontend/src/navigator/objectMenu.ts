@@ -22,6 +22,7 @@ import type { SqlAdminController } from "../SqlAdminController";
 import type { DdlLaunchers }     from "../controller/ddlLaunchers";
 import type { QueryWorkspace }   from "../controller/queryWorkspace";
 import type { ObjectPanels }     from "../controller/objectPanels";
+import type { DiagramPanels }    from "../controller/diagramPanels";
 import { isRelationKind }        from "./objectKinds";
 import { buildTableExportItems } from "../dock/menuItems";
 
@@ -42,6 +43,11 @@ export type ObjectPanelMenuActions = Pick<ObjectPanels,
     | "openSequence" | "openFunctionDefinition" | "openIndex" | "openReferencedStructure"
     | "openType">;
 
+/** The six diagram/graph openers the object context menu invokes. */
+export type DiagramMenuActions = Pick<DiagramPanels,
+    | "openSchemaDiagram" | "openSchemaDependencyGraph" | "openSchemaInheritanceGraph"
+    | "openRelationDiagram" | "openRelationDependencyGraph" | "openRelationInheritanceGraph">;
+
 /**
  * The controller slices the object context menu invokes. SqlAdminController
  * satisfies this structurally through its own collaborator fields, so both
@@ -49,11 +55,9 @@ export type ObjectPanelMenuActions = Pick<ObjectPanels,
  * type`, erased at runtime, so no cycle forms even though the controller
  * imports this module at runtime for `showObjectMenu`.
  */
-export interface ObjectMenuActions extends Pick<SqlAdminController,
-    | "openRelationDiagram" | "openRelationDependencyGraph" | "openRelationInheritanceGraph"
-    | "openSchemaDiagram" | "openSchemaDependencyGraph" | "openSchemaInheritanceGraph"
-    | "exportTable"> {
+export interface ObjectMenuActions extends Pick<SqlAdminController, "exportTable"> {
     readonly panels: ObjectPanelMenuActions;
+    readonly diagrams: DiagramMenuActions;
     readonly ddl: DdlMenuActions;
     readonly workspace: WorkspaceMenuActions;
 }
@@ -79,9 +83,9 @@ function schemaMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: Tr
             { text: "View", action: () => void actions.ddl.createView(ref) },
         ] } },
         { text: "Show", glyph: "diagram-project", submenu: { label: "Show", items: [
-            { text: "Dependency graph", glyph: "share-nodes",    action: () => void actions.openSchemaDependencyGraph(ref, node) },
-            { text: "Inheritance graph", glyph: "sitemap",        action: () => void actions.openSchemaInheritanceGraph(ref, node) },
-            { text: "Schema diagram", glyph: "diagram-project", action: () => void actions.openSchemaDiagram(ref, node) },
+            { text: "Dependency graph", glyph: "share-nodes",    action: () => void actions.diagrams.openSchemaDependencyGraph(ref, node) },
+            { text: "Inheritance graph", glyph: "sitemap",        action: () => void actions.diagrams.openSchemaInheritanceGraph(ref, node) },
+            { text: "Schema diagram", glyph: "diagram-project", action: () => void actions.diagrams.openSchemaDiagram(ref, node) },
         ] } },
     ];
 }
@@ -164,9 +168,9 @@ function relationMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
         // connected dependency component; Inheritance is the pg_inherits
         // partitioning/inheritance graph (also table-only).
         items.push({ text: "Show", glyph: "diagram-project", submenu: { label: "Show", items: [
-            { text: "Dependencies", glyph: "share-nodes",     action: () => void actions.openRelationDependencyGraph(ref, node) },
-            { text: "Inheritance",  glyph: "sitemap",         action: () => void actions.openRelationInheritanceGraph(ref, node) },
-            { text: "Relations",    glyph: "diagram-project", action: () => void actions.openRelationDiagram(ref, node) },
+            { text: "Dependencies", glyph: "share-nodes",     action: () => void actions.diagrams.openRelationDependencyGraph(ref, node) },
+            { text: "Inheritance",  glyph: "sitemap",         action: () => void actions.diagrams.openRelationInheritanceGraph(ref, node) },
+            { text: "Relations",    glyph: "diagram-project", action: () => void actions.diagrams.openRelationDiagram(ref, node) },
             { text: "Structure",    glyph: "table-columns",   action: () => void actions.panels.openStructure(ref, node) },
         ] } });
     } else {
@@ -175,7 +179,7 @@ function relationMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
         // its two Show items stay flat rather than in a one-or-two-item
         // submenu: its connected dependency component and, since only a
         // (materialized) view has one, its editable SQL definition.
-        items.push({ text: "Show dependencies", glyph: "share-nodes", action: () => void actions.openRelationDependencyGraph(ref, node) });
+        items.push({ text: "Show dependencies", glyph: "share-nodes", action: () => void actions.diagrams.openRelationDependencyGraph(ref, node) });
         items.push({ text: "Show definition", glyph: "file-code", action: () => void actions.panels.openDefinition(ref, node) });
     }
 
