@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import secrets
 import time
 
 import asyncpg
@@ -169,7 +170,9 @@ async def require_csrf(
     Returns:
         The live ``Session`` (so the route can resolve its pool).
     """
-    if request.headers.get(_CSRF_HEADER) != session.csrf_token:
+    header = request.headers.get(_CSRF_HEADER)
+
+    if header is None or not secrets.compare_digest(header, session.csrf_token):
         raise Forbidden("CSRF token missing or invalid")
 
     return session

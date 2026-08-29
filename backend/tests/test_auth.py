@@ -11,12 +11,13 @@ from typing import cast
 
 import asyncpg
 import pytest
+from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 
 from app import connections
-from app.auth import is_host_allowed, require_session
+from app.auth import SESSION_COOKIE_NAME, is_host_allowed, require_csrf, require_session
 from app.connections import Session, session_pool_for, sweep_idle_sessions
-from app.errors import NotFound
+from app.errors import Forbidden, NotFound
 from app.main import app
 from app.rate_limit import LOGIN_FAILURE_LIMIT
 
@@ -257,6 +258,28 @@ async def test_mutating_route_missing_csrf_is_403() -> None:
         app.dependency_overrides.clear()
 
     assert resp.status_code == 403
+
+
+class _FakeCsrfRequest:
+    """A minimal Request stand-in: require_csrf reads only request.headers.get()."""
+
+    def __init__(self, headers: dict[str, str]) -> None:
+        self.headers = headers
+
+
+async def test_require_csrf_accepts_a_matching_header() -> None:
+    session = _fake_session(csrf="tok")
+
+    result = await require_csrf(cast(Request, _FakeCsrfRequest({"X-CSRF-Token": "tok"})), session)
+
+    assert result is session
+
+
+async def test_require_csrf_rejects_a_mismatched_header() -> None:
+    session = _fake_session(csrf="tok")
+
+    with pytest.raises(Forbidden):
+        await require_csrf(cast(Request, _FakeCsrfRequest({"X-CSRF-Token": "wrong"})), session)
 
 
 async def test_sweep_evicts_idle_session() -> None:
