@@ -55,8 +55,8 @@ def test_columns_wraps_column_meta_as_payload() -> None:
         {
             "schema": "public", "table": "customers",
             "name": "balance", "data_type": "numeric", "full_type": "numeric(12,2)",
-            "default_expr": None, "nullable": False,
-            "is_primary_key": False, "is_generated": False, "has_default": False,
+            "default_expr": "0", "nullable": False,
+            "is_primary_key": False, "is_generated": False, "has_default": True,
             "sequence_schema": None, "sequence_name": None,
         },
     ]
@@ -79,8 +79,8 @@ def test_columns_wraps_column_meta_as_payload() -> None:
             "schema": "public", "table": "customers",
             "payload": {
                 "name": "balance", "dataType": "numeric", "nullable": False,
-                "isPrimaryKey": False, "isGenerated": False, "hasDefault": False,
-                "wireType": "string", "fullType": "numeric(12,2)", "defaultExpr": None,
+                "isPrimaryKey": False, "isGenerated": False, "hasDefault": True,
+                "wireType": "string", "fullType": "numeric(12,2)", "defaultExpr": "0",
                 "sequence": None,
             },
         },
