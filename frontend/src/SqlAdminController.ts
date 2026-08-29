@@ -94,6 +94,13 @@ import type { HistoryEntry, SavedQuery }                                        
 import { NotesStore }                                                                                                                                                                              from "./data/notesStore";
 import { LayoutStore }                                                                                                                                                                             from "./data/layoutStore";
 import { promptQueryName }                                                                                                                                                                         from "./promptQueryName";
+import {
+    panelId, structurePanelId, definitionPanelId, sequenceInfoPanelId, indexInfoPanelId, typeInfoPanelId,
+    ddlPanelId, functionDefinitionPanelId, diagramPanelId, relationDiagramPanelId,
+    dependencyPanelId, relationDependencyPanelId, inheritancePanelId, relationInheritancePanelId,
+    databaseDiagramPanelId, notesPanelId, roleGrantsPanelId, roleGrantsDiagramPanelId, roleMembershipDiagramPanelId,
+    panelTooltip as buildPanelTooltip, elideName, errorMessage,
+} from "./controller/controllerText";
 
 // The non-relation dock-tab glyphs (query / structure / definition / grants /
 // notes) plus the distinct diagram-tab glyphs: `diagram-project` is the FK
@@ -127,29 +134,6 @@ function buildIdentityWidget(username: string, database?: string): Component {
     Tooltip.attach(widget, database ? `Signed in as ${username} @ ${database}` : `Signed in as ${username}`);
 
     return widget;
-}
-
-// How much of a user-supplied name a status message may spend. A saved query's
-// name is free text with no length limit of its own, and the status bar is one
-// line — past this the name crowds out the message it is there to label.
-const MAX_STATUS_NAME_CHARS = 40;
-
-/**
- * Shorten a free-text name to fit a status message, eliding the tail so the
- * ellipsis reads as "there is more name here" rather than a truncation the user
- * has to guess at. The full name still shows wherever it has room to breathe —
- * the tab title, the Queries view.
- *
- * @param name - The name as the user typed it.
- * @returns The name, tail-elided when it runs past MAX_STATUS_NAME_CHARS.
- */
-function elideName(name: string): string {
-    if (name.length <= MAX_STATUS_NAME_CHARS) {
-        return name;
-    }
-
-    // Trailing space before the ellipsis reads as a typo, so shed it.
-    return `${name.slice(0, MAX_STATUS_NAME_CHARS - 1).trimEnd()}…`;
 }
 
 /** The optional hook a diagram-bearing panel exposes so its tab can wait for placement. */
@@ -508,7 +492,7 @@ export class SqlAdminController {
             return;
         }
 
-        const id = this.panelId(ref);
+        const id = panelId(ref);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -587,7 +571,7 @@ export class SqlAdminController {
      * this for views (see NavigatorTree).
      */
     async openDefinition(ref: DbObjectRef, node?: TreeNode): Promise<void> {
-        const id = this.definitionPanelId(ref);
+        const id = definitionPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -657,7 +641,7 @@ export class SqlAdminController {
                     // here would read as "the save failed", inviting a retry
                     // that re-runs the (for a matview, destructive) DDL a second
                     // time for no reason.
-                    this.notifyError(new Error(`saved, but failed to refresh the tab: ${this.errorMessage(err)}`), ref);
+                    this.notifyError(new Error(`saved, but failed to refresh the tab: ${errorMessage(err)}`), ref);
 
                     return;
                 }
@@ -713,7 +697,7 @@ export class SqlAdminController {
         try {
             await reload();
         } catch (err) {
-            this.notifyError(new Error(`failed to refresh: ${this.errorMessage(err)}`), ref);
+            this.notifyError(new Error(`failed to refresh: ${errorMessage(err)}`), ref);
 
             return;
         }
@@ -739,7 +723,7 @@ export class SqlAdminController {
      * rather than gating the tab.
      */
     async openSequence(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>): Promise<void> {
-        const id = this.sequenceInfoPanelId(ref);
+        const id = sequenceInfoPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -819,7 +803,7 @@ export class SqlAdminController {
      * — awaited alongside the detail fetch rather than gating the tab.
      */
     async openIndex(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>): Promise<void> {
-        const id = this.indexInfoPanelId(ref);
+        const id = indexInfoPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -882,7 +866,7 @@ export class SqlAdminController {
      * so there is no in-progress reveal `Promise` to await here.
      */
     async openType(ref: DbObjectRef, node?: TreeNode): Promise<void> {
-        const id = this.typeInfoPanelId(ref);
+        const id = typeInfoPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -926,7 +910,7 @@ export class SqlAdminController {
      * rather than gating the tab.
      */
     async openStructure(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>): Promise<void> {
-        const id = this.structurePanelId(ref);
+        const id = structurePanelId(ref);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -1017,7 +1001,7 @@ export class SqlAdminController {
             // in place, rather than removing and reopening the structure tab
             // the way the old per-dialog column launchers did.
             const onColumnsSaved = (): void => {
-                this.dock.removePanel(this.panelId(ref));
+                this.dock.removePanel(panelId(ref));
                 refresh();
             };
 
@@ -1103,7 +1087,7 @@ export class SqlAdminController {
         ref: DbObjectRef; slug: string; title: string; glyph: string;
         reviewTitle: string; build: () => DdlDraft;
     }): void {
-        const id = this.ddlPanelId(spec.ref, spec.slug);
+        const id = ddlPanelId(spec.ref, spec.slug);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -1167,8 +1151,8 @@ export class SqlAdminController {
                 (await previewDropTable(ref, { schema: ref.schema!, name: ref.name!, ...form.readSpec() })).sql,
             onSuccess: () => {
                 this._navigator?.refresh?.();
-                this.dock.removePanel(this.panelId(ref));
-                this.dock.removePanel(this.structurePanelId(ref));
+                this.dock.removePanel(panelId(ref));
+                this.dock.removePanel(structurePanelId(ref));
             },
             ...this.ddlDefaults(ref),
         });
@@ -1193,8 +1177,8 @@ export class SqlAdminController {
             generateSql: async () => (await previewAlterTable(ref, form.readSpec())).sql,
             onSuccess:   () => {
                 this._navigator?.refresh?.();
-                this.dock.removePanel(this.panelId(ref));
-                this.dock.removePanel(this.structurePanelId(ref));
+                this.dock.removePanel(panelId(ref));
+                this.dock.removePanel(structurePanelId(ref));
             },
             ...this.ddlDefaults(ref),
         });
@@ -1446,8 +1430,8 @@ export class SqlAdminController {
             })).sql,
             onSuccess: () => {
                 this._navigator?.refresh?.();
-                this.dock.removePanel(this.panelId(ref));
-                this.dock.removePanel(this.definitionPanelId(ref));
+                this.dock.removePanel(panelId(ref));
+                this.dock.removePanel(definitionPanelId(ref));
             },
             ...this.ddlDefaults(ref),
         });
@@ -1637,7 +1621,7 @@ export class SqlAdminController {
      *   disambiguates overloads).
      */
     async openFunctionDefinition(ref: DbObjectRef, node?: TreeNode): Promise<void> {
-        const id = this.functionDefinitionPanelId(ref);
+        const id = functionDefinitionPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -1691,7 +1675,7 @@ export class SqlAdminController {
                     // The save itself already succeeded (executeDdl above didn't
                     // throw) — only the post-save re-fetch failed, so this is NOT a
                     // failed save. Say so explicitly, mirroring openDefinition.
-                    this.notifyError(new Error(`saved, but failed to refresh the tab: ${this.errorMessage(err)}`), ref);
+                    this.notifyError(new Error(`saved, but failed to refresh the tab: ${errorMessage(err)}`), ref);
 
                     return;
                 }
@@ -1749,7 +1733,7 @@ export class SqlAdminController {
             ))).sql,
             onSuccess: () => {
                 this._navigator?.refresh?.();
-                this.dock.removePanel(this.functionDefinitionPanelId(ref));
+                this.dock.removePanel(functionDefinitionPanelId(ref));
             },
             ...this.ddlDefaults(ref),
         });
@@ -1889,7 +1873,7 @@ export class SqlAdminController {
      * @param ref - The table whose structure tab to read.
      */
     private structureColumns(ref: DbObjectRef): ColumnMeta[] {
-        return this._openPanels.get(this.structurePanelId(ref))?.columns ?? [];
+        return this._openPanels.get(structurePanelId(ref))?.columns ?? [];
     }
 
     /**
@@ -1906,7 +1890,7 @@ export class SqlAdminController {
      * @param ref - The table whose structure tab to reseed.
      */
     private refreshStructure(ref: DbObjectRef): void {
-        this._openPanels.get(this.structurePanelId(ref))?.refresh?.();
+        this._openPanels.get(structurePanelId(ref))?.refresh?.();
     }
 
     /**
@@ -1916,7 +1900,7 @@ export class SqlAdminController {
      * no `DbObjectRef`), matching how scratch query panels are handled.
      */
     openDocumentation(): void {
-        const id = this.notesPanelId();
+        const id = notesPanelId(this._connectionId);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -1943,7 +1927,7 @@ export class SqlAdminController {
      *   registered in _openPanels, so there is no node to remember.
      */
     async openSchemaDiagram(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
-        const id = this.diagramPanelId(ref);
+        const id = diagramPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -2039,7 +2023,7 @@ export class SqlAdminController {
      *   registered in _openPanels, so there is no node to remember.
      */
     async openDatabaseDiagram(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
-        const id = this.databaseDiagramPanelId(ref);
+        const id = databaseDiagramPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -2126,7 +2110,7 @@ export class SqlAdminController {
      *   control opens at; anything else opens at the default.
      */
     async openRelationDiagram(ref: DbObjectRef, _node?: TreeNode, depth?: string): Promise<void> {
-        const id = this.relationDiagramPanelId(ref);
+        const id = relationDiagramPanelId(ref);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -2226,15 +2210,15 @@ export class SqlAdminController {
                 key,
                 glyph          : "share-nodes",
                 fetch          : ref => this.fetchDependencyGraph(ref),
-                schemaPanelId  : ref => this.dependencyPanelId(ref),
-                relationPanelId: ref => this.relationDependencyPanelId(ref),
+                schemaPanelId  : ref => dependencyPanelId(ref),
+                relationPanelId: ref => relationDependencyPanelId(ref),
             }
             : {
                 key,
                 glyph          : "sitemap",
                 fetch          : ref => this.fetchInheritanceGraph(ref),
-                schemaPanelId  : ref => this.inheritancePanelId(ref),
-                relationPanelId: ref => this.relationInheritancePanelId(ref),
+                schemaPanelId  : ref => inheritancePanelId(ref),
+                relationPanelId: ref => relationInheritancePanelId(ref),
             };
     }
 
@@ -2962,7 +2946,7 @@ export class SqlAdminController {
      * @param ref - The table ref (matched to a remembered entry by panel id).
      */
     reopenTable(ref: DbObjectRef): void {
-        const entry = this._recentTables.find(t => this.panelId(t.ref) === this.panelId(ref));
+        const entry = this._recentTables.find(t => panelId(t.ref) === panelId(ref));
 
         if (entry) {
             void this.openTable(entry.ref, entry.node);
@@ -3089,8 +3073,8 @@ export class SqlAdminController {
 
     /** Remember a just-opened table (dedupe by panel id, move-to-front, capped). */
     private rememberTable(ref: DbObjectRef, node: TreeNode): void {
-        const id       = this.panelId(ref);
-        const existing = this._recentTables.findIndex(t => this.panelId(t.ref) === id);
+        const id       = panelId(ref);
+        const existing = this._recentTables.findIndex(t => panelId(t.ref) === id);
 
         if (existing >= 0) {
             this._recentTables.splice(existing, 1);
@@ -3147,7 +3131,7 @@ export class SqlAdminController {
      * than serving stale columns from a cache.
      */
     private fetchColumns(ref: DbObjectRef): Promise<ColumnMeta[]> {
-        const key = this.panelId(ref);
+        const key = panelId(ref);
         const inFlight = this._columnsInFlight.get(key);
 
         if (inFlight) {
@@ -3176,8 +3160,8 @@ export class SqlAdminController {
             return;
         }
 
-        const cached = this._openPanels.get(this.panelId(ref))?.columns
-                       ?? this._openPanels.get(this.structurePanelId(ref))?.columns;
+        const cached = this._openPanels.get(panelId(ref))?.columns
+                       ?? this._openPanels.get(structurePanelId(ref))?.columns;
 
         if (cached) {
             this.properties.show(ref, cached);
@@ -3269,7 +3253,7 @@ export class SqlAdminController {
      * the tab and reports through the Dock "exception" handler.
      */
     private openRoleGrants(role: string): void {
-        const id = `grants/${this._connectionId}/${role}`;
+        const id = roleGrantsPanelId(this._connectionId, role);
 
         if (this.dock.focusPanel(id)) {
             void this.showRoleProperties(role);
@@ -3309,7 +3293,7 @@ export class SqlAdminController {
      *   control opens at; anything else opens at the default.
      */
     async openRoleMembershipDiagram(name: string, depth?: string): Promise<void> {
-        const id = this.roleMembershipDiagramPanelId(name);
+        const id = roleMembershipDiagramPanelId(this._connectionId, name);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -3346,7 +3330,7 @@ export class SqlAdminController {
      * @param name - The role whose grants to graph.
      */
     async openRoleGrantsDiagram(name: string): Promise<void> {
-        const id = this.roleGrantsDiagramPanelId(name);
+        const id = roleGrantsDiagramPanelId(this._connectionId, name);
 
         if (this.dock.focusPanel(id)) {
             return;
@@ -3473,127 +3457,21 @@ export class SqlAdminController {
      */
     notifyError(error: unknown, ref?: DbObjectRef): void {
         const where  = ref?.name ? ` (${ref.name})` : "";
-        const detail = this.errorMessage(error);
+        const detail = errorMessage(error);
 
         this.statusBar.setMessage(`Error${where}: ${detail}`);
         Notification.show(ref?.name ? `${ref.name}: ${detail}` : detail, "error");
     }
 
     /**
-     * Stable panel id so re-opening focuses the existing panel. Includes the
-     * connection and database so same-named tables in different databases (e.g.
-     * `postgres` vs `sqladmin`, both with `public.customers`) never collide.
-     */
-    private panelId(ref: DbObjectRef): string {
-        return `${ref.connectionId}/${ref.database}/${ref.schema}.${ref.name}`;
-    }
-
-    /** Stable id for a table's structure tab, distinct from its data tab. */
-    private structurePanelId(ref: DbObjectRef): string {
-        return `${this.panelId(ref)}::structure`;
-    }
-
-    /** Stable id for a view's definition tab, distinct from its data/structure tabs. */
-    private definitionPanelId(ref: DbObjectRef): string {
-        return `${this.panelId(ref)}::definition`;
-    }
-
-    /** Stable id for a sequence's info tab, distinct from any relation tab. */
-    private sequenceInfoPanelId(ref: DbObjectRef): string {
-        return `${this.panelId(ref)}::sequence`;
-    }
-
-    /** Stable id for an index's info tab, distinct from any relation tab. */
-    private indexInfoPanelId(ref: DbObjectRef): string {
-        return `${this.panelId(ref)}::index`;
-    }
-
-    /** Stable id for a type's info tab, distinct from any relation tab. */
-    private typeInfoPanelId(ref: DbObjectRef): string {
-        return `${this.panelId(ref)}::type`;
-    }
-
-    /** Stable id for a DDL draft tab. See the id table in `## Architecture Decisions`. */
-    private ddlPanelId(ref: DbObjectRef, slug: string): string {
-        return `${ref.connectionId}/${ref.database}/${ref.schema ?? ""}/${ref.name ?? ""}::ddl-${slug}`;
-    }
-
-    /**
-     * Stable id for a function/procedure's definition tab. Includes the
-     * identity signature so two overloads of the same name (e.g.
-     * `total_orders()` and `total_orders(integer)`) get distinct tabs rather
-     * than colliding on `schema.name`.
-     */
-    private functionDefinitionPanelId(ref: DbObjectRef): string {
-        return `${this.panelId(ref)}(${ref.signature ?? ""})::function`;
-    }
-
-    /** Stable id for a schema's diagram tab, distinct from any relation tab. */
-    private diagramPanelId(ref: DbObjectRef): string {
-        return `${ref.connectionId}/${ref.database}/${ref.schema}::diagram`;
-    }
-
-    /**
-     * Stable id for a relation's rooted-diagram tab. `panelId` already includes
-     * the relation name, so this never collides with the schema diagram id
-     * (`.../schema::diagram`) nor with the relation's data/structure/definition
-     * tabs.
-     */
-    private relationDiagramPanelId(ref: DbObjectRef): string {
-        return `${this.panelId(ref)}::diagram`;
-    }
-
-    /** Stable id for the singleton per-connection notes/documentation tab. */
-    private notesPanelId(): string {
-        return `notes/${this._connectionId}`;
-    }
-
-    /**
-     * Stable id for a database's diagram tab, distinct from a schema's diagram
-     * id (no `/schema` segment) and from any relation tab.
-     */
-    private databaseDiagramPanelId(ref: DbObjectRef): string {
-        return `${ref.connectionId}/${ref.database}::db-diagram`;
-    }
-
-    /** Stable id for a role's membership-diagram tab. */
-    private roleMembershipDiagramPanelId(role: string): string {
-        return `roles/${this._connectionId}/${role}::membership`;
-    }
-
-    /**
-     * Stable id for a role's grants-diagram tab, distinct from openRoleGrants'
-     * `grants/${conn}/${role}` grid tab id.
-     */
-    private roleGrantsDiagramPanelId(role: string): string {
-        return `roles/${this._connectionId}/${role}::grants-diagram`;
-    }
-
-    /** Stable id for a schema's dependency-graph tab, distinct from any relation tab. */
-    private dependencyPanelId(ref: DbObjectRef): string {
-        return `${ref.connectionId}/${ref.database}/${ref.schema}::dependencies`;
-    }
-
-    /** Stable id for a relation's rooted dependency-graph tab. */
-    private relationDependencyPanelId(ref: DbObjectRef): string {
-        return `${this.panelId(ref)}::dependencies`;
-    }
-
-    /** Stable id for a schema's inheritance-graph tab, distinct from any relation tab. */
-    private inheritancePanelId(ref: DbObjectRef): string {
-        return `${ref.connectionId}/${ref.database}/${ref.schema}::inheritance`;
-    }
-
-    /** Stable id for a relation's rooted inheritance-graph tab. */
-    private relationInheritancePanelId(ref: DbObjectRef): string {
-        return `${this.panelId(ref)}::inheritance`;
-    }
-    /**
      * Hover tooltip for a tab: the object name, then Type/Schema/Database ordered
-     * most-specific to broadest.
+     * most-specific to broadest. A thin wrapper over the pure builder — named
+     * `buildPanelTooltip` on import so this method's body cannot be misread as
+     * recursive — supplying the type label the free function stays free of the
+     * DOM-touching lookup for.
      */
     private panelTooltip(ref: DbObjectRef): string {
-        return `${ref.name}\n\nType: ${kindDisplayLabel(ref.kind)}\nSchema: ${ref.schema}\nDatabase: ${ref.database}`;
+        return buildPanelTooltip(ref, kindDisplayLabel(ref.kind));
     }
 
     /** Drop a closed panel's store from the registry (the dock drives the start page). */
@@ -3673,46 +3551,5 @@ export class SqlAdminController {
         } else {
             this.statusBar.setMessage(`${this._statusScope} · ${panel.ref.name}: ${panel.detail ?? "structure"}`);
         }
-    }
-
-    /** Prefer an AjaxError's parsed {detail}; fall back to a message or string. */
-    private errorMessage(error: unknown): string {
-        const e = error as { body?: unknown; message?: unknown };
-        const detail = this.detailOf(e?.body);
-
-        if (detail) {
-            return detail;
-        }
-
-        if (typeof e?.message === "string" && e.message) {
-            return e.message;
-        }
-
-        return String(error);
-    }
-
-    /**
-     * Extract a readable message from a backend error body. A domain error's
-     * `detail` is a string; a FastAPI validation error's `detail` is an array of
-     * `{msg, ...}` entries, which are joined.
-     */
-    private detailOf(body: unknown): string | null {
-        if (!body || typeof body !== "object") {
-            return null;
-        }
-
-        const detail = (body as { detail?: unknown }).detail;
-
-        if (typeof detail === "string") {
-            return detail;
-        }
-
-        if (Array.isArray(detail)) {
-            return detail
-                .map(d => (d && typeof d === "object" && "msg" in d ? String((d as { msg: unknown }).msg) : String(d)))
-                .join("; ");
-        }
-
-        return null;
     }
 }
