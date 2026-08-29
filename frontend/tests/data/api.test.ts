@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
     getViewDefinition, getStructure, getSchemaGraph, getDatabaseGraph, runExplain, runQuery, tableExportUrl,
     setCsrfToken, csrfHeader, executeDdl, apiPath, tableRowsUrl, getObjects, previewDropTable, previewImportRows,
-    getRoleDetail,
+    getRoleDetail, getSchemas, previewCreateTable, getDatabases, getRoles,
 } from "../../src/data/api";
 import type { DbObjectRef } from "../../src/contract";
 
@@ -53,7 +53,7 @@ describe("getObjects with a hostile schema name", () => {
 
         await getObjects("default", "shop", "we/ird");
 
-        expect(fetchMock).toHaveBeenCalledWith("/api/default/shop/we%2Fird/objects");
+        expect(fetchMock).toHaveBeenCalledWith("/api/default/db/shop/we%2Fird/objects");
     });
 });
 
@@ -71,7 +71,7 @@ describe("getStructure with hostile schema and name", () => {
 
         await getStructure(ref);
 
-        expect(fetchMock).toHaveBeenCalledWith("/api/default/shop/a%23b/my%20table/structure");
+        expect(fetchMock).toHaveBeenCalledWith("/api/default/db/shop/a%23b/my%20table/structure");
     });
 });
 
@@ -91,7 +91,7 @@ describe("previewDropTable with a hostile database name", () => {
         await previewDropTable(ref, spec as never);
 
         expect(fetchMock).toHaveBeenCalledWith(
-            "/api/default/my%20db/ddl/table/drop",
+            "/api/default/db/my%20db/ddl/table/drop",
             expect.objectContaining({ method: "POST" }),
         );
     });
@@ -112,7 +112,7 @@ describe("previewImportRows with a hostile table name", () => {
         await previewImportRows(ref, []);
 
         expect(fetchMock).toHaveBeenCalledWith(
-            "/api/default/shop/public/od%2Fd/rows/import/preview",
+            "/api/default/db/shop/public/od%2Fd/rows/import/preview",
             expect.objectContaining({ method: "POST" }),
         );
     });
@@ -139,7 +139,7 @@ describe("tableRowsUrl", () => {
             kind        : "table",
         };
 
-        expect(tableRowsUrl(ref)).toBe("/api/default/shop/public/my%20table/rows");
+        expect(tableRowsUrl(ref)).toBe("/api/default/db/shop/public/my%20table/rows");
     });
 });
 
@@ -161,7 +161,7 @@ describe("getViewDefinition", () => {
 
         expect(result).toEqual(payload);
         expect(fetchMock).toHaveBeenCalledWith(
-            "/api/default/sqladmin/public/active_customers/definition",
+            "/api/default/db/sqladmin/public/active_customers/definition",
         );
     });
 
@@ -199,7 +199,7 @@ describe("getStructure", () => {
         const result = await getStructure(ref);
 
         expect(result).toEqual(structure);
-        expect(fetchMock).toHaveBeenCalledWith("/api/default/sqladmin/public/customers/structure");
+        expect(fetchMock).toHaveBeenCalledWith("/api/default/db/sqladmin/public/customers/structure");
     });
 
     it("throws the backend {detail} on a non-OK response", async () => {
@@ -242,7 +242,7 @@ describe("getSchemaGraph", () => {
         const result = await getSchemaGraph(ref);
 
         expect(result).toEqual(graph);
-        expect(fetchMock).toHaveBeenCalledWith("/api/default/sqladmin/public/graph");
+        expect(fetchMock).toHaveBeenCalledWith("/api/default/db/sqladmin/public/graph");
     });
 
     it("throws the backend {detail} on a non-OK response", async () => {
@@ -280,7 +280,7 @@ describe("getDatabaseGraph", () => {
         const result = await getDatabaseGraph(ref);
 
         expect(result).toEqual(graph);
-        expect(fetchMock).toHaveBeenCalledWith("/api/default/sqladmin/graph");
+        expect(fetchMock).toHaveBeenCalledWith("/api/default/db/sqladmin/graph");
     });
 
     it("throws the backend {detail} on a non-OK response", async () => {
@@ -307,9 +307,9 @@ describe("tableExportUrl", () => {
         };
 
         expect(tableExportUrl(ref, "csv"))
-            .toBe("/api/default/sqladmin/public/customers/export?format=csv");
+            .toBe("/api/default/db/sqladmin/public/customers/export?format=csv");
         expect(tableExportUrl(ref, "json"))
-            .toBe("/api/default/sqladmin/public/customers/export?format=json");
+            .toBe("/api/default/db/sqladmin/public/customers/export?format=json");
     });
 
     it("percent-encodes path segments so odd identifiers stay well-formed", () => {
@@ -322,7 +322,7 @@ describe("tableExportUrl", () => {
         };
 
         expect(tableExportUrl(ref, "csv"))
-            .toBe("/api/default/sqladmin/public/my%20table/export?format=csv");
+            .toBe("/api/default/db/sqladmin/public/my%20table/export?format=csv");
     });
 });
 
@@ -436,6 +436,84 @@ describe("executeDdl", () => {
 
         await expect(executeDdl("default", "CRATE TABLE t (id int)"))
             .rejects.toThrow('syntax error at or near "CRATE"');
+    });
+});
+
+describe("database-scoped builders carry the /db/ segment", () => {
+    it("getSchemas fetches /api/{connectionId}/db/{database}/schemas", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => [] });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await getSchemas("default", "shop");
+
+        expect(fetchMock).toHaveBeenCalledWith("/api/default/db/shop/schemas");
+    });
+
+    it("previewCreateTable posts to /api/{connectionId}/db/{database}/ddl/table/create", async () => {
+        const ref: DbObjectRef = {
+            connectionId: "default",
+            database    : "shop",
+            schema      : "public",
+            name        : "orders",
+            kind        : "table",
+        };
+        const spec      = { schema: "public", name: "orders", columns: [] };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sql: "" }) });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await previewCreateTable(ref, spec as never);
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/default/db/shop/ddl/table/create",
+            expect.objectContaining({ method: "POST" }),
+        );
+    });
+
+    it("previewImportRows posts to /api/{connectionId}/db/{database}/{schema}/{name}/rows/import/preview", async () => {
+        const ref: DbObjectRef = {
+            connectionId: "default",
+            database    : "shop",
+            schema      : "public",
+            name        : "orders",
+            kind        : "table",
+        };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await previewImportRows(ref, []);
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/default/db/shop/public/orders/rows/import/preview",
+            expect.objectContaining({ method: "POST" }),
+        );
+    });
+});
+
+describe("connection-scoped builders are unchanged by the /db/ segment", () => {
+    it("runQuery, runExplain, and executeDdl stay directly under the connection", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await runQuery("default", "select 1");
+        await runExplain("default", "select 1", { analyze: false, format: "text" });
+        await executeDdl("default", "CREATE TABLE t (id int)");
+
+        expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/default/query", expect.anything());
+        expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/default/explain", expect.anything());
+        expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/default/ddl/execute", expect.anything());
+    });
+
+    it("getDatabases, getRoles, and getRoleDetail stay directly under the connection", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => [] });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await getDatabases("default");
+        await getRoles("default");
+        await getRoleDetail("default", "schemas");
+
+        expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/default/databases");
+        expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/default/roles");
+        expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/default/roles/schemas");
     });
 });
 

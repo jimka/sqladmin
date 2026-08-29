@@ -195,7 +195,7 @@ export function getDatabases(connectionId: string): Promise<{ name: string }[]> 
 
 /** The navigator's schema level. */
 export function getSchemas(connectionId: string, database: string): Promise<{ name: string }[]> {
-    return getJson(apiPath(connectionId, database, "schemas"));
+    return getJson(apiPath(connectionId, "db", database, "schemas"));
 }
 
 /** The navigator's table/view level. */
@@ -204,7 +204,7 @@ export function getObjects(
     database    : string,
     schema      : string,
 ): Promise<{ name: string; kind: DbObjectKind }[]> {
-    return getJson(apiPath(connectionId, database, schema, "objects"));
+    return getJson(apiPath(connectionId, "db", database, schema, "objects"));
 }
 
 /** The navigator's Functions category level. */
@@ -213,7 +213,7 @@ export function getFunctions(
     database    : string,
     schema      : string,
 ): Promise<FunctionListItem[]> {
-    return getJson(apiPath(connectionId, database, schema, "functions"));
+    return getJson(apiPath(connectionId, "db", database, schema, "functions"));
 }
 
 /** The navigator's Types category level. */
@@ -222,7 +222,7 @@ export function getTypes(
     database    : string,
     schema      : string,
 ): Promise<{ name: string }[]> {
-    return getJson(apiPath(connectionId, database, schema, "types"));
+    return getJson(apiPath(connectionId, "db", database, schema, "types"));
 }
 
 /** The navigator's Indexes category level — every index across every table in the schema. */
@@ -231,7 +231,7 @@ export function getIndexes(
     database    : string,
     schema      : string,
 ): Promise<IndexDetail[]> {
-    return getJson(apiPath(connectionId, database, schema, "indexes"));
+    return getJson(apiPath(connectionId, "db", database, schema, "indexes"));
 }
 
 /** View/matview dependency edges for a schema (view -> underlying relation). */
@@ -240,7 +240,7 @@ export function getDependencies(
     database    : string,
     schema      : string,
 ): Promise<RelationEdge[]> {
-    return getJson(apiPath(connectionId, database, schema, "dependencies"));
+    return getJson(apiPath(connectionId, "db", database, schema, "dependencies"));
 }
 
 /** Inheritance/partition edges for a schema (parent -> child). */
@@ -249,47 +249,51 @@ export function getInheritance(
     database    : string,
     schema      : string,
 ): Promise<RelationEdge[]> {
-    return getJson(apiPath(connectionId, database, schema, "inheritance"));
+    return getJson(apiPath(connectionId, "db", database, schema, "inheritance"));
 }
 
 /** Introspect a table's columns (drives the Model + data grid). */
 export function getColumns(ref: DbObjectRef): Promise<ColumnMeta[]> {
-    return getJson<ColumnMeta[]>(apiPath(ref.connectionId, ref.database, ref.schema, ref.name, "columns"));
+    return getJson<ColumnMeta[]>(apiPath(ref.connectionId, "db", ref.database, ref.schema, ref.name, "columns"));
 }
 
 /** The connected user's INSERT/UPDATE/DELETE/SELECT rights on a table. */
 export function getTablePrivileges(ref: DbObjectRef): Promise<TablePrivileges> {
-    return getJson<TablePrivileges>(apiPath(ref.connectionId, ref.database, ref.schema, ref.name, "privileges"));
+    return getJson<TablePrivileges>(
+        apiPath(ref.connectionId, "db", ref.database, ref.schema, ref.name, "privileges"),
+    );
 }
 
 /** Fetch a (materialized) view's definition SQL (pg_get_viewdef). */
 export function getViewDefinition(ref: DbObjectRef): Promise<ViewDefinition> {
-    return getJson<ViewDefinition>(apiPath(ref.connectionId, ref.database, ref.schema, ref.name, "definition"));
+    return getJson<ViewDefinition>(
+        apiPath(ref.connectionId, "db", ref.database, ref.schema, ref.name, "definition"),
+    );
 }
 
 /** Fetch a table's indexes, constraints, and foreign keys in one round trip. */
 export function getStructure(ref: DbObjectRef): Promise<TableStructure> {
-    return getJson<TableStructure>(apiPath(ref.connectionId, ref.database, ref.schema, ref.name, "structure"));
+    return getJson<TableStructure>(apiPath(ref.connectionId, "db", ref.database, ref.schema, ref.name, "structure"));
 }
 
 /** Fetch a whole schema's ER graph metadata (every base table's structure + columns) in one request. */
 export function getSchemaGraph(ref: DbObjectRef): Promise<SchemaGraph> {
-    return getJson<SchemaGraph>(apiPath(ref.connectionId, ref.database, ref.schema, "graph"));
+    return getJson<SchemaGraph>(apiPath(ref.connectionId, "db", ref.database, ref.schema, "graph"));
 }
 
 /** Fetch a whole database's ER graph metadata (every non-system schema's tables + structures) in one request. */
 export function getDatabaseGraph(ref: DbObjectRef): Promise<DatabaseGraph> {
-    return getJson<DatabaseGraph>(apiPath(ref.connectionId, ref.database, "graph"));
+    return getJson<DatabaseGraph>(apiPath(ref.connectionId, "db", ref.database, "graph"));
 }
 
 /** Fetch a sequence's current state and parameters (pg_sequences). */
 export function getSequenceDetail(ref: DbObjectRef): Promise<SequenceDetail> {
-    return getJson<SequenceDetail>(apiPath(ref.connectionId, ref.database, ref.schema, ref.name, "sequence"));
+    return getJson<SequenceDetail>(apiPath(ref.connectionId, "db", ref.database, ref.schema, ref.name, "sequence"));
 }
 
 /** Fetch one index's full definition, flags, and owning table (IndexDetailQuery). */
 export function getIndexDetail(ref: DbObjectRef): Promise<IndexDetail> {
-    return getJson<IndexDetail>(apiPath(ref.connectionId, ref.database, ref.schema, ref.name, "index"));
+    return getJson<IndexDetail>(apiPath(ref.connectionId, "db", ref.database, ref.schema, ref.name, "index"));
 }
 
 /**
@@ -313,12 +317,12 @@ export function runQuery(connectionId: string, sql: string): Promise<QueryResult
  * @returns The `/…/export?format=…` URL to navigate to.
  */
 export function tableExportUrl(ref: DbObjectRef, format: "csv" | "json"): string {
-    return `${apiPath(ref.connectionId, ref.database, ref.schema, ref.name, "export")}?format=${format}`;
+    return `${apiPath(ref.connectionId, "db", ref.database, ref.schema, ref.name, "export")}?format=${format}`;
 }
 
 /** Collection URL for a table's row CRUD, called by `stores.ts`'s `AjaxProxy` (not a typed fetch). */
 export function tableRowsUrl(ref: DbObjectRef): string {
-    return apiPath(ref.connectionId, ref.database, ref.schema, ref.name, "rows");
+    return apiPath(ref.connectionId, "db", ref.database, ref.schema, ref.name, "rows");
 }
 
 /**
@@ -354,7 +358,7 @@ export function runExplain(
  * the pattern (no preview method ships in this infra module):
  * ```ts
  * export function previewCreateTable(ref: DbObjectRef, spec: CreateTableSpec): Promise<DdlPreview> {
- *     return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "create-table"), spec);
+ *     return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "create-table"), spec);
  * }
  * ```
  *
@@ -368,52 +372,52 @@ export function executeDdl(connectionId: string, sql: string): Promise<QueryStat
 
 /** Preview a CREATE TABLE statement (table-ddl phase). */
 export function previewCreateTable(ref: DbObjectRef, spec: CreateTableSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "table", "create"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "table", "create"), spec);
 }
 
 /** Preview a DROP TABLE statement (table-ddl phase). */
 export function previewDropTable(ref: DbObjectRef, spec: DropTableSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "table", "drop"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "table", "drop"), spec);
 }
 
 /** Preview one ALTER TABLE column/table-rename statement (table-ddl phase). */
 export function previewAlterTable(ref: DbObjectRef, spec: AlterTableSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "table", "alter"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "table", "alter"), spec);
 }
 
 /** Preview one constraint add/drop statement (table-ddl phase). */
 export function previewConstraint(ref: DbObjectRef, spec: ConstraintSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "table", "constraint"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "table", "constraint"), spec);
 }
 
 /** Preview one index create/drop statement (table-ddl phase). */
 export function previewIndex(ref: DbObjectRef, spec: IndexSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "table", "index"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "table", "index"), spec);
 }
 
 /** Preview a CREATE [OR REPLACE] VIEW statement (view-matview-ddl phase). */
 export function previewCreateView(ref: DbObjectRef, spec: CreateViewSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "create-view"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "create-view"), spec);
 }
 
 /** Preview a DROP VIEW statement (view-matview-ddl phase). */
 export function previewDropView(ref: DbObjectRef, spec: DropSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "drop-view"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "drop-view"), spec);
 }
 
 /** Preview a CREATE MATERIALIZED VIEW statement (view-matview-ddl phase). */
 export function previewCreateMatview(ref: DbObjectRef, spec: CreateMatviewSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "create-matview"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "create-matview"), spec);
 }
 
 /** Preview a DROP MATERIALIZED VIEW statement (view-matview-ddl phase). */
 export function previewDropMatview(ref: DbObjectRef, spec: DropSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "drop-matview"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "drop-matview"), spec);
 }
 
 /** Preview a REFRESH MATERIALIZED VIEW statement (view-matview-ddl phase). */
 export function previewRefreshMatview(ref: DbObjectRef, spec: RefreshMatviewSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "refresh-matview"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "refresh-matview"), spec);
 }
 
 /**
@@ -422,32 +426,32 @@ export function previewRefreshMatview(ref: DbObjectRef, spec: RefreshMatviewSpec
  * OR REPLACE'd, so an edit runs as this semicolon-joined pair instead.
  */
 export function previewReplaceMatview(ref: DbObjectRef, spec: ReplaceMatviewSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "replace-matview"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "replace-matview"), spec);
 }
 
 /** Preview a CREATE SCHEMA statement (schema-sequence-ddl phase). */
 export function previewCreateSchema(ref: DbObjectRef, spec: CreateSchemaSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "create-schema"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "create-schema"), spec);
 }
 
 /** Preview a DROP SCHEMA statement (schema-sequence-ddl phase). */
 export function previewDropSchema(ref: DbObjectRef, spec: DropSchemaSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "drop-schema"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "drop-schema"), spec);
 }
 
 /** Preview an ALTER SCHEMA ... RENAME TO statement (schema-sequence-ddl phase). */
 export function previewRenameSchema(ref: DbObjectRef, spec: RenameSchemaSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "rename-schema"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "rename-schema"), spec);
 }
 
 /** Preview a CREATE SEQUENCE statement (schema-sequence-ddl phase). */
 export function previewCreateSequence(ref: DbObjectRef, spec: CreateSequenceSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "create-sequence"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "create-sequence"), spec);
 }
 
 /** Preview an ALTER SEQUENCE parameter-form statement (schema-sequence-ddl phase). */
 export function previewAlterSequence(ref: DbObjectRef, spec: AlterSequenceSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "alter-sequence"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "alter-sequence"), spec);
 }
 
 /**
@@ -456,12 +460,12 @@ export function previewAlterSequence(ref: DbObjectRef, spec: AlterSequenceSpec):
  * (see plans/implemented/schema-sequence-ddl.md's "ALTER SEQUENCE" decision).
  */
 export function previewSequenceOwner(ref: DbObjectRef, spec: SequenceOwnerSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "sequence-owner"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "sequence-owner"), spec);
 }
 
 /** Preview a DROP SEQUENCE statement (schema-sequence-ddl phase). */
 export function previewDropSequence(ref: DbObjectRef, spec: DropSequenceSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "drop-sequence"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "drop-sequence"), spec);
 }
 
 /**
@@ -470,46 +474,47 @@ export function previewDropSequence(ref: DbObjectRef, spec: DropSequenceSpec): P
  * (disambiguates overloads).
  */
 export function getFunctionDefinition(ref: DbObjectRef, signature: string): Promise<FunctionDefinition> {
-    return postJson<FunctionDefinition>(apiPath(ref.connectionId, ref.database, "ddl", "function-definition"), {
-        schema: ref.schema, name: ref.name, signature,
-    });
+    return postJson<FunctionDefinition>(
+        apiPath(ref.connectionId, "db", ref.database, "ddl", "function-definition"),
+        { schema: ref.schema, name: ref.name, signature },
+    );
 }
 
 /** Introspect an enum/composite type for the edit-prefill flow (function-type-ddl phase). */
 export function getTypeDefinition(ref: DbObjectRef): Promise<TypeDefinition> {
-    return postJson<TypeDefinition>(apiPath(ref.connectionId, ref.database, "ddl", "type-definition"), {
+    return postJson<TypeDefinition>(apiPath(ref.connectionId, "db", ref.database, "ddl", "type-definition"), {
         schema: ref.schema, name: ref.name,
     });
 }
 
 /** Preview a CREATE [OR REPLACE] FUNCTION|PROCEDURE statement (function-type-ddl phase). */
 export function previewCreateFunction(ref: DbObjectRef, spec: CreateFunctionSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "create-function"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "create-function"), spec);
 }
 
 /** Preview a DROP FUNCTION|PROCEDURE statement (function-type-ddl phase). */
 export function previewDropFunction(ref: DbObjectRef, spec: DropFunctionSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "drop-function"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "drop-function"), spec);
 }
 
 /** Preview a CREATE TYPE ... AS ENUM statement (function-type-ddl phase). */
 export function previewCreateEnumType(ref: DbObjectRef, spec: CreateEnumTypeSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "create-enum-type"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "create-enum-type"), spec);
 }
 
 /** Preview a CREATE TYPE ... AS (...) composite-type statement (function-type-ddl phase). */
 export function previewCreateCompositeType(ref: DbObjectRef, spec: CreateCompositeTypeSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "create-composite-type"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "create-composite-type"), spec);
 }
 
 /** Preview a DROP TYPE statement (function-type-ddl phase). */
 export function previewDropType(ref: DbObjectRef, spec: DropTypeSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "drop-type"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "drop-type"), spec);
 }
 
 /** Preview an ALTER TYPE ... ADD VALUE statement (function-type-ddl phase). */
 export function previewAlterTypeAddValue(ref: DbObjectRef, spec: AlterTypeAddValueSpec): Promise<DdlPreview> {
-    return postJson<DdlPreview>(apiPath(ref.connectionId, ref.database, "ddl", "alter-type-add-value"), spec);
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "alter-type-add-value"), spec);
 }
 
 /**
@@ -520,14 +525,14 @@ export function previewAlterTypeAddValue(ref: DbObjectRef, spec: AlterTypeAddVal
  */
 export function previewImportRows(ref: DbObjectRef, rows: Record<string, unknown>[]): Promise<ImportPreviewResult> {
     return postJson<ImportPreviewResult>(
-        apiPath(ref.connectionId, ref.database, ref.schema, ref.name, "rows", "import", "preview"), { rows },
+        apiPath(ref.connectionId, "db", ref.database, ref.schema, ref.name, "rows", "import", "preview"), { rows },
     );
 }
 
 /** Insert every row of a validated import in one all-or-nothing transaction. */
 export function executeImportRows(ref: DbObjectRef, rows: Record<string, unknown>[]): Promise<ImportCommitResult> {
     return postJson<ImportCommitResult>(
-        apiPath(ref.connectionId, ref.database, ref.schema, ref.name, "rows", "import"), { rows },
+        apiPath(ref.connectionId, "db", ref.database, ref.schema, ref.name, "rows", "import"), { rows },
     );
 }
 
