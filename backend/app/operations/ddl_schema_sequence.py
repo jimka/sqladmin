@@ -80,7 +80,9 @@ class SchemaCreatePreview(DdlPreview):
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
-        """Set ``self._sql`` to the generated ``CREATE SCHEMA`` statement."""
+        """
+        Set ``self._sql`` to the generated ``CREATE SCHEMA`` statement.
+        """
         authorization = self._spec.get("authorization") or None
         self._sql = ddl.schema_create(self._name, authorization=authorization)
 
@@ -105,7 +107,9 @@ class SchemaDropPreview(DdlPreview):
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
-        """Set ``self._sql`` to the generated ``DROP SCHEMA`` statement."""
+        """
+        Set ``self._sql`` to the generated ``DROP SCHEMA`` statement.
+        """
         self._sql = ddl.schema_drop(
             self._name,
             cascade=bool(self._spec.get("cascade", False)),
@@ -133,7 +137,9 @@ class SchemaRenamePreview(DdlPreview):
         self._new_name: str = require_field(spec, "newName")
 
     def build(self) -> None:
-        """Set ``self._sql`` to the generated ``ALTER SCHEMA ... RENAME TO`` statement."""
+        """
+        Set ``self._sql`` to the generated ``ALTER SCHEMA ... RENAME TO`` statement.
+        """
         self._sql = ddl.schema_rename(self._name, self._new_name)
 
 
@@ -170,7 +176,9 @@ class SequenceCreatePreview(DdlPreview):
         self._owned_by: tuple[str, str, str] | None = _owned_by(spec)
 
     def build(self) -> None:
-        """Set ``self._sql`` to the generated ``CREATE SEQUENCE`` statement."""
+        """
+        Set ``self._sql`` to the generated ``CREATE SEQUENCE`` statement.
+        """
         self._sql = ddl.sequence_create(
             self._schema,
             self._name,
@@ -291,7 +299,9 @@ class SequenceOwnerPreview(DdlPreview):
         self._owner: str = require_field(spec, "owner")
 
     def build(self) -> None:
-        """Set ``self._sql`` to the generated ``OWNER TO`` statement."""
+        """
+        Set ``self._sql`` to the generated ``OWNER TO`` statement.
+        """
         self._sql = ddl.sequence_set_owner(self._schema, self._name, self._owner)
 
 
@@ -316,7 +326,9 @@ class SequenceDropPreview(DdlPreview):
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
-        """Set ``self._sql`` to the generated ``DROP SEQUENCE`` statement."""
+        """
+        Set ``self._sql`` to the generated ``DROP SEQUENCE`` statement.
+        """
         self._sql = ddl.sequence_drop(
             self._schema,
             self._name,
