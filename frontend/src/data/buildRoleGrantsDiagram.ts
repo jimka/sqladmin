@@ -7,13 +7,7 @@ import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/types
 import type { RolePrivilege } from "../contract";
 import { uniformNodeWidth } from "./uniformNodeWidth";
 import type { MeasureWidths } from "./uniformNodeWidth";
-
-// Left-to-right layered layout, matching the schema/membership graphs' layout
-// even though a depth-1 star has no real hierarchy to speak of.
-const LAYOUT_OPTIONS: Record<string, string> = {
-    "elk.algorithm": "layered",
-    "elk.direction": "RIGHT",
-};
+import { LAYERED_RIGHT } from "./diagramLayout";
 
 // The registered glyph names for the role and table nodes. Deliberately
 // inline literals, not imported from `../roles/RolesTree` / `../navigator/
@@ -104,5 +98,7 @@ export function buildRoleGrantsDiagram(
         node.width = nodeWidth;
     }
 
-    return { nodes, edges, layoutOptions: LAYOUT_OPTIONS };
+    // Left-to-right layered layout, matching the schema/membership graphs'
+    // layout even though a depth-1 star has no real hierarchy to speak of.
+    return { nodes, edges, layoutOptions: LAYERED_RIGHT };
 }

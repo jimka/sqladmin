@@ -27,14 +27,11 @@ import type { Component }                    from "@jimka/typescript-ui/core";
 import type { RelationNodeData }             from "../data/buildRelationGraph";
 import { FilteredDiagramShell }              from "./filteredDiagramShell";
 import { JunctionDiagramView }               from "./JunctionDiagramView";
+import { ROOT_FRAME }                        from "../theme";
 
-// The root node's emphasis: a 2px accent border over the DiagramNode default of
-// a 1px border, so the root reads as the anchor of the view. TableCardNode's
-// ROOT_OUTLINE plays the same role for the card-mode renderer, but as an
-// outline rather than a border — a border there would eat into the card's
-// inner height and misalign its FK ports (see that file's header); a plain
-// DiagramNode has no such constraint, so a border is fine here.
-const ROOT_BORDER = "2px solid var(--ts-ui-accent-color, rgb(30, 100, 200))";
+// The shared root frame (theme.ts's ROOT_FRAME), applied here as a border;
+// TableCardNode applies the same value as an outline so it takes no layout
+// space.
 
 /**
  * The node renderer both relation-graph panels share: a stock DiagramNode
@@ -49,7 +46,7 @@ export function relationGraphNodeRenderer(rootId?: string): (n: DiagramNodeData)
         const node = DiagramNode({ label: n.label, glyph: n.glyph, badge: n.badge });
 
         if (rootId !== undefined && n.id === rootId) {
-            node.setBorder(ROOT_BORDER);
+            node.setBorder(ROOT_FRAME);
         }
 
         return node;

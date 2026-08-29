@@ -6,13 +6,7 @@ import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/types
 import type { RoleDetail } from "../contract";
 import { uniformNodeWidth } from "./uniformNodeWidth";
 import type { MeasureWidths } from "./uniformNodeWidth";
-
-// Left-to-right layered layout: a membership DAG reads naturally as a
-// hierarchy flow (member -> parent), matching the schema FK graph's layout.
-const LAYOUT_OPTIONS: Record<string, string> = {
-    "elk.algorithm": "layered",
-    "elk.direction": "RIGHT",
-};
+import { LAYERED_RIGHT } from "./diagramLayout";
 
 // The registered glyph name for a role node. Deliberately an inline literal,
 // not imported from `../roles/RolesTree` (whose `Glyph.register(user)` import
@@ -69,5 +63,7 @@ export function buildRoleMembershipDiagram(details: RoleDetail[], measureWidths?
         }
     }
 
-    return { nodes, edges, layoutOptions: LAYOUT_OPTIONS };
+    // Left-to-right layered layout: a membership DAG reads naturally as a
+    // hierarchy flow (member -> parent), matching the schema FK graph's layout.
+    return { nodes, edges, layoutOptions: LAYERED_RIGHT };
 }

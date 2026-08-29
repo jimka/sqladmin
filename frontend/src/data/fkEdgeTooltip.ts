@@ -15,6 +15,7 @@
 
 import type { DiagramEdgeData } from "@jimka/typescript-ui/component/diagram";
 import type { FkDetail, FkEdgeData } from "./buildSchemaDiagram";
+import { referentialActionParts } from "./fkCardinality";
 
 /**
  * Cap on the number of rendered detail *lines* a bundle tooltip draws before
@@ -53,15 +54,7 @@ function isFkEdgeData(data: unknown): data is FkEdgeData {
  * @returns The line, or `null` when both actions are the default.
  */
 function referentialActionLine(fk: FkDetail): string | null {
-    const parts: string[] = [];
-
-    if (fk.onUpdate !== "NO ACTION") {
-        parts.push(`ON UPDATE ${fk.onUpdate}`);
-    }
-
-    if (fk.onDelete !== "NO ACTION") {
-        parts.push(`ON DELETE ${fk.onDelete}`);
-    }
+    const parts = referentialActionParts(fk.onUpdate, fk.onDelete);
 
     return parts.length > 0 ? parts.join(" · ") : null;
 }

@@ -32,3 +32,19 @@ export const HISTORY_COLOR = "rgb(90, 90, 90)";
 
 /** Secondary / hint text — start-page lines, dialog captions, empty-state hints. */
 export const MUTED_TEXT_COLOR = "rgb(140, 140, 140)";
+
+/**
+ * The plain-node frame: a hairline in the library's own border color. Applied
+ * as an *outline* by `TableCardNode` (an outline takes no layout space and
+ * cannot compress the card's column rows) and as a *border* by the panels that
+ * draw a plain node.
+ */
+export const CARD_FRAME = "1px solid var(--ts-ui-border-color, rgb(180, 180, 180))";
+
+/**
+ * The root-node frame: a heavier accent-colored ring marking a diagram's root
+ * node. Applied as an *outline* by `TableCardNode` (an outline takes no layout
+ * space and cannot compress the card's column rows) and as a *border* by the
+ * panels that draw a plain node.
+ */
+export const ROOT_FRAME = "2px solid var(--ts-ui-accent-color, rgb(30, 100, 200))";

@@ -24,6 +24,7 @@ import type { DiagramNodeData }              from "@jimka/typescript-ui/componen
 import type { ExplainNodeData }              from "../data/buildExplainDiagram";
 import type { ExplainPlanNode }              from "../data/parseExplainPlan";
 import { formatMetric, formatRange, formatRowCount } from "../data/explainFormat";
+import { CARD_FRAME } from "../theme";
 
 // Fixed card width: wide enough for a node-type heading and a "label   value"
 // row without wrapping, narrow enough to keep a deep plan's columns readable. The
@@ -49,11 +50,11 @@ const CARD_INSET = 6;
 // value column, so labels and values never touch.
 const LABEL_GAP = 8;
 
-// The card border: a plain 1px frame, recoloured to the accent when selected.
-// The width stays 1px in both states so selecting a card never reflows its
-// content (a 1px→2px border would nudge everything in); the extra prominence
-// comes from SELECTED_SHADOW, a box-shadow ring that takes no layout space.
-const CARD_BORDER     = "1px solid var(--ts-ui-border-color, rgb(180, 180, 180))";
+// The card border: a plain 1px frame (theme.ts's CARD_FRAME), recoloured to
+// the accent when selected. The width stays 1px in both states so selecting a
+// card never reflows its content (a 1px→2px border would nudge everything
+// in); the extra prominence comes from SELECTED_SHADOW, a box-shadow ring that
+// takes no layout space.
 const SELECTED_BORDER = "1px solid var(--ts-ui-accent-color, rgb(30, 100, 200))";
 
 // The selection highlight: a crisp accent ring plus a soft glow, drawn as a
@@ -122,7 +123,7 @@ class ExplainNode extends Panel {
             components   : rows.length > 0 ? [header, metricGrid(rows)] : [header],
         });
 
-        this.setBorder(CARD_BORDER);
+        this.setBorder(CARD_FRAME);
         this.setBackgroundColor(heatTint(info?.heat ?? 0));
         this.setCursor("pointer");
         // Clip a long group-key chip run at the card edge rather than letting it
@@ -142,7 +143,7 @@ class ExplainNode extends Panel {
      * @param value - Whether the node is selected.
      */
     setSelected(value: boolean): void {
-        this.setBorder(value ? SELECTED_BORDER : CARD_BORDER);
+        this.setBorder(value ? SELECTED_BORDER : CARD_FRAME);
         this.setShadow(value ? SELECTED_SHADOW : "none");
     }
 }
@@ -330,7 +331,7 @@ function badge(label: string, background: string): Component {
     box.setBackgroundColor(background);
     box.setBorderRadius("4px");
     box.setPadding(new Insets(1, 5, 1, 5));
-    box.setBorder(CARD_BORDER);
+    box.setBorder(CARD_FRAME);
     box.setPointerEvents("none");
 
     return box;
