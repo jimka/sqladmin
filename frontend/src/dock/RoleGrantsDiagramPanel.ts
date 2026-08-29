@@ -1,7 +1,7 @@
 // The per-role grants diagram, opened as its own Dock tab from the Roles
-// rail's right-click "Show grants graph". Extends DiagramShell (see
-// ./diagramShell.ts) with a selectable root: the shell's WEST `Root node`
-// selector + direction/depth/prune controls + legend, over a CENTER
+// rail's right-click "Show grants graph". Extends FilteredDiagramShell (see
+// ./filteredDiagramShell.ts) with a selectable root: the shell's WEST `Root
+// node` selector + direction/depth/prune controls + legend, over a CENTER
 // DiagramView built from the star buildRoleGrantsDiagram assembled: the role
 // node at the centre, one node per granted table. Opens on the whole star,
 // centred on the role node; picking a granted table narrows to that table
@@ -11,14 +11,14 @@
 // table — this panel reads each activated node's `data` to distinguish kinds
 // and only routes a table double-click to onOpenTable.
 //
-// Class-first (see ../../COMPONENT_CONVENTIONS.md): extends DiagramShell
-// directly. The `roleNodeId` lookup and the `JunctionDiagramView` are built as
-// locals before `super()` (they are `super()`'s CENTER child and its
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): extends
+// FilteredDiagramShell directly, which owns the whole derive/legend/filter
+// lifecycle. The `roleNodeId` lookup and the `JunctionDiagramView` are built
+// as locals before `super()` (they are `super()`'s CENTER child and its
 // `initialFocusNode`); the "activate" / "contextmenu" handlers are inline
 // arrows closing over the constructor's `onOpenTable` / `onContextMenu`
 // parameters, never handed off by reference, so they need no arrow-function
-// field. `applyFilter` and `rebuildBase` are handed to `fillLegend`/invoked
-// from `rootingChanged`, so they are arrow-function fields.
+// field.
 
 import { callable } from "@jimka/typescript-ui/core";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
@@ -26,8 +26,7 @@ import { Glyph }                    from "@jimka/typescript-ui/component/display
 import { user }                     from "@jimka/typescript-ui/glyphs/solid/user";
 import { table }                    from "@jimka/typescript-ui/glyphs/solid/table";
 import type { GrantNodeData }       from "../data/buildRoleGrantsDiagram";
-import { rootedBase, filteredBase } from "../data/relationDiagram";
-import { DiagramShell, fillLegend } from "./diagramShell";
+import { FilteredDiagramShell }     from "./filteredDiagramShell";
 import { JunctionDiagramView }      from "./JunctionDiagramView";
 
 // The role node and table-node glyphs this panel renders. Registered here so
@@ -43,11 +42,7 @@ Glyph.register(user, table);
  * the role node (or a node with no `data`) is a no-op — there is nothing
  * further to open.
  */
-class RoleGrantsDiagramPanel extends DiagramShell {
-    private readonly full: DiagramData;
-    private readonly hidden = new Set<string>();
-    private base: DiagramData;
-
+class RoleGrantsDiagramPanel extends FilteredDiagramShell {
     /**
      * @param data - The graph (from buildRoleGrantsDiagram).
      * @param onOpenTable - Invoked with a table node's schema and table on activate.
@@ -63,9 +58,6 @@ class RoleGrantsDiagramPanel extends DiagramShell {
         const view = JunctionDiagramView({ data, initialFocusNode: roleNodeId });
 
         super({ view, full: data, rootCaption: "Root node" });
-
-        this.full = data;
-        this.base = data;
 
         this.view.on("activate", (node: DiagramNodeData) => {
             const meta = node.data as GrantNodeData | undefined;
@@ -83,29 +75,6 @@ class RoleGrantsDiagramPanel extends DiagramShell {
             }
         });
     }
-
-    protected rootingChanged(): void {
-        this.rebuildBase();
-    }
-
-    protected pruneChanged(): void {
-        this.applyFilter();
-    }
-
-    // Passed by reference to fillLegend's rows — MUST be an arrow field, or it
-    // would lose `this` when invoked as a callback.
-    private applyFilter = (): void => {
-        this.view.setData(
-            filteredBase(this.base, this.getRoot(), this.hidden, this.isPrune(), this.getDirection()));
-    };
-
-    private rebuildBase = (): void => {
-        this.base = rootedBase(this.full, this.getRoot(), this.getDirection(), this.getDepth());
-
-        this.hidden.clear();
-        fillLegend(this.legend, this.base, this.getRoot(), this.hidden, this.applyFilter);
-        this.applyFilter();
-    };
 }
 
 const RoleGrantsDiagramPanelCallable = callable(RoleGrantsDiagramPanel);

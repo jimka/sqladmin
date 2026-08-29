@@ -322,6 +322,27 @@ export function rootedBase(
 }
 
 /**
+ * The base graph for a panel whose root is fixed: the badged direction+depth
+ * neighbourhood of `root`, with `root` injected when `full` carries no node
+ * with its id (e.g. a view/matview root, or a role with no memberships).
+ * Pure.
+ *
+ * @param full - The whole graph.
+ * @param root - The root's own node data (its id roots the traversal).
+ * @param direction - The traversal direction to walk.
+ * @param depth - The hop limit from the root.
+ * @returns The base graph to filter and draw, always containing `root`.
+ */
+export function fixedRootBase(
+    full: DiagramData,
+    root: DiagramNodeData,
+    direction: TraversalDirection,
+    depth: number,
+): DiagramData {
+    return withDepthBadges(rootedDiagram(full, root, direction, depth), full.edges, direction);
+}
+
+/**
  * The graph to draw from a base: `base` unchanged when there is no root (nothing
  * to hide against), else `base` with the hidden nodes removed — and, when
  * pruning, what they orphaned from the root. Pure.
