@@ -1,11 +1,14 @@
-// The reusable DDL form + editable-SQL-preview + Cancel/Execute dialog every
-// DDL phase embeds its structured form into. Flow: form -> generateSql()
-// seeds an editable SQL preview -> the user optionally edits it -> Execute
-// runs the (possibly edited) SQL, never a spec re-compiled at confirm time —
-// the previewed text is authoritative at execute (see
+// The reusable optional structured form + editable-SQL-preview +
+// Cancel/Execute dialog. Flow: generateSql() seeds an editable SQL preview ->
+// the user optionally edits it -> Execute runs the (possibly edited) SQL,
+// never a spec re-compiled at confirm time — the previewed text is
+// authoritative at execute (see
 // plans/implemented/ddl-infrastructure.md's "editable preview is
 // authoritative" decision). A "Regenerate SQL" button re-runs generateSql(),
-// discarding any manual edit; infra otherwise only seeds once, on open.
+// discarding any manual edit; infra otherwise only seeds once, on open. The
+// form is optional: a tab-hosted creation flow (see DdlFormPanel) keeps its
+// form in its own dock tab and omits it here, so the dialog is the SQL
+// review alone.
 //
 // Execute is a chrome button, validated on click via `DialogButtonConfig.
 // onClick` (mirroring ImportRowsDialog.ts's Import button): it returns
@@ -72,8 +75,12 @@ export interface SqlPreviewDialogOptions {
     /** Dialog title, e.g. "Create table". */
     title: string;
 
-    /** The phase's structured form, hosted above the SQL preview editor. */
-    form: Component;
+    /**
+     * The phase's structured form, hosted above the SQL preview editor. Omitted by
+     * a tab-hosted flow, whose form stays in its own dock tab (see DdlFormPanel):
+     * the dialog is then the SQL preview alone.
+     */
+    form?: Component;
 
     /**
      * Generate the SQL for the form's current state (the phase's preview
@@ -139,7 +146,7 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
 
     const content = Panel({
         layoutManager: VBox({ itemAlign: "stretch", spacing: CONTENT_SPACING }),
-        components:    [options.form, regenerateButton, editor],
+        components:    options.form ? [options.form, regenerateButton, editor] : [regenerateButton, editor],
     });
 
     const errorBanner = new ErrorBanner({ host: content, onChange: () => dialog.resizeToContent() });
