@@ -6,10 +6,13 @@
 // (or its "Show data" context item) also opens the role's grants tab through the
 // controller. Group parents carry a RoleGroupData marker instead, so the leaf
 // handlers skip them and the glyph resolver can pick each parent's icon. Mirrors
-// NavigatorTree's click→controller wiring.
+// NavigatorTree's click→controller wiring. The load lifecycle itself (arm/fetch/
+// map/restore/default-expand/settle) is owned by shell/explorerTree.ts's
+// ExplorerTreeBase — this class supplies only its own load/toNodes/
+// applyDefaultExpansion.
 
 import { callable } from "@jimka/typescript-ui/core";
-import { Tree, IconLabelTreeNodeRenderer } from "@jimka/typescript-ui/component/tree";
+import { IconLabelTreeNodeRenderer } from "@jimka/typescript-ui/component/tree";
 import type { TreeNode }             from "@jimka/typescript-ui/component/tree";
 import { Menu }                      from "@jimka/typescript-ui/overlay";
 import { Glyph }                     from "@jimka/typescript-ui/component/display";
@@ -18,9 +21,9 @@ import { users }                     from "@jimka/typescript-ui/glyphs/solid/use
 import { user_group }                from "@jimka/typescript-ui/glyphs/solid/user_group";
 import { gears }                     from "@jimka/typescript-ui/glyphs/solid/gears";
 import type { SqlAdminController }   from "../SqlAdminController";
-import type { ExplorerTree }         from "../navigator/NavigatorTree";
-import { TreeExpansionPersistence }  from "../data/treeExpansion";
-import { LoadSignal }                from "../data/loadSignal";
+import type { RoleSummary }          from "../contract";
+import { ExplorerTreeBase }          from "../shell/explorerTree";
+import type { ExplorerTree }         from "../shell/explorerTree";
 import { groupRoles, roleNodeKey }   from "./groupRoles";
 import type { RoleGroupData }        from "./groupRoles";
 import { buildTableExportItems }     from "../dock/menuItems";
@@ -41,15 +44,11 @@ function roleRowGlyph(node: TreeNode): string {
 }
 
 /** Build the roles Tree, wired to show a role's detail and report load errors. */
-class RolesTree extends Tree implements ExplorerTree {
-    private readonly controller: SqlAdminController;
+class RolesTree extends ExplorerTreeBase<RoleSummary[]> implements ExplorerTree {
     private readonly contextMenu = Menu();
-    private readonly _expansion: TreeExpansionPersistence;
-    private readonly _loaded: LoadSignal = new LoadSignal();
 
     constructor(controller: SqlAdminController) {
-        super();
-        this.controller = controller;
+        super(controller, controller.layout.bindTreeExpansion("roles"), roleNodeKey);
 
         // Render each row as its glyph (group parent or role leaf) beside its label.
         this.setRendererFactory(() => new IconLabelTreeNodeRenderer(roleRowGlyph));
@@ -102,52 +101,32 @@ class RolesTree extends Tree implements ExplorerTree {
         // Let the controller drive selection when a role is opened.
         this.controller.setRolesTree(this);
 
-        this._expansion = new TreeExpansionPersistence(this, controller.layout.bindTreeExpansion("roles"), roleNodeKey);
-        this.on("expand",   this._expansion.save);
-        this.on("collapse", this._expansion.save);
-
         // (Re)load the role list; used for the initial load.
         this.refresh();
     }
 
     // (Re)load the role list; used for the initial load and the refresh tool.
-    // setNodes collapses every group, so afterwards we reveal the first login
-    // role to expand the "Users" section by default — the real users sit up
-    // front while the noisy Groups / Predefined sections stay collapsed. Skipped
-    // once the user has expansion state of their own. A public arrow-function
-    // field: refreshTool/bindRefreshShortcut hold this by reference, which
-    // would lose `this` if it were a plain method.
-    refresh = (): void => {
-        this._loaded.arm();
+    protected load(): Promise<RoleSummary[]> {
+        return this.controller.loadRoles();
+    }
 
-        void this.controller.loadRoles()
-            .then(async roles => {
-                this.setNodes(groupRoles(roles));
+    // setNodes collapses every group, so applyDefaultExpansion below reveals
+    // the first login role to expand the "Users" section by default — the
+    // real users sit up front while the noisy Groups / Predefined sections
+    // stay collapsed.
+    protected toNodes(roles: RoleSummary[]): TreeNode[] {
+        return groupRoles(roles);
+    }
 
-                const restored = await this._expansion.restore();
+    // Awaited, not fired and forgotten: the signal must settle only once this
+    // default reveal has finished scrolling, or a waiting reveal of its own
+    // can land first and then be scrolled away from by this one.
+    protected async applyDefaultExpansion(roles: RoleSummary[]): Promise<void> {
+        const firstUser = roles.find(role => role.canLogin);
 
-                const firstUser = roles.find(role => role.canLogin);
-
-                if (!restored && firstUser) {
-                    // Awaited, not fired and forgotten: the signal must settle
-                    // only once this default reveal has finished scrolling, or a
-                    // waiting reveal of its own can land first and then be
-                    // scrolled away from by this one.
-                    await this.revealByPredicate(data => data === firstUser.name);
-                }
-            })
-            .catch(error => this.controller.notifyError(error))
-            // After the whole chain, and after the .catch so the signal settles
-            // on the failure path too — see NavigatorTree.refresh.
-            .finally(() => this._loaded.settle());
-    };
-
-    /**
-     * @returns A promise resolving once {@link refresh}'s load chain has
-     * finished; an already-resolved one when no load is running.
-     */
-    whenLoaded(): Promise<void> {
-        return this._loaded.whenSettled();
+        if (firstUser) {
+            await this.revealByPredicate(data => data === firstUser.name);
+        }
     }
 }
 
