@@ -99,8 +99,10 @@ import {
     ddlPanelId, functionDefinitionPanelId, diagramPanelId, relationDiagramPanelId,
     dependencyPanelId, relationDependencyPanelId, inheritancePanelId, relationInheritancePanelId,
     databaseDiagramPanelId, notesPanelId, roleGrantsPanelId, roleGrantsDiagramPanelId, roleMembershipDiagramPanelId,
-    panelTooltip as buildPanelTooltip, elideName, errorMessage,
+    panelTooltip as buildPanelTooltip, elideName, errorMessage, panelIdsFor,
 } from "./controller/controllerText";
+import { PanelLoadError } from "./controller/panelHost";
+import type { PanelHost, OpenPanel, RecentTable, RoleGrants, AsyncPanelSpec } from "./controller/panelHost";
 
 // The non-relation dock-tab glyphs (query / structure / definition / grants /
 // notes) plus the distinct diagram-tab glyphs: `diagram-project` is the FK
@@ -160,30 +162,6 @@ function awaitDiagramLayout(content: Component): Promise<void> {
 /** A focusable section of the Queries view — the Saved or the Recent list. */
 export type QueriesSection = "saved" | "recent";
 
-/**
- * Registry entry for one open dock panel. `store` is absent for the storeless
- * detail tabs (structure, definition); `columns` is present only when the tab
- * was built from introspected columns (data, structure). `detail` labels a
- * storeless tab in the status line ("structure" / "definition").
- */
-interface OpenPanel {
-    ref: DbObjectRef;
-    node: TreeNode | null; // null when opened without a navigator node (e.g. an FK target)
-    store?: AjaxStore;
-    columns?: ColumnMeta[];
-    detail?: string;
-    // Set only by the six storeless detail tabs (structure, definition,
-    // function definition, sequence, index, type) — what `refreshActive`
-    // dispatches to instead of the store-reload path. Never set alongside `store`.
-    refresh?: () => void;
-}
-
-/** A recently opened table, kept with its node so the start page can re-open it. */
-interface RecentTable {
-    ref: DbObjectRef;
-    node: TreeNode;
-}
-
 // How many recently opened tables the start page lists. Small enough to stay a
 // glanceable "jump back in" strip, not a full history.
 const MAX_RECENT_TABLES = 8;
@@ -213,22 +191,7 @@ interface RelationGraphKind {
     relationPanelId: (ref: DbObjectRef) => string;
 }
 
-/**
- * A panel-load failure, carrying the object being opened so the Dock's
- * "exception" handler can name it, and whether the error was already
- * surfaced by the fetch helper that produced it.
- */
-class PanelLoadError extends Error {
-    constructor(
-        readonly reason: unknown,
-        readonly ref?: DbObjectRef,
-        readonly reported: boolean = false,
-    ) {
-        super("panel load failed");
-    }
-}
-
-export class SqlAdminController {
+export class SqlAdminController implements PanelHost {
     readonly dock           : Dock;
     readonly statusBar      : StatusBar;
     readonly properties     : PropertiesPanel;
@@ -307,7 +270,7 @@ export class SqlAdminController {
     // A grants tab's full grant set, keyed by panel id, so the active-tab export
     // covers a focused role grants tab the same way _activeQueryResult covers a
     // query panel. Grants tabs are not in _openPanels (no DbObjectRef).
-    private readonly _activeRoleGrants: Map<string, { role: string; privileges: RolePrivilege[] }> = new Map();
+    private readonly _activeRoleGrants: Map<string, RoleGrants> = new Map();
     private _activePanelId: string | null = null;
 
     // The same monotonic guard for the Roles view's detail fetch.
@@ -531,13 +494,13 @@ export class SqlAdminController {
             store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
             store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
 
-            this._openPanels.set(id, { ref, node: resolvedNode ?? null, store, columns });
+            this.registerPanel(id, { ref, node: resolvedNode ?? null, store, columns });
 
             if (resolvedNode) {
                 this.rememberTable(ref, resolvedNode);
             }
 
-            const notify = (message: string): void => { this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: ${message}`); };
+            const notify = (message: string): void => { this.status(`${ref.name}: ${message}`); };
             const panel = new TableWorkPanel(
                 store, columns, notify, format => this.exportTable(ref, format),
                 () => this.importIntoTable(ref, store, columns, notify), privileges, view,
@@ -646,7 +609,7 @@ export class SqlAdminController {
                     return;
                 }
 
-                this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: definition saved`);
+                this.status(`${ref.name}: definition saved`);
             };
 
             const refresh = (): void => void this.refreshPanel(ref, async () => {
@@ -662,7 +625,7 @@ export class SqlAdminController {
             // definition tab's columns are only ever read by the DefinitionPanel
             // itself, which already holds its own copy — nothing looks this
             // entry up by definitionPanelId.
-            this._openPanels.set(id, { ref, node: node ?? null, detail: "definition", refresh });
+            this.registerPanel(id, { ref, node: node ?? null, detail: "definition", refresh });
             this.syncToPanel(id);
 
             return panel.content;
@@ -702,7 +665,7 @@ export class SqlAdminController {
             return;
         }
 
-        this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: refreshed`);
+        this.status(`${ref.name}: refreshed`);
     }
 
     /**
@@ -760,7 +723,7 @@ export class SqlAdminController {
                 panel.reload(await getSequenceDetail(ref));
             });
 
-            this._openPanels.set(id, { ref, node: resolvedNode ?? null, detail: "info", refresh });
+            this.registerPanel(id, { ref, node: resolvedNode ?? null, detail: "info", refresh });
             this.syncToPanel(id);
 
             panel = new SequenceInfoPanel(detail, {
@@ -771,7 +734,7 @@ export class SqlAdminController {
                 previewOwner: spec => previewSequenceOwner(ref, spec),
                 execute:      sql => executeDdl(this._connectionId, sql),
                 reloadDetail: () => getSequenceDetail(ref),
-                onStatus:     m => this.statusBar.setMessage(`${this._statusScope} · ${m}`),
+                onStatus:     m => this.status(`${m}`),
                 onError:      m => this.notifyError(new Error(m), ref),
                 onRefresh:    refresh,
                 onOpenOwner:  (schema, table) => this.openReferencedStructure({
@@ -830,7 +793,7 @@ export class SqlAdminController {
                 panel.reload(await getIndexDetail(ref));
             });
 
-            this._openPanels.set(id, { ref, node: resolvedNode ?? null, detail: "info", refresh });
+            this.registerPanel(id, { ref, node: resolvedNode ?? null, detail: "info", refresh });
             this.syncToPanel(id);
 
             panel = new IndexInfoPanel(detail, {
@@ -893,7 +856,7 @@ export class SqlAdminController {
                 panel.reload(await getTypeDefinition(ref));
             });
 
-            this._openPanels.set(id, { ref, node: node ?? null, detail: "info", refresh });
+            this.registerPanel(id, { ref, node: node ?? null, detail: "info", refresh });
             this.syncToPanel(id);
 
             panel = new TypeInfoPanel(detail, { schema: ref.schema!, name: ref.name!, onRefresh: refresh });
@@ -945,7 +908,7 @@ export class SqlAdminController {
             // per-section Refresh tools.
             const refresh = (): void => void this.refreshPanel(ref, async () => {
                 const [freshColumns, freshStructure] = await Promise.all([getColumns(ref), getStructure(ref)]);
-                const entry = this._openPanels.get(id);
+                const entry = this.panelEntry(id);
 
                 panel.reload(freshColumns, freshStructure);
 
@@ -966,7 +929,7 @@ export class SqlAdminController {
             // Decision for why this is worth the redundant fetch).
             const refreshColumns = (): void => void this.refreshPanel(ref, async () => {
                 const freshColumns = await getColumns(ref);
-                const entry = this._openPanels.get(id);
+                const entry = this.panelEntry(id);
 
                 panel.reloadColumns(freshColumns);
 
@@ -1005,7 +968,7 @@ export class SqlAdminController {
                 refresh();
             };
 
-            this._openPanels.set(id, { ref, node: resolvedNode ?? null, columns, detail: "structure", refresh });
+            this.registerPanel(id, { ref, node: resolvedNode ?? null, columns, detail: "structure", refresh });
             this.syncToPanel(id);
 
             panel = new StructurePanel(columns, structure, (refSchema, refTable) =>
@@ -1054,7 +1017,7 @@ export class SqlAdminController {
                 execute:      sql => executeDdl(this._connectionId, sql),
                 onSaved:      onColumnsSaved,
                 onError:      m => this.notifyError(new Error(m), ref),
-                onStatus:     m => this.statusBar.setMessage(`${this._statusScope} · ${m}`),
+                onStatus:     m => this.status(`${m}`),
             } : undefined,
         };
     }
@@ -1457,7 +1420,7 @@ export class SqlAdminController {
                 concurrently: form.concurrently(),
                 withNoData:   form.withNoData(),
             })).sql,
-            onSuccess: () => this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: refreshed`),
+            onSuccess: () => this.status(`${ref.name}: refreshed`),
             ...this.ddlDefaults(ref),
         });
     }
@@ -1680,7 +1643,7 @@ export class SqlAdminController {
                     return;
                 }
 
-                this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: definition saved`);
+                this.status(`${ref.name}: definition saved`);
             };
 
             const refresh = (): void => void this.refreshPanel(ref, async () => {
@@ -1689,7 +1652,7 @@ export class SqlAdminController {
 
             panel = new FunctionDefinitionPanel(definition.definition, onSave, refresh);
 
-            this._openPanels.set(id, { ref, node: node ?? null, detail: "definition", refresh });
+            this.registerPanel(id, { ref, node: node ?? null, detail: "definition", refresh });
             this.syncToPanel(id);
 
             return panel.content;
@@ -1818,7 +1781,7 @@ export class SqlAdminController {
                 title:       "Add enum value",
                 form,
                 generateSql: async () => (await previewAlterTypeAddValue(ref, form.readSpec())).sql,
-                onSuccess:   () => this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: altered`),
+                onSuccess:   () => this.status(`${ref.name}: altered`),
                 ...this.ddlDefaults(ref),
             });
 
@@ -1873,7 +1836,7 @@ export class SqlAdminController {
      * @param ref - The table whose structure tab to read.
      */
     private structureColumns(ref: DbObjectRef): ColumnMeta[] {
-        return this._openPanels.get(structurePanelId(ref))?.columns ?? [];
+        return this.panelEntry(structurePanelId(ref))?.columns ?? [];
     }
 
     /**
@@ -1890,7 +1853,7 @@ export class SqlAdminController {
      * @param ref - The table whose structure tab to reseed.
      */
     private refreshStructure(ref: DbObjectRef): void {
-        this._openPanels.get(structurePanelId(ref))?.refresh?.();
+        this.panelEntry(structurePanelId(ref))?.refresh?.();
     }
 
     /**
@@ -1949,7 +1912,7 @@ export class SqlAdminController {
                 throw new PanelLoadError(null, ref, true);
             }
 
-            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: diagram (${data.nodes.length} tables)`);
+            this.status(`${ref.schema}: diagram (${data.nodes.length} tables)`);
 
             return SchemaDiagramPanel(
                 data,
@@ -2047,7 +2010,7 @@ export class SqlAdminController {
 
             const tableCount = schemas.reduce((total, s) => total + s.tables.length, 0);
 
-            this.statusBar.setMessage(`${this._statusScope} · ${ref.database}: diagram (${tableCount} tables)`);
+            this.status(`${ref.database}: diagram (${tableCount} tables)`);
 
             return DatabaseDiagramPanel(
                 schemas,
@@ -2136,7 +2099,7 @@ export class SqlAdminController {
 
             const root: DiagramNodeData = { id: ref.name!, label: ref.name!, glyph: KIND_GLYPH[ref.kind] };
 
-            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: relations`);
+            this.status(`${ref.schema}.${ref.name}: relations`);
 
             return RelationDiagramPanel(
                 full,
@@ -2287,7 +2250,7 @@ export class SqlAdminController {
                 throw new PanelLoadError(null, ref, true);
             }
 
-            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: ${kind.key} (${data.nodes.length} relations)`);
+            this.status(`${ref.schema}: ${kind.key} (${data.nodes.length} relations)`);
 
             const { onSelect, onContextMenu } = this.relationGraphHandlers(ref);
 
@@ -2339,7 +2302,7 @@ export class SqlAdminController {
                 data : { schema: ref.schema!, name: ref.name!, kind: ref.kind },
             };
 
-            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: ${kind.key}`);
+            this.status(`${ref.schema}.${ref.name}: ${kind.key}`);
 
             const { onSelect, onContextMenu } = this.relationGraphHandlers(ref);
 
@@ -2634,7 +2597,7 @@ export class SqlAdminController {
         const statusLabel = elideName(label);
 
         const notify = (message: string): void => {
-            this.statusBar.setMessage(`${this._statusScope} · ${statusLabel}: ${message}`);
+            this.status(`${statusLabel}: ${message}`);
         };
 
         const panel = new QueryPanel({
@@ -2689,7 +2652,7 @@ export class SqlAdminController {
         if (id) {
             const active = this._activeQueryResult.get(id);
             const notify = (message: string): void => {
-                this.statusBar.setMessage(`${this._statusScope} · export: ${message}`);
+                this.status(`export: ${message}`);
             };
 
             if (active?.kind === "rows") {
@@ -2709,7 +2672,7 @@ export class SqlAdminController {
             // A table/view data tab carries a store in _openPanels; its ref drives
             // the server-side full-relation export (a structure/definition detail
             // tab has no store, so it falls through to the notify below).
-            const panel = this._openPanels.get(id);
+            const panel = this.panelEntry(id);
 
             if (panel && panel.store) {
                 this.exportTable(panel.ref, format);
@@ -2763,7 +2726,7 @@ export class SqlAdminController {
         }
 
         return this._activeQueryResult.get(id) != null   // query rows or an EXPLAIN plan
-            || this._openPanels.get(id)?.store != null    // a table/view data grid
+            || this.panelEntry(id)?.store != null    // a table/view data grid
             || this._activeRoleGrants.get(id) != null;    // a role grants tab
     }
 
@@ -2895,7 +2858,7 @@ export class SqlAdminController {
         }
 
         this.saveQuery(name, sql);
-        this.statusBar.setMessage(`${this._statusScope} · Saved query as “${elideName(name)}”`);
+        this.status(`Saved query as “${elideName(name)}”`);
     }
 
     /**
@@ -3130,7 +3093,7 @@ export class SqlAdminController {
      * fetch (e.g. after a structure change) always goes to the server rather
      * than serving stale columns from a cache.
      */
-    private fetchColumns(ref: DbObjectRef): Promise<ColumnMeta[]> {
+    fetchColumns(ref: DbObjectRef): Promise<ColumnMeta[]> {
         const key = panelId(ref);
         const inFlight = this._columnsInFlight.get(key);
 
@@ -3160,8 +3123,8 @@ export class SqlAdminController {
             return;
         }
 
-        const cached = this._openPanels.get(panelId(ref))?.columns
-                       ?? this._openPanels.get(structurePanelId(ref))?.columns;
+        const cached = this.panelEntry(panelId(ref))?.columns
+                       ?? this.panelEntry(structurePanelId(ref))?.columns;
 
         if (cached) {
             this.properties.show(ref, cached);
@@ -3316,7 +3279,7 @@ export class SqlAdminController {
             const full = buildRoleMembershipDiagram(details, Util.measureTextWidths);
             const root: DiagramNodeData = { id: name, label: name, glyph: ROLE_GLYPH };
 
-            this.statusBar.setMessage(`${this._statusScope} · ${name}: membership (${full.nodes.length} roles)`);
+            this.status(`${name}: membership (${full.nodes.length} roles)`);
 
             return RoleMembershipDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName), depth);
         });
@@ -3353,7 +3316,7 @@ export class SqlAdminController {
 
             const data = buildRoleGrantsDiagram(name, detail.privileges, Util.measureTextWidths);
 
-            this.statusBar.setMessage(`${this._statusScope} · ${name}: grants graph (${data.nodes.length - 1} tables)`);
+            this.status(`${name}: grants graph (${data.nodes.length - 1} tables)`);
 
             return RoleGrantsDiagramPanel(
                 data,
@@ -3391,7 +3354,7 @@ export class SqlAdminController {
             const node = await this.revealNavigatorNode(matchesGrantedTable(schema, table));
 
             if (!node) {
-                this.statusBar.setMessage(`${this._statusScope} · ${schema}.${table}: not found in navigator`);
+                this.status(`${schema}.${table}: not found in navigator`);
 
                 return;
             }
@@ -3415,7 +3378,7 @@ export class SqlAdminController {
      * Wired to the Alt+R accelerator.
      */
     refreshActive(): void {
-        const entry = this._activePanelId ? this._openPanels.get(this._activePanelId) : undefined;
+        const entry = this._activePanelId ? this.panelEntry(this._activePanelId) : undefined;
 
         if (entry?.refresh) {
             entry.refresh();
@@ -3434,7 +3397,7 @@ export class SqlAdminController {
         }
 
         void entry.store.load();
-        this.statusBar.setMessage(`${this._statusScope} · ${entry.ref.name ?? ""}: refreshed`);
+        this.status(`${entry.ref.name ?? ""}: refreshed`);
     }
 
     /** Report a sync outcome: each failure as an error, or a success message. */
@@ -3445,7 +3408,7 @@ export class SqlAdminController {
             return;
         }
 
-        this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: changes saved`);
+        this.status(`${ref.name}: changes saved`);
     }
 
     /**
@@ -3463,6 +3426,57 @@ export class SqlAdminController {
         Notification.show(ref?.name ? `${ref.name}: ${detail}` : detail, "error");
     }
 
+    /** Write a status message, prefixed with the connected database (PanelHost). */
+    status(message: string): void {
+        this.statusBar.setMessage(`${this._statusScope} · ${message}`);
+    }
+
+    /** Add or replace this panel's open-panel registry entry (PanelHost). */
+    registerPanel(id: string, entry: OpenPanel): void {
+        this._openPanels.set(id, entry);
+    }
+
+    /** The live registry entry for `id`, or undefined when the tab is not open (PanelHost). */
+    panelEntry(id: string): OpenPanel | undefined {
+        return this._openPanels.get(id);
+    }
+
+    /** Record the address-bar route for a tab opened without openAsyncPanel (PanelHost). */
+    setPanelRoute(id: string, route: PanelRoute): void {
+        this._panelRoutes.set(id, route);
+    }
+
+    /** Close every tab that can exist for `ref` (PanelHost; see panelIdsFor). */
+    closeTabsFor(ref: DbObjectRef): void {
+        panelIdsFor(ref).forEach(id => this.dock.removePanel(id));
+    }
+
+    /**
+     * Record a query panel's latest run for the address-bar sync, and
+     * re-sync the address bar when `id` is still the focused panel: an
+     * auto-run query tab's run finishes after the "focus" event that opened
+     * it already fired (and fired too early — before any run existed to
+     * resolve to), so without this the address bar would stay on "/" until
+     * the user switched tabs away and back (PanelHost).
+     */
+    recordQueryRun(id: string, timestamp: number): void {
+        this._queryPanelRuns.set(id, timestamp);
+
+        if (id === this._activePanelId) {
+            this.syncAddressBarFor(id);
+        }
+    }
+
+    /** Mirror a query panel's latest exportable result (PanelHost). */
+    setActiveExport(id: string, active: ActiveExport | null): void {
+        this._activeQueryResult.set(id, active);
+    }
+
+    /** Track a grants tab's full grant set for the active-tab export (PanelHost). */
+    setActiveRoleGrants(id: string, grants: RoleGrants): void {
+        this._activeRoleGrants.set(id, grants);
+    }
+
     /**
      * Hover tooltip for a tab: the object name, then Type/Schema/Database ordered
      * most-specific to broadest. A thin wrapper over the pure builder — named
@@ -3470,7 +3484,7 @@ export class SqlAdminController {
      * recursive — supplying the type label the free function stays free of the
      * DOM-touching lookup for.
      */
-    private panelTooltip(ref: DbObjectRef): string {
+    panelTooltip(ref: DbObjectRef): string {
         return buildPanelTooltip(ref, kindDisplayLabel(ref.kind));
     }
 
@@ -3490,8 +3504,8 @@ export class SqlAdminController {
      *
      * @param spec - The tab's identity.
      */
-    private openAsyncPanel(
-        spec: { id: string; title: string; glyph: string; tooltip?: string; ref?: DbObjectRef; route?: PanelRoute },
+    openAsyncPanel(
+        spec: AsyncPanelSpec,
         build: () => Promise<Component>,
     ): void {
         if (spec.route) {
@@ -3524,12 +3538,12 @@ export class SqlAdminController {
             },
         });
 
-        this.statusBar.setMessage(`${this._statusScope} · ${spec.title}: loading…`);
+        this.status(`${spec.title}: loading…`);
     }
 
     /** Select the panel's navigator node and refresh the status bar to match. */
-    private syncToPanel(id: string): void {
-        const panel = this._openPanels.get(id);
+    syncToPanel(id: string): void {
+        const panel = this.panelEntry(id);
 
         if (!panel) {
             return;
@@ -3547,9 +3561,9 @@ export class SqlAdminController {
     private updateStatusFor(panel: OpenPanel): void {
         if (panel.store) {
             const count = panel.store.getTotalCount() ?? panel.store.getRecords().length;
-            this.statusBar.setMessage(`${this._statusScope} · ${panel.ref.name}: ${count} rows`);
+            this.status(`${panel.ref.name}: ${count} rows`);
         } else {
-            this.statusBar.setMessage(`${this._statusScope} · ${panel.ref.name}: ${panel.detail ?? "structure"}`);
+            this.status(`${panel.ref.name}: ${panel.detail ?? "structure"}`);
         }
     }
 }
