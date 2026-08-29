@@ -50,19 +50,18 @@
 // subscription, and the main editor — when the tab closes, so this class
 // needs no `dispose` of its own. The two exceptions are the result pane and
 // the error banner: each is deliberately kept alive and detached from its
-// parent while hidden (see hideResultPane / hideErrorBanner), so nothing in
+// parent while hidden (see hideResultPane / ErrorBanner.hide), so nothing in
 // the tab's subtree reaches either one in that state. `content` is a
 // `QueryPanelContent`, a small `Container` subclass whose `destructor()`
 // override disposes both either way.
 
 import { Component, Container, Event }          from "@jimka/typescript-ui/core";
 import { Placement }                            from "@jimka/typescript-ui/primitive";
-import { Border as BorderLayout, Split, HBox }  from "@jimka/typescript-ui/layout";
+import { Border as BorderLayout, Split }        from "@jimka/typescript-ui/layout";
 import { ToolBar }                              from "@jimka/typescript-ui/component/menubar";
 import { Spacer, TabPanel }                     from "@jimka/typescript-ui/component/container";
 import { glyphButton, glyphMenuButton }         from "./glyphButton";
 import { CodeEditor }                           from "@jimka/typescript-ui/component/editor";
-import { Text }                                 from "@jimka/typescript-ui/component/input";
 import { Glyph, ProgressSpinner }               from "@jimka/typescript-ui/component/display";
 import { play }                                 from "@jimka/typescript-ui/glyphs/solid/play";
 import { eraser }                               from "@jimka/typescript-ui/glyphs/solid/eraser";
@@ -79,9 +78,8 @@ import { sitemap }                              from "@jimka/typescript-ui/glyph
 import { wand_magic_sparkles }                  from "@jimka/typescript-ui/glyphs/solid/wand_magic_sparkles";
 import { table }                                from "@jimka/typescript-ui/glyphs/solid/table";
 import { chart_simple }                         from "@jimka/typescript-ui/glyphs/solid/chart_simple";
-import { circle_exclamation }                   from "@jimka/typescript-ui/glyphs/solid/circle_exclamation";
-import { xmark }                                from "@jimka/typescript-ui/glyphs/solid/xmark";
 import { QueryResultGrid, QueryResultChart } from "./QueryResultView";
+import { ErrorBanner }                   from "./ErrorBanner";
 import { isChartable }                   from "../data/chartConfig";
 import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
@@ -101,9 +99,9 @@ import {
     OLDER_QUERY_SHORTCUT, NEWER_QUERY_SHORTCUT,
 } from "../shell/queryShortcuts";
 import type { QueryExplainResult, QueryResult, QueryRowsResult } from "../contract";
-import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, CAUTION_COLOR, HISTORY_COLOR, NEUTRAL_COLOR, DESTRUCTIVE_COLOR } from "../theme";
+import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, CAUTION_COLOR, HISTORY_COLOR, NEUTRAL_COLOR } from "../theme";
 
-Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask, sitemap, wand_magic_sparkles, table, chart_simple, circle_exclamation, xmark);
+Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask, sitemap, wand_magic_sparkles, table, chart_simple);
 
 // The editor's starting height once the result pane is shown below it; the Split
 // gutter lets the user resize from there.
@@ -113,14 +111,6 @@ const EDITOR_HEIGHT = 150;
 // ProgressSpinner's "which loading affordance" docs) — refreshDataTab's
 // in-place overlay is the same "component exists, data pending" case.
 const DATA_TAB_OVERLAY_SPINNER_SIZE = 24;
-
-// The library's own error-notification wash (Notification/Dialog use the same
-// token — see typescript-ui's Theme.ts) rather than a hand-rolled tint off
-// DESTRUCTIVE_COLOR: it already tracks the active theme (including dark mode),
-// which a literal rgba() derived from this file's own app-level palette would
-// not. The fallback is ModernTheme's light-mode value, for a render that
-// somehow predates the theme CSS variables being set.
-const ERROR_BANNER_BG = "var(--ts-ui-notification-error-bg, rgba(244, 214, 214, 0.75))";
 
 /** Surface a short status message (row count / command tag / hint) to the user. */
 export type Notify = (message: string) => void;
@@ -189,33 +179,43 @@ export interface QueryPanelOptions {
  * banner is always among its children.
  */
 class QueryPanelContent extends Container {
-    private readonly _resultHost: TabPanel;
-    private readonly _getErrorBanner: () => Component | null;
+    private readonly _resultHost : TabPanel;
+    private readonly _errorBanner: ErrorBanner;
 
     /**
      * @param resultHost - The result pane, which the panel detaches while hidden.
-     * @param getErrorBanner - Returns the durable error banner (see
-     *   `ensureErrorBanner`), or null before the first failed run / after Dispose.
-     *   Late-bound because the banner is built lazily, well after this constructor
-     *   runs — a closure over the constructor's own `errorBanner` variable, not a
-     *   value captured at construction time.
+     * @param onErrorBannerChange - Run after the banner is shown or hidden,
+     *   in addition to this component's own relayout.
      */
-    constructor(resultHost: TabPanel, getErrorBanner: () => Component | null) {
+    constructor(resultHost: TabPanel, onErrorBannerChange: () => void) {
         super({ layoutManager: new BorderLayout({ spacing: 0 }) });
 
-        this._resultHost     = resultHost;
-        this._getErrorBanner = getErrorBanner;
+        this._resultHost  = resultHost;
+        this._errorBanner = new ErrorBanner({
+            host:        this,
+            constraints: { placement: Placement.SOUTH },
+            onChange:    () => {
+                this.doLayout();
+                onErrorBannerChange();
+            },
+        });
+    }
+
+    /** The panel's durable error banner. */
+    getErrorBanner(): ErrorBanner {
+        return this._errorBanner;
     }
 
     /**
-     * `hideResultPane`/`hideErrorBanner` remove the result pane / error banner from
-     * this component while hidden, so the child recursion in `super.destructor()`
-     * cannot reach either then. Disposing both here covers every state — `dispose()`
-     * is idempotent, so a still-shown pane/banner is just a harmless second pass.
+     * `hideResultPane`/`ErrorBanner.hide` remove the result pane / error banner
+     * from this component while hidden, so the child recursion in
+     * `super.destructor()` cannot reach either then. Disposing both here covers
+     * every state — `dispose()` is idempotent, so a still-shown pane/banner is
+     * just a harmless second pass.
      */
     protected destructor(): void {
         this._resultHost.dispose();
-        this._getErrorBanner()?.dispose();
+        this._errorBanner.dispose();
 
         super.destructor();
     }
@@ -261,14 +261,6 @@ export class QueryPanel {
         // in flight at once. See liveTabCount's doc comment for why this exists
         // alongside it, and refreshDataTab for where it's incremented/decremented.
         let pendingDataTabs = 0;
-
-        // The durable error banner for a failed run, built once on first use and
-        // reused (content replaced) on every later failure. Lives at the bottom of
-        // the whole panel (Placement.SOUTH), independent of resultHost's own
-        // shown/hidden state, so it works the same whether a Data tab exists or not.
-        let errorBanner: Component | null = null;
-        let errorBannerText: Text | null = null;
-        let errorBannerShown = false;
 
         // Raised around a programmatic closeTab so its "tabclose" emit is ignored by
         // the onTabClose handler — it exists purely to stop that handler's slot
@@ -334,7 +326,15 @@ export class QueryPanel {
         const olderButton = glyphButton("angle-up", HISTORY_COLOR, `Older query (${OLDER_QUERY_SHORTCUT})`, () => recallInEditor(true));
         const newerButton = glyphButton("angle-down", HISTORY_COLOR, `Newer query (${NEWER_QUERY_SHORTCUT})`, () => recallInEditor(false));
 
-        const panel = new QueryPanelContent(resultHost, () => errorBanner);
+        const panel = new QueryPanelContent(resultHost, () => syncToolbarButtons());
+
+        // The durable error banner for a failed run, built once by QueryPanelContent
+        // and reused (message replaced) on every later failure. Lives at the bottom
+        // of the whole panel (Placement.SOUTH, see QueryPanelContent's constructor),
+        // independent of resultHost's own shown/hidden state, so it works the same
+        // whether a Data tab exists or not.
+        const errorBanner = panel.getErrorBanner();
+
         panel.addComponent(new ToolBar({
             components: [runButton, saveButton, clearButton, formatButton, chartButton, explainButton, analyzeButton, diagramButton, exportButton, Spacer.flex(), olderButton, newerButton],
         }), { placement: Placement.NORTH });
@@ -582,7 +582,7 @@ export class QueryPanel {
             removeDiagramTab();
             removeExplainTab();
             hideResultPane(); // covers an orphaned in-flight Data tab too — see doc comment
-            hideErrorBanner();
+            errorBanner.hide();
             setActiveExport(null);
             setBusy(false); // re-enable run/explain/chart/diagram buttons in case a run was in flight
         }
@@ -619,7 +619,7 @@ export class QueryPanel {
         function syncToolbarButtons(): void {
             const hasSql = editor.getValue().trim() !== "";
 
-            clearButton.setEnabled(hasSql || resultShown || errorBannerShown);
+            clearButton.setEnabled(hasSql || resultShown || errorBanner.isShown());
             saveButton.setEnabled(onSave !== undefined && hasSql);
         }
 
@@ -631,48 +631,6 @@ export class QueryPanel {
         /** Enable the Explain-diagram button only while an Explain plan is on screen. */
         function syncDiagramButton(): void {
             diagramButton.setEnabled(explainSlot !== null);
-        }
-
-        /** Build the banner row on first use: warning glyph, wrapping message text, dismiss button. */
-        function ensureErrorBanner(): Component {
-            if (!errorBanner) {
-                const icon    = new Glyph("circle-exclamation", { foregroundColor: DESTRUCTIVE_COLOR });
-                const dismiss = glyphButton("xmark", NEUTRAL_COLOR, "Dismiss", () => hideErrorBanner());
-
-                errorBannerText = new Text("", { whiteSpace: "normal", truncate: false });
-
-                errorBanner = Container({ layoutManager: new HBox({ spacing: 8, itemAlign: "stretch" }) });
-                errorBanner.addComponent(icon);
-                errorBanner.addComponent(errorBannerText, { weight: 1 });
-                errorBanner.addComponent(dismiss);
-                errorBanner.setBackgroundColor(ERROR_BANNER_BG);
-            }
-
-            return errorBanner;
-        }
-
-        /** Show (or refresh) the error banner with `error`'s message. */
-        function showErrorBanner(error: unknown): void {
-            const banner = ensureErrorBanner();
-
-            errorBannerText!.setText(error instanceof Error ? error.message : String(error));
-
-            if (!errorBannerShown) {
-                panel.addComponent(banner, { placement: Placement.SOUTH });
-                errorBannerShown = true;
-                panel.doLayout();
-                syncToolbarButtons();
-            }
-        }
-
-        /** Hide the error banner (Dismiss, a new run starting, or Clear). A no-op when not showing. */
-        function hideErrorBanner(): void {
-            if (errorBannerShown) {
-                panel.removeComponent(errorBanner!);
-                errorBannerShown = false;
-                panel.doLayout();
-                syncToolbarButtons();
-            }
         }
 
         /**
@@ -828,7 +786,7 @@ export class QueryPanel {
             historyCursor = null;
             setBusy(true);
             notify("Running…");
-            hideErrorBanner();
+            errorBanner.hide();
 
             const resultPromise = runQuery(sql);
 
@@ -844,7 +802,7 @@ export class QueryPanel {
             } catch (error) {
                 if (seq === runSeq) {
                     onError(error);
-                    showErrorBanner(error);
+                    errorBanner.show(error);
                     onRun?.({ sql, timestamp: Date.now(), ok: false, rowCount: 0 });
                 }
             } finally {

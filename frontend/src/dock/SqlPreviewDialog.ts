@@ -18,35 +18,27 @@
 // Every failure — a failed generateSql (initial seed or "Regenerate SQL") and
 // a failed execute — still calls the caller's `onError` (or the default
 // Notification) exactly as before, preserving StatusBar/Notification-history
-// side effects, but ALSO shows an in-content banner (ensureErrorBanner/
-// showError/hideErrorBanner, mirroring QueryPanel.ts's durable error banner
-// and ImportRowsDialog.ts's identical copy of it): a Notification's z-index
-// (10002) sits below the Dialog band (11000, see LayerManager's
-// Z_BAND_DIALOG), so a toast fired while this dialog is open — every failure
-// here except the very first seed, before the dialog exists — would render
-// invisibly behind the modal backdrop.
+// side effects, but ALSO shows an in-content banner (ErrorBanner, mirroring
+// QueryPanel.ts's durable error banner): a Notification's z-index (10002)
+// sits below the Dialog band (11000, see LayerManager's Z_BAND_DIALOG), so a
+// toast fired while this dialog is open — every failure here except the very
+// first seed, before the dialog exists — would render invisibly behind the
+// modal backdrop.
 //
 // The Dialog exposes only three result codes ("confirm" | "cancel" | "close"),
 // and every dismiss gesture (Escape, backdrop, the always-present title-bar
 // close) resolves to "close". So: Execute = "confirm" (primary), Cancel =
 // "close" (shares the dismiss code, so dismissing == Cancel == do nothing).
 
-import { Panel, Container }        from "@jimka/typescript-ui/core";
+import { Panel }                   from "@jimka/typescript-ui/core";
 import type { Component }          from "@jimka/typescript-ui/core";
-import { VBox, HBox }              from "@jimka/typescript-ui/layout";
+import { VBox }                    from "@jimka/typescript-ui/layout";
 import { Button }                  from "@jimka/typescript-ui/component/button";
 import { CodeEditor }              from "@jimka/typescript-ui/component/editor";
-import { Text }                    from "@jimka/typescript-ui/component/input";
-import { Glyph }                   from "@jimka/typescript-ui/component/display";
-import { circle_exclamation }      from "@jimka/typescript-ui/glyphs/solid/circle_exclamation";
-import { xmark }                   from "@jimka/typescript-ui/glyphs/solid/xmark";
 import { Dialog, Notification }    from "@jimka/typescript-ui/overlay";
 import type { DialogButtonConfig } from "@jimka/typescript-ui/overlay";
-import { glyphButton }             from "./glyphButton";
-import { DESTRUCTIVE_COLOR, NEUTRAL_COLOR } from "../theme";
+import { ErrorBanner }             from "./ErrorBanner";
 import type { QueryStatusResult }  from "../contract";
-
-Glyph.register(circle_exclamation, xmark);
 
 // A comfortable modal width for a structured DDL form plus the SQL preview
 // editor beneath it — a bit wider than this app's narrower dialogs (~500px)
@@ -74,12 +66,6 @@ const SQL_PREVIEW_MAX_ROWS = 24;
 // the same order of magnitude as this app's other dialog content spacing,
 // for a consistent dialog rhythm.
 const CONTENT_SPACING = 8;
-
-// The error banner's background — same token/fallback as QueryPanel.ts's own
-// (private) ERROR_BANNER_BG and ImportRowsDialog.ts's copy of it; duplicated
-// rather than shared since none of the three export it and it's a single
-// CSS-var literal.
-const ERROR_BANNER_BG = "var(--ts-ui-notification-error-bg, rgba(244, 214, 214, 0.75))";
 
 /** Options for {@link openSqlPreviewDialog}. */
 export interface SqlPreviewDialogOptions {
@@ -156,73 +142,7 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
         components:    [options.form, regenerateButton, editor],
     });
 
-    let errorBanner: Container | null = null;
-    let errorBannerText: Text | null = null;
-    let errorBannerShown = false;
-
-    /** Build the banner row on first use: warning glyph, wrapping message text, dismiss button. */
-    function ensureErrorBanner(): Container {
-        if (!errorBanner) {
-            const icon    = new Glyph("circle-exclamation", { foregroundColor: DESTRUCTIVE_COLOR });
-            const dismiss = glyphButton("xmark", NEUTRAL_COLOR, "Dismiss", () => hideErrorBanner());
-            const banner  = Container({ layoutManager: new HBox({ spacing: 8, itemAlign: "stretch" }) });
-
-            errorBannerText = new Text("", { whiteSpace: "normal", truncate: false });
-
-            banner.addComponent(icon);
-            banner.addComponent(errorBannerText, { weight: 1 });
-            banner.addComponent(dismiss);
-            banner.setBackgroundColor(ERROR_BANNER_BG);
-
-            errorBanner = banner;
-        }
-
-        return errorBanner;
-    }
-
-    /**
-     * Report `err` through the caller's `onError`/Notification (unchanged
-     * side effect — StatusBar text, Notification history) and additionally
-     * show it in the in-content banner, refreshing the text if already shown.
-     */
-    function showError(err: unknown): void {
-        reportError(err, options.onError);
-
-        const banner = ensureErrorBanner();
-
-        errorBannerText!.setText(err instanceof Error ? err.message : String(err));
-
-        if (!errorBannerShown) {
-            content.addComponent(banner);
-            errorBannerShown = true;
-        }
-
-        dialog.resizeToContent();
-    }
-
-    /** Hide the error banner (Dismiss, or a new generate/execute attempt starting). A no-op when not showing. */
-    function hideErrorBanner(): void {
-        if (errorBannerShown) {
-            content.removeComponent(errorBanner!);
-            errorBannerShown = false;
-            dialog.resizeToContent();
-        }
-    }
-
-    /**
-     * Dispose the error banner if it exists but isn't currently attached to
-     * `content` — Dialog's own teardown only cascades into content's
-     * CURRENTLY attached children, so a dismissed (detached) banner would
-     * otherwise leak (same reasoning as QueryPanel.ts's own errorBanner
-     * teardown). A separate function, not inlined at the call site: see
-     * ImportRowsDialog.ts's identical helper for why (a `never`-narrowing
-     * quirk in TypeScript's control-flow analysis inside `try/finally`).
-     */
-    function disposeDetachedErrorBanner(): void {
-        if (!errorBannerShown && errorBanner) {
-            errorBanner.dispose();
-        }
-    }
+    const errorBanner = new ErrorBanner({ host: content, onChange: () => dialog.resizeToContent() });
 
     /**
      * Regenerate the preview SQL from the form's current state and load it
@@ -230,12 +150,13 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
      * leaving the editor's current text untouched.
      */
     async function refreshPreview(): Promise<void> {
-        hideErrorBanner();
+        errorBanner.hide();
 
         try {
             editor.setValue(await options.generateSql());
         } catch (err) {
-            showError(err);
+            reportError(err, options.onError);
+            errorBanner.show(err);
         }
     }
 
@@ -246,7 +167,7 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
      * shown) otherwise.
      */
     async function tryExecute(): Promise<boolean> {
-        hideErrorBanner();
+        errorBanner.hide();
 
         try {
             const status = await options.execute(editor.getValue());
@@ -255,7 +176,8 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
 
             return true;
         } catch (err) {
-            showError(err);
+            reportError(err, options.onError);
+            errorBanner.show(err);
 
             return false;
         }
@@ -281,7 +203,7 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
         await refreshPreview();
         await dialog.show();
     } finally {
-        disposeDetachedErrorBanner();
+        errorBanner.dispose();
     }
 }
 
