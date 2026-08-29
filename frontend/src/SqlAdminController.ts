@@ -2066,7 +2066,7 @@ export class SqlAdminController {
         try {
             const edges = await getDependencies(ref.connectionId, ref.database!, ref.schema!);
 
-            return buildRelationGraph(edges, ref.schema!, DEPENDENCY_LAYOUT, true);
+            return buildRelationGraph(edges, ref.schema!, DEPENDENCY_LAYOUT, true, Util.measureTextWidths);
         } catch (err) {
             this.notifyError(err, ref);
 
@@ -2087,7 +2087,7 @@ export class SqlAdminController {
         try {
             const edges = await getInheritance(ref.connectionId, ref.database!, ref.schema!);
 
-            return buildRelationGraph(edges, ref.schema!, INHERITANCE_LAYOUT);
+            return buildRelationGraph(edges, ref.schema!, INHERITANCE_LAYOUT, undefined, Util.measureTextWidths);
         } catch (err) {
             this.notifyError(err, ref);
 
@@ -3243,7 +3243,7 @@ export class SqlAdminController {
                 throw new PanelLoadError(null, undefined, true);
             }
 
-            const data = buildRoleGrantsDiagram(name, detail.privileges);
+            const data = buildRoleGrantsDiagram(name, detail.privileges, Util.measureTextWidths);
 
             this.statusBar.setMessage(`${this._statusScope} · ${name}: grants graph (${data.nodes.length - 1} tables)`);
 

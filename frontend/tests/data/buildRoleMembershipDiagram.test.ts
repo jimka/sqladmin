@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { RoleDetail, RoleSummary } from "../../src/contract";
 import { buildRoleMembershipDiagram } from "../../src/data/buildRoleMembershipDiagram";
+import { uniformNodeWidth } from "../../src/data/uniformNodeWidth";
 
 function summary(overrides: Partial<RoleSummary> = {}): RoleSummary {
     return {
@@ -25,11 +26,28 @@ function detail(name: string, memberOf: RoleDetail["memberOf"] = []): RoleDetail
 describe("buildRoleMembershipDiagram", () => {
     it("emits one node per role, carrying the user glyph", () => {
         const out = buildRoleMembershipDiagram([detail("a"), detail("b")]);
+        const width = uniformNodeWidth(["a", "b"]);
 
         expect(out.nodes).toEqual([
-            { id: "a", label: "a", glyph: "user" },
-            { id: "b", label: "b", glyph: "user" },
+            { id: "a", label: "a", glyph: "user", width },
+            { id: "b", label: "b", glyph: "user", width },
         ]);
+    });
+
+    it("gives every node the same width, sized to the widest role name", () => {
+        const out = buildRoleMembershipDiagram([detail("a"), detail("a_considerably_longer_role_name")]);
+
+        expect(out.nodes[0].width).toBe(out.nodes[1].width);
+        expect(out.nodes[0].width).toBe(uniformNodeWidth(["a_considerably_longer_role_name"]));
+    });
+
+    it("passes a stub measurer through to uniformNodeWidth, changing the width", () => {
+        const stub = (texts: string[]): number[] => texts.map(() => 500);
+
+        const out = buildRoleMembershipDiagram([detail("a")], stub);
+
+        expect(out.nodes[0].width).toBe(uniformNodeWidth(["a"], stub));
+        expect(out.nodes[0].width).not.toBe(uniformNodeWidth(["a"]));
     });
 
     it("emits an edge role -> parent for each membership", () => {

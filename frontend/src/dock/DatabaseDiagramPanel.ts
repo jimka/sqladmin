@@ -28,7 +28,7 @@
 // (not just a local) because `focusSchema` and the mode listener mutate it
 // after construction; the root selector itself is the shell's.
 
-import { Component, callable } from "@jimka/typescript-ui/core";
+import { Component, Util, callable } from "@jimka/typescript-ui/core";
 import { HBox }                     from "@jimka/typescript-ui/layout";
 import { Checkbox, ComboBox, Text } from "@jimka/typescript-ui/component/input";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
@@ -79,7 +79,7 @@ class DatabaseDiagramPanel extends DiagramShell {
                 onContextMenu?: (schema: string, table: string, event: MouseEvent) => void) {
         // Locals before super() — they are super()'s children (this is
         // unavailable until super() returns).
-        const full          = buildDatabaseDiagram(schemas);
+        const full          = buildDatabaseDiagram(schemas, Util.measureTextWidths);
         const overviewGraph = buildSchemaOverviewDiagram(schemas);
         const schemaNames   = schemas.map(s => s.schema);
 

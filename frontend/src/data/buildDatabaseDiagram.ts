@@ -12,6 +12,8 @@ import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/types
 import type { TableStructure } from "../contract";
 import type { FkEdgeData } from "./buildSchemaDiagram";
 import { collapseParallelFkEdges } from "./buildSchemaDiagram";
+import { uniformNodeWidth } from "./uniformNodeWidth";
+import type { MeasureWidths } from "./uniformNodeWidth";
 
 // Left-to-right layered layout, matching buildSchemaDiagram's choice — a
 // database's FK graph still reads naturally as a dependency flow.
@@ -63,12 +65,20 @@ export function qualifiedId(schema: string, table: string): string {
  * system catalog or an unfetched schema) is dropped.
  *
  * @param schemas - Every schema's table names + structures, positionally paired.
+ * @param measureWidths - Optional real text measurer passed through to
+ *   `uniformNodeWidth`. Omitting it keeps the estimated node width, which is
+ *   what this builder's own tests do; the app supplies `Util.measureTextWidths`.
  * @returns The nodes + edges + layered/RIGHT layout options for DiagramView.
- *   Two foreign keys between the same qualified table pair fold into one edge
- *   via {@link collapseParallelFkEdges} — this builder has no card mode, so
- *   folding always applies.
+ *   Every leaf node carries the same `width` (see `uniformNodeWidth`), sized
+ *   to the widest bare table name — `groupBySchema`'s later container boxes
+ *   get none. Two foreign keys between the same qualified table pair fold
+ *   into one edge via {@link collapseParallelFkEdges} — this builder has no
+ *   card mode, so folding always applies.
  */
-export function buildDatabaseDiagram(schemas: SchemaTables[]): DiagramData {
+export function buildDatabaseDiagram(schemas: SchemaTables[], measureWidths?: MeasureWidths): DiagramData {
+    const allTables = schemas.flatMap(s => s.tables);
+    const nodeWidth = uniformNodeWidth(allTables, measureWidths);
+
     const nodes: DiagramNodeData[] = [];
     const nodeIds = new Set<string>();
 
@@ -80,6 +90,7 @@ export function buildDatabaseDiagram(schemas: SchemaTables[]): DiagramData {
                 id,
                 label: table,
                 glyph: TABLE_GLYPH,
+                width: nodeWidth,
                 data : { schema, table } satisfies TableNodeData,
             });
             nodeIds.add(id);
