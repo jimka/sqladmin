@@ -970,6 +970,34 @@ _SEQUENCE_TYPES: frozenset[str] = frozenset(
 )
 
 
+def _sequence_bound_clauses(
+    *,
+    increment: int | None,
+    min_value: int | None,
+    max_value: int | None,
+    start: int | None,
+    cache: int | None,
+) -> list[str]:
+    """
+    Build the sequence option clauses CREATE and ALTER share, in Postgres's
+    documented clause order, skipping every option left unset.
+    """
+    parts: list[str] = []
+
+    if increment is not None:
+        parts.append(f"INCREMENT BY {int(increment)}")
+    if min_value is not None:
+        parts.append(f"MINVALUE {int(min_value)}")
+    if max_value is not None:
+        parts.append(f"MAXVALUE {int(max_value)}")
+    if start is not None:
+        parts.append(f"START WITH {int(start)}")
+    if cache is not None:
+        parts.append(f"CACHE {int(cache)}")
+
+    return parts
+
+
 def sequence_create(
     schema: str,
     name: str,
@@ -1009,17 +1037,10 @@ def sequence_create(
     require_text(name, "name")
 
     parts = [f"CREATE SEQUENCE {qualify(schema, name)}"]
+    parts.extend(_sequence_bound_clauses(
+        increment=increment, min_value=min_value, max_value=max_value, start=start, cache=cache,
+    ))
 
-    if increment is not None:
-        parts.append(f"INCREMENT BY {int(increment)}")
-    if min_value is not None:
-        parts.append(f"MINVALUE {int(min_value)}")
-    if max_value is not None:
-        parts.append(f"MAXVALUE {int(max_value)}")
-    if start is not None:
-        parts.append(f"START WITH {int(start)}")
-    if cache is not None:
-        parts.append(f"CACHE {int(cache)}")
     if cycle:
         parts.append("CYCLE")
     if owned_by:
@@ -1079,20 +1100,23 @@ def sequence_alter(
         if data_type.lower() not in _SEQUENCE_TYPES:
             raise ValidationError(f"Unsupported sequence data type '{data_type}'")
         parts.append(f"AS {data_type}")
-    if increment is not None:
-        parts.append(f"INCREMENT BY {int(increment)}")
-    if min_value is not None:
-        parts.append(f"MINVALUE {int(min_value)}")
-    if max_value is not None:
-        parts.append(f"MAXVALUE {int(max_value)}")
-    if start is not None:
-        parts.append(f"START WITH {int(start)}")
+
+    # RESTART sits between START WITH and CACHE in the canonical clause order,
+    # so the five shared bound clauses are built in two calls rather than one
+    # contiguous block: increment/min/max/start first, then RESTART, then cache.
+    parts.extend(_sequence_bound_clauses(
+        increment=increment, min_value=min_value, max_value=max_value, start=start, cache=None,
+    ))
+
     if restart is RESTART_DEFAULT:
         parts.append("RESTART")
     elif restart is not None:
         parts.append(f"RESTART WITH {int(restart)}")  # type: ignore[arg-type]
-    if cache is not None:
-        parts.append(f"CACHE {int(cache)}")
+
+    parts.extend(_sequence_bound_clauses(
+        increment=None, min_value=None, max_value=None, start=None, cache=cache,
+    ))
+
     if cycle is True:
         parts.append("CYCLE")
     elif cycle is False:
