@@ -1,6 +1,6 @@
 """
 App configuration read from the environment (no settings framework — bare
-``os.environ`` like ``connections.py``): the admin-defined **server presets** and
+``os.environ`` like ``static.py``): the admin-defined **server presets** and
 the ``ALLOW_USER_PRESETS`` flag, plus the pre-auth ``GET /api/config`` handler
 that feeds the login screen.
 

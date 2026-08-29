@@ -953,7 +953,9 @@ def schema_rename(name: str, new_name: str) -> str:
 # `RESTART` (reset to the sequence's start value) from `RESTART WITH n`.
 # Compared via `is`, never `==`, so it can never collide with a real int.
 class _RestartDefaultType:
-    """The type of the ``RESTART_DEFAULT`` sentinel (see module docstring)."""
+    """
+    The type of the ``RESTART_DEFAULT`` sentinel (see module docstring).
+    """
 
     def __repr__(self) -> str:
         return "RESTART_DEFAULT"
@@ -1203,7 +1205,9 @@ _VOLATILITIES: frozenset[str] = frozenset({"IMMUTABLE", "STABLE", "VOLATILE"})
 
 @dataclass(frozen=True)
 class FunctionArg:
-    """One CREATE FUNCTION/PROCEDURE argument."""
+    """
+    One CREATE FUNCTION/PROCEDURE argument.
+    """
 
     type: str
     name: str | None = None
@@ -1213,7 +1217,9 @@ class FunctionArg:
 
 @dataclass(frozen=True)
 class CompositeAttr:
-    """One composite-type attribute."""
+    """
+    One composite-type attribute.
+    """
 
     name: str
     type: str
@@ -1221,7 +1227,9 @@ class CompositeAttr:
 
 @dataclass(frozen=True)
 class CreateRoutineSpec:
-    """A CREATE [OR REPLACE] FUNCTION|PROCEDURE request."""
+    """
+    A CREATE [OR REPLACE] FUNCTION|PROCEDURE request.
+    """
 
     schema: str
     name: str

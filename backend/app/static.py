@@ -29,14 +29,18 @@ _DEFAULT_STATIC_DIR = "/srv/static"
 
 
 def static_dir() -> Path | None:
-    """The directory holding the built frontend, or None when absent."""
+    """
+    The directory holding the built frontend, or None when absent.
+    """
     path = Path(os.environ.get(_STATIC_DIR_ENV) or _DEFAULT_STATIC_DIR)
 
     return path if (path / "index.html").is_file() else None
 
 
 def mount_static(app: FastAPI) -> None:
-    """Mount the built frontend on `app`; a no-op when `static_dir()` is None."""
+    """
+    Mount the built frontend on `app`; a no-op when `static_dir()` is None.
+    """
     directory = static_dir()
 
     if directory is None:

@@ -1,4 +1,5 @@
-"""Development launcher behind ``poetry run dev``.
+"""
+Development launcher behind ``poetry run dev``.
 
 A ``[project.scripts]`` entry point must be an importable ``module:callable``,
 not a shell command — so the documented dev invocation
@@ -20,7 +21,8 @@ _PORT = 8000
 
 
 def main() -> None:
-    """Start the API with auto-reload for local development.
+    """
+    Start the API with auto-reload for local development.
 
     ``setdefault`` lets an explicit ``SQLADMIN_ALLOWED_HOSTS`` in the
     environment win, so ``SQLADMIN_ALLOWED_HOSTS=other:5432 poetry run dev``
