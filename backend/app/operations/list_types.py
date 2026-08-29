@@ -13,15 +13,12 @@ requiring ``relkind = 'c'``, or no backing relation at all for an enum).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
-from .base import Query
+from .base import CatalogQuery
 
 
-class ListTypesQuery(Query):
+class ListTypesQuery(CatalogQuery):
     """
     List the standalone enum and composite types in a schema.
     """
@@ -41,15 +38,7 @@ class ListTypesQuery(Query):
         """
         Capture the connection and the schema to list.
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the type rows for the schema.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema)
+        super().__init__(conn, schema)
 
     def get_result(self) -> list[dict]:
         """
@@ -61,7 +50,4 @@ class ListTypesQuery(Query):
         Returns:
             ``[{"name": str}]``, name-ordered.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
-        return [{"name": r["name"]} for r in self._raw]
+        return [{"name": r["name"]} for r in self._rows()]

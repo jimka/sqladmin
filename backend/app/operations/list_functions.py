@@ -12,15 +12,12 @@ plan's Non-Goals).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
-from .base import Query
+from .base import CatalogQuery
 
 
-class ListFunctionsQuery(Query):
+class ListFunctionsQuery(CatalogQuery):
     """
     List the functions and procedures in a schema, each carrying its
     identity-argument signature so an overload can be opened/edited/dropped
@@ -41,15 +38,7 @@ class ListFunctionsQuery(Query):
         """
         Capture the connection and the schema to list.
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the function/procedure rows for the schema.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema)
+        super().__init__(conn, schema)
 
     def get_result(self) -> list[dict]:
         """
@@ -62,10 +51,7 @@ class ListFunctionsQuery(Query):
             ``[{"name": str, "signature": str, "isProcedure": bool}]``, name/
             signature ordered.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
             {"name": r["name"], "signature": r["signature"], "isProcedure": r["is_procedure"]}
-            for r in self._raw
+            for r in self._rows()
         ]

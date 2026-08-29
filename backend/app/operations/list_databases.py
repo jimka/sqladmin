@@ -4,15 +4,12 @@ ListDatabasesQuery — the navigator's database level (pg_database).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
-from .base import Query
+from .base import CatalogQuery
 
 
-class ListDatabasesQuery(Query):
+class ListDatabasesQuery(CatalogQuery):
     """
     List the connection's non-template, connectable databases.
     """
@@ -27,14 +24,7 @@ class ListDatabasesQuery(Query):
         """
         Capture the connection; no inputs to validate.
         """
-        self._conn: asyncpg.Connection = conn
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the database rows.
-        """
-        self._raw = await self._conn.fetch(self._SQL)
+        super().__init__(conn)
 
     def get_result(self) -> list[dict]:
         """
@@ -46,7 +36,4 @@ class ListDatabasesQuery(Query):
         Returns:
             ``[{"name": str}]``.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
-        return [{"name": r["name"]} for r in self._raw]
+        return [{"name": r["name"]} for r in self._rows()]

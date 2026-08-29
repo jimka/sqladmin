@@ -7,13 +7,13 @@ password), so listing roles and their attributes needs no superuser.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 import asyncpg
 
 from ..contract import RoleSummary
-from .base import Query
+from .base import CatalogQuery
 
 # The pg_roles attribute columns shared by the list query and the per-role
 # attributes query (see role_detail.py), kept in one place so both select the
@@ -45,7 +45,7 @@ def summary_from_row(row: Mapping[str, Any]) -> RoleSummary:
     )
 
 
-class ListRolesQuery(Query):
+class ListRolesQuery(CatalogQuery):
     """
     List every role with its ``pg_roles`` attribute flags.
     """
@@ -56,14 +56,7 @@ class ListRolesQuery(Query):
         """
         Capture the connection.
         """
-        self._conn: asyncpg.Connection = conn
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch every role's attribute row.
-        """
-        self._raw = await self._conn.fetch(self._SQL)
+        super().__init__(conn)
 
     def get_result(self) -> list[dict]:
         """
@@ -75,7 +68,4 @@ class ListRolesQuery(Query):
         Returns:
             ``[RoleSummary.to_contract()]`` ordered by role name.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
-        return [summary_from_row(r).to_contract() for r in self._raw]
+        return [summary_from_row(r).to_contract() for r in self._rows()]

@@ -4,17 +4,14 @@ ListSchemasQuery — the navigator's schema level (information_schema.schemata).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
-from .base import Query
+from .base import CatalogQuery
 
 _SYSTEM_SCHEMAS = ("pg_catalog", "information_schema")
 
 
-class ListSchemasQuery(Query):
+class ListSchemasQuery(CatalogQuery):
     """
     List the non-system schemas in a database.
     """
@@ -30,15 +27,8 @@ class ListSchemasQuery(Query):
         """
         Capture the connection and the (multi-DB seam) database name.
         """
-        self._conn: asyncpg.Connection = conn
+        super().__init__(conn, list(_SYSTEM_SCHEMAS))
         self._database: str = database  # carried for the multi-DB seam
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the schema rows, excluding system schemas.
-        """
-        self._raw = await self._conn.fetch(self._SQL, list(_SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -50,7 +40,4 @@ class ListSchemasQuery(Query):
         Returns:
             ``[{"name": str}]``.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
-        return [{"name": r["name"]} for r in self._raw]
+        return [{"name": r["name"]} for r in self._rows()]

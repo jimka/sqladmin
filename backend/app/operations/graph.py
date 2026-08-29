@@ -12,14 +12,11 @@ request per table.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
 from ..contract import ColumnMeta, SequenceRef
 from ..wire import pg_type_to_wire
-from .base import Query
+from .base import CatalogQuery
 from .table_structure import _CONSTRAINT_TYPES, _FK_ACTIONS
 
 # Excluded from every schema/database-wide query below, mirroring
@@ -27,7 +24,7 @@ from .table_structure import _CONSTRAINT_TYPES, _FK_ACTIONS
 _SYSTEM_SCHEMAS = ("pg_catalog", "information_schema")
 
 
-class SchemaTablesQuery(Query):
+class SchemaTablesQuery(CatalogQuery):
     """
     Base-table names in scope: a concrete schema restricts to it; ``None``
     spans every non-system schema in the database. The authoritative node set
@@ -48,15 +45,7 @@ class SchemaTablesQuery(Query):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str | None = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the base-table rows in scope.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, list(_SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -68,13 +57,10 @@ class SchemaTablesQuery(Query):
         Returns:
             ``[{"schema": str, "table": str}]`` ordered by schema then table.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
-        return [{"schema": r["schema"], "table": r["table"]} for r in self._raw]
+        return [{"schema": r["schema"], "table": r["table"]} for r in self._rows()]
 
 
-class SchemaColumnsQuery(Query):
+class SchemaColumnsQuery(CatalogQuery):
     """
     Every base table's columns in scope, generalizing ``ListColumnsQuery``.
     The matview fallback there is dropped: ``SchemaTablesQuery`` excludes
@@ -153,15 +139,7 @@ class SchemaColumnsQuery(Query):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str | None = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the column metadata rows in scope.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, list(_SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -175,12 +153,9 @@ class SchemaColumnsQuery(Query):
             ``[{"schema", "table", "payload": <ColumnMeta contract>}]``,
             ordinal-position order preserved within each table.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         result = []
 
-        for r in self._raw:
+        for r in self._rows():
             meta = ColumnMeta(
                 name=r["name"],
                 data_type=r["data_type"],
@@ -200,7 +175,7 @@ class SchemaColumnsQuery(Query):
         return result
 
 
-class SchemaIndexesQuery(Query):
+class SchemaIndexesQuery(CatalogQuery):
     """
     Every base table's indexes in scope, generalizing ``ListIndexesQuery``.
     """
@@ -232,15 +207,7 @@ class SchemaIndexesQuery(Query):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str | None = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the index metadata rows in scope.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, list(_SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -252,9 +219,6 @@ class SchemaIndexesQuery(Query):
         Returns:
             ``[{"schema", "table", "payload": {name, definition, unique, primary}}]``.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
             {
                 "schema": r["schema"],
@@ -266,11 +230,11 @@ class SchemaIndexesQuery(Query):
                     "primary": bool(r["primary"]),
                 },
             }
-            for r in self._raw
+            for r in self._rows()
         ]
 
 
-class SchemaConstraintsQuery(Query):
+class SchemaConstraintsQuery(CatalogQuery):
     """
     Every base table's non-FK constraints in scope, generalizing
     ``ListConstraintsQuery``.
@@ -302,15 +266,7 @@ class SchemaConstraintsQuery(Query):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str | None = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the non-FK constraint rows in scope.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, list(_SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -323,9 +279,6 @@ class SchemaConstraintsQuery(Query):
         Returns:
             ``[{"schema", "table", "payload": {name, type, columns, definition}}]``.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
             {
                 "schema": r["schema"],
@@ -337,11 +290,11 @@ class SchemaConstraintsQuery(Query):
                     "definition": r["definition"],
                 },
             }
-            for r in self._raw
+            for r in self._rows()
         ]
 
 
-class SchemaForeignKeysQuery(Query):
+class SchemaForeignKeysQuery(CatalogQuery):
     """
     Every base table's foreign keys in scope, generalizing
     ``ListForeignKeysQuery``.
@@ -383,15 +336,7 @@ class SchemaForeignKeysQuery(Query):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str | None = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the foreign-key constraint rows in scope.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, list(_SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -405,9 +350,6 @@ class SchemaForeignKeysQuery(Query):
             ``[{"schema", "table", "payload": {name, columns, refSchema,
             refTable, refColumns, onUpdate, onDelete}}]``.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
             {
                 "schema": r["schema"],
@@ -422,7 +364,7 @@ class SchemaForeignKeysQuery(Query):
                     "onDelete": _FK_ACTIONS[r["on_delete"]],
                 },
             }
-            for r in self._raw
+            for r in self._rows()
         ]
 
 

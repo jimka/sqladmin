@@ -6,19 +6,16 @@ inheritance and declarative partitioning.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
-from .base import Query
+from .base import CatalogQuery
 
 # pg_class.relkind -> the contract DbObjectKind. Partitioned ('p') and foreign
 # ('f') tables collapse to "table"; fixed by the catalog format.
 _RELKIND_KIND: dict[str, str] = {"r": "table", "p": "table", "f": "table", "v": "view", "m": "materializedView"}
 
 
-class ListInheritanceQuery(Query):
+class ListInheritanceQuery(CatalogQuery):
     """
     Parent -> child inheritance/partition edges for a schema (``pg_inherits``
     joined to ``pg_class``). Schema-scoped on the parent's namespace; a child
@@ -43,15 +40,7 @@ class ListInheritanceQuery(Query):
         """
         Capture the connection and the schema to introspect.
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the inheritance edge rows for the schema.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema)
+        super().__init__(conn, schema)
 
     def get_result(self) -> list[dict]:
         """
@@ -65,9 +54,6 @@ class ListInheritanceQuery(Query):
             ``[{"source": {schema, name, kind}, "target": {schema, name, kind}}]``
             where source is the parent and target is the child.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
             {
                 "source": {
@@ -81,5 +67,5 @@ class ListInheritanceQuery(Query):
                     "kind": _RELKIND_KIND[r["child_kind"]],
                 },
             }
-            for r in self._raw
+            for r in self._rows()
         ]

@@ -11,20 +11,17 @@ rows (enum labels or composite attributes).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
 from ..errors import NotFound
-from .base import Query
+from .base import CatalogQuery
 
 # pg_type.typtype values for the two kinds this query understands: 'e' (enum)
 # and 'c' (composite, aka a stand-alone row type created via CREATE TYPE ... AS).
 _ENUM_TYPTYPE = "e"
 
 
-class TypeDefinitionQuery(Query):
+class TypeDefinitionQuery(CatalogQuery):
     """
     Introspect one enum or composite type's labels/attributes.
     """
@@ -59,12 +56,11 @@ class TypeDefinitionQuery(Query):
             schema: the type's schema.
             name: the type's name.
         """
-        self._conn: asyncpg.Connection = conn
+        super().__init__(conn)
         self._schema: str = schema
         self._name: str = name
         self._category: str | None = None
         self._owner: str | None = None
-        self._raw: Sequence[Mapping[str, Any]] | None = None
 
     async def apply(self) -> None:
         """
@@ -108,8 +104,7 @@ class TypeDefinitionQuery(Query):
             — only the field matching ``category`` is populated; the other is
             empty.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
+        rows = self._rows()
 
         if self._owner is None:
             raise NotFound(f"Type '{self._schema}.{self._name}' not found")
@@ -117,7 +112,7 @@ class TypeDefinitionQuery(Query):
         if self._category == "enum":
             return {
                 "category": "enum",
-                "labels": [r["enumlabel"] for r in self._raw],
+                "labels": [r["enumlabel"] for r in rows],
                 "attributes": [],
                 "owner": self._owner,
             }
@@ -125,6 +120,6 @@ class TypeDefinitionQuery(Query):
         return {
             "category": "composite",
             "labels": [],
-            "attributes": [{"name": r["name"], "type": r["type"]} for r in self._raw],
+            "attributes": [{"name": r["name"], "type": r["type"]} for r in rows],
             "owner": self._owner,
         }

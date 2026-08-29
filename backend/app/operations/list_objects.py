@@ -10,12 +10,9 @@ every kind surfaces in one round-trip.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
-from .base import Query
+from .base import CatalogQuery
 
 # One SELECT per object kind, UNION ALL'd into the query below. A phase that
 # adds a new listed kind (schema-sequence-ddl added the sequence fragment;
@@ -40,7 +37,7 @@ _OBJECT_SELECTS: tuple[str, ...] = (
 )
 
 
-class ListObjectsQuery(Query):
+class ListObjectsQuery(CatalogQuery):
     """
     List the tables, views, materialized views, and sequences in a schema,
     tagged by kind.
@@ -52,15 +49,7 @@ class ListObjectsQuery(Query):
         """
         Capture the connection and the schema to list.
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the table/view/matview rows for the schema.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema)
+        super().__init__(conn, schema)
 
     def get_result(self) -> list[dict]:
         """
@@ -73,7 +62,4 @@ class ListObjectsQuery(Query):
             ``[{"name": str, "kind": "table" | "view" | "materializedView" |
             "sequence"}]``.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
-        return [{"name": r["name"], "kind": r["kind"]} for r in self._raw]
+        return [{"name": r["name"], "kind": r["kind"]} for r in self._rows()]

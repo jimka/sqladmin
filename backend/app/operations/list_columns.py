@@ -9,17 +9,14 @@ operations consume.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
 from ..contract import ColumnMeta, SequenceRef, TableRef
 from ..wire import pg_type_to_wire
-from .base import Query
+from .base import CatalogQuery
 
 
-class ListColumnsQuery(Query):
+class ListColumnsQuery(CatalogQuery):
     """
     Introspect one table's columns, marking primary-key and generated ones.
     """
@@ -154,9 +151,8 @@ class ListColumnsQuery(Query):
         """
         Capture the connection and the table to introspect.
         """
-        self._conn: asyncpg.Connection = conn
+        super().__init__(conn, table.schema, table.name)
         self._table: TableRef = table
-        self._raw: Sequence[Mapping[str, Any]] | None = None
 
     async def apply(self) -> None:
         """
@@ -184,9 +180,6 @@ class ListColumnsQuery(Query):
         Returns:
             One ``ColumnMeta`` per column, in ordinal order.
         """
-        if self._raw is None:
-            raise RuntimeError("get_columns_result() called before apply()")
-
         return [
             ColumnMeta(
                 name=r["name"],
@@ -204,7 +197,7 @@ class ListColumnsQuery(Query):
                     else None
                 ),
             )
-            for r in self._raw
+            for r in self._rows()
         ]
 
     def get_result(self) -> list[dict]:

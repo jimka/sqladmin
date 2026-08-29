@@ -9,14 +9,11 @@ needed and injection is impossible — the same discipline as ``role_detail``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
 from ..contract import TableRef
 from ..errors import NotFound
-from .base import Query
+from .base import CatalogQuery
 
 # Map the single-char referential-action codes Postgres stores in
 # ``pg_constraint.confupdtype``/``confdeltype`` to the SQL clause they render as.
@@ -38,7 +35,7 @@ _CONSTRAINT_TYPES: dict[str, str] = {
 }
 
 
-class ListIndexesQuery(Query):
+class ListIndexesQuery(CatalogQuery):
     """
     The indexes on one table, each with its full ``CREATE INDEX`` text and the
     unique/primary flags (from ``pg_indexes`` joined to ``pg_index``).
@@ -62,15 +59,7 @@ class ListIndexesQuery(Query):
         """
         Capture the connection and the table to introspect.
         """
-        self._conn: asyncpg.Connection = conn
-        self._table: TableRef = table
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the index metadata rows for the table.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._table.schema, self._table.name)
+        super().__init__(conn, table.schema, table.name)
 
     def get_result(self) -> list[dict]:
         """
@@ -82,9 +71,6 @@ class ListIndexesQuery(Query):
         Returns:
             ``[{name, definition, unique, primary}]`` ordered by index name.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
             {
                 "name": r["name"],
@@ -92,11 +78,11 @@ class ListIndexesQuery(Query):
                 "unique": bool(r["unique"]),
                 "primary": bool(r["primary"]),
             }
-            for r in self._raw
+            for r in self._rows()
         ]
 
 
-class IndexDetailQuery(Query):
+class IndexDetailQuery(CatalogQuery):
     """
     One index's full ``CREATE INDEX`` text, unique/primary flags, and owning
     table, located by schema + index name alone (backs the Indexes-category
@@ -128,15 +114,8 @@ class IndexDetailQuery(Query):
         holds the index's own name, not a table's — mirrors how
         ``SequenceDetailQuery`` reuses ``TableRef.name`` for a sequence).
         """
-        self._conn: asyncpg.Connection = conn
+        super().__init__(conn, index.schema, index.name)
         self._index: TableRef = index
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the detail row (zero or one row) for the index.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._index.schema, self._index.name)
 
     def get_result(self) -> dict:
         """
@@ -149,13 +128,12 @@ class IndexDetailQuery(Query):
         Returns:
             ``{name, definition, unique, primary, table}``.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
+        rows = self._rows()
 
-        if not self._raw:
+        if not rows:
             raise NotFound(f"Index '{self._index.schema}.{self._index.name}' not found")
 
-        row = self._raw[0]
+        row = rows[0]
 
         return {
             "name": row["name"],
@@ -166,7 +144,7 @@ class IndexDetailQuery(Query):
         }
 
 
-class ListConstraintsQuery(Query):
+class ListConstraintsQuery(CatalogQuery):
     """
     One table's non-FK constraints — primary key (``p``), unique (``u``), and
     check (``c``) — with the reconstructed clause from ``pg_get_constraintdef``.
@@ -195,15 +173,7 @@ class ListConstraintsQuery(Query):
         """
         Capture the connection and the table to introspect.
         """
-        self._conn: asyncpg.Connection = conn
-        self._table: TableRef = table
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the non-FK constraint rows for the table.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._table.schema, self._table.name)
+        super().__init__(conn, table.schema, table.name)
 
     def get_result(self) -> list[dict]:
         """
@@ -216,9 +186,6 @@ class ListConstraintsQuery(Query):
             ``[{name, type, columns, definition}]`` where ``type`` is the mapped
             ``primaryKey``/``unique``/``check`` string.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
             {
                 "name": r["name"],
@@ -226,11 +193,11 @@ class ListConstraintsQuery(Query):
                 "columns": list(r["columns"]),
                 "definition": r["definition"],
             }
-            for r in self._raw
+            for r in self._rows()
         ]
 
 
-class ListForeignKeysQuery(Query):
+class ListForeignKeysQuery(CatalogQuery):
     """
     One table's foreign keys, each with its local columns, referenced
     schema/table/columns, and the update/delete referential actions
@@ -269,15 +236,7 @@ class ListForeignKeysQuery(Query):
         """
         Capture the connection and the table to introspect.
         """
-        self._conn: asyncpg.Connection = conn
-        self._table: TableRef = table
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the foreign-key constraint rows for the table.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._table.schema, self._table.name)
+        super().__init__(conn, table.schema, table.name)
 
     def get_result(self) -> list[dict]:
         """
@@ -290,9 +249,6 @@ class ListForeignKeysQuery(Query):
             ``[{name, columns, refSchema, refTable, refColumns, onUpdate,
             onDelete}]`` ordered by constraint name.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
             {
                 "name": r["name"],
@@ -303,5 +259,5 @@ class ListForeignKeysQuery(Query):
                 "onUpdate": _FK_ACTIONS[r["on_update"]],
                 "onDelete": _FK_ACTIONS[r["on_delete"]],
             }
-            for r in self._raw
+            for r in self._rows()
         ]

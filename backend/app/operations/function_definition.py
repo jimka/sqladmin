@@ -21,16 +21,13 @@ bare name.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
 from ..errors import NotFound
-from .base import Query
+from .base import CatalogQuery
 
 
-class FunctionDefinitionQuery(Query):
+class FunctionDefinitionQuery(CatalogQuery):
     """
     Fetch a function/procedure's ``pg_get_functiondef`` definition SQL.
     """
@@ -58,17 +55,10 @@ class FunctionDefinitionQuery(Query):
             signature: the identity-argument list (from
                 ``ListFunctionsQuery``), disambiguating overloads.
         """
-        self._conn: asyncpg.Connection = conn
+        super().__init__(conn, schema, name, signature)
         self._schema: str = schema
         self._name: str = name
         self._signature: str = signature
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the definition row (zero or one row) for the routine.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema, self._name, self._signature)
 
     def get_result(self) -> dict:
         """
@@ -82,13 +72,12 @@ class FunctionDefinitionQuery(Query):
             ``{"definition": str, "isProcedure": bool, "signature": str,
             "language": str}``.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
+        rows = self._rows()
 
-        if not self._raw:
+        if not rows:
             raise NotFound(f"Function/procedure '{self._schema}.{self._name}({self._signature})' not found")
 
-        row = self._raw[0]
+        row = rows[0]
 
         return {
             "definition": row["definition"],

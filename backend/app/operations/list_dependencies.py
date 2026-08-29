@@ -5,19 +5,16 @@ ListDependenciesQuery — view/materialized-view dependency edges for a schema
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
-from .base import Query
+from .base import CatalogQuery
 
 # pg_class.relkind -> the contract DbObjectKind. Partitioned ('p') and foreign
 # ('f') tables collapse to "table"; fixed by the catalog format.
 _RELKIND_KIND: dict[str, str] = {"r": "table", "p": "table", "f": "table", "v": "view", "m": "materializedView"}
 
 
-class ListDependenciesQuery(Query):
+class ListDependenciesQuery(CatalogQuery):
     """
     View/matview dependency edges for a schema: source = the dependent view,
     target = the underlying relation it reads (``pg_depend``/``pg_rewrite``/
@@ -50,15 +47,7 @@ class ListDependenciesQuery(Query):
         """
         Capture the connection and the schema to introspect.
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the dependency edge rows for the schema.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema)
+        super().__init__(conn, schema)
 
     def get_result(self) -> list[dict]:
         """
@@ -72,9 +61,6 @@ class ListDependenciesQuery(Query):
             ``[{"source": {schema, name, kind}, "target": {schema, name, kind}}]``
             where source is the dependent view and target is the relation it reads.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
             {
                 "source": {
@@ -88,5 +74,5 @@ class ListDependenciesQuery(Query):
                     "kind": _RELKIND_KIND[r["source_kind"]],
                 },
             }
-            for r in self._raw
+            for r in self._rows()
         ]
