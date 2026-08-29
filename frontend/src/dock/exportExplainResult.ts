@@ -4,7 +4,8 @@
 // demand (a second EXPLAIN — an ANALYZE re-executes, rolled back on the backend)
 // so a user who only ever wants the text view never pays for it.
 //
-// DOM-bound (it calls download()) and so manual-verify, mirroring
+// The download() call is mocked in tests/dock/exportExplainResult.test.ts, so
+// the filename, MIME type and status message are unit-tested here, mirroring
 // exportQueryResult; the read-only classifier and SQL builder it leans on are
 // unit-tested in their own pure modules.
 
