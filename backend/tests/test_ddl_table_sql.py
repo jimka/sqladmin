@@ -179,7 +179,10 @@ def test_add_primary_key_named() -> None:
 
 
 def test_add_primary_key_empty_columns_raises() -> None:
-    with pytest.raises(ValidationError):
+    # Exact message pinned, not just the exception type: _add_key_constraint
+    # interpolates its "PRIMARY KEY"/"UNIQUE" keyword parameter into the
+    # message, so a swapped literal at either call site would otherwise pass.
+    with pytest.raises(ValidationError, match="PRIMARY KEY requires at least one column"):
         ddl.add_primary_key("public", "t", [])
 
 
@@ -190,7 +193,7 @@ def test_add_unique_named() -> None:
 
 
 def test_add_unique_empty_columns_raises() -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="UNIQUE requires at least one column"):
         ddl.add_unique("public", "t", [])
 
 

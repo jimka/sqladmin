@@ -43,10 +43,8 @@ __all__ = [
     "drop_index",
     "create_view",
     "drop_view",
-    "rename_view",
     "create_materialized_view",
     "drop_materialized_view",
-    "rename_materialized_view",
     "refresh_materialized_view",
     "replace_materialized_view",
     "RESTART_DEFAULT",
@@ -126,6 +124,27 @@ def require_text(value: object, label: str) -> str:
         raise ValidationError(f"'{label}' is required")
 
     return value
+
+
+def _drop_statement(keyword: str, target: str, *, cascade: bool, if_exists: bool) -> str:
+    """
+    Build a ``DROP <keyword> [IF EXISTS] <target> [CASCADE]`` statement — the
+    shape every ``DROP`` builder in this module shares.
+
+    Args:
+        keyword: the SQL keyword after ``DROP`` (e.g. ``"TABLE"``, ``"VIEW"``).
+        target: the already-quoted/qualified object reference.
+        cascade: emit ``CASCADE``; omitting it leaves Postgres's default
+            ``RESTRICT`` (the keyword itself is never emitted).
+        if_exists: emit ``IF EXISTS``.
+
+    Returns:
+        ``DROP <keyword> [IF EXISTS] <target> [CASCADE]``.
+    """
+    exists_clause = "IF EXISTS " if if_exists else ""
+    cascade_clause = " CASCADE" if cascade else ""
+
+    return f"DROP {keyword} {exists_clause}{target}{cascade_clause}"
 
 
 # --- Table DDL ----------------------------------------------------------------
@@ -237,10 +256,7 @@ def drop_table(schema: str, name: str, *, cascade: bool = False, if_exists: bool
     Returns:
         ``DROP TABLE [IF EXISTS] "schema"."name" [CASCADE]``.
     """
-    exists_clause = "IF EXISTS " if if_exists else ""
-    cascade_clause = " CASCADE" if cascade else ""
-
-    return f"DROP TABLE {exists_clause}{qualify(schema, name)}{cascade_clause}"
+    return _drop_statement("TABLE", qualify(schema, name), cascade=cascade, if_exists=if_exists)
 
 
 def rename_table(schema: str, name: str, new_name: str) -> str:
@@ -420,6 +436,39 @@ def _constraint_prefix(constraint_name: str | None) -> str:
     return "ADD "
 
 
+def _add_key_constraint(
+    schema: str, name: str, columns: Sequence[str], keyword: str, *, constraint_name: str | None
+) -> str:
+    """
+    Build an ``ADD [CONSTRAINT "name"] <keyword> (...)`` statement — the shape
+    ``add_primary_key`` and ``add_unique`` share, differing only in keyword.
+
+    Args:
+        schema: the table's schema.
+        name: the table's name.
+        columns: the key's columns, in order (composite when several).
+        keyword: ``"PRIMARY KEY"`` or ``"UNIQUE"``.
+        constraint_name: an explicit constraint name, or ``None`` to let
+            Postgres auto-name it.
+
+    Raises:
+        ValidationError: if ``columns`` is empty.
+
+    Returns:
+        ``ALTER TABLE "schema"."name" ADD [CONSTRAINT "name"] <keyword>
+        ("c1", "c2")``.
+    """
+    if not columns:
+        raise ValidationError(f"{keyword} requires at least one column")
+
+    col_list = ", ".join(quote_ident(c) for c in columns)
+
+    return (
+        f"ALTER TABLE {qualify(schema, name)} "
+        f"{_constraint_prefix(constraint_name)}{keyword} ({col_list})"
+    )
+
+
 def add_primary_key(
     schema: str, name: str, columns: Sequence[str], *, constraint_name: str | None = None
 ) -> str:
@@ -440,15 +489,7 @@ def add_primary_key(
         ``ALTER TABLE "schema"."name" ADD [CONSTRAINT "name"] PRIMARY KEY
         ("c1", "c2")``.
     """
-    if not columns:
-        raise ValidationError("PRIMARY KEY requires at least one column")
-
-    col_list = ", ".join(quote_ident(c) for c in columns)
-
-    return (
-        f"ALTER TABLE {qualify(schema, name)} "
-        f"{_constraint_prefix(constraint_name)}PRIMARY KEY ({col_list})"
-    )
+    return _add_key_constraint(schema, name, columns, "PRIMARY KEY", constraint_name=constraint_name)
 
 
 def add_unique(
@@ -471,15 +512,7 @@ def add_unique(
         ``ALTER TABLE "schema"."name" ADD [CONSTRAINT "name"] UNIQUE ("c1",
         "c2")``.
     """
-    if not columns:
-        raise ValidationError("UNIQUE requires at least one column")
-
-    col_list = ", ".join(quote_ident(c) for c in columns)
-
-    return (
-        f"ALTER TABLE {qualify(schema, name)} "
-        f"{_constraint_prefix(constraint_name)}UNIQUE ({col_list})"
-    )
+    return _add_key_constraint(schema, name, columns, "UNIQUE", constraint_name=constraint_name)
 
 
 def add_check(schema: str, name: str, expression: str, *, constraint_name: str | None = None) -> str:
@@ -665,10 +698,7 @@ def drop_index(schema: str, index_name: str, *, cascade: bool = False, if_exists
     Returns:
         ``DROP INDEX [IF EXISTS] "schema"."index_name" [CASCADE]``.
     """
-    exists_clause = "IF EXISTS " if if_exists else ""
-    cascade_clause = " CASCADE" if cascade else ""
-
-    return f"DROP INDEX {exists_clause}{qualify(schema, index_name)}{cascade_clause}"
+    return _drop_statement("INDEX", qualify(schema, index_name), cascade=cascade, if_exists=if_exists)
 
 
 # --- View / matview DDL ---------------------------------------------------------
@@ -716,7 +746,7 @@ def create_view(
     return f"CREATE {replace_clause}VIEW {qualify(schema, name)}{columns_clause} AS\n{select}"
 
 
-def drop_view(schema: str, name: str, *, cascade: bool = False) -> str:
+def drop_view(schema: str, name: str, *, cascade: bool = False, if_exists: bool = False) -> str:
     """
     Build a ``DROP VIEW`` statement.
 
@@ -725,28 +755,12 @@ def drop_view(schema: str, name: str, *, cascade: bool = False) -> str:
         name: the view's name.
         cascade: emit ``CASCADE``; omitting it leaves Postgres's default
             ``RESTRICT``.
+        if_exists: emit ``IF EXISTS``.
 
     Returns:
-        ``DROP VIEW "schema"."name" [CASCADE]``.
+        ``DROP VIEW [IF EXISTS] "schema"."name" [CASCADE]``.
     """
-    cascade_clause = " CASCADE" if cascade else ""
-
-    return f"DROP VIEW {qualify(schema, name)}{cascade_clause}"
-
-
-def rename_view(schema: str, name: str, new_name: str) -> str:
-    """
-    Build a view-rename ``ALTER VIEW ... RENAME TO`` statement.
-
-    Args:
-        schema: the view's current schema.
-        name: the view's current name.
-        new_name: the new (unqualified) view name.
-
-    Returns:
-        ``ALTER VIEW "schema"."name" RENAME TO "new_name"``.
-    """
-    return f"ALTER VIEW {qualify(schema, name)} RENAME TO {quote_ident(new_name)}"
+    return _drop_statement("VIEW", qualify(schema, name), cascade=cascade, if_exists=if_exists)
 
 
 def create_materialized_view(schema: str, name: str, select: str, *, with_data: bool = True) -> str:
@@ -771,7 +785,7 @@ def create_materialized_view(schema: str, name: str, select: str, *, with_data: 
     return f"CREATE MATERIALIZED VIEW {qualify(schema, name)} AS\n{select}\n{data_clause}"
 
 
-def drop_materialized_view(schema: str, name: str, *, cascade: bool = False) -> str:
+def drop_materialized_view(schema: str, name: str, *, cascade: bool = False, if_exists: bool = False) -> str:
     """
     Build a ``DROP MATERIALIZED VIEW`` statement.
 
@@ -781,29 +795,14 @@ def drop_materialized_view(schema: str, name: str, *, cascade: bool = False) -> 
         cascade: emit ``CASCADE`` — also drops dependent objects, and (as the
             drop half of ``replace_materialized_view``) any dependents the
             CREATE half does not recreate.
+        if_exists: emit ``IF EXISTS``.
 
     Returns:
-        ``DROP MATERIALIZED VIEW "schema"."name" [CASCADE]``.
+        ``DROP MATERIALIZED VIEW [IF EXISTS] "schema"."name" [CASCADE]``.
     """
-    cascade_clause = " CASCADE" if cascade else ""
-
-    return f"DROP MATERIALIZED VIEW {qualify(schema, name)}{cascade_clause}"
-
-
-def rename_materialized_view(schema: str, name: str, new_name: str) -> str:
-    """
-    Build a matview-rename ``ALTER MATERIALIZED VIEW ... RENAME TO``
-    statement.
-
-    Args:
-        schema: the matview's current schema.
-        name: the matview's current name.
-        new_name: the new (unqualified) matview name.
-
-    Returns:
-        ``ALTER MATERIALIZED VIEW "schema"."name" RENAME TO "new_name"``.
-    """
-    return f"ALTER MATERIALIZED VIEW {qualify(schema, name)} RENAME TO {quote_ident(new_name)}"
+    return _drop_statement(
+        "MATERIALIZED VIEW", qualify(schema, name), cascade=cascade, if_exists=if_exists
+    )
 
 
 def refresh_materialized_view(
@@ -919,10 +918,7 @@ def schema_drop(name: str, *, cascade: bool = False, if_exists: bool = False) ->
     """
     require_text(name, "name")
 
-    exists_clause = "IF EXISTS " if if_exists else ""
-    cascade_clause = " CASCADE" if cascade else ""
-
-    return f"DROP SCHEMA {exists_clause}{quote_ident(name)}{cascade_clause}"
+    return _drop_statement("SCHEMA", quote_ident(name), cascade=cascade, if_exists=if_exists)
 
 
 def schema_rename(name: str, new_name: str) -> str:
@@ -1141,10 +1137,7 @@ def sequence_drop(schema: str, name: str, *, cascade: bool = False, if_exists: b
     """
     require_text(name, "name")
 
-    exists_clause = "IF EXISTS " if if_exists else ""
-    cascade_clause = " CASCADE" if cascade else ""
-
-    return f"DROP SEQUENCE {exists_clause}{qualify(schema, name)}{cascade_clause}"
+    return _drop_statement("SEQUENCE", qualify(schema, name), cascade=cascade, if_exists=if_exists)
 
 
 # --- Function/procedure & custom-type DDL ----------------------------------------
@@ -1302,7 +1295,7 @@ def create_routine(spec: CreateRoutineSpec) -> str:
 
 
 def drop_routine(
-    schema: str, name: str, kind: str, signature: str, cascade: bool, if_exists: bool
+    schema: str, name: str, kind: str, signature: str, *, cascade: bool = False, if_exists: bool = False
 ) -> str:
     """
     Build a ``DROP FUNCTION|PROCEDURE`` statement, disambiguating overloads by
@@ -1329,10 +1322,10 @@ def drop_routine(
     require_text(name, "name")
 
     keyword = "FUNCTION" if kind == "function" else "PROCEDURE"
-    exists_clause = "IF EXISTS " if if_exists else ""
-    cascade_clause = " CASCADE" if cascade else ""
 
-    return f"DROP {keyword} {exists_clause}{qualify(schema, name)}({signature}){cascade_clause}"
+    return _drop_statement(
+        keyword, f"{qualify(schema, name)}({signature})", cascade=cascade, if_exists=if_exists
+    )
 
 
 def create_enum_type(schema: str, name: str, labels: Sequence[str]) -> str:
@@ -1408,10 +1401,7 @@ def drop_type(schema: str, name: str, *, cascade: bool = False, if_exists: bool 
     require_text(schema, "schema")
     require_text(name, "name")
 
-    exists_clause = "IF EXISTS " if if_exists else ""
-    cascade_clause = " CASCADE" if cascade else ""
-
-    return f"DROP TYPE {exists_clause}{qualify(schema, name)}{cascade_clause}"
+    return _drop_statement("TYPE", qualify(schema, name), cascade=cascade, if_exists=if_exists)
 
 
 def alter_type_add_value(

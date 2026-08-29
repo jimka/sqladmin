@@ -64,7 +64,7 @@ class DropViewPreview(DdlPreview):
     """
     Preview a ``DROP VIEW`` statement.
 
-    Spec: ``{schema, name, cascade?}``.
+    Spec: ``{schema, name, cascade?, ifExists?}``.
     """
 
     def __init__(self, conn: asyncpg.Connection, spec: Mapping[str, Any]) -> None:
@@ -84,7 +84,12 @@ class DropViewPreview(DdlPreview):
         """
         Set ``self._sql`` to the generated ``DROP VIEW`` statement.
         """
-        self._sql = ddl.drop_view(self._schema, self._name, cascade=bool(self._spec.get("cascade", False)))
+        self._sql = ddl.drop_view(
+            self._schema,
+            self._name,
+            cascade=bool(self._spec.get("cascade", False)),
+            if_exists=bool(self._spec.get("ifExists", False)),
+        )
 
 
 class CreateMaterializedViewPreview(DdlPreview):
@@ -122,7 +127,7 @@ class DropMaterializedViewPreview(DdlPreview):
     """
     Preview a ``DROP MATERIALIZED VIEW`` statement.
 
-    Spec: ``{schema, name, cascade?}``.
+    Spec: ``{schema, name, cascade?, ifExists?}``.
     """
 
     def __init__(self, conn: asyncpg.Connection, spec: Mapping[str, Any]) -> None:
@@ -144,7 +149,10 @@ class DropMaterializedViewPreview(DdlPreview):
         statement.
         """
         self._sql = ddl.drop_materialized_view(
-            self._schema, self._name, cascade=bool(self._spec.get("cascade", False))
+            self._schema,
+            self._name,
+            cascade=bool(self._spec.get("cascade", False)),
+            if_exists=bool(self._spec.get("ifExists", False)),
         )
 
 
