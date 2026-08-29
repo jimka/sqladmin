@@ -112,11 +112,12 @@ function shareOneTarget(pairs: FkEdgePair[]): boolean {
 
 /**
  * Caps a bundle's detail blocks at a {@link MAX_TOOLTIP_LINES}-line visual
- * budget, appending a trailing summary line for the rest. Each block is one
- * contributing key's text, which may itself span two rendered lines (its
- * header plus a coverage line) — the cap counts *rendered lines*, not blocks,
- * so the eight-line visual budget holds even when every key in the bundle is
- * uncovered; a block that would only partially fit is excluded whole rather
+ * budget, appending a trailing summary line for the rest. Every block
+ * `multiEdgeSummary` passes in is one line today (index coverage was removed —
+ * see `singleEdgeDetail`'s and `multiEdgeSummary`'s own notes on that), but the
+ * cap still counts *rendered lines*, not blocks: a block that ever grows past
+ * one line (an optional referential-action line, say) is still budgeted
+ * correctly, and one that would only partially fit is excluded whole rather
  * than split across the boundary. The trailing summary still counts
  * contributing *keys*, not lines, matching the existing `"…and N more"` contract.
  *
