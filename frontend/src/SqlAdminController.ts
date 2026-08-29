@@ -1165,13 +1165,12 @@ export class SqlAdminController {
             form,
             generateSql: async () =>
                 (await previewDropTable(ref, { schema: ref.schema!, name: ref.name!, ...form.readSpec() })).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => {
                 this._navigator?.refresh?.();
                 this.dock.removePanel(this.panelId(ref));
                 this.dock.removePanel(this.structurePanelId(ref));
             },
-            onError: msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1192,13 +1191,12 @@ export class SqlAdminController {
             title:       "Rename table",
             form,
             generateSql: async () => (await previewAlterTable(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
             onSuccess:   () => {
                 this._navigator?.refresh?.();
                 this.dock.removePanel(this.panelId(ref));
                 this.dock.removePanel(this.structurePanelId(ref));
             },
-            onError: msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1232,9 +1230,8 @@ export class SqlAdminController {
             title:       "Add constraint",
             form,
             generateSql: async () => (await previewConstraint(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
             onSuccess:   () => this.refreshStructure(ref),
-            onError:     msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1255,9 +1252,8 @@ export class SqlAdminController {
             generateSql: async () => (await previewConstraint(ref, {
                 schema: ref.schema!, name: ref.name!, action: "drop", constraintName, ...form.readSpec(),
             })).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this.refreshStructure(ref),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1275,9 +1271,8 @@ export class SqlAdminController {
             title:       "Create index",
             form,
             generateSql: async () => (await previewIndex(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
             onSuccess:   () => this.refreshStructure(ref),
-            onError:     msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1297,9 +1292,8 @@ export class SqlAdminController {
             generateSql: async () => (await previewIndex(ref, {
                 schema: ref.schema!, action: "drop", indexName, ...form.readSpec(),
             })).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this.refreshStructure(ref),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1336,9 +1330,8 @@ export class SqlAdminController {
             title:       "Create index",
             form,
             generateSql: async () => (await previewIndex(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
             onSuccess:   () => this.refreshStructure(ref),
-            onError:     msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1449,13 +1442,12 @@ export class SqlAdminController {
                 name:    ref.name!,
                 cascade: form.readSpec().cascade,
             })).sql,
-            execute: sql => executeDdl(this._connectionId, sql),
             onSuccess: () => {
                 this._navigator?.refresh?.();
                 this.dock.removePanel(this.panelId(ref));
                 this.dock.removePanel(this.definitionPanelId(ref));
             },
-            onError: msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1479,9 +1471,8 @@ export class SqlAdminController {
                 concurrently: form.concurrently(),
                 withNoData:   form.withNoData(),
             })).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: refreshed`),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1533,9 +1524,8 @@ export class SqlAdminController {
             form,
             generateSql: async () =>
                 (await previewDropSchema(ref, buildDropSchemaSpec(ref.schema!, form.readSpec().cascade))).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1554,9 +1544,8 @@ export class SqlAdminController {
             form,
             generateSql: async () =>
                 (await previewRenameSchema(ref, buildRenameSchemaSpec(ref.schema!, form.newName()))).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1596,9 +1585,8 @@ export class SqlAdminController {
             form,
             generateSql: async () =>
                 (await previewDropSequence(ref, buildDropSequenceSpec(ref.schema!, ref.name!, form.readSpec().cascade))).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1757,12 +1745,11 @@ export class SqlAdminController {
             generateSql: async () => (await previewDropFunction(ref, buildDropFunctionSpec(
                 ref.schema!, ref.name!, kind, ref.signature ?? "", form.readSpec().cascade,
             ))).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => {
                 this._navigator?.refresh?.();
                 this.dock.removePanel(this.functionDefinitionPanelId(ref));
             },
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1845,9 +1832,8 @@ export class SqlAdminController {
                 title:       "Add enum value",
                 form,
                 generateSql: async () => (await previewAlterTypeAddValue(ref, form.readSpec())).sql,
-                execute:     sql => executeDdl(this._connectionId, sql),
                 onSuccess:   () => this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: altered`),
-                onError:     msg => this.notifyError(new Error(msg), ref),
+                ...this.ddlDefaults(ref),
             });
 
             return;
@@ -1885,9 +1871,8 @@ export class SqlAdminController {
             form,
             generateSql: async () =>
                 (await previewDropType(ref, buildDropTypeSpec(ref.schema!, ref.name!, form.readSpec().cascade))).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
