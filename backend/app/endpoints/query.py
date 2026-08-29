@@ -34,7 +34,7 @@ async def run_query(
     Returns:
         ``{"kind": "rows", "columns", "rows", "rowCount", "truncated"}`` for a
         statement that returned a result set (``truncated`` is ``True`` when the
-        result was capped at ``MAX_RESULT_ROWS``), or
+        result was capped at ``MAX_ROWS_PER_REQUEST``), or
         ``{"kind": "status", "command", "rowCount"}`` for one that did not
         (INSERT/UPDATE/DDL).
     """

@@ -21,14 +21,7 @@ from ..contract import ColumnMeta, WireType
 from ..errors import ValidationError
 from ..wire import pg_type_to_wire, rows_to_wire
 from .base import Command
-
-
-# The ad-hoc query result cap. A rows-returning statement is read through a
-# server-side cursor that fetches at most this many rows (plus one, to detect
-# truncation), so an unbounded SELECT (e.g. ``SELECT * FROM huge_table``) never
-# materializes fully server- or client-side — the ad-hoc query panel is not
-# paginated, so the bound belongs here. Mirrors the list-rows page-size ceiling.
-MAX_RESULT_ROWS = 1000
+from .common import MAX_ROWS_PER_REQUEST, status_envelope
 
 
 def _query_columns(attrs: Sequence[Any]) -> list[dict]:
@@ -94,30 +87,17 @@ def _as_colmeta(columns: list[dict]) -> list[ColumnMeta]:
     ]
 
 
-def _affected(status: str | None) -> int:
-    """
-    Parse the affected-row count off a command tag.
-
-    ``"INSERT 0 3"`` -> 3, ``"UPDATE 5"`` -> 5, ``"CREATE TABLE"`` -> 0,
-    ``None``/``""`` -> 0.
-
-    Args:
-        status: the asyncpg command status tag, or None.
-
-    Returns:
-        The trailing integer of the tag, or 0 when there is none.
-    """
-    if not status:
-        return 0
-
-    last = status.rsplit(" ", 1)[-1]
-
-    return int(last) if last.isdigit() else 0
-
-
 class RunQueryCommand(Command):
     """
     Run one arbitrary SQL statement and classify its result.
+
+    A rows-returning statement is read through a server-side cursor that
+    fetches at most MAX_ROWS_PER_REQUEST rows (plus one, to detect
+    truncation), so an unbounded SELECT (e.g. ``SELECT * FROM huge_table``)
+    never materializes fully server- or client-side — the ad-hoc query panel
+    is not paginated, so the bound belongs here. Shared with the list-rows
+    page-size ceiling and the import row ceiling (see common.py's
+    MAX_ROWS_PER_REQUEST).
     """
 
     def __init__(self, conn: asyncpg.Connection, sql: str) -> None:
@@ -146,7 +126,7 @@ class RunQueryCommand(Command):
         description, the (capped) rows, and the command status tag.
 
         A rows-returning statement is read through a server-side cursor that
-        fetches at most ``MAX_RESULT_ROWS + 1`` rows: the cursor never
+        fetches at most ``MAX_ROWS_PER_REQUEST + 1`` rows: the cursor never
         materializes a huge result set, and the extra row lets ``get_result``
         report truncation without a second COUNT. A non-row statement
         (INSERT/UPDATE/DDL) is executed for its status tag.
@@ -157,7 +137,7 @@ class RunQueryCommand(Command):
 
             if self._attrs:
                 cursor = await stmt.cursor()
-                self._records = await cursor.fetch(MAX_RESULT_ROWS + 1)
+                self._records = await cursor.fetch(MAX_ROWS_PER_REQUEST + 1)
             else:
                 await stmt.fetch()
 
@@ -174,8 +154,8 @@ class RunQueryCommand(Command):
         Returns:
             ``{"kind": "rows", "columns", "rows", "rowCount", "truncated"}`` for a
             statement that returned a result set (even an empty one) — ``truncated``
-            is ``True`` when the result exceeded ``MAX_RESULT_ROWS`` and only the
-            first ``MAX_RESULT_ROWS`` rows are returned — or
+            is ``True`` when the result exceeded ``MAX_ROWS_PER_REQUEST`` and only the
+            first ``MAX_ROWS_PER_REQUEST`` rows are returned — or
             ``{"kind": "status", "command", "rowCount"}`` otherwise.
         """
         if self._attrs is None:
@@ -188,8 +168,8 @@ class RunQueryCommand(Command):
             # apply() fetches one past the cap; a full extra row means the result
             # was truncated. Keep only the capped rows for the wire.
             fetched   = self._records or []
-            truncated = len(fetched) > MAX_RESULT_ROWS
-            kept      = fetched[:MAX_RESULT_ROWS]
+            truncated = len(fetched) > MAX_ROWS_PER_REQUEST
+            kept      = fetched[:MAX_ROWS_PER_REQUEST]
 
             # Build each row positionally against the de-duplicated names. asyncpg
             # collapses duplicate/unnamed keys under dict(record) (last wins), which
@@ -209,4 +189,4 @@ class RunQueryCommand(Command):
                 "truncated": truncated,
             }
 
-        return {"kind": "status", "command": self._status or "", "rowCount": _affected(self._status)}
+        return status_envelope(self._status)

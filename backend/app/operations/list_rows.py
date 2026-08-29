@@ -16,10 +16,7 @@ from ..contract import ColumnMeta, TableRef
 from ..sql.compiler import FilterCompiler, OrderCompiler
 from ..wire import rows_to_wire
 from .base import CatalogQuery
-from .common import qualified
-
-# Cap the page size so a hostile/buggy client can't request an unbounded read.
-_MAX_PAGE_SIZE = 1000
+from .common import MAX_ROWS_PER_REQUEST, qualified
 
 
 class ListRowsQuery(CatalogQuery):
@@ -61,7 +58,8 @@ class ListRowsQuery(CatalogQuery):
         self._params: list[Any]
         self._where, self._params = FilterCompiler(filters, columns).compile()
         self._order: str = OrderCompiler(sort, columns).compile()
-        self._limit: int = max(1, min(int(page_size), _MAX_PAGE_SIZE))
+        # Cap the page size so a hostile/buggy client can't request an unbounded read.
+        self._limit: int = max(1, min(int(page_size), MAX_ROWS_PER_REQUEST))
         self._offset: int = max(0, (max(1, int(page)) - 1) * self._limit)
 
     async def apply(self) -> None:

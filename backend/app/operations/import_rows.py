@@ -32,12 +32,8 @@ from ..contract import ColumnMeta, TableRef
 from ..errors import ValidationError
 from ..wire import from_import_scalar, from_wire_value
 from .base import Command, Query
-from .common import is_required_column
+from .common import MAX_ROWS_PER_REQUEST, is_required_column
 from .insert_row import InsertRowCommand
-
-# This app's established per-request row ceiling — matches run_query.py's
-# MAX_RESULT_ROWS and list_rows.py's _MAX_PAGE_SIZE.
-MAX_IMPORT_ROWS = 1000
 
 # The coercion exceptions a bad cell value can raise, once the column itself
 # is known to exist. Shared by _coerce_row (wraps them into a ValidationError
@@ -152,11 +148,11 @@ class PreviewImportRowsQuery(Query):
             columns: the table's introspected columns.
 
         Raises:
-            ValidationError: ``rows`` exceeds ``MAX_IMPORT_ROWS``, or any row
+            ValidationError: ``rows`` exceeds ``MAX_ROWS_PER_REQUEST``, or any row
                 has a key naming no real column.
         """
-        if len(rows) > MAX_IMPORT_ROWS:
-            raise ValidationError(f"Import is limited to {MAX_IMPORT_ROWS} rows (got {len(rows)})")
+        if len(rows) > MAX_ROWS_PER_REQUEST:
+            raise ValidationError(f"Import is limited to {MAX_ROWS_PER_REQUEST} rows (got {len(rows)})")
 
         by_name = {c.name: c for c in columns}
         unknown = sorted({k for raw in rows for k in raw if k not in by_name})
@@ -219,11 +215,11 @@ class ImportRowsCommand(Command):
             columns: the table's introspected columns.
 
         Raises:
-            ValidationError: ``rows`` exceeds ``MAX_IMPORT_ROWS``, a key names
+            ValidationError: ``rows`` exceeds ``MAX_ROWS_PER_REQUEST``, a key names
                 no real column, or a value fails to coerce.
         """
-        if len(rows) > MAX_IMPORT_ROWS:
-            raise ValidationError(f"Import is limited to {MAX_IMPORT_ROWS} rows (got {len(rows)})")
+        if len(rows) > MAX_ROWS_PER_REQUEST:
+            raise ValidationError(f"Import is limited to {MAX_ROWS_PER_REQUEST} rows (got {len(rows)})")
 
         self._conn: asyncpg.Connection = conn
         self._table: TableRef = table
