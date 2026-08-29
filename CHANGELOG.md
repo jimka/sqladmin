@@ -46,7 +46,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   previously only the diagram's other control gestures did.
 
 ### Internal
-- Migrated to `@jimka/typescript-ui` 0.8.0.
+- Migrated to `@jimka/typescript-ui` 0.8.0, dropping `DiagramShell`'s own
+  fit-on-load workaround for an unrooted diagram panel now that
+  `DiagramView`'s `fitOnLoad` default handles it. A panel with a root
+  chosen at construction still settles its own viewport, since the library
+  has no notion of this shell's root and would otherwise fit the whole
+  graph instead.
 
 ## [0.7.0] — 2026-08-22
 
