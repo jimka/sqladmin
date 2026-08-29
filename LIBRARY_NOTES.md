@@ -8,6 +8,217 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✅ `DiagramView` low-zoom node simplification verified against the real 325-table diagram
+
+Manual verification for the `diagram-level-of-detail-rendering` library plan, run
+against the same Tables-mode whole-database diagram as the two entries below (325
+tables, the `hub` schema's 150-table FK chain) via the `@jimka/typescript-ui`
+symlink override, built from `.worktrees/diagram-level-of-detail-rendering`. Core
+mechanism confirmed working; the interactive checks (click/double-click/right-click/
+drag/hysteresis on a simplified node) were not re-confirmed live this session — see
+below — but are covered by the offline suite's new "level-of-detail rendering at
+low zoom" block (14 cases).
+
+**Fit to view on the real graph draws plain themed boxes in place of the table
+nodes, matching the design exactly.** With the Tables-mode diagram open at its
+default zoom (full `DiagramNode`/`DiagramGroupNode` components, 332 of them,
+confirmed via `querySelectorAll`), clicking **Fit to view** replaced every one of
+them with a plain filled rectangle at the same position and size — no node text,
+the FK edges between them unchanged, the picture still reading as the same graph
+(two screenshots taken, before and after). This is the one live confirmation that
+matters most: the real 325-table graph is exactly the case the plan's own
+measurement work (`## Addendum`) was built around, and it behaves as designed.
+
+**The small (7-node) Overview-mode diagram never simplifies, at Fit to view or
+otherwise** — confirmed via `querySelectorAll`: 7 real `DiagramGroupNode`
+components, 0 `<rect>` elements, labels legible in a screenshot at fit zoom. This
+is the node-count-floor guard working correctly against a real diagram, not just
+the offline `gridResult`/`compoundGridResult` fixtures.
+
+**Not re-confirmed live: selection, double-click, right-click, drag-to-pan, and
+the zoom hysteresis band on a simplified node.** Every attempt to reopen the
+Tables-mode diagram after the first successful one (including in a fresh tab, after
+a full dev-server restart and `.vite` cache clear) left it permanently unmounted —
+zero node components, zero drawn `<rect>`s, no console error, no rejected promise
+(instrumented directly: a `Worker` proxy showed the ELK worker completing its
+round-trip with a well-formed result — real node coordinates matching the
+graph — and a `Promise.prototype.catch` proxy caught nothing). **Confirmed
+pre-existing, not caused by this plan:** the identical hang reproduces byte-for-byte
+against the `diagram-edge-virtualization` tip build (this plan's own parent commit,
+containing none of its changes) via the same symlink-and-rebuild swap. This is the
+same failure mode the `diagram-edge-virtualization` entry below flagged as "One
+observation, not chased down" (Mode dropdown Overview→Tables leaving the diagram
+unmounted until a manual Fit to view) — this session's harder variant (permanently
+zero, Fit to view no longer rescues it) is very likely the same root cause given
+more provocation (repeated Mode-switch cycles, dependency re-optimization mid-session),
+still most consistent with that entry's own suspect: `tryInitialCentre`'s one-shot
+centring not re-arming on a same-instance `setData` at a drastically different
+scale. Filed here rather than chased further, since a definitive root-cause trace
+would need its own investigation session and this plan's diff is now cleared of
+suspicion by the parent-commit reproduction.
+
+**Repeat of the `vite-dep-cache-stale-across-rebuilds` lesson, again in the shared-
+`node_modules` multi-worktree setup:** the frontend dev server already running (the
+`type-info-tab` worktree, sharing `node_modules` with the main tree) kept serving a
+pre-simplification bundle after the symlink swap and a plain reload; only killing
+and restarting that dev server plus clearing `frontend/node_modules/.vite` made the
+new build actually load. The dev server and symlink were restored to their original
+targets (`type-info-tab`'s worktree process, `@jimka/typescript-ui` → the main tree)
+before finishing.
+
+---
+
+## ✅ `DiagramEdgeLayer` viewport culling verified against the real 325-table diagram
+
+Manual verification for the `diagram-edge-virtualization` library plan, run against
+the same Tables-mode whole-database diagram as the node-virtualization entry below
+(325 tables, the `hub` schema's 150-table FK chain) via the `@jimka/typescript-ui`
+symlink override, built from `.worktrees/diagram-edge-virtualization`. No
+regressions found; the drawn-edge reduction is real, and this closes the earlier
+entry's own caveat that its "~3,675 elements... unchanged by this plan" figure
+was edges, left untouched on purpose.
+
+**Getting a clean read took a restart.** The frontend dev server that was already
+running (a `feature/type-info-tab` sqladmin worktree, sharing `node_modules` —
+and therefore `@jimka/typescript-ui` — with the main tree per the usual worktree
+convention) had the pre-edge-virtualization library pre-bundled by Vite's
+dependency optimizer. Swapping the symlink and reloading alone kept serving the
+stale bundle (the DOM counts below were identical, down to the last digit, before
+and after the symlink swap); only killing and restarting that dev server, plus
+clearing `frontend/node_modules/.vite`, made it pick up the new build. Filed here
+as a repeat of the `vite-dep-cache-stale-across-rebuilds` lesson, this time in a
+shared-`node_modules` multi-worktree setup rather than a single-checkout one.
+
+**DOM element counts** (read via the DiagnosticsOverlay's whole-page count, About
+→ Debug — the node-virtualization entry used a subtree-scoped
+`querySelectorAll` count instead, so these two figures are not directly
+comparable to each other, only each to its own before/after): at a working zoom
+inside the `hub` chain, **1,156–1,220** DOM nodes: at fit-to-view zoom (nothing
+culled, per the plan's own Non-Goal), **6,380** — a ~5.3–5.5× reduction,
+reproduced across two independent working-zoom samples (a `Zoom in` burst and,
+separately, `Reset view`). A subtree-scoped read at the same working zoom found
+322–334 edge `<path>` elements drawn (against ~3,600 for the whole graph, matching
+the earlier entry's figure) alongside 1–2 node components — both axes culling
+together as the plan intends, neither dominating the other.
+
+**Behavioural checks in the Tables-mode diagram:** panning (dispatched
+`pointerdown`/`pointermove` on the view root) reconciled the drawn edge count up
+and down correctly with no stale/frozen numbers and no console errors, matching
+the plan's "a difference, never a rebuild" design. Hovering a point on a drawn
+edge fired the app's real tooltip with the correct bundle contents ("2 references
+to hub.users(id): hub.ops_allocation(changed_by), hub.ops_allocation(created_by)"),
+confirming `edgeIdAt`/`edgesNear` answer correctly against the culled/drawn set
+in the live app, not just offline. FPS held at 60 with 0 long tasks while
+interacting at a culled working zoom; the one-time uncalled full draw at
+fit-to-view briefly cost 3 long tasks and dropped FPS to 46 — a one-off, expected
+per the plan's own "Potential Challenges" note on a big zoom-in pass costing no
+more than today's every-`setEdges` redraw.
+
+**Not re-verified live this session, relying on the offline suite instead:**
+pressing-and-dragging an edge to pan, a press-without-move leaving the selection
+alone, and selection dimming unrelated edges while panning the selection off
+screen and back — all three are exercised by the `## Expected Behaviour` §B/§C
+cases (the emphasis-survives-a-cull-round-trip cases in particular), not
+spot-checked again live. Likewise skipped: the 6×-CPU-throttled performance trace
+and the before/after `setEdgeEmphasis` timing comparison the plan's `##
+Verification` section also asks for, and a live close-the-tab DOM-growth check —
+the last of these is covered by `releaseDrawnEdge`'s unchanged
+untrack-then-release shape (identical to the mechanism the node-virtualization
+entry below already traced through a real close with no leak) and by §B's own
+assertions on exact `removeChild` counts, not by a fresh live measurement.
+
+**One observation, not chased down: switching the diagram's own Mode dropdown
+from Overview to Tables (a ~1000× jump in the graph's coordinate extent, on the
+same already-sized view) left the diagram fully unmounted — zero node components,
+zero drawn edges — until a manual "Fit to view" click.** `Reset view` afterwards,
+and reopening the diagram tab fresh, both centred and mounted correctly on their
+own. This did not block verification (a real user would see the same blank
+canvas after a Mode switch and need to click Fit to view, or would open a fresh
+diagram tab and never hit it), and is very likely pre-existing: this plan touches
+no centring/pan/zoom logic, only what gets drawn once the view's pan and zoom are
+already known, and the symptom is consistent with `tryInitialCentre`'s one-shot
+centring not re-arming on a same-instance `setData` at a drastically different
+scale — a `DiagramView`/`JunctionDiagramView` question, not an edge-layer one.
+Not confirmed against a pre-change baseline in this session (would have needed
+another rebuild/restart cycle); flagged here rather than silently pushed past.
+
+---
+
+## ✅ `DiagramView` node virtualization verified against the real 325-table diagram
+
+Manual verification for the `diagram-node-virtualization` library plan, run against
+the Tables-mode whole-database diagram (325 tables, the `hub` schema's 150-table
+FK chain) via the `@jimka/typescript-ui` symlink override, built from
+`.worktrees/diagram-node-virtualization`. No regressions found; the mounted-node
+reduction is real and substantially exceeds the plan's own "roughly an order of
+magnitude" estimate.
+
+**DOM element counts** (read via `document.querySelectorAll` against the
+`.JunctionDiagramView` subtree, not the diagnostics overlay's whole-page count):
+at a working zoom inside the `hub` chain, only **12 of 325** node components were
+attached to the document (`.DiagramNode`/`.DiagramGroupNode` count) — a ~27×
+reduction — with the remaining ~3,675 elements in that subtree being SVG edge
+paths, unchanged by this plan as documented. Zoomed out one step, 150 of 325 were
+mounted, tracking the visible area as expected. At fit-to-view zoom, all 325 were
+mounted, matching the plan's documented "nothing is culled at fit-the-whole-graph
+zoom" caveat.
+
+**Behavioural checks in the Tables-mode diagram, all passed:** the diagram opens,
+centres, and fits identically to before. Panning (simulated via dispatched
+`pointerdown`/`pointermove`/`pointerup` on the content host) is smooth with no
+empty-painted regions or late-appearing nodes at any point along a
+multi-thousand-pixel drag. Selecting a table (`workorder_rows`), panning it
+several screens off-screen (into empty canvas, unmounting it) and back left it
+still visibly highlighted — selection survives a real unmount/remount cycle in
+the browser, not just in the offline suite. Right-click on a mounted node opens
+the real context menu (Open data / Open as query / Show / Rename / Drop /
+Export); double-click activation navigates to the table view as before. Edge
+hover's underlying mechanism is untouched by this plan and already covered by
+the offline suite; spot-checked only.
+
+**Node emphasis survives the same cycle — checked separately, in
+`RelationDiagramPanel`.** `DatabaseDiagramPanel` (the Tables-mode panel above)
+never calls `setNodeEmphasis`; the app's only call site is
+`RelationDiagramPanel.ts` (the "Show ▸ Relations" FK-explorer diagram, opened
+from a table's context menu). Verified there instead: opening `hub.asset_ledger_entry`'s
+relations diagram and clicking its `project_id` column emphasises the root card
+and dims the unrelated ones (`columnEmphasis` → `setNodeEmphasis`); panning
+every card off-screen and back left the same card emphasised and the same ones
+dimmed — confirmed by screenshot comparison before/after the round-trip.
+
+**Stylesheet cleanup on close — the metric doesn't exercise what it was meant
+to.** With 150 node components mounted, `document.styleSheets` totalled 242
+rules (vs. 241 immediately before switching into Tables mode); closing the
+diagram tab dropped this to 220. The rule count barely moves either way because
+the Tables-mode default node renderer (`DiagramNode`, unconfigured — see
+`DiagramView.ts`'s `rebuildNodes`) carries **no per-instance `#id`-scoped style
+rule at all**: it declares only `ownStyleStates` (a shared `.DiagramNode.selected`
+class-tier rule) and takes every other value from `_defaultDiagramNodeOptions`,
+confirmed by instrumenting the offline `RecordingDOMSink` harness — mounting two
+default `DiagramNode`s produced zero `#id`-scoped `ensureStyleRule` calls, only
+shared class-tier ones. So this number is *consistent* with the fix (nothing
+leaked) but is not a meaningful stress test of the `destructor` fix (Ordered
+Implementation Step 10) for the common case — it would only move if a
+`nodeRenderer` wrote per-instance styles (a custom `TableCardNode`, e.g., as
+`RelationDiagramPanel` uses, does). Not re-verified against that renderer in
+this pass; flagged here rather than left implied by the numbers above.
+
+**Performance trace** (6× CPU throttling, a scripted pan/zoom/hover burst over
+the mounted `hub`-chain region): the `ForcedReflow` insight reported 312 ms total
+reflow time across the whole burst, dominated by `flushPendingLayouts` /
+`measureText`, with no runaway layout-thrashing pattern. The `DOMSize` insight
+reported 4,304 total page elements, with the largest single element (an SVG `<g>`
+with 3,572 children) being the edge layer — again, unchanged by this plan.
+**INP could not be captured**: Chrome only attributes Interaction timing to
+trusted input events, and a scripted `dispatchEvent` burst is not trusted, so no
+number is directly comparable to the plan's originally-measured 459 ms. The DOM
+element counts above are the more precise, more directly comparable evidence for
+this specific change (mounted node count), since INP was always a downstream
+symptom of that count in the original investigation, not the thing this plan
+edits directly.
+
+---
+
 ## ✂️✅ Tree exposed no way to observe or read back its expanded set
 
 Persisting which nodes are expanded in the Database and Roles rail trees
