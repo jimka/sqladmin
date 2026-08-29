@@ -18,13 +18,20 @@ export class LoadSignal {
     // The armed deferred, or null when idle. Holding the resolver beside its
     // promise is what lets `settle` resolve a promise handed out earlier.
     private _pending: { promise: Promise<void>; resolve: () => void } | null = null;
+    // Loads that have armed and not yet settled. The shared deferred resolves
+    // when this returns to zero, so overlapping refreshes extend one wait.
+    private _armed: number = 0;
 
     /**
-     * Arm the awaitable. A no-op while one is already armed, so a refresh
-     * arriving mid-load extends the existing wait instead of handing out a
-     * second promise the first load's settle would never resolve.
+     * Arm the awaitable, counting this load among the outstanding ones. A
+     * refresh arriving mid-load increments the count rather than replacing
+     * the deferred, so `whenSettled()`'s promise resolves only once every
+     * armed load has settled — one still-outstanding load extends the wait
+     * for every caller already holding the promise.
      */
     arm(): void {
+        this._armed += 1;
+
         if (this._pending !== null) {
             return;
         }
@@ -35,8 +42,22 @@ export class LoadSignal {
         this._pending = { promise, resolve };
     }
 
-    /** Settle the armed awaitable, if there is one. A no-op when idle. */
+    /**
+     * Settle one armed load. A no-op when nothing is armed (guards against an
+     * unmatched call rather than driving the count negative). Resolves the
+     * shared deferred only once every armed load has settled.
+     */
     settle(): void {
+        if (this._armed === 0) {
+            return;
+        }
+
+        this._armed -= 1;
+
+        if (this._armed > 0) {
+            return;
+        }
+
         const pending = this._pending;
 
         this._pending = null;
@@ -44,8 +65,8 @@ export class LoadSignal {
     }
 
     /**
-     * @returns A promise resolving when the armed load settles; an
-     * already-resolved one when no load is armed.
+     * @returns A promise resolving when every currently-armed load has
+     * settled; an already-resolved one when no load is armed.
      */
     whenSettled(): Promise<void> {
         return this._pending?.promise ?? Promise.resolve();
