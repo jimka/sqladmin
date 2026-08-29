@@ -60,12 +60,22 @@ cascade runs setters **during** `super()`. So:
 3. Assign instance fields, `addComponent(...)` calls, and event-listener
    wiring **after** `super()` returns.
 
+A child widget must be a pre-`super()` local only when `super()`'s own
+options bag reads it — [`LoginForm.ts:27-51`](src/shell/LoginForm.ts#L27)
+and `SqlAdminShell`'s constructor are cases where it does (each passes its
+children through `components:`); `ActivityBar` is the case where it doesn't
+— `super()` takes only a layout manager, so its children are built as plain
+field assignments afterwards instead:
+
 ```ts
-constructor(views: ActivityView[]) {
-    const rail = new ToolBar({ orientation: "vertical" });   // local — pre-super()
+constructor(views: ActivityView[], options: ActivityBarOptions = {}) {
     super({ layoutManager: new BorderLayout({ spacing: 0 }) });
-    this.rail = rail;                                        // field assignment — post-super()
-    this.addComponent(this.rail, { placement: Placement.WEST });
+
+    this.card       = new Card();
+    this.deck       = Container({ layoutManager: this.card });
+    this.rail       = new ToolBar({ orientation: "vertical" });
+    this.buttonById = new Map();
+    // ...
 }
 ```
 
