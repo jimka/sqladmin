@@ -32,7 +32,7 @@ export type GrantNodeData =
     | { kind: "table"; schema: string; table: string };
 
 /** Opaque metadata carried on a grant edge: the table's privilege list. */
-export interface GrantEdgeData {
+interface GrantEdgeData {
     privileges: string[]; // distinct privileges held on this table, sorted
 }
 

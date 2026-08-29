@@ -24,7 +24,7 @@ const LAYOUT_OPTIONS: Record<string, string> = {
 const ROLE_GLYPH = "user";
 
 /** Opaque metadata carried on a membership edge (admin_option on the grant). */
-export interface MembershipEdgeData {
+interface MembershipEdgeData {
     admin: boolean;
 }
 
