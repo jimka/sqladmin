@@ -19,6 +19,7 @@ from .base import CatalogQuery
 # pg_type.typtype values for the two kinds this query understands: 'e' (enum)
 # and 'c' (composite, aka a stand-alone row type created via CREATE TYPE ... AS).
 _ENUM_TYPTYPE = "e"
+_COMPOSITE_TYPTYPE = "c"
 
 
 class TypeDefinitionQuery(CatalogQuery):
@@ -30,12 +31,19 @@ class TypeDefinitionQuery(CatalogQuery):
     # pseudo-type, which asyncpg decodes as raw bytes (b"e"/b"c"), not str —
     # comparing that against a Python str literal silently never matches.
     # Casting in SQL sidesteps the codec quirk entirely.
+    # The typtype/typrelid conditions mirror list_types.py's own filter, so
+    # this query answers for exactly the types the navigator lists: excludes
+    # every typtype outside 'e'/'c', and a composite typtype whose typrelid
+    # names a real table/view row type rather than a stand-alone composite.
     _TYPE_SQL = (
         "SELECT t.oid, t.typtype::text AS typtype, t.typrelid, "
         "pg_catalog.pg_get_userbyid(t.typowner) AS owner "
         "FROM pg_catalog.pg_type t "
         "JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace "
-        "WHERE n.nspname = $1 AND t.typname = $2"
+        "LEFT JOIN pg_catalog.pg_class c ON c.oid = t.typrelid "
+        "WHERE n.nspname = $1 AND t.typname = $2 "
+        "AND t.typtype IN ('e', 'c') "
+        "AND (t.typrelid = 0 OR c.relkind = 'c')"
     )
     _ENUM_LABELS_SQL = (
         "SELECT enumlabel FROM pg_catalog.pg_enum WHERE enumtypid = $1 ORDER BY enumsortorder"
@@ -85,9 +93,18 @@ class TypeDefinitionQuery(CatalogQuery):
         if type_row["typtype"] == _ENUM_TYPTYPE:
             self._category = "enum"
             self._raw = await self._conn.fetch(self._ENUM_LABELS_SQL, type_row["oid"])
-        else:
+        elif type_row["typtype"] == _COMPOSITE_TYPTYPE:
             self._category = "composite"
             self._raw = await self._conn.fetch(self._COMPOSITE_ATTRS_SQL, type_row["typrelid"])
+        else:
+            # Unreachable via a real Postgres connection — _TYPE_SQL's own
+            # WHERE clause already excludes every typtype outside 'e'/'c' — but
+            # kept as a defensive guard: clearing _owner (set above) is what
+            # makes get_result()'s NotFound fire instead of silently
+            # mislabeling an unrecognized type as a composite.
+            self._category = None
+            self._raw = []
+            self._owner = None
 
     def get_result(self) -> dict:
         """
