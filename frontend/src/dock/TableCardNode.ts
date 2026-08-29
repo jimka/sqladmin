@@ -10,8 +10,8 @@
 // row below schemaCardModel's CARD_ROW_HEIGHT, walking the ports off the row
 // centres they were pinned to (see schemaCardModel's header comment for the
 // renderer contract this follows). A node with no card `data` (or no columns —
-// e.g. the injected root buildSchemaDiagram never fetches columns for, or a
-// role in the reused role-membership graph) renders header-only.
+// e.g. the injected root buildSchemaDiagram never fetches columns for) renders
+// header-only.
 //
 // Class-first (see ../../COMPONENT_CONVENTIONS.md): extends Panel directly, so
 // `setSelected` is a real public method rather than a grafted-on cast.

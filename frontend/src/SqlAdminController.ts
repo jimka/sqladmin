@@ -81,6 +81,7 @@ import type { SchemaTables }                                                    
 import { RoleGrantsDiagramPanel }                                                                                                                                                                  from "./dock/RoleGrantsDiagramPanel";
 import { RelationGraphPanel }                                                                                                                                                                      from "./dock/RelationGraphPanel";
 import { RootedRelationGraphPanel }                                                                                                                                                                from "./dock/RootedRelationGraphPanel";
+import { RoleMembershipDiagramPanel }                                                                                                                                                              from "./dock/RoleMembershipDiagramPanel";
 import type { DiagramData, DiagramNodeData }                                                                                                                                                       from "@jimka/typescript-ui/component/diagram";
 import { PropertiesPanel }                                                                                                                                                                          from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                                                                                                                                                    from "./roles/RolesPropertiesPanel";
@@ -3170,8 +3171,8 @@ export class SqlAdminController {
 
     /**
      * Open (or focus) the role-membership graph rooted at `name`: every role as
-     * a node, `role -> parent` edges from each role's `memberOf`, driven by the
-     * reused RelationDiagramPanel (direction / depth / legend). The membership
+     * a node, `role -> parent` edges from each role's `memberOf`, driven by
+     * RoleMembershipDiagramPanel (direction / depth / legend). The membership
      * DAG needs every role's detail, so this fans out N per-role fetches —
      * unlike buildSchemaGraphData/buildDatabaseGraphData's single bulk `/graph`
      * request, there is no combined role-detail endpoint to collapse this into,
@@ -3204,12 +3205,12 @@ export class SqlAdminController {
             const roles   = await this.loadRoles();
             const details = await Promise.all(roles.map(r => getRoleDetail(this._connectionId, r.name)));
 
-            const full = buildRoleMembershipDiagram(details);
+            const full = buildRoleMembershipDiagram(details, Util.measureTextWidths);
             const root: DiagramNodeData = { id: name, label: name, glyph: ROLE_GLYPH };
 
             this.statusBar.setMessage(`${this._statusScope} · ${name}: membership (${full.nodes.length} roles)`);
 
-            return RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName), undefined, depth);
+            return RoleMembershipDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName), depth);
         });
     }
 
