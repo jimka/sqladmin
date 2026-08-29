@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import asyncpg
 
-from ..contract import ColumnMeta, SequenceRef
-from ..wire import pg_type_to_wire
 from .base import CatalogQuery
 from .catalog import (
+    COLUMN_FROM,
+    COLUMN_SELECT,
     CONSTRAINT_FROM,
     CONSTRAINT_SELECT,
     FOREIGN_KEY_FROM,
@@ -25,6 +25,7 @@ from .catalog import (
     INDEX_FROM,
     INDEX_SELECT,
     SYSTEM_SCHEMAS,
+    column_meta,
     constraint_payload,
     foreign_key_payload,
     index_payload,
@@ -69,76 +70,22 @@ class SchemaTablesQuery(CatalogQuery):
 
 class SchemaColumnsQuery(CatalogQuery):
     """
-    Every base table's columns in scope, generalizing ``ListColumnsQuery``.
-    The matview fallback there is dropped: ``SchemaTablesQuery`` excludes
-    views/matviews, so this only ever needs the ``information_schema`` path.
+    Every base table's columns in scope, generalizing ``ListColumnsQuery``. An
+    ``EXISTS`` guard against ``information_schema.tables`` (excluding views)
+    keeps this to base tables only — ``SchemaTablesQuery``'s own node set —
+    so no matview fallback is needed here.
     """
 
-    # Both the ``pk`` and ``seq`` sub-selects carry (schema, table) throughout
-    # — dropped, primary-key/sequence rows would attribute to the wrong table
-    # whenever a column name repeats across tables. See ListColumnsQuery's
-    # docstring for the seq sub-select's two-arm rationale (OWNED BY vs.
-    # DEFAULT nextval()); the arms are unchanged here, just table-qualified.
-    _SQL = """
-        SELECT
-            c.table_schema AS schema,
-            c.table_name   AS table,
-            c.column_name  AS name,
-            c.data_type    AS data_type,
-            (c.is_nullable = 'YES') AS nullable,
-            COALESCE(
-                c.is_identity = 'YES' OR c.is_generated = 'ALWAYS' OR c.column_default LIKE 'nextval(%',
-                false
-            ) AS is_generated,
-            (c.column_default IS NOT NULL) AS has_default,
-            COALESCE(pk.is_pk, false) AS is_primary_key,
-            seq.sequence_schema AS sequence_schema,
-            seq.sequence_name   AS sequence_name
-        FROM information_schema.columns c
-        JOIN information_schema.tables t
-          ON t.table_schema = c.table_schema
-         AND t.table_name   = c.table_name
-         AND t.table_type  <> 'VIEW'
-        LEFT JOIN (
-            SELECT tc.table_schema, tc.table_name, kcu.column_name, true AS is_pk
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-              ON kcu.constraint_name = tc.constraint_name
-             AND kcu.table_schema    = tc.table_schema
-            WHERE tc.constraint_type = 'PRIMARY KEY'
-        ) pk ON pk.table_schema = c.table_schema
-            AND pk.table_name   = c.table_name
-            AND pk.column_name  = c.column_name
-        LEFT JOIN (
-            SELECT DISTINCT ON (rn.nspname, rc.relname, l.attnum)
-                   rn.nspname AS ref_schema,
-                   rc.relname AS ref_table,
-                   a.attname  AS column_name,
-                   sn.nspname AS sequence_schema,
-                   s.relname  AS sequence_name
-            FROM (
-                SELECT d.refobjid AS attrelid, d.refobjsubid AS attnum, d.objid AS seqid, 1 AS arm
-                FROM pg_catalog.pg_depend d
-                WHERE d.classid = 'pg_class'::regclass AND d.refclassid = 'pg_class'::regclass
-                  AND d.deptype IN ('a', 'i') AND d.refobjsubid > 0
-                UNION ALL
-                SELECT ad.adrelid, ad.adnum, d.refobjid, 2
-                FROM pg_catalog.pg_depend d
-                JOIN pg_catalog.pg_attrdef ad ON ad.oid = d.objid
-                WHERE d.classid = 'pg_attrdef'::regclass AND d.refclassid = 'pg_class'::regclass
-                  AND d.deptype = 'n'
-            ) l
-            JOIN pg_catalog.pg_class s      ON s.oid = l.seqid AND s.relkind = 'S'
-            JOIN pg_catalog.pg_namespace sn ON sn.oid = s.relnamespace
-            JOIN pg_catalog.pg_class rc     ON rc.oid = l.attrelid
-            JOIN pg_catalog.pg_namespace rn ON rn.oid = rc.relnamespace
-            JOIN pg_catalog.pg_attribute a  ON a.attrelid = l.attrelid AND a.attnum = l.attnum
-            ORDER BY rn.nspname, rc.relname, l.attnum, l.arm DESC, sn.nspname, s.relname
-        ) seq ON seq.ref_schema  = c.table_schema
-             AND seq.ref_table   = c.table_name
-             AND seq.column_name = c.column_name
-        WHERE ($1::text IS NULL OR c.table_schema = $1)
-          AND c.table_schema <> ALL($2::text[])
+    _SQL = f"""
+        SELECT c.table_schema AS schema, c.table_name AS table, {COLUMN_SELECT}
+        {COLUMN_FROM}
+          AND c.table_schema <> ALL($3::text[])
+          AND EXISTS (
+              SELECT 1 FROM information_schema.tables t
+              WHERE t.table_schema = c.table_schema
+                AND t.table_name   = c.table_name
+                AND t.table_type  <> 'VIEW'
+          )
         ORDER BY c.table_schema, c.table_name, c.ordinal_position
     """
 
@@ -146,7 +93,7 @@ class SchemaColumnsQuery(CatalogQuery):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        super().__init__(conn, schema, list(SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, None, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -160,26 +107,10 @@ class SchemaColumnsQuery(CatalogQuery):
             ``[{"schema", "table", "payload": <ColumnMeta contract>}]``,
             ordinal-position order preserved within each table.
         """
-        result = []
-
-        for r in self._rows():
-            meta = ColumnMeta(
-                name=r["name"],
-                data_type=r["data_type"],
-                nullable=r["nullable"],
-                is_primary_key=r["is_primary_key"],
-                is_generated=r["is_generated"],
-                has_default=r["has_default"],
-                wire_type=pg_type_to_wire(r["data_type"]),
-                sequence=(
-                    SequenceRef(schema=r["sequence_schema"], name=r["sequence_name"])
-                    if r["sequence_schema"] is not None
-                    else None
-                ),
-            )
-            result.append({"schema": r["schema"], "table": r["table"], "payload": meta.to_contract()})
-
-        return result
+        return [
+            {"schema": r["schema"], "table": r["table"], "payload": column_meta(r).to_contract()}
+            for r in self._rows()
+        ]
 
 
 class SchemaIndexesQuery(CatalogQuery):

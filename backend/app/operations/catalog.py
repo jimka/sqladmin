@@ -11,6 +11,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from ..contract import ColumnMeta, SequenceRef
+from ..wire import pg_type_to_wire
+
 # Excluded from every schema/database-wide query (graph.py's five queries)
 # and from ListSchemasQuery's own listing. Shared by every module that used
 # to keep its own copy of this same catalog-scoping constant (list_schemas.py,
@@ -225,3 +228,142 @@ def edge_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict]:
         for r in rows
         if r["source_kind"] in RELKIND_KIND and r["target_kind"] in RELKIND_KIND
     ]
+
+
+COLUMN_SELECT = """
+    c.column_name AS name,
+    c.data_type   AS data_type,
+    COALESCE(att.full_type, c.data_type) AS full_type,
+    c.column_default AS default_expr,
+    (c.is_nullable = 'YES') AS nullable,
+    COALESCE(
+        c.is_identity = 'YES'
+        OR c.is_generated = 'ALWAYS'
+        OR c.column_default LIKE 'nextval(%',
+        false
+    ) AS is_generated,
+    (c.column_default IS NOT NULL) AS has_default,
+    COALESCE(pk.is_pk, false) AS is_primary_key,
+    seq.sequence_schema AS sequence_schema,
+    seq.sequence_name   AS sequence_name
+"""
+
+# The backing-sequence sub-select (`seq`) unions the two DISTINCT ways a column
+# can be tied to a sequence. The two arms have OPPOSITE join orientations,
+# which is the easiest thing here to get wrong:
+#
+#   Arm (a) OWNED BY (serial, GENERATED ... AS IDENTITY): the SEQUENCE is
+#     the dependent object, so it is d.objid and the column is d.refobjid.
+#   Arm (b) DEFAULT nextval(...): the ATTRDEF is the dependent object, so
+#     the SEQUENCE is the REFERENCED side (d.refobjid) instead.
+#
+# Writing arm (b) with arm (a)'s orientation returns zero rows — and still
+# looks correct for serial/identity columns, which arm (a) covers.
+COLUMN_FROM = """
+    FROM information_schema.columns c
+    LEFT JOIN (
+        SELECT tc.table_schema, tc.table_name, kcu.column_name, true AS is_pk
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON kcu.constraint_name = tc.constraint_name
+         AND kcu.table_schema    = tc.table_schema
+        WHERE tc.constraint_type = 'PRIMARY KEY'
+          AND ($1::text IS NULL OR tc.table_schema = $1)
+          AND ($2::text IS NULL OR tc.table_name   = $2)
+    ) pk ON pk.table_schema = c.table_schema
+        AND pk.table_name   = c.table_name
+        AND pk.column_name  = c.column_name
+    -- The declared type WITH its modifier (information_schema.columns.data_type
+    -- is the SQL-standard type name only, e.g. "character varying" for a
+    -- varchar(60) column) — format_type() over pg_attribute is the only
+    -- source for the modifier, so this is a second self-join on the same
+    -- table/column, independent of the `seq` sub-select below.
+    LEFT JOIN (
+        SELECT an.nspname AS ref_schema,
+               ac.relname AS ref_table,
+               a.attname  AS column_name,
+               format_type(a.atttypid, a.atttypmod) AS full_type
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class ac     ON ac.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace an ON an.oid = ac.relnamespace
+        WHERE a.attnum > 0 AND NOT a.attisdropped
+          AND ($1::text IS NULL OR an.nspname = $1)
+          AND ($2::text IS NULL OR ac.relname = $2)
+    ) att ON att.ref_schema  = c.table_schema
+         AND att.ref_table   = c.table_name
+         AND att.column_name = c.column_name
+    LEFT JOIN (
+        SELECT DISTINCT ON (rn.nspname, rc.relname, l.attnum)
+               rn.nspname AS ref_schema,
+               rc.relname AS ref_table,
+               a.attname  AS column_name,
+               sn.nspname AS sequence_schema,
+               s.relname  AS sequence_name
+        FROM (
+            -- Arm (a): the sequence is OWNED BY the column.
+            SELECT d.refobjid AS attrelid, d.refobjsubid AS attnum, d.objid AS seqid, 1 AS arm
+            FROM pg_catalog.pg_depend d
+            WHERE d.classid = 'pg_class'::regclass
+              AND d.refclassid = 'pg_class'::regclass
+              AND d.deptype IN ('a', 'i')
+              AND d.refobjsubid > 0
+            UNION ALL
+            -- Arm (b): the column's DEFAULT calls nextval() on the sequence.
+            SELECT ad.adrelid, ad.adnum, d.refobjid, 2
+            FROM pg_catalog.pg_depend d
+            JOIN pg_catalog.pg_attrdef ad ON ad.oid = d.objid
+            WHERE d.classid = 'pg_attrdef'::regclass
+              AND d.refclassid = 'pg_class'::regclass
+              AND d.deptype = 'n'
+        ) l
+        -- relkind='S' is load-bearing, not cosmetic: arm (b)'s
+        -- refclassid='pg_class' ALSO matches a generated-STORED column's
+        -- references to its own table's columns, which would otherwise be
+        -- reported as that column's "sequence".
+        JOIN pg_catalog.pg_class s      ON s.oid = l.seqid AND s.relkind = 'S'
+        JOIN pg_catalog.pg_namespace sn ON sn.oid = s.relnamespace
+        JOIN pg_catalog.pg_class rc     ON rc.oid = l.attrelid
+        JOIN pg_catalog.pg_namespace rn ON rn.oid = rc.relnamespace
+        JOIN pg_catalog.pg_attribute a  ON a.attrelid = l.attrelid AND a.attnum = l.attnum
+        WHERE ($1::text IS NULL OR rn.nspname = $1)
+          AND ($2::text IS NULL OR rc.relname = $2)
+        -- arm DESC: a DEFAULT (arm 2) beats an OWNED BY (arm 1) when the two
+        -- disagree — the DEFAULT is what actually supplies the value at
+        -- INSERT. The trailing name sort makes a same-arm tie deterministic
+        -- (a column can own two sequences, or default from two).
+        ORDER BY rn.nspname, rc.relname, l.attnum, l.arm DESC, sn.nspname, s.relname
+    ) seq ON seq.ref_schema  = c.table_schema
+         AND seq.ref_table   = c.table_name
+         AND seq.column_name = c.column_name
+    WHERE ($1::text IS NULL OR c.table_schema = $1)
+      AND ($2::text IS NULL OR c.table_name   = $2)
+"""
+
+
+def column_meta(row: Mapping[str, Any]) -> ColumnMeta:
+    """
+    Map one ``COLUMN_SELECT`` row to a typed ``ColumnMeta``.
+
+    Args:
+        row: a row carrying ``COLUMN_SELECT``'s columns.
+
+    Returns:
+        The column's typed metadata, with its wire type derived from
+        ``data_type``.
+    """
+    return ColumnMeta(
+        name=row["name"],
+        data_type=row["data_type"],
+        nullable=row["nullable"],
+        is_primary_key=row["is_primary_key"],
+        is_generated=row["is_generated"],
+        has_default=row["has_default"],
+        wire_type=pg_type_to_wire(row["data_type"]),
+        full_type=row["full_type"],
+        default_expr=row["default_expr"],
+        sequence=(
+            SequenceRef(schema=row["sequence_schema"], name=row["sequence_name"])
+            if row["sequence_schema"] is not None
+            else None
+        ),
+    )

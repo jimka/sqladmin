@@ -47,28 +47,31 @@ def test_columns_wraps_column_meta_as_payload() -> None:
     op._raw = [
         {
             "schema": "public", "table": "customers",
-            "name": "id", "data_type": "integer", "nullable": False,
+            "name": "id", "data_type": "integer", "full_type": "integer", "default_expr": None,
+            "nullable": False,
             "is_primary_key": True, "is_generated": True, "has_default": True,
             "sequence_schema": "public", "sequence_name": "customers_id_seq",
         },
         {
             "schema": "public", "table": "customers",
-            "name": "balance", "data_type": "numeric", "nullable": False,
+            "name": "balance", "data_type": "numeric", "full_type": "numeric(12,2)",
+            "default_expr": None, "nullable": False,
             "is_primary_key": False, "is_generated": False, "has_default": False,
             "sequence_schema": None, "sequence_name": None,
         },
     ]
 
-    # This op's raw rows carry no full_type/default_expr, so the ColumnMeta
-    # objects it builds fall back to the dataclass defaults ("" / None) —
-    # SchemaColumnsQuery is unrelated to the editable Structure tab.
+    # COLUMN_FROM's att sub-select gives this op the same full_type/default_expr
+    # columns the editable Structure tab reads — "balance" pins a case where
+    # full_type (carrying the modifier) differs from data_type (the SQL-standard
+    # name alone).
     assert op.get_result() == [
         {
             "schema": "public", "table": "customers",
             "payload": {
                 "name": "id", "dataType": "integer", "nullable": False,
                 "isPrimaryKey": True, "isGenerated": True, "hasDefault": True,
-                "wireType": "number", "fullType": "", "defaultExpr": None,
+                "wireType": "number", "fullType": "integer", "defaultExpr": None,
                 "sequence": {"schema": "public", "name": "customers_id_seq"},
             },
         },
@@ -77,7 +80,7 @@ def test_columns_wraps_column_meta_as_payload() -> None:
             "payload": {
                 "name": "balance", "dataType": "numeric", "nullable": False,
                 "isPrimaryKey": False, "isGenerated": False, "hasDefault": False,
-                "wireType": "string", "fullType": "", "defaultExpr": None,
+                "wireType": "string", "fullType": "numeric(12,2)", "defaultExpr": None,
                 "sequence": None,
             },
         },
