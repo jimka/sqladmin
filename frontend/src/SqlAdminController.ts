@@ -1486,7 +1486,7 @@ export class SqlAdminController {
         openSqlPreviewDialog({
             title:       "Create function",
             form,
-            generateSql: async () => (await previewCreateFunction(ref, form.getSpec())).sql,
+            generateSql: async () => (await previewCreateFunction(ref, form.readSpec())).sql,
             execute:     sql => executeDdl(this._connectionId, sql),
             onSuccess:   () => this._navigator?.refresh?.(),
             onError:     msg => this.notifyError(new Error(msg), ref),
@@ -1652,7 +1652,7 @@ export class SqlAdminController {
             openSqlPreviewDialog({
                 title:       "Create enum type",
                 form,
-                generateSql: async () => (await previewCreateEnumType(ref, form.getSpec())).sql,
+                generateSql: async () => (await previewCreateEnumType(ref, form.readSpec())).sql,
                 execute:     sql => executeDdl(this._connectionId, sql),
                 onSuccess,
                 onError,
@@ -1666,7 +1666,7 @@ export class SqlAdminController {
         openSqlPreviewDialog({
             title:       "Create composite type",
             form,
-            generateSql: async () => (await previewCreateCompositeType(ref, form.getSpec())).sql,
+            generateSql: async () => (await previewCreateCompositeType(ref, form.readSpec())).sql,
             execute:     sql => executeDdl(this._connectionId, sql),
             onSuccess,
             onError,
@@ -1709,7 +1709,7 @@ export class SqlAdminController {
             openSqlPreviewDialog({
                 title:       "Add enum value",
                 form,
-                generateSql: async () => (await previewAlterTypeAddValue(ref, form.getSpec())).sql,
+                generateSql: async () => (await previewAlterTypeAddValue(ref, form.readSpec())).sql,
                 execute:     sql => executeDdl(this._connectionId, sql),
                 onSuccess:   () => this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: altered`),
                 onError,
@@ -1723,7 +1723,7 @@ export class SqlAdminController {
         openSqlPreviewDialog({
             title:       "Edit composite type (recreate)",
             form,
-            generateSql: async () => (await previewCreateCompositeType(ref, form.getSpec())).sql,
+            generateSql: async () => (await previewCreateCompositeType(ref, form.readSpec())).sql,
             execute:     sql => executeDdl(this._connectionId, sql),
             onSuccess:   () => this._navigator?.refresh?.(),
             onError,

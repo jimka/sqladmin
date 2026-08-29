@@ -67,7 +67,7 @@ class AddEnumValueForm extends Panel {
     }
 
     /** @returns the AlterTypeAddValueSpec for the form's current fields. */
-    getSpec(): AlterTypeAddValueSpec {
+    readSpec(): AlterTypeAddValueSpec {
         const value = this._valueField.getValue();
         const placement = this._placementCombo.getValue();
 

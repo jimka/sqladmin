@@ -3,23 +3,23 @@
 // COLUMN_WEIGHT below), so the inputs stretch to fill it instead of sitting
 // squished at a fixed width. The column rows themselves collect raw
 // name/type/default/nullable/primaryKey fields; readSpec() hands them to the
-// pure buildCreateTableSpec helper.
+// pure buildCreateTableSpec helper. The row grid itself is RowGridPanel's —
+// see that module for the shared add/remove-row mechanics and the leak its
+// disposal fixes.
 
-import { Panel, callable } from "@jimka/typescript-ui/core";
-import type { Component } from "@jimka/typescript-ui/core";
-import { Grid, VBox } from "@jimka/typescript-ui/layout";
+import { callable } from "@jimka/typescript-ui/core";
 import { Checkbox, TextField } from "@jimka/typescript-ui/component/input";
 import { Button } from "@jimka/typescript-ui/component/button";
 import { Glyph } from "@jimka/typescript-ui/component/display";
-import { plus } from "@jimka/typescript-ui/glyphs/solid/plus";
 import { minus } from "@jimka/typescript-ui/glyphs/solid/minus";
-import { Insets } from "@jimka/typescript-ui/primitive";
 import type { CreateTableSpec } from "../contract";
 import { buildCreateTableSpec } from "./ddlSpecs";
 import type { ColumnRow } from "./ddlSpecs";
-import { CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR } from "../theme";
+import { DESTRUCTIVE_COLOR } from "../theme";
+import { RowGridPanel } from "./RowGridPanel";
+import type { RowGridRow } from "./RowGridPanel";
 
-Glyph.register(plus, minus);
+Glyph.register(minus);
 
 // Row geometry: name/type/default share the dialog width by weight; the
 // nullable/PK checkboxes and the remove button are content-sized — the
@@ -28,30 +28,15 @@ Glyph.register(plus, minus);
 const NAME_WEIGHT    = 130;
 const TYPE_WEIGHT    = 120;
 const DEFAULT_WEIGHT = 130;
-const ROW_SPACING    = 6;
-
-// One row has six cells: name, type, nullable, default, primary-key,
-// remove — matches the six `columnTracks` entries below.
-const GRID_COLUMNS = 6;
-
-/** One column row's live handles: its grid cells and a reader. */
-interface RowHandle {
-    inputs: Component[];
-    read: () => ColumnRow;
-    removeButton: Button;
-}
 
 /**
  * The CREATE TABLE form: a table-name field over an add/remove-row column
  * grid. Embedded as the `form` of a `SqlPreviewDialog` by the controller's
  * `createTable` launcher.
  */
-class CreateTableForm extends Panel {
+class CreateTableForm extends RowGridPanel<ColumnRow> {
     private readonly _schema: string;
     private readonly _nameField: TextField;
-    private readonly _grid: Grid;
-    private readonly _gridPanel: Panel;
-    private readonly _rows: RowHandle[] = [];
 
     /**
      * @param schema - the schema the new table is created in (fixed — the
@@ -59,9 +44,12 @@ class CreateTableForm extends Panel {
      */
     constructor(schema: string) {
         const nameField = new TextField({ placeholder: "table name" });
-        const grid = new Grid({
-            columns: GRID_COLUMNS,
-            spacing: ROW_SPACING,
+
+        super({
+            header:       [nameField],
+            addLabel:     "Add column",
+            // Six cells: name, type, nullable, default, primary-key, remove
+            // — matches buildColumnRow's six-cell row below.
             columnTracks: [
                 { mode: "weight", value: NAME_WEIGHT },
                 { mode: "weight", value: TYPE_WEIGHT },
@@ -70,24 +58,12 @@ class CreateTableForm extends Panel {
                 { mode: "content" }, // primary-key checkbox
                 { mode: "content" }, // remove button
             ],
-        });
-        const gridPanel = Panel({ layoutManager: grid, insets: new Insets(0, 0, 0, 0) });
-        const addButton = Button({
-            glyph: "plus", text: "Add column", showText: true, showDescription: false,
-            compact: true, glyphColor: CONSTRUCTIVE_COLOR,
-        });
-
-        super({
-            layoutManager: new VBox({ itemAlign: "stretch", spacing: ROW_SPACING }),
-            components:    [nameField, addButton, gridPanel],
+            buildRow: buildColumnRow,
         });
 
         this._schema    = schema;
         this._nameField = nameField;
-        this._grid       = grid;
-        this._gridPanel  = gridPanel;
 
-        addButton.on("action", () => this.appendRow());
         this.appendRow(); // seed with one empty row
     }
 
@@ -96,47 +72,7 @@ class CreateTableForm extends Panel {
      *   (rows with a blank name are dropped by buildCreateTableSpec).
      */
     readSpec(): CreateTableSpec {
-        return buildCreateTableSpec(this._schema, this._nameField.getValue(), this._rows.map(r => r.read()));
-    }
-
-    /** Append a new, empty column row to the grid. */
-    private appendRow(): void {
-        const row = buildColumnRow(() => this.removeRow(row));
-
-        this._rows.push(row);
-
-        for (const input of row.inputs) {
-            this._gridPanel.addComponent(input);
-        }
-
-        this.syncGrid();
-    }
-
-    /** Remove one column row (never past the last remaining row). */
-    private removeRow(row: RowHandle): void {
-        const index = this._rows.indexOf(row);
-
-        if (index < 0 || this._rows.length <= 1) {
-            return;
-        }
-
-        for (const input of row.inputs) {
-            this._gridPanel.removeComponent(input);
-        }
-
-        this._rows.splice(index, 1);
-        this.syncGrid();
-    }
-
-    /** Resize the grid to the current row count and keep the sole row's remove button disabled. */
-    private syncGrid(): void {
-        this._grid.setRows(this._rows.length);
-
-        const soleRow = this._rows.length === 1;
-
-        for (const row of this._rows) {
-            row.removeButton.setEnabled(!soleRow);
-        }
+        return buildCreateTableSpec(this._schema, this._nameField.getValue(), this.readRows());
     }
 }
 
@@ -148,7 +84,7 @@ class CreateTableForm extends Panel {
  * @param onRemove - invoked when the row's remove button is pressed.
  * @returns the row's cells, a reader, and the remove button.
  */
-function buildColumnRow(onRemove: () => void): RowHandle {
+function buildColumnRow(onRemove: () => void): RowGridRow<ColumnRow> {
     const nameField     = new TextField({ placeholder: "column name" });
     const typeField      = new TextField({ placeholder: "type, e.g. text" });
     const nullableBox   = Checkbox({ label: "Null", selected: true });
@@ -170,7 +106,7 @@ function buildColumnRow(onRemove: () => void): RowHandle {
     });
 
     return {
-        inputs: [nameField, typeField, nullableBox, defaultField, primaryKeyBox, removeButton],
+        cells: [nameField, typeField, nullableBox, defaultField, primaryKeyBox, removeButton],
         read,
         removeButton,
     };
