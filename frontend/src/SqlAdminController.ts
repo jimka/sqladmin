@@ -81,9 +81,10 @@ import { RoleGrantsDiagramPanel }                                               
 import { RelationGraphPanel }                                                                                                                                                                      from "./dock/RelationGraphPanel";
 import { RootedRelationGraphPanel }                                                                                                                                                                from "./dock/RootedRelationGraphPanel";
 import type { DiagramData, DiagramNodeData }                                                                                                                                                       from "@jimka/typescript-ui/component/diagram";
-import { PropertiesPanel, relationTypeLabel }                                                                                                                                                      from "./properties/PropertiesPanel";
+import { PropertiesPanel }                                                                                                                                                                          from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                                                                                                                                                    from "./roles/RolesPropertiesPanel";
 import { KIND_GLYPH }                                                                                                                                                                              from "./navigator/objectGlyphs";
+import { kindDisplayLabel }                                                                                                                                                                        from "./navigator/objectKinds";
 import { QueryHistoryStore, SavedQueryStore }                                                                                                                                                      from "./data/queryStore";
 import type { HistoryEntry, SavedQuery }                                                                                                                                                           from "./data/queryStore";
 import { NotesStore }                                                                                                                                                                              from "./data/notesStore";
@@ -3485,7 +3486,7 @@ export class SqlAdminController {
      * most-specific to broadest.
      */
     private panelTooltip(ref: DbObjectRef): string {
-        return `${ref.name}\n\nType: ${relationTypeLabel(ref.kind)}\nSchema: ${ref.schema}\nDatabase: ${ref.database}`;
+        return `${ref.name}\n\nType: ${kindDisplayLabel(ref.kind)}\nSchema: ${ref.schema}\nDatabase: ${ref.database}`;
     }
 
     /** Drop a closed panel's store from the registry (the dock drives the start page). */
