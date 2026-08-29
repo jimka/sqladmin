@@ -20,13 +20,19 @@ import { user }                      from "@jimka/typescript-ui/glyphs/solid/use
 import { users }                     from "@jimka/typescript-ui/glyphs/solid/users";
 import { user_group }                from "@jimka/typescript-ui/glyphs/solid/user_group";
 import { gears }                     from "@jimka/typescript-ui/glyphs/solid/gears";
+import { key }                       from "@jimka/typescript-ui/glyphs/solid/key";
+import { diagram_project }           from "@jimka/typescript-ui/glyphs/solid/diagram_project";
+import { file_export }               from "@jimka/typescript-ui/glyphs/solid/file_export";
+import { file_csv }                  from "@jimka/typescript-ui/glyphs/solid/file_csv";
+import { file_code }                 from "@jimka/typescript-ui/glyphs/solid/file_code";
 import type { SqlAdminController }   from "../SqlAdminController";
 import type { RoleSummary }          from "../contract";
 import { ExplorerTreeBase }          from "../shell/explorerTree";
 import type { ExplorerTree }         from "../shell/explorerTree";
 import { groupRoles, roleNodeKey }   from "./groupRoles";
 import type { RoleGroupData }        from "./groupRoles";
-import { buildTableExportItems }     from "../dock/menuItems";
+import { buildRoleMenuItems }        from "./roleMenu";
+import { matchesRole }               from "../navigator/revealMatch";
 
 // Leaf rows use the single-user glyph; the group parents carry their own glyph
 // (from RoleGroupData) so each section reads as users / a group / built-ins.
@@ -34,6 +40,16 @@ Glyph.register(user);
 Glyph.register(users);
 Glyph.register(user_group);
 Glyph.register(gears);
+
+// The five glyphs buildRoleMenuItems names by string. A menu item's glyph is
+// registered by the component that shows the menu — the rule NavigatorTree.ts
+// already follows for objectMenu — so the roles context menu holds even if
+// the controller/shell registrations it happens to piggyback on today change.
+Glyph.register(key);
+Glyph.register(diagram_project);
+Glyph.register(file_export);
+Glyph.register(file_csv);
+Glyph.register(file_code);
 
 /** Resolve a row's glyph: a group parent's own glyph, or a user glyph per leaf. */
 function roleRowGlyph(node: TreeNode): string {
@@ -85,17 +101,12 @@ class RolesTree extends ExplorerTreeBase<RoleSummary[]> implements ExplorerTree 
                 return;
             }
 
-            this.contextMenu.show(event.clientX, event.clientY, [
-                // "Show data" mirrors the double-click: show the role and open its grants
-                // tab. Glyphs match the grants tab and the export formats.
-                { text: "Show data", glyph: "key", action: () => void this.controller.roles.showRole(name) },
-                { separator: true },
-                { text: "Show membership graph", glyph: "diagram-project", action: () => void this.controller.roles.openRoleMembershipDiagram(name) },
-                { text: "Show grants graph", glyph: "diagram-project", action: () => void this.controller.roles.openRoleGrantsDiagram(name) },
-                { separator: true },
-                { text: "Export grants", glyph: "file-export", submenu: { label: "Export grants",
-                    items: buildTableExportItems(format => void this.controller.roles.exportRole(name, format)) } },
-            ]);
+            this.contextMenu.show(event.clientX, event.clientY, buildRoleMenuItems(name, {
+                showRole:              n => void this.controller.roles.showRole(n),
+                openMembershipDiagram: n => void this.controller.roles.openRoleMembershipDiagram(n),
+                openGrantsDiagram:     n => void this.controller.roles.openRoleGrantsDiagram(n),
+                exportGrants:          (n, format) => void this.controller.roles.exportRole(n, format),
+            }));
         });
 
         // Let the reveal coordinator drive selection when a role is opened.
@@ -125,7 +136,7 @@ class RolesTree extends ExplorerTreeBase<RoleSummary[]> implements ExplorerTree 
         const firstUser = roles.find(role => role.canLogin);
 
         if (firstUser) {
-            await this.revealByPredicate(data => data === firstUser.name);
+            await this.revealByPredicate(matchesRole(firstUser.name));
         }
     }
 }
