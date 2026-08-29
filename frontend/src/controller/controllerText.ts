@@ -209,6 +209,16 @@ export function detailOf(body: unknown): string | null {
     return null;
 }
 
+/**
+ * The download filename for a table/view export — `<schema>.<table>.<format>`.
+ * Shared by `SqlAdminController.exportTable` (the coordinator's own export
+ * route) and `ObjectPanels.openTable` (the data tab's own Export toolbar
+ * button), both of which trigger the identical streaming download.
+ */
+export function tableExportFilename(ref: DbObjectRef, format: "csv" | "json"): string {
+    return `${[ref.schema, ref.name].filter(Boolean).join(".") || "export"}.${format}`;
+}
+
 /** Prefer an AjaxError's parsed {detail}; fall back to a message or string. */
 export function errorMessage(error: unknown): string {
     const e = error as { body?: unknown; message?: unknown };

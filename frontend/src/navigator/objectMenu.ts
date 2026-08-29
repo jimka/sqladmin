@@ -21,6 +21,7 @@ import type { DbObjectRef }      from "../contract";
 import type { SqlAdminController } from "../SqlAdminController";
 import type { DdlLaunchers }     from "../controller/ddlLaunchers";
 import type { QueryWorkspace }   from "../controller/queryWorkspace";
+import type { ObjectPanels }     from "../controller/objectPanels";
 import { isRelationKind }        from "./objectKinds";
 import { buildTableExportItems } from "../dock/menuItems";
 
@@ -35,24 +36,24 @@ export type DdlMenuActions = Pick<DdlLaunchers,
 /** The two query-workspace actions the object context menu invokes. */
 export type WorkspaceMenuActions = Pick<QueryWorkspace, "openQueryFor" | "executeFunction">;
 
+/** The eight per-object panel openers the object context menu invokes. */
+export type ObjectPanelMenuActions = Pick<ObjectPanels,
+    | "openTable" | "openStructure" | "openDefinition"
+    | "openSequence" | "openFunctionDefinition" | "openIndex" | "openReferencedStructure"
+    | "openType">;
+
 /**
- * The controller methods (and, for DDL/workspace actions, the `ddl`/
- * `workspace` collaborators' methods) the object context menu invokes. A
- * narrowed slice of SqlAdminController so the tree and the diagram panels
- * build identical menus without the builder depending on the whole
- * controller. The controller (and `this.controller` in the tree) satisfies
- * it structurally. The import above is `import type`, erased at runtime, so
- * no cycle forms even though the controller imports this module at runtime
- * for `showObjectMenu`.
+ * The controller slices the object context menu invokes. SqlAdminController
+ * satisfies this structurally through its own collaborator fields, so both
+ * callers still pass the controller itself. The import above is `import
+ * type`, erased at runtime, so no cycle forms even though the controller
+ * imports this module at runtime for `showObjectMenu`.
  */
 export interface ObjectMenuActions extends Pick<SqlAdminController,
-    | "openTable" | "openStructure" | "openDefinition"
-    | "openSequence" | "openFunctionDefinition"
     | "openRelationDiagram" | "openRelationDependencyGraph" | "openRelationInheritanceGraph"
     | "openSchemaDiagram" | "openSchemaDependencyGraph" | "openSchemaInheritanceGraph"
-    | "exportTable"
-    | "openIndex" | "openReferencedStructure"
-    | "openType"> {
+    | "exportTable"> {
+    readonly panels: ObjectPanelMenuActions;
     readonly ddl: DdlMenuActions;
     readonly workspace: WorkspaceMenuActions;
 }
@@ -88,7 +89,7 @@ function schemaMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: Tr
 /** Build a sequence leaf's small menu: show its info, or drop it. */
 function sequenceMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: TreeNode): MenuItemConfig[] {
     return [
-        { text: "Show info", glyph: "arrow-up-1-9", action: () => void actions.openSequence(ref, node) },
+        { text: "Show info", glyph: "arrow-up-1-9", action: () => void actions.panels.openSequence(ref, node) },
         { text: "Drop", glyph: "trash", action: () => actions.ddl.dropSequence(ref) },
     ];
 }
@@ -101,7 +102,7 @@ function functionMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
     return [
         { text: ref.isProcedure ? "Call" : "Execute", glyph: "play", action: () => actions.workspace.executeFunction(ref) },
         { separator: true },
-        { text: "Show definition", glyph: "file-code", action: () => void actions.openFunctionDefinition(ref, node) },
+        { text: "Show definition", glyph: "file-code", action: () => void actions.panels.openFunctionDefinition(ref, node) },
         { text: "Drop", glyph: "trash", action: () => actions.ddl.dropFunction(ref) },
     ];
 }
@@ -109,7 +110,7 @@ function functionMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
 /** Build a standalone enum/composite type leaf's menu: show its info, edit it, or drop it. */
 function typeMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: TreeNode): MenuItemConfig[] {
     return [
-        { text: "Show info", glyph: "cube", action: () => void actions.openType(ref, node) },
+        { text: "Show info", glyph: "cube", action: () => void actions.panels.openType(ref, node) },
         { text: "Edit", glyph: "pencil", action: () => void actions.ddl.editType(ref) },
         { text: "Drop", glyph: "trash", action: () => actions.ddl.dropType(ref) },
     ];
@@ -122,8 +123,8 @@ function typeMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: Tree
  */
 function indexMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: TreeNode): MenuItemConfig[] {
     return [
-        { text: "Show info", glyph: "magnifying-glass", action: () => void actions.openIndex(ref, node) },
-        { text: "Open table", glyph: "table-columns", action: () => actions.openReferencedStructure({
+        { text: "Show info", glyph: "magnifying-glass", action: () => void actions.panels.openIndex(ref, node) },
+        { text: "Open table", glyph: "table-columns", action: () => actions.panels.openReferencedStructure({
             connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name: ref.table, kind: "table",
         }) },
     ];
@@ -140,7 +141,7 @@ function relationMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
         // data"; a view/matview is read-only and opens as an auto-run query
         // (SELECT * … LIMIT n) — so it reads "Show data". The glyphs match the
         // tabs each item opens.
-        { text: ref.kind === "table" ? "Open data" : "Show data", glyph: "table", action: () => void actions.openTable(ref, node) },
+        { text: ref.kind === "table" ? "Open data" : "Show data", glyph: "table", action: () => void actions.panels.openTable(ref, node) },
     ];
 
     // "Open as query" is a table-only affordance: a table's primary open is its
@@ -166,7 +167,7 @@ function relationMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
             { text: "Dependencies", glyph: "share-nodes",     action: () => void actions.openRelationDependencyGraph(ref, node) },
             { text: "Inheritance",  glyph: "sitemap",         action: () => void actions.openRelationInheritanceGraph(ref, node) },
             { text: "Relations",    glyph: "diagram-project", action: () => void actions.openRelationDiagram(ref, node) },
-            { text: "Structure",    glyph: "table-columns",   action: () => void actions.openStructure(ref, node) },
+            { text: "Structure",    glyph: "table-columns",   action: () => void actions.panels.openStructure(ref, node) },
         ] } });
     } else {
         // A view/matview has fewer facets — no structure/relations/inheritance
@@ -175,7 +176,7 @@ function relationMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
         // submenu: its connected dependency component and, since only a
         // (materialized) view has one, its editable SQL definition.
         items.push({ text: "Show dependencies", glyph: "share-nodes", action: () => void actions.openRelationDependencyGraph(ref, node) });
-        items.push({ text: "Show definition", glyph: "file-code", action: () => void actions.openDefinition(ref, node) });
+        items.push({ text: "Show definition", glyph: "file-code", action: () => void actions.panels.openDefinition(ref, node) });
     }
 
     // Structural launchers (table-ddl phase): rename/drop this table. Only a

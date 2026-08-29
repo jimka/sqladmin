@@ -21,13 +21,15 @@ const SCHEMA = "public";
 /** A minimal ObjectMenuActions with every controller method a no-op spy. */
 function stubActions(): ObjectMenuActions {
     return {
-        openTable: vi.fn(), openStructure: vi.fn(), openDefinition: vi.fn(),
-        openSequence: vi.fn(), openFunctionDefinition: vi.fn(),
         openRelationDiagram: vi.fn(), openRelationDependencyGraph: vi.fn(), openRelationInheritanceGraph: vi.fn(),
         openSchemaDiagram: vi.fn(), openSchemaDependencyGraph: vi.fn(), openSchemaInheritanceGraph: vi.fn(),
         exportTable: vi.fn(),
-        openIndex: vi.fn(), openReferencedStructure: vi.fn(),
-        openType: vi.fn(),
+        panels: {
+            openTable: vi.fn(), openStructure: vi.fn(), openDefinition: vi.fn(),
+            openSequence: vi.fn(), openFunctionDefinition: vi.fn(),
+            openIndex: vi.fn(), openReferencedStructure: vi.fn(),
+            openType: vi.fn(),
+        },
         workspace: {
             openQueryFor: vi.fn(), executeFunction: vi.fn(),
         },
@@ -167,7 +169,7 @@ describe("buildObjectMenuItems", () => {
         const items = buildObjectMenuItems(ref, actions);
 
         items.find(i => i.text === "Show info")?.action?.();
-        expect(actions.openType).toHaveBeenCalledWith(ref, undefined);
+        expect(actions.panels.openType).toHaveBeenCalledWith(ref, undefined);
     });
 
     it("builds an index's menu: show info, open table", () => {
@@ -182,10 +184,10 @@ describe("buildObjectMenuItems", () => {
         const items = buildObjectMenuItems(ref, actions);
 
         items.find(i => i.text === "Show info")?.action?.();
-        expect(actions.openIndex).toHaveBeenCalledWith(ref, undefined);
+        expect(actions.panels.openIndex).toHaveBeenCalledWith(ref, undefined);
 
         items.find(i => i.text === "Open table")?.action?.();
-        expect(actions.openReferencedStructure).toHaveBeenCalledWith({
+        expect(actions.panels.openReferencedStructure).toHaveBeenCalledWith({
             connectionId: ref.connectionId, database: ref.database, schema: ref.schema, name: ref.table, kind: "table",
         });
     });
@@ -208,7 +210,7 @@ describe("buildObjectMenuItems", () => {
         const items = buildObjectMenuItems(ref, actions);
 
         items.find(i => i.text === "Open data")?.action?.();
-        expect(actions.openTable).toHaveBeenCalledWith(ref, undefined);
+        expect(actions.panels.openTable).toHaveBeenCalledWith(ref, undefined);
 
         items.find(i => i.text === "Drop")?.action?.();
         expect(actions.ddl.dropTable).toHaveBeenCalledWith(ref, undefined);

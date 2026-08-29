@@ -1,6 +1,8 @@
 // Pins controllerText.ts's pure string derivations — panel ids, panelIdsFor,
 // panelTooltip, elideName, errorMessage, detailOf — against the plan's
 // `## Expected Behaviour` cases 1-14 (plans/implemented/sqladmin-controller-split.md).
+// tableExportFilename is a later addition (see the plan's `## Implementation
+// Notes`), pinned in its own describe block below.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -9,6 +11,7 @@ import {
     relationDependencyPanelId, relationInheritancePanelId, dependencyPanelId, inheritancePanelId,
     databaseDiagramPanelId, ddlPanelId, notesPanelId, roleGrantsPanelId, roleGrantsDiagramPanelId,
     roleMembershipDiagramPanelId, panelIdsFor, panelTooltip, elideName, errorMessage, detailOf,
+    tableExportFilename,
 } from "../../src/controller/controllerText";
 import type { DbObjectRef } from "../../src/contract";
 
@@ -148,5 +151,18 @@ describe("panelTooltip, elideName, errorMessage, detailOf (cases 10-14)", () => 
 
     it("case 14: an unusable detail falls through to message rather than stringifying it", () => {
         expect(errorMessage({ body: { detail: 42 }, message: "fallback" })).toBe("fallback");
+    });
+});
+
+describe("tableExportFilename", () => {
+    it("joins schema and name with the format extension", () => {
+        expect(tableExportFilename(REF, "csv")).toBe("public.orders.csv");
+        expect(tableExportFilename(REF, "json")).toBe("public.orders.json");
+    });
+
+    it("falls back to a bare \"export\" stem when schema and name are both absent", () => {
+        const dbRef: DbObjectRef = { connectionId: "default", database: "sqladmin", kind: "database" };
+
+        expect(tableExportFilename(dbRef, "csv")).toBe("export.csv");
     });
 });

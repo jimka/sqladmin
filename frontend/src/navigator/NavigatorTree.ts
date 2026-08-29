@@ -144,7 +144,7 @@ class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements Expl
             // data tab. Checked before the isRelation guard below, mirroring
             // the sequence branch in the contextmenu handler.
             if (ref && ref.kind === "sequence") {
-                void this.controller.openSequence(ref, node);
+                void this.controller.panels.openSequence(ref, node);
 
                 return;
             }
@@ -162,7 +162,7 @@ class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements Expl
             // An index has no rows either — double-click opens its read-only
             // info tab, mirroring the sequence branch above.
             if (ref && ref.kind === "index") {
-                void this.controller.openIndex(ref, node);
+                void this.controller.panels.openIndex(ref, node);
 
                 return;
             }
@@ -170,13 +170,13 @@ class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements Expl
             // A type has no rows either — double-click opens its read-only
             // info tab, mirroring the sequence and index branches above.
             if (ref && ref.kind === "type") {
-                void this.controller.openType(ref, node);
+                void this.controller.panels.openType(ref, node);
 
                 return;
             }
 
             if (ref && isRelation(ref.kind)) {
-                void this.controller.openTable(ref, node);
+                void this.controller.panels.openTable(ref, node);
             }
         });
 

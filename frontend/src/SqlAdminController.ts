@@ -21,37 +21,20 @@ import { file_lines }                                                           
 import { user }                                                                                                                                                                                    from "@jimka/typescript-ui/glyphs/solid/user";
 import type { TreeNode }                                                                                                                                                                           from "@jimka/typescript-ui/component/tree";
 import { showObjectMenu }                                                                                                                                                                          from "./navigator/objectMenu";
-import { matchesGrantedTable, matchesObject, matchesRelationName }                                                                                                                                 from "./navigator/revealMatch";
+import { matchesGrantedTable }                                                                                                                                                                     from "./navigator/revealMatch";
 import { objectPath, rolePath, databaseDiagramPath, resolveAddressBarRoute }                                                                                                                       from "./shell/routeTargets";
 import type { PanelRoute }                                                                                                                                                                         from "./shell/routeTargets";
-import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent }                                                                                                                                     from "@jimka/typescript-ui/data";
-import type { ColumnMeta, DbObjectRef, FunctionDefinition, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary } from "./contract";
-import { executeDdl, getColumns, getDatabaseGraph, getDependencies, getFunctionDefinition, getInheritance, getRoleDetail, getRoles, getSchemaGraph, getTablePrivileges, getTypeDefinition, getViewDefinition, getStructure, previewAlterSequence, previewAlterTable, previewCreateView, previewReplaceMatview, previewSequenceOwner, tableExportUrl } from "./data/api";
-import { getSequenceDetail }                                                                                                                                                                       from "./data/api";
-import { getIndexDetail }                                                                                                                                                                          from "./data/api";
+import type { ColumnMeta, DbObjectRef, RelationNodeRef, RoleDetail, RolePrivilege, RoleSummary } from "./contract";
+import { getColumns, getDatabaseGraph, getDependencies, getInheritance, getRoleDetail, getRoles, getSchemaGraph, tableExportUrl } from "./data/api";
 import { exportQueryResult }                                                                                                                                                                       from "./dock/exportQueryResult";
 import { exportExplainPlan }                                                                                                                                                                       from "./dock/exportExplainResult";
 import type { ActiveExport }                                                                                                                                                                       from "./data/explain";
-import { buildModel }                                                                                                                                                                              from "./data/buildModel";
 import { buildSchemaDiagram }                                                                                                                                                                      from "./data/buildSchemaDiagram";
 import { annotateFkCardinality }                                                                                                                                                                   from "./data/fkCardinality";
 import { buildRoleMembershipDiagram }                                                                                                                                                              from "./data/buildRoleMembershipDiagram";
 import { buildRoleGrantsDiagram }                                                                                                                                                                  from "./data/buildRoleGrantsDiagram";
 import { buildRelationGraph, relationNodeId }                                                                                                                                                      from "./data/buildRelationGraph";
 import type { RelationNodeData }                                                                                                                                                                   from "./data/buildRelationGraph";
-import { buildSelectSql }                                                                                                                                                                          from "./data/sql";
-import { buildStore }                                                                                                                                                                              from "./data/stores";
-import { TableWorkPanel }                                                                                                                                                                          from "./dock/TableWorkPanel";
-import type { TableViewOptions, Notify }                                                                                                                                                           from "./dock/TableWorkPanel";
-import { openImportRowsDialog }                                                                                                                                                                    from "./dock/ImportRowsDialog";
-import { StructurePanel }                                                                                                                                                                          from "./dock/StructurePanel";
-import type { StructureActions, StructureRefresh }                                                                                                                                                from "./dock/StructurePanel";
-import { stripTrailingSemicolon } from "./dock/ddlSpecs";
-import { DefinitionPanel }                                                                                                                                                                         from "./dock/DefinitionPanel";
-import { FunctionDefinitionPanel }                                                                                                                                                                 from "./dock/FunctionDefinitionPanel";
-import { SequenceInfoPanel }                                                                                                                                                                       from "./dock/SequenceInfoPanel";
-import { IndexInfoPanel }                                                                                                                                                                          from "./dock/IndexInfoPanel";
-import { TypeInfoPanel }                                                                                                                                                                           from "./dock/TypeInfoPanel";
 import { RoleGrantsPanel }                                                                                                                                                                         from "./dock/RoleGrantsPanel";
 import { exportRoleGrants }                                                                                                                                                                        from "./dock/exportRoleGrants";
 import { SchemaDiagramPanel }                                                                                                                                                                      from "./dock/SchemaDiagramPanel";
@@ -69,17 +52,18 @@ import { KIND_GLYPH }                                                           
 import { kindDisplayLabel }                                                                                                                                                                        from "./navigator/objectKinds";
 import { LayoutStore }                                                                                                                                                                             from "./data/layoutStore";
 import {
-    panelId, structurePanelId, definitionPanelId, sequenceInfoPanelId, indexInfoPanelId, typeInfoPanelId,
-    functionDefinitionPanelId, diagramPanelId, relationDiagramPanelId,
+    panelId, structurePanelId, diagramPanelId, relationDiagramPanelId,
     dependencyPanelId, relationDependencyPanelId, inheritancePanelId, relationInheritancePanelId,
     databaseDiagramPanelId, roleGrantsPanelId, roleGrantsDiagramPanelId, roleMembershipDiagramPanelId,
-    panelTooltip as buildPanelTooltip, errorMessage, panelIdsFor,
+    panelTooltip as buildPanelTooltip, errorMessage, panelIdsFor, tableExportFilename,
 } from "./controller/controllerText";
+import { downloadUrl } from "./data/download";
 import { PanelLoadError } from "./controller/panelHost";
 import type { PanelHost, OpenPanel, RoleGrants, AsyncPanelSpec } from "./controller/panelHost";
 import { RevealCoordinator } from "./controller/revealCoordinator";
 import { DdlLaunchers } from "./controller/ddlLaunchers";
 import { QueryWorkspace } from "./controller/queryWorkspace";
+import { ObjectPanels } from "./controller/objectPanels";
 
 // The non-relation dock-tab glyphs (query / structure / definition / grants /
 // notes) plus the distinct diagram-tab glyphs: `diagram-project` is the FK
@@ -180,6 +164,10 @@ export class SqlAdminController implements PanelHost {
     // Scratch query panels, the run-history/saved-query/notes stores, and
     // recently opened tables.
     readonly workspace      : QueryWorkspace;
+    // Every per-object panel opener (table/view data, structure, definition,
+    // sequence, index, standalone-type info) and the reveal-then-open wiring
+    // for a foreign key's referenced table.
+    readonly panels         : ObjectPanels;
 
     private readonly _connectionId: string;
     private readonly _database    : string | undefined;
@@ -268,6 +256,7 @@ export class SqlAdminController implements PanelHost {
         this.reveal    = new RevealCoordinator(connectionId, database);
         this.ddl       = new DdlLaunchers(this, this.reveal);
         this.workspace = new QueryWorkspace(this, this.ddl, username);
+        this.panels    = new ObjectPanels(this, this.reveal, this.ddl, this.workspace);
 
         // The dock disposes a closed tab's content itself (destroying every
         // registered child in its subtree) and fires "close" only on genuine
@@ -358,706 +347,6 @@ export class SqlAdminController implements PanelHost {
     }
 
     /**
-     * Open a relation in the Dock. A table opens the editable TableWorkPanel
-     * (deduped by panel id, its store wired for transport errors and
-     * write-feedback). A view or materialized view is read-only and has no CRUD
-     * surface, so it instead opens as an auto-run browse query —
-     * `SELECT * FROM … LIMIT n` on the shared QueryPanel — the same surface its
-     * Explain/Export already used; its structure and definition still open as
-     * their own tabs from the navigator's right-click menu.
-     *
-     * The `node` is optional: an FK-referenced table may have no currently-loaded
-     * navigator node, so its tab still opens but the focus-sync skips the reveal.
-     * It may also be a still-pending `Promise` — an in-progress navigator reveal
-     * (see `openReferencedTable`) — so a slow reveal never delays the tab itself;
-     * it is awaited alongside the table's own fetch instead of gating it.
-     *
-     * @param view - The view-mode properties a route can request (record view,
-     *   a focused record). Ignored on the view/matview branch above, which
-     *   opens a query tab instead of a `TableWorkPanel`.
-     */
-    async openTable(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>, view?: TableViewOptions): Promise<void> {
-        // A view/matview has no editable data surface, so it opens as an auto-run
-        // browse query on the shared QueryPanel rather than a dedicated data panel.
-        // A query panel has no pagination, so the seed carries buildSelectSql's
-        // small preview LIMIT (the user can raise or remove it). Each open mints a
-        // fresh query tab (no dedup, like every query panel); it is still recorded
-        // in recent tables so it reopens from the start page.
-        if (ref.kind === "view" || ref.kind === "materializedView") {
-            // Not awaited: remembering the table has no bearing on the query tab
-            // that follows, and a pending reveal must not delay it.
-            void Promise.resolve(node).then(resolved => { if (resolved) { this.workspace.rememberTable(ref, resolved); } });
-
-            this.workspace.openQuery(buildSelectSql(ref), true, ref.name);
-
-            return;
-        }
-
-        const id = panelId(ref);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        // The address-bar route captured at open time — record/rotated flags
-        // only, never a diagram depth (openTable has none); see the plan's
-        // "per-panel route registry" Architecture Decision for why this is a
-        // one-shot snapshot rather than kept live as the tab's view changes.
-        const query: Record<string, string> = {};
-
-        if (view?.rotated) { query.rotated = "true"; }
-        if (view?.record)  { query.record  = view.record; }
-
-        const built = objectPath(ref);
-        const route: PanelRoute | undefined = built ? { path: built.path, query: Object.keys(query).length > 0 ? query : undefined } : undefined;
-
-        this.openAsyncPanel({
-            id,
-            title  : ref.name ?? id,
-            glyph  : KIND_GLYPH[ref.kind],
-            tooltip: this.panelTooltip(ref),
-            ref,
-            route,
-        }, async () => {
-            // The fetch now runs behind the library's spinner. A throw here closes
-            // the tab and reaches the "exception" handler — so no local catch. The
-            // requests are independent, so they run concurrently; getColumns is
-            // shared with the selection-driven Properties fetch via fetchColumns,
-            // and a pending `node` reveal rides along rather than gating any of it.
-            const [columns, privileges, resolvedNode] = await Promise.all([
-                this.fetchColumns(ref), getTablePrivileges(ref), Promise.resolve(node),
-            ]);
-            const store = buildStore(ref, buildModel(columns), columns);
-
-            store.on("exception", (e: StoreExceptionEvent) => this.notifyError(e.error, ref));
-            store.on("sync", (e: StoreSyncEvent) => this.reportSync(e, ref));
-
-            this.registerPanel(id, { ref, node: resolvedNode ?? null, store, columns });
-
-            if (resolvedNode) {
-                this.workspace.rememberTable(ref, resolvedNode);
-            }
-
-            const notify = (message: string): void => { this.status(`${ref.name}: ${message}`); };
-            const panel = new TableWorkPanel(
-                store, columns, notify, format => this.exportTable(ref, format),
-                () => this.importIntoTable(ref, store, columns, notify), privileges, view,
-            );
-
-            // Not awaited: the panel already exists, so TablePanel's own store-driven
-            // spinner covers the row load, and load()'s rejection is already surfaced by
-            // the "exception" listener wired above.
-            void store.load().then(() => this.syncToPanel(id)).catch(() => {});
-
-            return panel;
-        });
-    }
-
-    /**
-     * Open an editable definition tab for a view/matview — its Columns grid
-     * above its SQL definition (pg_get_viewdef, the SELECT body only),
-     * deduping by definition-panel id. The tab opens at once behind the
-     * library's spinner; the definition and columns are fetched behind it and
-     * passed to a `DefinitionPanel` wired with an `onSave` that builds and
-     * executes the edit directly, with no intermediate dialog: `CREATE OR
-     * REPLACE VIEW` for a view, or the atomic DROP+CREATE replace pair for a
-     * materialized view (a materialized view cannot be CREATE OR REPLACE'd —
-     * see the view-matview-ddl plan's "Matview edit strategy" decision). On
-     * success the navigator refreshes and the tab reseeds itself in place (via
-     * `panel.reload`) rather than closing — the object list may be
-     * unaffected, but the tab's own definition/columns just changed. A failed
-     * fetch closes the tab it opened, reported through notifyError; a failed
-     * save surfaces through notifyError and leaves the tab (and the user's
-     * edits) open. Tables have no definition, so the navigator only offers
-     * this for views (see NavigatorTree).
-     */
-    async openDefinition(ref: DbObjectRef, node?: TreeNode): Promise<void> {
-        const id = definitionPanelId(ref);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const route = objectPath(ref, "definition") ?? undefined;
-
-        this.openAsyncPanel({
-            id,
-            title  : `${ref.name ?? id} (definition)`,
-            glyph  : "file-code",
-            tooltip: this.panelTooltip(ref),
-            ref,
-            route,
-        }, async () => {
-            // The fetch now runs behind the library's spinner. A throw here closes
-            // the tab and reaches the "exception" handler — so no local catch.
-            const [definition, columns] = await this.fetchDefinitionAndColumns(ref);
-
-            // Read by `onSave` only after a Save click, which always happens
-            // after this variable is assigned just below — the forward
-            // reference is safe.
-            let panel: DefinitionPanel;
-
-            const onSave = async (newDefinition: string): Promise<void> => {
-                // getViewDefinition's pg_get_viewdef output always ends with a
-                // semicolon; CreateViewSpec/ReplaceMatviewSpec's `select` expects
-                // a bare body with none (see stripTrailingSemicolon's doc — a
-                // stray one is harmless for CREATE OR REPLACE VIEW but breaks the
-                // matview replace's appended WITH DATA).
-                const select = stripTrailingSemicolon(newDefinition);
-
-                try {
-                    // cascade is hardcoded false: this tab has no CASCADE
-                    // toggle (the dialog's edit mode had one; this Save button
-                    // deliberately has no dialog at all — see this method's
-                    // doc). A matview with dependents therefore can't be edited
-                    // here at all: the DROP half fails with a dependency error,
-                    // surfaced below via notifyError, leaving the matview and
-                    // the tab untouched; the user must drop the dependent(s)
-                    // out-of-band (e.g. the SQL workspace) before retrying.
-                    const sql = ref.kind === "materializedView"
-                        ? (await previewReplaceMatview(ref, {
-                            schema: ref.schema!, name: ref.name!, select, cascade: false, withData: true,
-                        })).sql
-                        : (await previewCreateView(ref, {
-                            schema: ref.schema!, name: ref.name!, select, orReplace: true,
-                        })).sql;
-
-                    await executeDdl(this._connectionId, sql);
-                } catch (err) {
-                    this.notifyError(err, ref);
-
-                    return;
-                }
-
-                this.reveal.refreshNavigator();
-
-                try {
-                    const [reloadedDefinition, reloadedColumns] = await this.fetchDefinitionAndColumns(ref);
-
-                    panel.reload(reloadedDefinition, reloadedColumns);
-                } catch (err) {
-                    // The save itself already succeeded (executeDdl above didn't
-                    // throw) — only the post-save re-fetch failed, so this is
-                    // NOT a failed save. Say so explicitly: a bare notifyError
-                    // here would read as "the save failed", inviting a retry
-                    // that re-runs the (for a matview, destructive) DDL a second
-                    // time for no reason.
-                    this.notifyError(new Error(`saved, but failed to refresh the tab: ${errorMessage(err)}`), ref);
-
-                    return;
-                }
-
-                this.status(`${ref.name}: definition saved`);
-            };
-
-            const refresh = (): void => void this.refreshPanel(ref, async () => {
-                const [freshDefinition, freshColumns] = await this.fetchDefinitionAndColumns(ref);
-
-                panel.reload(freshDefinition, freshColumns);
-            });
-
-            panel = new DefinitionPanel(definition, columns, onSave, refresh, this.layout.bindSplit("definition"));
-
-            // No `columns` field here: unlike the structure tab (keyed by
-            // structurePanelId, whose `columns` backs structureColumns()), the
-            // definition tab's columns are only ever read by the DefinitionPanel
-            // itself, which already holds its own copy — nothing looks this
-            // entry up by definitionPanelId.
-            this.registerPanel(id, { ref, node: node ?? null, detail: "definition", refresh });
-            this.syncToPanel(id);
-
-            return panel.content;
-        });
-    }
-
-    /**
-     * Fetch a view/matview's definition and columns in parallel — shared by
-     * `openDefinition`'s initial load and its Save-success reload.
-     *
-     * @param ref - The view/matview to fetch.
-     * @returns A tuple of the definition SQL (the SELECT body only) and the columns.
-     */
-    private async fetchDefinitionAndColumns(ref: DbObjectRef): Promise<[string, ColumnMeta[]]> {
-        const [definitionResult, columns] = await Promise.all([getViewDefinition(ref), getColumns(ref)]);
-
-        return [definitionResult.definition, columns];
-    }
-
-    /**
-     * Run one of the six detail tabs' Refresh: re-fetch and reseed via
-     * `reload`, then report the outcome — the shared success/error wording
-     * every Refresh button uses, so the six call sites don't drift apart.
-     * Never rejects, so every call site may write `void this.refreshPanel(...)`.
-     *
-     * @param ref - The tab's own object, for the status message and a failed
-     *   fetch's error label.
-     * @param reload - The caller's fetch-and-reseed body; its own errors (a
-     *   dropped/renamed object, a network failure) are caught here.
-     */
-    private async refreshPanel(ref: DbObjectRef, reload: () => Promise<void>): Promise<void> {
-        try {
-            await reload();
-        } catch (err) {
-            this.notifyError(new Error(`failed to refresh: ${errorMessage(err)}`), ref);
-
-            return;
-        }
-
-        this.status(`${ref.name}: refreshed`);
-    }
-
-    /**
-     * Open an editable info tab for a sequence — its current value and
-     * parameters (pg_sequences), deduping by sequence-info-panel id. The tab
-     * opens at once behind the library's spinner; behind it, the detail and
-     * the connection's role names (for the form's Owner combo) are fetched in
-     * parallel and passed to a SequenceInfoPanel wired with the alter/owner
-     * preview, execute, and reload callbacks its Save flow needs. A failed
-     * detail fetch closes the tab it opened, reported through notifyError; a
-     * failed roles fetch degrades gracefully instead (the tab still opens,
-     * with `roles: []` — see SequenceInfoPanelDeps.roles). A sequence has no
-     * rows, so unlike openTable this has no store to register, and unlike
-     * openDefinition the panel needs no dispose (see SequenceInfoPanel).
-     *
-     * `node` may be a still-pending `Promise` — an in-progress navigator reveal
-     * (see `openReferencedSequence`) — awaited alongside the detail/roles fetch
-     * rather than gating the tab.
-     */
-    async openSequence(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>): Promise<void> {
-        const id = sequenceInfoPanelId(ref);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const route = objectPath(ref) ?? undefined;
-
-        this.openAsyncPanel({
-            id,
-            title  : ref.name ?? id,
-            glyph  : "arrow-up-1-9",
-            tooltip: this.panelTooltip(ref),
-            ref,
-            route,
-        }, async () => {
-            const [[detailResult, rolesResult], resolvedNode] = await Promise.all([
-                Promise.allSettled([getSequenceDetail(ref), getRoles(ref.connectionId)]),
-                Promise.resolve(node),
-            ]);
-
-            if (detailResult.status === "rejected") {
-                throw detailResult.reason;
-            }
-
-            const detail = detailResult.value;
-            const roles  = rolesResult.status === "fulfilled" ? rolesResult.value.map(r => r.name) : [];
-
-            // Read by `refresh` only after a click, which always happens after
-            // this variable is assigned just below — the forward reference is
-            // safe (mirrors openDefinition/openFunctionDefinition's `panel`).
-            let panel: SequenceInfoPanel;
-
-            const refresh = (): void => void this.refreshPanel(ref, async () => {
-                panel.reload(await getSequenceDetail(ref));
-            });
-
-            this.registerPanel(id, { ref, node: resolvedNode ?? null, detail: "info", refresh });
-            this.syncToPanel(id);
-
-            panel = new SequenceInfoPanel(detail, {
-                schema:       ref.schema!,
-                name:         ref.name!,
-                roles,
-                previewAlter: spec => previewAlterSequence(ref, spec),
-                previewOwner: spec => previewSequenceOwner(ref, spec),
-                execute:      sql => executeDdl(this._connectionId, sql),
-                reloadDetail: () => getSequenceDetail(ref),
-                onStatus:     m => this.status(`${m}`),
-                onError:      m => this.notifyError(new Error(m), ref),
-                onRefresh:    refresh,
-                onOpenOwner:  (schema, table) => this.openReferencedStructure({
-                    connectionId: ref.connectionId,
-                    database    : ref.database,
-                    schema,
-                    name        : table,
-                    kind        : "table",
-                }),
-            });
-
-            return panel;
-        });
-    }
-
-    /**
-     * Open a read-only info tab for an index — its owning table, unique/primary
-     * flags, and full CREATE INDEX text, deduping by index-info-panel id. The
-     * tab opens at once behind the library's spinner; behind it, the detail is
-     * fetched fresh (matching openSequence/openFunctionDefinition/openStructure
-     * — see the plan's fetch-fresh-on-open decision) and passed to an
-     * IndexInfoPanel wired with the "open table" callback. A failed detail
-     * fetch closes the tab it opened, reported through notifyError. An index
-     * has no rows and no editable fields, so unlike openTable this has no
-     * store to register, and unlike openSequence the panel needs no dispose
-     * (see IndexInfoPanel).
-     *
-     * `node` may be a still-pending `Promise` — an in-progress navigator reveal
-     * — awaited alongside the detail fetch rather than gating the tab.
-     */
-    async openIndex(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>): Promise<void> {
-        const id = indexInfoPanelId(ref);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const route = objectPath(ref) ?? undefined;
-
-        this.openAsyncPanel({
-            id,
-            title  : ref.name ?? id,
-            glyph  : "magnifying-glass",
-            tooltip: this.panelTooltip(ref),
-            ref,
-            route,
-        }, async () => {
-            const [detail, resolvedNode] = await Promise.all([getIndexDetail(ref), Promise.resolve(node)]);
-
-            // Read by `refresh` only after a click, which always happens after
-            // this variable is assigned just below — the forward reference is
-            // safe (mirrors openDefinition/openFunctionDefinition's `panel`).
-            let panel: IndexInfoPanel;
-
-            const refresh = (): void => void this.refreshPanel(ref, async () => {
-                panel.reload(await getIndexDetail(ref));
-            });
-
-            this.registerPanel(id, { ref, node: resolvedNode ?? null, detail: "info", refresh });
-            this.syncToPanel(id);
-
-            panel = new IndexInfoPanel(detail, {
-                schema: ref.schema!,
-                onOpenTable: (schema, table) => this.openReferencedStructure({
-                    connectionId: ref.connectionId,
-                    database    : ref.database,
-                    schema,
-                    name        : table,
-                    kind        : "table",
-                }),
-                onRefresh: refresh,
-            });
-
-            return panel;
-        });
-    }
-
-    /**
-     * Open a read-only info tab for a standalone enum or composite type — its
-     * category, owning role, and ordered labels/attributes — deduping by
-     * type-info-panel id. The tab opens at once behind the library's
-     * spinner; behind it, the detail is fetched fresh through the same
-     * `getTypeDefinition` chain `editType`'s prefill uses (see the plan's
-     * "reuse TypeDefinitionQuery" decision) and passed to a TypeInfoPanel. A
-     * failed detail fetch closes the tab it opened, reported through
-     * notifyError. A type has no rows and no editable fields, so unlike
-     * openTable this has no store to register, and unlike openSequence the
-     * panel needs no dispose (see TypeInfoPanel).
-     *
-     * Unlike openSequence/openIndex, `node` is a plain `TreeNode | undefined`
-     * (matching openFunctionDefinition): nothing opens a type by reference,
-     * so there is no in-progress reveal `Promise` to await here.
-     */
-    async openType(ref: DbObjectRef, node?: TreeNode): Promise<void> {
-        const id = typeInfoPanelId(ref);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const route = objectPath(ref) ?? undefined;
-
-        this.openAsyncPanel({
-            id,
-            title  : ref.name ?? id,
-            glyph  : "cube",
-            tooltip: this.panelTooltip(ref),
-            ref,
-            route,
-        }, async () => {
-            const detail = await getTypeDefinition(ref);
-
-            // Read by `refresh` only after a click, which always happens after
-            // this variable is assigned just below — the forward reference is
-            // safe (mirrors openIndex's `panel`).
-            let panel: TypeInfoPanel;
-
-            const refresh = (): void => void this.refreshPanel(ref, async () => {
-                panel.reload(await getTypeDefinition(ref));
-            });
-
-            this.registerPanel(id, { ref, node: node ?? null, detail: "info", refresh });
-            this.syncToPanel(id);
-
-            panel = new TypeInfoPanel(detail, { schema: ref.schema!, name: ref.name!, onRefresh: refresh });
-
-            return panel;
-        });
-    }
-
-    /**
-     * Open a read-only structure (column metadata) tab for a table/view.
-     *
-     * `node` may be a still-pending `Promise` — an in-progress navigator reveal
-     * (see `openReferencedStructure`) — awaited alongside the structure fetch
-     * rather than gating the tab.
-     */
-    async openStructure(ref: DbObjectRef, node?: TreeNode | Promise<TreeNode | undefined>): Promise<void> {
-        const id = structurePanelId(ref);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const route = objectPath(ref, "structure") ?? undefined;
-
-        this.openAsyncPanel({
-            id,
-            title  : `${ref.name ?? id} (structure)`,
-            glyph  : "table-columns",
-            tooltip: this.panelTooltip(ref),
-            ref,
-            route,
-        }, async () => {
-            // The fetch now runs behind the library's spinner. A throw here closes
-            // the tab and reaches the "exception" handler — so no local catch. A
-            // pending `node` reveal rides along rather than gating the fetch.
-            const [columns, structure, resolvedNode] = await Promise.all([
-                getColumns(ref), getStructure(ref), Promise.resolve(node),
-            ]);
-
-            // Read by `refresh`/the section refreshes only after a click, which
-            // always happens after this variable is assigned just below — the
-            // forward reference is safe (mirrors openDefinition/
-            // openFunctionDefinition's `panel`).
-            let panel: StructurePanel;
-
-            // The whole-tab refresh backs Alt+R / View → Refresh (see
-            // refreshActive): it re-fetches everything and reseeds all four
-            // sections via `panel.reload`, exactly as before this tab grew
-            // per-section Refresh tools.
-            const refresh = (): void => void this.refreshPanel(ref, async () => {
-                const [freshColumns, freshStructure] = await Promise.all([getColumns(ref), getStructure(ref)]);
-                const entry = this.panelEntry(id);
-
-                panel.reload(freshColumns, freshStructure);
-
-                // structureColumns(ref) reads this cache to build the constraint/index
-                // dialogs' column checklists — it must track the refreshed columns.
-                if (entry) {
-                    entry.columns = freshColumns;
-                }
-            });
-
-            // The four per-section refreshes back each section header's own
-            // Refresh tool (StructureRefresh). Indexes/Constraints/Foreign
-            // Keys all read the same getStructure(ref) endpoint — each still
-            // re-fetches the whole payload (there is no narrower endpoint) but
-            // reseeds only its own section, so a click on one section's
-            // Refresh never visibly touches the other two sourced from that
-            // endpoint (see the plan's per-section-refresh Architecture
-            // Decision for why this is worth the redundant fetch).
-            const refreshColumns = (): void => void this.refreshPanel(ref, async () => {
-                const freshColumns = await getColumns(ref);
-                const entry = this.panelEntry(id);
-
-                panel.reloadColumns(freshColumns);
-
-                if (entry) {
-                    entry.columns = freshColumns;
-                }
-            });
-
-            const refreshIndexes = (): void => void this.refreshPanel(ref, async () => {
-                panel.reloadIndexes((await getStructure(ref)).indexes);
-            });
-
-            const refreshConstraints = (): void => void this.refreshPanel(ref, async () => {
-                panel.reloadConstraints((await getStructure(ref)).constraints);
-            });
-
-            const refreshForeignKeys = (): void => void this.refreshPanel(ref, async () => {
-                panel.reloadForeignKeys((await getStructure(ref)).foreignKeys);
-            });
-
-            const sectionRefresh: StructureRefresh = {
-                onRefreshColumns:     refreshColumns,
-                onRefreshIndexes:     refreshIndexes,
-                onRefreshConstraints: refreshConstraints,
-                onRefreshForeignKeys: refreshForeignKeys,
-            };
-
-            // The Columns section's Save success callback: the data tab's
-            // Model is now stale (a column may have been renamed, retyped,
-            // added, or removed), so it closes first — then the same
-            // whole-tab `refresh` a Refresh/Alt+R uses reseeds every section
-            // in place, rather than removing and reopening the structure tab
-            // the way the old per-dialog column launchers did.
-            const onColumnsSaved = (): void => {
-                this.dock.removePanel(panelId(ref));
-                refresh();
-            };
-
-            this.registerPanel(id, { ref, node: resolvedNode ?? null, columns, detail: "structure", refresh });
-            this.syncToPanel(id);
-
-            panel = new StructurePanel(columns, structure, (refSchema, refTable) =>
-                this.openReferencedTable({
-                    connectionId: ref.connectionId,
-                    database    : ref.database,
-                    schema      : refSchema,
-                    name        : refTable,
-                    kind        : "table",
-                }), (seqSchema, seqName) => this.openReferencedSequence({
-                    connectionId: ref.connectionId,
-                    database    : ref.database,
-                    schema      : seqSchema,
-                    name        : seqName,
-                    kind        : "sequence",
-                }), sectionRefresh, this.layout.bindAccordion("structure"), this.structureActionsFor(ref, onColumnsSaved));
-
-            return panel;
-        });
-    }
-
-    /**
-     * Build the StructureActions the structure tab's section toolbars call
-     * into — one closure per action, each fixed to this tab's own table ref.
-     * The Indexes/Constraints/Foreign Keys launchers accept any relation ref
-     * uniformly with the rest of the panel (the navigator only offers them on
-     * a table node in practice); `columnEdits` is narrower, since a view or
-     * matview's Structure tab must keep its Columns grid read-only (see the
-     * plan's "Only a table's Structure tab is editable" Architecture Decision).
-     *
-     * @param ref - The structure tab's own table.
-     * @param onColumnsSaved - Invoked after a successful Columns Save —
-     *   closes the (now-stale) data tab and reseeds the structure tab in
-     *   place. Supplied by `openStructure`, which owns the tab's `refresh` closure.
-     */
-    private structureActionsFor(ref: DbObjectRef, onColumnsSaved: () => void): StructureActions {
-        return {
-            onAddConstraint:  kind => void this.ddl.addConstraint(ref, kind),
-            onDropConstraint: constraintName => this.ddl.dropConstraint(ref, constraintName),
-            onCreateIndex:    () => this.ddl.createIndex(ref),
-            onDropIndex:      indexName => this.ddl.dropIndex(ref, indexName),
-            columnEdits: ref.kind === "table" ? {
-                schema:       ref.schema!,
-                table:        ref.name!,
-                previewAlter: spec => previewAlterTable(ref, spec),
-                execute:      sql => executeDdl(this._connectionId, sql),
-                onSaved:      onColumnsSaved,
-                onError:      m => this.notifyError(new Error(m), ref),
-                onStatus:     m => this.status(`${m}`),
-            } : undefined,
-        };
-    }
-
-    /**
-     * Open an editable definition tab for a function/procedure — the routine
-     * counterpart to `openDefinition` (which handles views), opened by
-     * double-click or the navigator's "Show definition". The tab opens at once
-     * behind the library's spinner; behind it, fetches the routine's
-     * `pg_get_functiondef` text — already a complete, executable
-     * `CREATE OR REPLACE FUNCTION|PROCEDURE …` statement — and seeds a
-     * FunctionDefinitionPanel with it, deduping by function-definition-panel
-     * id. The panel's Save hands the edited text straight to `executeDdl` with
-     * no preview/wrapper (the text is already the whole statement — see the
-     * function-type-ddl plan's "prefer CREATE OR REPLACE" decision: a
-     * signature-changing edit is the user's own manual escape hatch, not an
-     * auto-generated drop-recreate). On success the navigator refreshes and the
-     * tab reseeds itself in place (via `panel.reload`) rather than closing. A
-     * failed fetch closes the tab it opened, reported through notifyError; a
-     * failed save surfaces through notifyError and leaves the tab (and the
-     * user's edits) open.
-     *
-     * @param ref - the function/procedure leaf to open (its `signature`
-     *   disambiguates overloads).
-     */
-    async openFunctionDefinition(ref: DbObjectRef, node?: TreeNode): Promise<void> {
-        const id = functionDefinitionPanelId(ref);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const signature = ref.signature ?? "";
-        const route = objectPath(ref) ?? undefined;
-
-        this.openAsyncPanel({
-            id,
-            // Include the identity signature so two overloads of the same name
-            // get visibly distinct tab titles (e.g. `total_orders()` vs
-            // `total_orders(p_customer_id integer)`), matching their distinct ids.
-            title  : `${ref.name ?? id}(${signature}) (definition)`,
-            glyph  : "file-code",
-            tooltip: this.panelTooltip(ref),
-            ref,
-            route,
-        }, async () => {
-            // The fetch now runs behind the library's spinner. A throw here closes
-            // the tab and reaches the "exception" handler — so no local catch.
-            const definition: FunctionDefinition = await getFunctionDefinition(ref, signature);
-
-            // Read by `onSave` only after a Save click, which always happens after
-            // this variable is assigned just below — the forward reference is safe.
-            let panel: FunctionDefinitionPanel;
-
-            const onSave = async (newDefinition: string): Promise<void> => {
-                try {
-                    // No preview/builder: pg_get_functiondef is already the full
-                    // CREATE OR REPLACE statement, so the user's edited text runs
-                    // as-is. Editing the argument list here creates a NEW overload
-                    // rather than replacing this one (the signature is part of the
-                    // routine's identity) — the stated escape-hatch behaviour; the
-                    // re-fetch below then fails to find the original signature and
-                    // reports "saved, but failed to refresh".
-                    await executeDdl(this._connectionId, newDefinition);
-                } catch (err) {
-                    this.notifyError(err, ref);
-
-                    return;
-                }
-
-                this.reveal.refreshNavigator();
-
-                try {
-                    const reloaded = await getFunctionDefinition(ref, signature);
-
-                    panel.reload(reloaded.definition);
-                } catch (err) {
-                    // The save itself already succeeded (executeDdl above didn't
-                    // throw) — only the post-save re-fetch failed, so this is NOT a
-                    // failed save. Say so explicitly, mirroring openDefinition.
-                    this.notifyError(new Error(`saved, but failed to refresh the tab: ${errorMessage(err)}`), ref);
-
-                    return;
-                }
-
-                this.status(`${ref.name}: definition saved`);
-            };
-
-            const refresh = (): void => void this.refreshPanel(ref, async () => {
-                panel.reload((await getFunctionDefinition(ref, signature)).definition);
-            });
-
-            panel = new FunctionDefinitionPanel(definition.definition, onSave, refresh);
-
-            this.registerPanel(id, { ref, node: node ?? null, detail: "definition", refresh });
-            this.syncToPanel(id);
-
-            return panel.content;
-        });
-    }
-
-    /**
      * Open a read-only entity-relationship diagram for a whole schema in the Dock
      * (deduped by panel id): tables as nodes, foreign keys as edges, auto-laid-out
      * by ELK. Selecting a node opens that table's data tab via openReferencedTable.
@@ -1094,7 +383,7 @@ export class SqlAdminController implements PanelHost {
 
             return SchemaDiagramPanel(
                 data,
-                table => this.openReferencedTable({
+                table => this.panels.openReferencedTable({
                     connectionId: ref.connectionId,
                     database    : ref.database,
                     schema      : ref.schema,
@@ -1192,7 +481,7 @@ export class SqlAdminController implements PanelHost {
 
             return DatabaseDiagramPanel(
                 schemas,
-                (schema, table) => this.openReferencedTable({
+                (schema, table) => this.panels.openReferencedTable({
                     connectionId: ref.connectionId,
                     database    : ref.database,
                     schema,
@@ -1282,7 +571,7 @@ export class SqlAdminController implements PanelHost {
             return RelationDiagramPanel(
                 full,
                 root,
-                table => this.openReferencedTable({
+                table => this.panels.openReferencedTable({
                     connectionId: ref.connectionId,
                     database    : ref.database,
                     schema      : ref.schema,
@@ -1379,7 +668,7 @@ export class SqlAdminController implements PanelHost {
         onContextMenu: (node: RelationNodeData, event: MouseEvent) => void;
     } {
         return {
-            onSelect: nd => this.openReferencedTable({
+            onSelect: nd => this.panels.openReferencedTable({
                 connectionId: ref.connectionId,
                 database    : ref.database,
                 schema      : nd.schema,
@@ -1552,25 +841,6 @@ export class SqlAdminController implements PanelHost {
     }
 
     /**
-     * Open a foreign key's referenced table in the Dock and reveal it in the
-     * navigator. `Tree.revealByPredicate` expands the path to the node —
-     * loading lazy branches (unexpanded schemas) as needed — so the target is
-     * revealed even when the user never navigated to it. That reveal can take a
-     * moment (it waits for the navigator's own load, and each unexpanded branch
-     * on the path is a fetch), so it runs concurrently with the tab's own open
-     * rather than gating it: the tab
-     * appears at once, exactly like every other open path, with its content
-     * loading lazily behind it (see openTable); the navigator selection lands
-     * whenever the reveal resolves. Best-effort: if no node matches, the tab
-     * still opens.
-     *
-     * @param ref - The referenced table to open.
-     */
-    openReferencedTable(ref: DbObjectRef): void {
-        this.reveal.revealInNavigator(matchesRelationName(ref), { open: r => void this.openTable(ref, r) });
-    }
-
-    /**
      * Show `ref`'s object context menu at `event`'s position — the same menu
      * the navigator tree shows for the identical object, built by the shared
      * buildObjectMenuItems (see objectMenu.ts). Called by each diagram panel's
@@ -1581,30 +851,6 @@ export class SqlAdminController implements PanelHost {
      */
     private diagramContextMenu(ref: DbObjectRef, event: MouseEvent): void {
         showObjectMenu(this._objectMenu, ref, this, event);
-    }
-
-    /**
-     * Open a column's backing sequence's info tab and reveal it in the
-     * navigator — the Structure tab's Sequence link. Best-effort, exactly like
-     * {@link openReferencedTable}: if no node matches, the tab still opens; the
-     * reveal runs concurrently with the tab's own open rather than gating it.
-     *
-     * @param ref - The sequence to open (kind "sequence").
-     */
-    openReferencedSequence(ref: DbObjectRef): void {
-        this.reveal.revealInNavigator(matchesObject(ref), { open: r => void this.openSequence(ref, r) });
-    }
-
-    /**
-     * Open a table's Structure tab and reveal the table in the navigator — the
-     * sequence info tab's "Owned by column" link. Best-effort, exactly like
-     * {@link openReferencedTable}: the reveal runs concurrently with the tab's
-     * own open rather than gating it.
-     *
-     * @param ref - The table whose structure to open (kind "table").
-     */
-    openReferencedStructure(ref: DbObjectRef): void {
-        this.reveal.revealInNavigator(matchesObject(ref), { open: r => void this.openStructure(ref, r) });
     }
 
     /**
@@ -1740,40 +986,7 @@ export class SqlAdminController implements PanelHost {
      * @param format - The export format, "csv" or "json".
      */
     exportTable(ref: DbObjectRef, format: "csv" | "json"): void {
-        const anchor = document.createElement("a");
-        anchor.href          = tableExportUrl(ref, format);
-        // The download attribute makes this a file save rather than a top-level
-        // navigation, and names the file `<schema>.<table>.<format>`.
-        anchor.download      = `${[ref.schema, ref.name].filter(Boolean).join(".") || "export"}.${format}`;
-        anchor.style.display = "none";
-
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-    }
-
-    /**
-     * Open the "Import data" dialog for a table: file pick -> preview ->
-     * commit. On a successful commit, discards any pending local edits and
-     * reloads the grid from page 1 — the same reload sequence the toolbar's
-     * own Refresh button uses — then reports the inserted count through the
-     * panel's shared status line.
-     *
-     * @param ref - The target table.
-     * @param store - The table's live grid store, reloaded after a commit.
-     * @param columns - The table's introspected columns (drives the preview grid).
-     * @param notify - The panel's shared status-line reporter.
-     */
-    private importIntoTable(ref: DbObjectRef, store: AjaxStore, columns: ColumnMeta[], notify: Notify): void {
-        openImportRowsDialog({
-            ref,
-            columns,
-            onImported: (insertedCount: number): void => {
-                store.reject();
-                void store.load();
-                notify(`Imported ${insertedCount} row(s)`);
-            },
-        });
+        downloadUrl(tableExportUrl(ref, format), tableExportFilename(ref, format));
     }
 
     /**
@@ -1786,7 +999,7 @@ export class SqlAdminController implements PanelHost {
         const entry = this.workspace.recentEntry(ref);
 
         if (entry) {
-            void this.openTable(entry.ref, entry.node);
+            void this.panels.openTable(entry.ref, entry.node);
         }
     }
 
@@ -2114,7 +1327,7 @@ export class SqlAdminController implements PanelHost {
                 return;
             }
 
-            await this.openTable(node.data as DbObjectRef, node);
+            await this.panels.openTable(node.data as DbObjectRef, node);
             this.reveal.selectNavigatorNode(node);
         })();
     }
@@ -2153,17 +1366,6 @@ export class SqlAdminController implements PanelHost {
 
         void entry.store.load();
         this.status(`${entry.ref.name ?? ""}: refreshed`);
-    }
-
-    /** Report a sync outcome: each failure as an error, or a success message. */
-    private reportSync(event: StoreSyncEvent, ref: DbObjectRef): void {
-        if (event.failures.length > 0) {
-            event.failures.forEach((f: StoreExceptionEvent) => this.notifyError(f.error, ref));
-
-            return;
-        }
-
-        this.status(`${ref.name}: changes saved`);
     }
 
     /**

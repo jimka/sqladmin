@@ -158,7 +158,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
             controller.reveal.selectObject(ref);
 
-            return controller.openTable(ref, undefined, {
+            return controller.panels.openTable(ref, undefined, {
                 rotated: routeFlag(query.rotated),
                 record:  query.record,
             });
@@ -178,8 +178,8 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             controller.reveal.selectObject(ref);
 
             switch (view) {
-                case "structure":    return controller.openStructure(ref);
-                case "definition":   return controller.openDefinition(ref);
+                case "structure":    return controller.panels.openStructure(ref);
+                case "definition":   return controller.panels.openDefinition(ref);
                 case "diagram":      return controller.openRelationDiagram(ref, undefined, query.depth);
                 case "dependencies": return controller.openRelationDependencyGraph(ref, undefined, query.depth);
                 case "inheritance":  return controller.openRelationInheritanceGraph(ref, undefined, query.depth);
@@ -198,7 +198,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
         controller.reveal.selectObject(ref);
 
-        return controller.openSequence(ref);
+        return controller.panels.openSequence(ref);
     }));
 
     router.register("/schema/:schema/index/:name", params => dispatch(controller, () => {
@@ -212,7 +212,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
         controller.reveal.selectObject(ref);
 
-        return controller.openIndex(ref);
+        return controller.panels.openIndex(ref);
     }));
 
     router.register("/schema/:schema/type/:name", params => dispatch(controller, () => {
@@ -226,7 +226,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
         controller.reveal.selectObject(ref);
 
-        return controller.openType(ref);
+        return controller.panels.openType(ref);
     }));
 
     // A single registration: the overload-disambiguating signature is a query
@@ -247,7 +247,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
         // routine selects its first leaf while the tab opens the exact overload.
         controller.reveal.selectObject(ref);
 
-        return controller.openFunctionDefinition(ref);
+        return controller.panels.openFunctionDefinition(ref);
     }));
 
     // The three role buckets are registered once per ROLE_BUCKETS entry, the
