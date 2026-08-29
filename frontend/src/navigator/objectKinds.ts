@@ -25,6 +25,8 @@ export interface ObjectKindInfo {
     kind: DbObjectKind;
     /** The registered glyph name (see objectGlyphs.ts's `Glyph.register` calls). */
     glyph: string;
+    /** Human-readable name for this kind, shown as the "Type" row / tab tooltip line. */
+    displayLabel: string;
     categoryLabel?: string;
     isRelation: boolean;
 }
@@ -35,21 +37,24 @@ export interface ObjectKindInfo {
  * order (Tables, then Views, then Materialized Views, then Sequences).
  */
 export const OBJECT_KINDS: readonly ObjectKindInfo[] = [
-    { kind: "database", glyph: "database", isRelation: false },
-    { kind: "schema", glyph: "folder", isRelation: false },
-    { kind: "table", glyph: "table", categoryLabel: "Tables", isRelation: true },
-    { kind: "view", glyph: "eye", categoryLabel: "Views", isRelation: true },
-    { kind: "materializedView", glyph: "layer-group", categoryLabel: "Materialized Views", isRelation: true },
-    { kind: "sequence", glyph: "arrow-up-1-9", categoryLabel: "Sequences", isRelation: false },
+    { kind: "database", glyph: "database", displayLabel: "Database", isRelation: false },
+    { kind: "schema", glyph: "folder", displayLabel: "Schema", isRelation: false },
+    { kind: "table", glyph: "table", displayLabel: "Table", categoryLabel: "Tables", isRelation: true },
+    { kind: "view", glyph: "eye", displayLabel: "View", categoryLabel: "Views", isRelation: true },
+    {
+        kind: "materializedView", glyph: "layer-group", displayLabel: "Materialized view",
+        categoryLabel: "Materialized Views", isRelation: true,
+    },
+    { kind: "sequence", glyph: "arrow-up-1-9", displayLabel: "Sequence", categoryLabel: "Sequences", isRelation: false },
     // function/type (function-type-ddl phase): listed leaves like a sequence —
     // they open a definition/edit view, not a Dock data tab, so isRelation stays
     // false for both.
-    { kind: "function", glyph: "code", categoryLabel: "Functions", isRelation: false },
-    { kind: "type", glyph: "cube", categoryLabel: "Types", isRelation: false },
+    { kind: "function", glyph: "code", displayLabel: "Function", categoryLabel: "Functions", isRelation: false },
+    { kind: "type", glyph: "cube", displayLabel: "Type", categoryLabel: "Types", isRelation: false },
     // index (navigator-indexes-category phase): a flat, schema-wide listed leaf
     // like a sequence — it opens a read-only info tab, not a Dock data tab, so
     // isRelation stays false.
-    { kind: "index", glyph: "magnifying-glass", categoryLabel: "Indexes", isRelation: false },
+    { kind: "index", glyph: "magnifying-glass", displayLabel: "Index", categoryLabel: "Indexes", isRelation: false },
 ];
 
 /**
@@ -85,13 +90,14 @@ export function isRelationKind(kind: DbObjectKind | undefined): boolean {
 }
 
 /**
- * The registered glyph name for `kind`.
+ * The human-readable name for `kind` — the "Type" row in the Properties
+ * inspector and the matching line of a dock tab's hover tooltip.
  *
  * @param kind - the object kind to resolve.
- * @returns the glyph name.
+ * @returns the kind's display label.
  */
-export function kindGlyph(kind: DbObjectKind): string {
-    return kindInfo(kind).glyph;
+export function kindDisplayLabel(kind: DbObjectKind): string {
+    return kindInfo(kind).displayLabel;
 }
 
 /**

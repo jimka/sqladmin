@@ -4,7 +4,7 @@
 // happens here — see memory "tsui DOM module side effects").
 
 import { describe, expect, it } from "vitest";
-import { isRelationKind, objectCategories, OBJECT_KINDS } from "../../src/navigator/objectKinds";
+import { isRelationKind, objectCategories, OBJECT_KINDS, kindDisplayLabel } from "../../src/navigator/objectKinds";
 
 describe("OBJECT_KINDS", () => {
     it("has exactly one entry per known object kind", () => {
@@ -18,6 +18,12 @@ describe("OBJECT_KINDS", () => {
     it("gives every entry a non-empty glyph name", () => {
         for (const entry of OBJECT_KINDS) {
             expect(entry.glyph.length).toBeGreaterThan(0);
+        }
+    });
+
+    it("gives every entry a non-empty displayLabel", () => {
+        for (const entry of OBJECT_KINDS) {
+            expect(entry.displayLabel.length).toBeGreaterThan(0);
         }
     });
 
@@ -54,6 +60,20 @@ describe("isRelationKind", () => {
 
     it("is false for undefined", () => {
         expect(isRelationKind(undefined)).toBe(false);
+    });
+});
+
+describe("kindDisplayLabel", () => {
+    it("returns each kind's human-readable label", () => {
+        expect(kindDisplayLabel("database")).toBe("Database");
+        expect(kindDisplayLabel("schema")).toBe("Schema");
+        expect(kindDisplayLabel("table")).toBe("Table");
+        expect(kindDisplayLabel("view")).toBe("View");
+        expect(kindDisplayLabel("materializedView")).toBe("Materialized view");
+        expect(kindDisplayLabel("sequence")).toBe("Sequence");
+        expect(kindDisplayLabel("function")).toBe("Function");
+        expect(kindDisplayLabel("type")).toBe("Type");
+        expect(kindDisplayLabel("index")).toBe("Index");
     });
 });
 
