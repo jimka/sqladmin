@@ -31,7 +31,8 @@ class WireType(str, Enum):
 class TableRef:
     """
     Identifies one table/view within a connection. ``database`` is carried
-    for the multi-DB seam; Phase 0-1 query the connection's own database.
+    for the multi-DB seam; nothing reads it today — every query runs against
+    the session's own connected database.
     """
 
     database: str

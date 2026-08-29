@@ -8,9 +8,9 @@ namespaced ``/api/{connectionId}/...`` resolve their pool from the request's
 session (the cookie), not from a global registry — the ``connection_id`` path
 segment is only validated against the session's own label.
 
-The app now boots with **zero** pools (there is no ``DATABASE_URL``); pools exist
-only for the lifetime of a logged-in session and are closed on logout, on idle
-eviction (``sweep_idle_sessions``), and on shutdown (``close_all_sessions``).
+The app boots with **zero** pools; a pool exists only for the lifetime of a
+logged-in session, and is closed on logout, on idle eviction
+(``sweep_idle_sessions``), and on shutdown (``close_all_sessions``).
 """
 
 from __future__ import annotations
@@ -67,7 +67,6 @@ class Session:
     csrf_token: str  # synchronizer token, returned in JSON bodies
     pool: asyncpg.Pool
     username: str  # for whoami display; NOT the password
-    host: str
     database: str
     last_seen: float  # monotonic seconds, bumped per request
 
@@ -132,7 +131,6 @@ async def create_session(parts: ConnParts) -> Session:
         csrf_token=secrets.token_urlsafe(_TOKEN_BYTES),
         pool=pool,
         username=parts.username,
-        host=parts.host,
         database=parts.database,
         last_seen=time.monotonic(),
     )

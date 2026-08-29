@@ -65,7 +65,6 @@ def _fake_session(csrf: str = "tok") -> Session:
         csrf_token=csrf,
         pool=cast(asyncpg.Pool, object()),
         username="u",
-        host="h",
         database="d",
         last_seen=time.monotonic(),
     )
@@ -275,7 +274,6 @@ async def test_sweep_evicts_idle_session() -> None:
         csrf_token="t",
         pool=cast(asyncpg.Pool, pool),
         username="u",
-        host="h",
         database="d",
         last_seen=time.monotonic() - connections.SESSION_IDLE_TIMEOUT_SECONDS - 1,
     )
