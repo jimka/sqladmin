@@ -1,8 +1,10 @@
 """
 Tests for the app's route table: every route resolves to exactly the
 ``EXPECTED_ROUTES`` triples (no extras, no omissions), no two routes sharing
-an HTTP method can match the same concrete URL, and the DDL preview registry
-stays in sync with the ``DdlPreview`` subclasses ``app.operations`` exports.
+an HTTP method can match the same concrete URL, the DDL preview registry
+stays in sync with the ``DdlPreview`` subclasses ``app.operations`` exports,
+and the driver-error handler translates a Postgres error into the typed
+taxonomy's status/body.
 
 Route *resolution* (which route wins for a concrete URL) is tested through
 Starlette's own ``Route.matches`` rather than an end-to-end request, so these
@@ -12,12 +14,17 @@ tests need no session, no CSRF token, and no real Postgres connection.
 from __future__ import annotations
 
 import itertools
+import json
+from typing import cast
 
+import asyncpg
+import pytest
+from starlette.requests import Request
 from starlette.routing import Match
 
 from app import operations
 from app.endpoints.ddl import PREVIEW_OPS, preview_docs
-from app.main import app
+from app.main import _pg_error_handler, app
 from app.operations import DdlPreview
 
 # --- the fixed route table (## Route inventory, C/D expanded) --------------
@@ -282,3 +289,29 @@ def test_preview_docs_splits_docstring_into_summary_and_description() -> None:
     assert summary == "Preview a ``CREATE [OR REPLACE] VIEW`` statement."
     assert description.startswith(summary)
     assert "Spec:" in description
+
+
+# --- Cases 9-10: the driver-error handler translates into the taxonomy -----
+
+
+def _request() -> Request:
+    """A minimal stand-in ``Request`` for a handler that never reads it."""
+    return cast(Request, cast(object, None))
+
+
+@pytest.mark.parametrize(
+    "error",
+    [asyncpg.UniqueViolationError("dup"), asyncpg.ForeignKeyViolationError("dup")],
+)
+async def test_integrity_violation_becomes_409_conflict(error: asyncpg.PostgresError) -> None:
+    response = await _pg_error_handler(_request(), error)
+
+    assert response.status_code == 409
+    assert json.loads(bytes(response.body)) == {"detail": "dup"}
+
+
+async def test_syntax_error_becomes_400_bad_request() -> None:
+    response = await _pg_error_handler(_request(), asyncpg.PostgresSyntaxError("bad"))
+
+    assert response.status_code == 400
+    assert json.loads(bytes(response.body)) == {"detail": "bad"}

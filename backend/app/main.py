@@ -35,7 +35,7 @@ from .auth import log_dial_policy, login, logout, whoami
 from .config import app_config, enable_docs
 from .connections import SWEEP_INTERVAL_SECONDS, close_all_sessions, sweep_idle_sessions
 from .endpoints import ROUTERS
-from .errors import DomainError
+from .errors import BadRequest, ConflictError, DomainError
 from .static import mount_static
 
 
@@ -109,12 +109,17 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
 @app.exception_handler(asyncpg.PostgresError)
 async def _pg_error_handler(request: Request, exc: asyncpg.PostgresError) -> JSONResponse:
     """
-    Map a driver error to a status: integrity/unique -> 409, else -> 400.
+    Translate a driver error into the typed taxonomy, then render it through the
+    one domain-error handler — so ``errors.py`` stays the single place a status
+    is chosen. An integrity/unique violation is a conflict; anything else the
+    server rejected is a bad request.
     """
     if isinstance(exc, asyncpg.exceptions.IntegrityConstraintViolationError):
-        return JSONResponse(status_code=409, content={"detail": str(exc)})
+        domain: DomainError = ConflictError(str(exc))
+    else:
+        domain = BadRequest(str(exc))
 
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+    return await _domain_error_handler(request, domain)
 
 
 # Registration order decides nothing: no two routes can claim the same concrete
