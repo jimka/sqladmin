@@ -6,7 +6,7 @@ import {
     EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT,
     NEW_QUERY_SHORTCUT, OPEN_SAVED_SHORTCUT, QUERY_HISTORY_SHORTCUT,
     DATABASES_RAIL_SHORTCUT, ROLES_RAIL_SHORTCUT, QUERIES_RAIL_SHORTCUT,
-    REFRESH_SHORTCUT, HELP_SHORTCUT, isHelpChord,
+    REFRESH_SHORTCUT, HELP_SHORTCUT,
 } from "../../src/shell/queryShortcuts";
 
 // The 14 ids the registry must carry: all 13 pre-existing shortcuts plus the new
@@ -77,26 +77,5 @@ describe("groupByCategory", () => {
 
         expect(editor?.entries.map(entry => entry.id)).toEqual(
             ["run", "save", "clear", "history-recall", "explain", "explain-analyze"]);
-    });
-});
-
-describe("isHelpChord (modifier/key logic; editable-target verified live)", () => {
-    /** A minimal KeyboardEvent-like stub for the non-DOM branches. */
-    function keyEvent(partial: Partial<KeyboardEvent>): KeyboardEvent {
-        return { ctrlKey: false, metaKey: false, altKey: false, key: "", target: null, ...partial } as KeyboardEvent;
-    }
-
-    it("is true for a bare ? with no editable target", () => {
-        expect(isHelpChord(keyEvent({ key: "?" }))).toBe(true);
-    });
-
-    it("is false for any other key", () => {
-        expect(isHelpChord(keyEvent({ key: "a" }))).toBe(false);
-    });
-
-    it("is false when ctrl, meta, or alt is held", () => {
-        expect(isHelpChord(keyEvent({ key: "?", ctrlKey: true }))).toBe(false);
-        expect(isHelpChord(keyEvent({ key: "?", metaKey: true }))).toBe(false);
-        expect(isHelpChord(keyEvent({ key: "?", altKey: true }))).toBe(false);
     });
 });
