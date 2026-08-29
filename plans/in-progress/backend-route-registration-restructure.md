@@ -678,6 +678,13 @@ Add one sentence under the Layout list: *"Authenticated routes are namespaced `/
 
 ---
 
+## Implementation Notes
+
+- **`endpoints/ddl.py`'s `_preview_endpoint` needed a `cast` the `## Internal Structure` snippet doesn't show.** The snippet's `op = op_class(c, body)` fails `pyright` (standard mode): `op_class` is statically `type[DdlPreview]`, and calling a generic `type[Base]` type-checks against `Base`'s own `__init__` — `DdlPreview.__init__(self) -> None` ([`operations/ddl.py:58`](backend/app/operations/ddl.py#L58)) takes zero args, not the `(conn, spec)` every subclass actually declares. `DdlPreview.__init__` is outside this plan's file list, so rather than widen its signature, the route builds a locally-scoped `construct = cast(Callable[[asyncpg.Connection, dict], DdlPreview], op_class)` and calls that — asserting, at the one place the registry pattern needs it, the "every subclass takes `(conn, spec)`" convention `DdlPreview`'s own docstring and `CreateViewPreview`'s already document. `PREVIEW_OPS`'s declared type (`dict[str, type[DdlPreview]]`) and the case-7/8 test assertions are unaffected — the cast changes nothing observable, only what `pyright` can verify at the call site.
+- **`frontend/src/data/stores.ts` needed no edit.** Step 19's conditional fired on its "already moved" branch: `data-layer-navigator-convergence` had already relocated the row-collection URL into `api.ts`'s `tableRowsUrl`, so `stores.ts` still only calls that function and never spells out a URL itself. `tableRowsUrl` is the 45th builder in the `db`-segment insertion instead of `stores.ts`'s own literal.
+
+---
+
 ## Notes
 
 [^why-routers]: `APIRouter` appears nowhere in the repo today — `grep -rn 'APIRouter\|include_router' backend/` returns zero matches — so this is a new pattern and needs the justification. The alternative that keeps the repo pattern-free is per-resource modules exposing a `register(app)` function that the app calls, which is what the four auth/config routes already do in miniature ([`main.py:161-164`](backend/app/main.py#L161)). It was rejected on the load-bearing point of this plan: a `register(app)` function declares each route's full path at its decorator, so the URL scheme stays scattered across nine files and nothing forces a module to state its prefix. `APIRouter` makes the prefix a required, single, greppable declaration per file — which is why the `db` insertion is one constant rather than 45 decorators, and why a reader can tell a file's URL scope from its first ten lines. It is also FastAPI's own documented mechanism for exactly this split, so it costs no novelty for a reader who knows the framework.
