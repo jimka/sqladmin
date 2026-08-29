@@ -4,7 +4,8 @@ so a streamed full-table CSV is byte-identical to a query-result CSV of the same
 wire data (NULL vs empty, quoting, each string-based wire type, header) —
 floating-point numbers excepted, since the query path stringifies them from JS
 numbers (see export_format.py's byte-identity note). The cases below use integer
-numbers, where both sides agree.
+numbers, where both sides agree. Also covers ``EXPORT_MEDIA``, the single
+format registry, and ``content_disposition``, the sanitized download header.
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ import json
 
 from app.contract import WireType
 from app.export_format import (
+    EXPORT_MEDIA,
+    content_disposition,
     csv_header,
     csv_row,
     json_close,
@@ -134,3 +137,51 @@ def test_json_document_round_trips_to_native_types() -> None:
         {"id": 1, "ok": True, "meta": {"x": 1}, "note": None},
         {"id": 2, "ok": False, "meta": [1, 2], "note": "hi"},
     ]
+
+
+# --- download header ---------------------------------------------------
+
+
+def test_content_disposition_plain_name() -> None:
+    header = content_disposition("public", "customers", "csv")
+
+    assert header == (
+        'attachment; filename="public.customers.csv"; '
+        "filename*=UTF-8''public.customers.csv"
+    )
+
+
+def test_content_disposition_sanitizes_quote_and_crlf() -> None:
+    header = content_disposition("public", 'say "hi"\r\nX-Evil: 1', "csv")
+
+    assert header == (
+        'attachment; filename="public.say__hi___X-Evil__1.csv"; '
+        "filename*=UTF-8''public.say%20%22hi%22%0D%0AX-Evil%3A%201.csv"
+    )
+
+
+def test_content_disposition_percent_encodes_non_ascii() -> None:
+    header = content_disposition("public", "naïve", "json")
+
+    assert header == (
+        'attachment; filename="public.na_ve.json"; '
+        "filename*=UTF-8''public.na%C3%AFve.json"
+    )
+
+
+def test_content_disposition_quote_and_crlf_case_has_no_raw_crlf() -> None:
+    header = content_disposition("public", 'say "hi"\r\nX-Evil: 1', "csv")
+
+    # A header value must never carry a raw CR/LF (header/response-splitting);
+    # the sanitized fallback's two quotes are the ones wrapping the filename.
+    assert "\r" not in header
+    assert "\n" not in header
+    assert header.count('"') == 2
+
+
+def test_export_media_has_csv_and_json_with_non_empty_values() -> None:
+    assert set(EXPORT_MEDIA) == {"csv", "json"}
+
+    for media_type, ext in EXPORT_MEDIA.values():
+        assert media_type
+        assert ext

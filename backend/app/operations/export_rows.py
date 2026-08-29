@@ -19,13 +19,14 @@ import asyncpg
 
 from ..contract import ColumnMeta, TableRef
 from ..errors import ValidationError
-from ..export_format import csv_header, csv_row, json_close, json_open, json_row
+from ..export_format import EXPORT_MEDIA, csv_header, csv_row, json_close, json_open, json_row
 from ..wire import rows_to_wire
 from .base import Query
 from .common import qualified
 
-# The export formats this operation supports; anything else is a client error.
-_VALID_FORMATS = frozenset({"csv", "json"})
+# The export formats this operation supports, derived from the media registry so
+# the two can never name different sets; anything else is a client error.
+_VALID_FORMATS = frozenset(EXPORT_MEDIA)
 
 
 class ExportRowsQuery(Query):
@@ -54,7 +55,9 @@ class ExportRowsQuery(Query):
             ValidationError: if ``fmt`` is not a supported format.
         """
         if fmt not in _VALID_FORMATS:
-            raise ValidationError(f"Unsupported export format: {fmt!r} (expected csv or json)")
+            expected = " or ".join(sorted(_VALID_FORMATS))
+
+            raise ValidationError(f"Unsupported export format: {fmt!r} (expected {expected})")
 
         self._conn: asyncpg.Connection = conn
         self._table: TableRef = table
