@@ -1,4 +1,4 @@
-// The CREATE TYPE ... AS ENUM dialog form: a name field plus an add/remove-row
+// The CREATE TYPE ... AS ENUM form: a name field plus an add/remove-row
 // label grid, built on the shared RowGridPanel base (see that module for the
 // add/remove-row mechanics).
 
@@ -20,7 +20,7 @@ const LABEL_WEIGHT = 200;
 
 /**
  * The CREATE TYPE ... AS ENUM form: a type-name field over an add/remove-row
- * label grid. Embedded as the `form` of a `SqlPreviewDialog` by the
+ * label grid. Embedded as a `DdlFormPanel` dock tab's form by the
  * controller's `createType` launcher (enum category).
  */
 class EnumTypeForm extends RowGridPanel<string> {

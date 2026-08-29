@@ -1713,41 +1713,46 @@ export class SqlAdminController {
     }
 
     /**
-     * Open the CREATE TYPE dialog for a schema (the navigator's "Create
-     * type ▸ Enum | Composite" context-menu submenu). Success refreshes the
-     * navigator, since a new type changes the schema's object list.
+     * Open (or focus) the CREATE TYPE draft tab for a schema (the
+     * navigator's "Create type ▸ Enum | Composite" context-menu submenu). A
+     * successful execute closes the tab and refreshes the navigator, since a
+     * new type changes the schema's object list.
      *
      * @param ref - the target schema (kind "schema"; database + schema set).
      * @param category - which CREATE TYPE form to open.
      */
     createType(ref: DbObjectRef, category: "enum" | "composite"): void {
-        const onSuccess = (): void => this._navigator?.refresh?.();
-        const onError = (msg: string): void => this.notifyError(new Error(msg), ref);
-
         if (category === "enum") {
-            const form = new EnumTypeForm({ schema: ref.schema! });
+            this.openDdlPanel({
+                ref,
+                slug:        "enum-type",
+                title:       `New enum type (${ref.schema})`,
+                glyph:       KIND_GLYPH.type,
+                reviewTitle: "Create enum type",
+                build:       () => {
+                    const form = new EnumTypeForm({ schema: ref.schema! });
 
-            openSqlPreviewDialog({
-                title:       "Create enum type",
-                form,
-                generateSql: async () => (await previewCreateEnumType(ref, form.readSpec())).sql,
-                execute:     sql => executeDdl(this._connectionId, sql),
-                onSuccess,
-                onError,
+                    return { form, generateSql: async () => (await previewCreateEnumType(ref, form.readSpec())).sql };
+                },
             });
 
             return;
         }
 
-        const form = new CompositeTypeForm({ schema: ref.schema! });
+        this.openDdlPanel({
+            ref,
+            slug:        "composite-type",
+            title:       `New composite type (${ref.schema})`,
+            glyph:       KIND_GLYPH.type,
+            reviewTitle: "Create composite type",
+            build:       () => {
+                const form = new CompositeTypeForm({ schema: ref.schema! });
 
-        openSqlPreviewDialog({
-            title:       "Create composite type",
-            form,
-            generateSql: async () => (await previewCreateCompositeType(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
-            onSuccess,
-            onError,
+                return {
+                    form,
+                    generateSql: async () => (await previewCreateCompositeType(ref, form.readSpec())).sql,
+                };
+            },
         });
     }
 

@@ -1,4 +1,4 @@
-// The CREATE TYPE ... AS (...) composite-type dialog form: a name field plus
+// The CREATE TYPE ... AS (...) composite-type form: a name field plus
 // an add/remove-row (name, type) attribute grid, built on the shared
 // RowGridPanel base. An optional `prefill` (edit mode — see the
 // function-type-ddl plan's "composite recreate" decision: restructuring an
@@ -25,7 +25,7 @@ const TYPE_WEIGHT = 140;
 
 /**
  * The CREATE TYPE ... AS (...) form: a type-name field over an add/remove-row
- * attribute grid. Embedded as the `form` of a `SqlPreviewDialog` by the
+ * attribute grid. Embedded as a `DdlFormPanel` dock tab's form by the
  * controller's `createType` launcher (composite category) and `editType`
  * (composite recreate/clone).
  */
