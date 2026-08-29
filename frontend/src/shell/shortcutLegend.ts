@@ -12,7 +12,7 @@ import { VBox, Grid }          from "@jimka/typescript-ui/layout";
 import { Text }                from "@jimka/typescript-ui/component/input";
 import { groupByCategory }     from "./shortcutRegistry";
 import type { ShortcutGroup }  from "./shortcutRegistry";
-import { MUTED_TEXT_COLOR }    from "../theme";
+import { mutedHeading, mutedText } from "./mutedText";
 
 // The gap between the stacked category groups, and the tighter gap between a
 // group's heading and its key rows. The group gap is a touch larger than the
@@ -50,7 +50,7 @@ export function buildShortcutLegend(): Component {
 function buildGroup(group: ShortcutGroup): Component {
     const block = Panel({ layoutManager: new VBox({ itemAlign: "stretch", spacing: ROW_SPACING }) });
 
-    block.addComponent(heading(group.title));
+    block.addComponent(mutedHeading(group.title));
     block.addComponent(buildGrid(group));
 
     return block;
@@ -80,20 +80,4 @@ function buildGrid(group: ShortcutGroup): Component {
     }
 
     return rows;
-}
-
-/** A bold, muted category heading. */
-function heading(text: string): Component {
-    const header = new Text(text, { fontWeight: "600" });
-    header.setForegroundColor(MUTED_TEXT_COLOR);
-
-    return header;
-}
-
-/** A muted label line. */
-function mutedText(text: string): Component {
-    const line = new Text(text);
-    line.setForegroundColor(MUTED_TEXT_COLOR);
-
-    return line;
 }
