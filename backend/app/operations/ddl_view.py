@@ -18,31 +18,8 @@ from typing import Any, Mapping
 
 import asyncpg
 
-from ..errors import ValidationError
 from ..sql import ddl
-from .ddl import DdlPreview
-
-
-def _require(spec: Mapping[str, Any], key: str) -> str:
-    """
-    Read a required, non-blank string field off a spec.
-
-    Args:
-        spec: the preview op's spec mapping.
-        key: the field to read.
-
-    Raises:
-        ValidationError: if the field is missing, not a string, or blank.
-
-    Returns:
-        The field's value.
-    """
-    value = spec.get(key)
-
-    if not isinstance(value, str) or not value.strip():
-        raise ValidationError(f"'{key}' is required")
-
-    return value
+from .ddl import DdlPreview, require_field
 
 
 class CreateViewPreview(DdlPreview):
@@ -64,9 +41,9 @@ class CreateViewPreview(DdlPreview):
             spec: the ``CreateViewSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
-        self._select: str = _require(spec, "select")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
+        self._select: str = require_field(spec, "select")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -99,8 +76,8 @@ class DropViewPreview(DdlPreview):
             spec: the ``DropSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -126,9 +103,9 @@ class CreateMaterializedViewPreview(DdlPreview):
             spec: the ``CreateMatviewSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
-        self._select: str = _require(spec, "select")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
+        self._select: str = require_field(spec, "select")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -157,8 +134,8 @@ class DropMaterializedViewPreview(DdlPreview):
             spec: the ``DropSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -191,8 +168,8 @@ class RefreshMaterializedViewPreview(DdlPreview):
             spec: the ``RefreshMatviewSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -225,9 +202,9 @@ class ReplaceMaterializedViewPreview(DdlPreview):
             spec: the ``ReplaceMatviewSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
-        self._select: str = _require(spec, "select")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
+        self._select: str = require_field(spec, "select")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:

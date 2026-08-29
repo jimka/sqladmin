@@ -22,6 +22,7 @@ __all__ = [
     "quote_ident",
     "qualify",
     "quote_literal",
+    "require_text",
     "create_table",
     "drop_table",
     "rename_table",
@@ -103,6 +104,28 @@ def quote_literal(value: str) -> str:
         The value wrapped in single quotes, with embedded ``'`` doubled.
     """
     return "'" + value.replace("'", "''") + "'"
+
+
+def require_text(value: object, label: str) -> str:
+    """
+    Validate a required field is a non-blank string.
+
+    Args:
+        value: the field's value — accepts ``object`` so a caller can pass an
+            unvalidated wire value straight through (a preview spec's field may
+            be any JSON type) without checking its type first.
+        label: the field name, used in the error message.
+
+    Raises:
+        ValidationError: if ``value`` is not a string, or is blank.
+
+    Returns:
+        ``value``, unchanged.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError(f"'{label}' is required")
+
+    return value
 
 
 # --- Table DDL ----------------------------------------------------------------
@@ -853,27 +876,8 @@ def replace_materialized_view(
 # sequences have no free-form expression slots to review in a preview editor
 # (every numeric option is validated as an integer, not a raw fragment), so
 # there is no equivalent "reviewed in the editable preview" trust boundary to
-# lean on. Names are quoted via quote_ident/qualify.
-
-
-def _require_ident(value: str, label: str) -> str:
-    """
-    Validate a required identifier is non-blank.
-
-    Args:
-        value: the identifier to check.
-        label: the field name, used in the error message.
-
-    Raises:
-        ValidationError: if ``value`` is blank.
-
-    Returns:
-        ``value``, unchanged.
-    """
-    if not value or not value.strip():
-        raise ValidationError(f"'{label}' is required")
-
-    return value
+# lean on. Names are quoted via quote_ident/qualify; required identifiers are
+# validated via the shared ``require_text``.
 
 
 def schema_create(name: str, authorization: str | None = None) -> str:
@@ -890,7 +894,7 @@ def schema_create(name: str, authorization: str | None = None) -> str:
     Returns:
         ``CREATE SCHEMA "name" [AUTHORIZATION "owner"]``.
     """
-    _require_ident(name, "name")
+    require_text(name, "name")
 
     auth_clause = f" AUTHORIZATION {quote_ident(authorization)}" if authorization else ""
 
@@ -913,7 +917,7 @@ def schema_drop(name: str, *, cascade: bool = False, if_exists: bool = False) ->
     Returns:
         ``DROP SCHEMA [IF EXISTS] "name" [CASCADE]``.
     """
-    _require_ident(name, "name")
+    require_text(name, "name")
 
     exists_clause = "IF EXISTS " if if_exists else ""
     cascade_clause = " CASCADE" if cascade else ""
@@ -935,8 +939,8 @@ def schema_rename(name: str, new_name: str) -> str:
     Returns:
         ``ALTER SCHEMA "name" RENAME TO "new_name"``.
     """
-    _require_ident(name, "name")
-    _require_ident(new_name, "newName")
+    require_text(name, "name")
+    require_text(new_name, "newName")
 
     return f"ALTER SCHEMA {quote_ident(name)} RENAME TO {quote_ident(new_name)}"
 
@@ -998,7 +1002,7 @@ def sequence_create(
         canonical grammar order: ``INCREMENT BY``, ``MINVALUE``, ``MAXVALUE``,
         ``START WITH``, ``CACHE``, ``CYCLE``, ``OWNED BY``.
     """
-    _require_ident(name, "name")
+    require_text(name, "name")
 
     parts = [f"CREATE SEQUENCE {qualify(schema, name)}"]
 
@@ -1063,7 +1067,7 @@ def sequence_alter(
         canonical grammar order: ``AS``, ``INCREMENT BY``, ``MINVALUE``,
         ``MAXVALUE``, ``START WITH``, ``RESTART``, ``CACHE``, ``CYCLE``.
     """
-    _require_ident(name, "name")
+    require_text(name, "name")
 
     parts = [f"ALTER SEQUENCE {qualify(schema, name)}"]
 
@@ -1113,8 +1117,8 @@ def sequence_set_owner(schema: str, name: str, owner: str) -> str:
     Returns:
         ``ALTER SEQUENCE "schema"."name" OWNER TO "owner"``.
     """
-    _require_ident(name, "name")
-    _require_ident(owner, "owner")
+    require_text(name, "name")
+    require_text(owner, "owner")
 
     return f"ALTER SEQUENCE {qualify(schema, name)} OWNER TO {quote_ident(owner)}"
 
@@ -1135,7 +1139,7 @@ def sequence_drop(schema: str, name: str, *, cascade: bool = False, if_exists: b
     Returns:
         ``DROP SEQUENCE [IF EXISTS] "schema"."name" [CASCADE]``.
     """
-    _require_ident(name, "name")
+    require_text(name, "name")
 
     exists_clause = "IF EXISTS " if if_exists else ""
     cascade_clause = " CASCADE" if cascade else ""
@@ -1275,8 +1279,8 @@ def create_routine(spec: CreateRoutineSpec) -> str:
         [volatility] AS <dollar-quoted body>`` statement. No trailing
         semicolon (matches ``pg_get_functiondef``).
     """
-    _require_ident(spec.schema, "schema")
-    _require_ident(spec.name, "name")
+    require_text(spec.schema, "schema")
+    require_text(spec.name, "name")
 
     keyword = "FUNCTION" if spec.kind == "function" else "PROCEDURE"
     replace_clause = "OR REPLACE " if spec.replace else ""
@@ -1321,8 +1325,8 @@ def drop_routine(
         ``DROP FUNCTION|PROCEDURE [IF EXISTS] "schema"."name"(signature)
         [CASCADE]``.
     """
-    _require_ident(schema, "schema")
-    _require_ident(name, "name")
+    require_text(schema, "schema")
+    require_text(name, "name")
 
     keyword = "FUNCTION" if kind == "function" else "PROCEDURE"
     exists_clause = "IF EXISTS " if if_exists else ""
@@ -1347,8 +1351,8 @@ def create_enum_type(schema: str, name: str, labels: Sequence[str]) -> str:
         ``CREATE TYPE "schema"."name" AS ENUM ('l1', 'l2', ...)`` — labels are
         quoted via ``quote_literal``.
     """
-    _require_ident(schema, "schema")
-    _require_ident(name, "name")
+    require_text(schema, "schema")
+    require_text(name, "name")
 
     labels_sql = ", ".join(quote_literal(label) for label in labels)
 
@@ -1376,8 +1380,8 @@ def create_composite_type(schema: str, name: str, attrs: Sequence[CompositeAttr]
         ``CREATE TYPE "schema"."name" AS (\\n    "a1" t1,\\n    "a2" t2\\n)`` —
         attribute names are quoted; types are raw.
     """
-    _require_ident(schema, "schema")
-    _require_ident(name, "name")
+    require_text(schema, "schema")
+    require_text(name, "name")
 
     lines = [f"{quote_ident(a.name)} {a.type}" for a in attrs]
     body = ",\n".join(f"{_CREATE_TYPE_INDENT}{line}" for line in lines)
@@ -1401,8 +1405,8 @@ def drop_type(schema: str, name: str, *, cascade: bool = False, if_exists: bool 
     Returns:
         ``DROP TYPE [IF EXISTS] "schema"."name" [CASCADE]``.
     """
-    _require_ident(schema, "schema")
-    _require_ident(name, "name")
+    require_text(schema, "schema")
+    require_text(name, "name")
 
     exists_clause = "IF EXISTS " if if_exists else ""
     cascade_clause = " CASCADE" if cascade else ""
@@ -1433,8 +1437,8 @@ def alter_type_add_value(
         'existing']`` — ``value``/``existing`` are quoted via
         ``quote_literal``.
     """
-    _require_ident(schema, "schema")
-    _require_ident(name, "name")
+    require_text(schema, "schema")
+    require_text(name, "name")
 
     position_clause = ""
 

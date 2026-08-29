@@ -18,36 +18,14 @@ import asyncpg
 
 from ..errors import ValidationError
 from ..sql import ddl
-from .ddl import DdlPreview
-
-
-def _require(spec: Mapping[str, Any], key: str) -> str:
-    """
-    Read a required, non-blank string field off a spec.
-
-    Args:
-        spec: the preview op's spec mapping.
-        key: the field to read.
-
-    Raises:
-        ValidationError: if the field is missing, not a string, or blank.
-
-    Returns:
-        The field's value.
-    """
-    value = spec.get(key)
-
-    if not isinstance(value, str) or not value.strip():
-        raise ValidationError(f"'{key}' is required")
-
-    return value
+from .ddl import DdlPreview, require_field
 
 
 def _field(spec: Mapping[str, Any], key: str) -> Any:
     """
     Read a required non-string field off a spec (a column list, a column-def
-    mapping) — the collection analogue of ``_require``, which only accepts
-    non-blank strings.
+    mapping) — the collection analogue of ``require_field``, which only
+    accepts non-blank strings.
 
     Args:
         spec: the preview op's spec mapping.
@@ -104,8 +82,8 @@ class PreviewCreateTable(DdlPreview):
             spec: the ``CreateTableSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -135,8 +113,8 @@ class PreviewDropTable(DdlPreview):
             spec: the ``DropTableSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -173,8 +151,8 @@ class PreviewAlterTable(DdlPreview):
             spec: the ``AlterTableSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -192,21 +170,21 @@ class PreviewAlterTable(DdlPreview):
         if action == "addColumn":
             self._sql = ddl.add_column(s, t, _column_def(_field(spec, "columnDef")))
         elif action == "dropColumn":
-            self._sql = ddl.drop_column(s, t, _require(spec, "column"), cascade=bool(spec.get("cascade", False)))
+            self._sql = ddl.drop_column(s, t, require_field(spec, "column"), cascade=bool(spec.get("cascade", False)))
         elif action == "renameColumn":
-            self._sql = ddl.rename_column(s, t, _require(spec, "column"), _require(spec, "newName"))
+            self._sql = ddl.rename_column(s, t, require_field(spec, "column"), require_field(spec, "newName"))
         elif action == "changeType":
-            self._sql = ddl.alter_column_type(s, t, _require(spec, "column"), _require(spec, "newType"), using=spec.get("using") or None)
+            self._sql = ddl.alter_column_type(s, t, require_field(spec, "column"), require_field(spec, "newType"), using=spec.get("using") or None)
         elif action == "setNotNull":
-            self._sql = ddl.set_not_null(s, t, _require(spec, "column"))
+            self._sql = ddl.set_not_null(s, t, require_field(spec, "column"))
         elif action == "dropNotNull":
-            self._sql = ddl.drop_not_null(s, t, _require(spec, "column"))
+            self._sql = ddl.drop_not_null(s, t, require_field(spec, "column"))
         elif action == "setDefault":
-            self._sql = ddl.set_default(s, t, _require(spec, "column"), _require(spec, "default"))
+            self._sql = ddl.set_default(s, t, require_field(spec, "column"), require_field(spec, "default"))
         elif action == "dropDefault":
-            self._sql = ddl.drop_default(s, t, _require(spec, "column"))
+            self._sql = ddl.drop_default(s, t, require_field(spec, "column"))
         elif action == "renameTable":
-            self._sql = ddl.rename_table(s, t, _require(spec, "newName"))
+            self._sql = ddl.rename_table(s, t, require_field(spec, "newName"))
         else:
             raise ValidationError(f"Unknown ALTER action '{action}'")
 
@@ -230,8 +208,8 @@ class PreviewConstraint(DdlPreview):
             spec: the ``ConstraintSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -252,10 +230,10 @@ class PreviewConstraint(DdlPreview):
         elif action == "addUnique":
             self._sql = ddl.add_unique(s, t, _field(spec, "columns"), constraint_name=constraint_name)
         elif action == "addCheck":
-            self._sql = ddl.add_check(s, t, _require(spec, "expression"), constraint_name=constraint_name)
+            self._sql = ddl.add_check(s, t, require_field(spec, "expression"), constraint_name=constraint_name)
         elif action == "addForeignKey":
             self._sql = ddl.add_foreign_key(
-                s, t, _field(spec, "columns"), _require(spec, "refSchema"), _require(spec, "refTable"),
+                s, t, _field(spec, "columns"), require_field(spec, "refSchema"), require_field(spec, "refTable"),
                 _field(spec, "refColumns"),
                 constraint_name=constraint_name,
                 on_update=spec.get("onUpdate") or None,
@@ -263,7 +241,7 @@ class PreviewConstraint(DdlPreview):
             )
         elif action == "drop":
             self._sql = ddl.drop_constraint(
-                s, t, _require(spec, "constraintName"), cascade=bool(spec.get("cascade", False))
+                s, t, require_field(spec, "constraintName"), cascade=bool(spec.get("cascade", False))
             )
         else:
             raise ValidationError(f"Unknown constraint action '{action}'")
@@ -287,7 +265,7 @@ class PreviewIndex(DdlPreview):
             spec: the ``IndexSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
+        self._schema: str = require_field(spec, "schema")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -304,14 +282,14 @@ class PreviewIndex(DdlPreview):
 
         if action == "create":
             self._sql = ddl.create_index(
-                s, _require(spec, "table"), _field(spec, "columns"),
+                s, require_field(spec, "table"), _field(spec, "columns"),
                 name=spec.get("name") or None,
                 unique=bool(spec.get("unique", False)),
                 method=spec.get("method") or None,
             )
         elif action == "drop":
             self._sql = ddl.drop_index(
-                s, _require(spec, "indexName"),
+                s, require_field(spec, "indexName"),
                 cascade=bool(spec.get("cascade", False)),
                 if_exists=bool(spec.get("ifExists", False)),
             )

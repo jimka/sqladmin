@@ -15,11 +15,34 @@ envelope ``RunQueryCommand`` emits for a non-row statement, so the frontend's
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 import asyncpg
 
 from ..errors import ValidationError
+from ..sql.ddl import require_text
 from .base import Command, Query
 from .run_query import _affected
+
+
+def require_field(spec: Mapping[str, Any], key: str) -> str:
+    """
+    Read a required, non-blank string field off a spec — the mapping
+    adapter every DDL preview op's ``__init__`` calls in place of hand-rolled
+    validation, over the shared ``require_text``.
+
+    Args:
+        spec: the preview op's spec mapping.
+        key: the field to read.
+
+    Raises:
+        ValidationError: if the field is missing, not a string, or blank.
+
+    Returns:
+        The field's value.
+    """
+    return require_text(spec.get(key), key)
 
 
 class DdlPreview(Query):

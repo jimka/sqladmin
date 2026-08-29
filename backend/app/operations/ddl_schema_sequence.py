@@ -16,29 +16,7 @@ import asyncpg
 
 from ..errors import ValidationError
 from ..sql import ddl
-from .ddl import DdlPreview
-
-
-def _require(spec: Mapping[str, Any], key: str) -> str:
-    """
-    Read a required, non-blank string field off a spec.
-
-    Args:
-        spec: the preview op's spec mapping.
-        key: the field to read.
-
-    Raises:
-        ValidationError: if the field is missing, not a string, or blank.
-
-    Returns:
-        The field's value.
-    """
-    value = spec.get(key)
-
-    if not isinstance(value, str) or not value.strip():
-        raise ValidationError(f"'{key}' is required")
-
-    return value
+from .ddl import DdlPreview, require_field
 
 
 def _int_opt(spec: Mapping[str, Any], key: str) -> int | None:
@@ -98,7 +76,7 @@ class SchemaCreatePreview(DdlPreview):
             spec: the ``CreateSchemaSpec`` wire payload.
         """
         super().__init__()
-        self._name: str = _require(spec, "name")
+        self._name: str = require_field(spec, "name")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -123,7 +101,7 @@ class SchemaDropPreview(DdlPreview):
             spec: the ``DropSchemaSpec`` wire payload.
         """
         super().__init__()
-        self._name: str = _require(spec, "name")
+        self._name: str = require_field(spec, "name")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -151,8 +129,8 @@ class SchemaRenamePreview(DdlPreview):
             spec: the ``RenameSchemaSpec`` wire payload.
         """
         super().__init__()
-        self._name: str = _require(spec, "name")
-        self._new_name: str = _require(spec, "newName")
+        self._name: str = require_field(spec, "name")
+        self._new_name: str = require_field(spec, "newName")
 
     def build(self) -> None:
         """Set ``self._sql`` to the generated ``ALTER SCHEMA ... RENAME TO`` statement."""
@@ -181,8 +159,8 @@ class SequenceCreatePreview(DdlPreview):
                 option.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._increment = _int_opt(spec, "increment")
         self._start = _int_opt(spec, "start")
         self._min_value = _int_opt(spec, "minValue")
@@ -225,7 +203,7 @@ def _owned_by(spec: Mapping[str, Any]) -> tuple[str, str, str] | None:
     if not owned_by:
         return None
 
-    return (_require(owned_by, "schema"), _require(owned_by, "table"), _require(owned_by, "column"))
+    return (require_field(owned_by, "schema"), require_field(owned_by, "table"), require_field(owned_by, "column"))
 
 
 class SequenceAlterPreview(DdlPreview):
@@ -255,8 +233,8 @@ class SequenceAlterPreview(DdlPreview):
                 ``build()``.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._data_type: str | None = spec.get("dataType") or None
         self._restart_default: bool = bool(spec.get("restartDefault", False))
         self._restart = _int_opt(spec, "restart")
@@ -308,9 +286,9 @@ class SequenceOwnerPreview(DdlPreview):
             spec: the ``SequenceOwnerSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
-        self._owner: str = _require(spec, "owner")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
+        self._owner: str = require_field(spec, "owner")
 
     def build(self) -> None:
         """Set ``self._sql`` to the generated ``OWNER TO`` statement."""
@@ -333,8 +311,8 @@ class SequenceDropPreview(DdlPreview):
             spec: the ``DropSequenceSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
