@@ -1190,6 +1190,16 @@ def sequence_drop(schema: str, name: str, *, cascade: bool = False, if_exists: b
 # this fixed allowlist rather than inserted raw.
 _ARG_MODES: frozenset[str] = frozenset({"IN", "OUT", "INOUT", "VARIADIC"})
 
+# The routine languages this app's function form offers. LANGUAGE is a
+# keyword (not a passthrough expression, like a function's raw type strings/
+# defaults/body), so it is validated against this fixed allowlist rather than
+# inserted raw — adding another language is a one-line change with a test.
+_ROUTINE_LANGUAGES: frozenset[str] = frozenset({"sql", "plpgsql"})
+
+# The volatility categories PostgreSQL's CREATE FUNCTION grammar accepts. Also
+# a keyword, validated the same way as _ROUTINE_LANGUAGES above.
+_VOLATILITIES: frozenset[str] = frozenset({"IMMUTABLE", "STABLE", "VOLATILE"})
+
 
 @dataclass(frozen=True)
 class FunctionArg:
@@ -1295,8 +1305,10 @@ def create_routine(spec: CreateRoutineSpec) -> str:
             function) its optional return type/volatility.
 
     Raises:
-        ValidationError: if ``spec.schema``/``spec.name`` is blank, or an
-            argument's mode is invalid (see ``render_function_arg``).
+        ValidationError: if ``spec.schema``/``spec.name`` is blank, an
+            argument's mode is invalid (see ``render_function_arg``),
+            ``spec.language`` is not a recognized routine language, or
+            ``spec.volatility`` is set and not a recognized volatility.
 
     Returns:
         A multi-line, human-reviewable ``CREATE [OR REPLACE]
@@ -1306,6 +1318,12 @@ def create_routine(spec: CreateRoutineSpec) -> str:
     """
     require_text(spec.schema, "schema")
     require_text(spec.name, "name")
+
+    if spec.language.lower() not in _ROUTINE_LANGUAGES:
+        raise ValidationError(f"Unknown routine language '{spec.language}'")
+
+    if spec.kind == "function" and spec.volatility and spec.volatility.upper() not in _VOLATILITIES:
+        raise ValidationError(f"Unknown volatility '{spec.volatility}'")
 
     keyword = "FUNCTION" if spec.kind == "function" else "PROCEDURE"
     replace_clause = "OR REPLACE " if spec.replace else ""
