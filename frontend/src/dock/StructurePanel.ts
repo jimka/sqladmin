@@ -58,7 +58,6 @@ import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox, LayoutConstraints } from "@jimka/typescript-ui/layout";
 import { AccordionPanel }      from "@jimka/typescript-ui/component/container";
 import { Button }              from "@jimka/typescript-ui/component/button";
-import { Text }                from "@jimka/typescript-ui/component/input";
 import { Glyph }               from "@jimka/typescript-ui/component/display";
 import { Table, LinkCellRenderer } from "@jimka/typescript-ui/component/table";
 import type { CellClickEvent } from "@jimka/typescript-ui/component/table";
@@ -92,6 +91,7 @@ import { constraintRows, foreignKeyRows } from "./structureRows";
 import { glyphButton, glyphMenuButton } from "./glyphButton";
 import { buildAddConstraintItems } from "./menuItems";
 import { openSqlPreviewDialog } from "./SqlPreviewDialog";
+import { summaryPanel } from "./summaryPanel";
 import { CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR, PRIMARY_COLOR } from "../theme";
 import type { AccordionLayoutBinding } from "../data/layoutStore";
 
@@ -407,6 +407,31 @@ function gateOnSelection(grid: Table, buttons: Button[]): void {
 }
 
 /**
+ * Build a Drop button gated on `grid`'s selection: enabled only while a row
+ * is selected, and invoking `onDrop` with the selected row's `name` when
+ * clicked. Shared by the Indexes, Constraints and Foreign Keys sections,
+ * which each drop by name off their own grid's selection.
+ *
+ * @param grid - The section's grid to read the selection from.
+ * @param tooltip - The button's tooltip text.
+ * @param onDrop - Invoked with the selected row's `name` when clicked.
+ * @returns The wired, selection-gated Drop button.
+ */
+function selectionDropButton(grid: Table, tooltip: string, onDrop: (name: string) => void): Button {
+    const button = glyphButton("trash", DESTRUCTIVE_COLOR, tooltip, () => {
+        const record = grid.getSelectedRecord();
+
+        if (record) {
+            onDrop(String(record.get("name")));
+        }
+    });
+
+    gateOnSelection(grid, [button]);
+
+    return button;
+}
+
+/**
  * Build the Columns section's header tools: Add column (always enabled,
  * appends a blank row via `Table.addRow`) and Drop column (gated on a
  * selected row, removes it via `Table.removeSelectedRow`) when `saveButton`
@@ -464,23 +489,6 @@ function readEditedColumnRows(store: MemoryStore): EditedColumnRow[] {
 }
 
 /**
- * Build the minimal read-only summary shown above the Save SQL preview: one
- * line per changed column, from `describeColumnSpecs`. Display-only — the
- * previewed (and possibly hand-edited) SQL text is authoritative at execute,
- * the same trust model every other DDL phase's preview dialog uses. Mirrors
- * SequenceInfoPanel's own `summaryPanel`.
- *
- * @param lines - one summary line per changed column.
- * @returns the summary panel to host above the SQL preview editor.
- */
-function summaryPanel(lines: string[]): Panel {
-    return Panel({
-        layoutManager: new VBox({ itemAlign: "stretch" }),
-        components:    lines.map(line => new Text(line)),
-    });
-}
-
-/**
  * Build the Indexes section's header tools: Create (always enabled) and Drop
  * (gated on a selected row) when `actions` is passed, then Refresh last —
  * always present, independent of `actions`.
@@ -499,15 +507,7 @@ function buildIndexesTools(grid: Table, onRefresh: () => void, actions?: Structu
     }
 
     const createButton = glyphButton("plus", CONSTRUCTIVE_COLOR, "Create index", () => actions.onCreateIndex());
-    const dropButton = glyphButton("trash", DESTRUCTIVE_COLOR, "Drop index", () => {
-        const record = grid.getSelectedRecord();
-
-        if (record) {
-            actions.onDropIndex(String(record.get("name")));
-        }
-    });
-
-    gateOnSelection(grid, [dropButton]);
+    const dropButton = selectionDropButton(grid, "Drop index", name => actions.onDropIndex(name));
 
     return [createButton, dropButton, refreshButton];
 }
@@ -532,15 +532,7 @@ function buildConstraintsTools(grid: Table, onRefresh: () => void, actions?: Str
     }
 
     const addButton = glyphMenuButton("plus", CONSTRUCTIVE_COLOR, "Add constraint", buildAddConstraintItems(actions));
-    const dropButton = glyphButton("trash", DESTRUCTIVE_COLOR, "Drop constraint", () => {
-        const record = grid.getSelectedRecord();
-
-        if (record) {
-            actions.onDropConstraint(String(record.get("name")));
-        }
-    });
-
-    gateOnSelection(grid, [dropButton]);
+    const dropButton = selectionDropButton(grid, "Drop constraint", name => actions.onDropConstraint(name));
 
     return [addButton, dropButton, refreshButton];
 }
@@ -566,15 +558,7 @@ function buildForeignKeysTools(grid: Table, onRefresh: () => void, actions?: Str
         return [refreshButton];
     }
 
-    const dropButton = glyphButton("trash", DESTRUCTIVE_COLOR, "Drop constraint", () => {
-        const record = grid.getSelectedRecord();
-
-        if (record) {
-            actions.onDropConstraint(String(record.get("name")));
-        }
-    });
-
-    gateOnSelection(grid, [dropButton]);
+    const dropButton = selectionDropButton(grid, "Drop constraint", name => actions.onDropConstraint(name));
 
     return [dropButton, refreshButton];
 }

@@ -41,6 +41,7 @@ import { CodeEditor }              from "@jimka/typescript-ui/component/editor";
 import { Dialog, Notification }    from "@jimka/typescript-ui/overlay";
 import type { DialogButtonConfig } from "@jimka/typescript-ui/overlay";
 import { ErrorBanner }             from "./ErrorBanner";
+import { CONTENT_SPACING }         from "./panelMetrics";
 import type { QueryStatusResult }  from "../contract";
 
 // A comfortable modal width for a structured DDL form plus the SQL preview
@@ -64,11 +65,6 @@ const EDITOR_SEED_HEIGHT = 180;
 // standard many-column fixture, see LIBRARY_NOTES.md) is 22 such lines; 24
 // leaves headroom for a trailing clause without immediately scrolling.
 const SQL_PREVIEW_MAX_ROWS = 24;
-
-// Vertical gap between the form, the "Regenerate SQL" row, and the editor —
-// the same order of magnitude as this app's other dialog content spacing,
-// for a consistent dialog rhythm.
-const CONTENT_SPACING = 8;
 
 /** Options for {@link openSqlPreviewDialog}. */
 export interface SqlPreviewDialogOptions {

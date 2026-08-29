@@ -32,6 +32,7 @@ import { MemoryStore, Model }      from "@jimka/typescript-ui/data";
 import type { AbstractStore, FieldOptions, ModelRecord } from "@jimka/typescript-ui/data";
 import type { ColumnMeta }         from "../contract";
 import { toColumnRows }            from "./columnSequence";
+import { CONTENT_WIDTH_CAP }       from "./panelMetrics";
 
 /** A built Columns grid plus the store backing it. */
 export interface ColumnsGrid {
@@ -87,18 +88,6 @@ const STRUCTURE_FIELDS: FieldOptions[] = [
     { name: "filler", type: "string", description: "", order: 12 },
 ];
 
-// The library's own auto-width cap (Table.clampColumnWidth clamps a derived
-// width to at most this many px when a column declares no maxWidth of its
-// own — see AUTO_WIDTH_CAP_PX in the library's Table.ts). Declaring this as a
-// column's own `maxWidth` therefore changes nothing about that column's
-// content sizing (it already gets clamped here by default); it only takes the
-// column out of `absorbSlackIntoGreedy`'s leftover-width split, which skips
-// any column that declares a `maxWidth`. So declaring it on every column but
-// `filler` is what makes `filler` the one column that absorbs the grid's
-// leftover width — see the plan's "A blank filler column absorbs leftover
-// width" Architecture Decision.
-const CONTENT_WIDTH_CAP = 400;
-
 // The Sequence column's declared starting width. It carries a
 // LinkCellRenderer, and the library never samples a column with a renderer
 // under `autoSizeColumns`, so it has no content width of its own to derive
@@ -125,6 +114,15 @@ const SEQUENCE_COLUMN_WIDTH = 220;
 export function readOnlyTable(store: AbstractStore): Table {
     return Table(store, { columns: [], autoSizeColumns: true, rowReadOnly: () => true });
 }
+
+/**
+ * The blank column that absorbs a grid's leftover width (see
+ * {@link CONTENT_WIDTH_CAP}'s comment for the mechanism). Must be paired with
+ * `appendUnlisted: false` and a `filler` model field, or the library has
+ * nothing to route the leftover width to.
+ */
+export const FILLER_COLUMN: NonNullable<ColumnSpec["columns"]>[number] =
+    { field: "filler", headerText: "", minWidth: 0, unhideable: true, readOnly: true };
 
 /**
  * Build the Columns grid over a fresh in-memory store: name/type/nullable/
@@ -195,7 +193,7 @@ function linkedColumnsTable(store: MemoryStore, onOpenSequence: OpenSequenceHand
             { field: "isGenerated", readOnly: true },
             { field: "wireType", readOnly: true, maxWidth: CONTENT_WIDTH_CAP },
             { field: "sequence", renderer: () => new LinkCellRenderer(), width: SEQUENCE_COLUMN_WIDTH, maxWidth: CONTENT_WIDTH_CAP },
-            { field: "filler", headerText: "", minWidth: 0, unhideable: true, readOnly: true },
+            FILLER_COLUMN,
         ],
         autoSizeColumns: true,
         appendUnlisted:  false,

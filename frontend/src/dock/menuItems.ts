@@ -14,7 +14,7 @@
 
 import type { MenuItemConfig }   from "@jimka/typescript-ui/component/container";
 import type { ActiveExport }     from "../data/explain";
-import type { Notify }           from "./QueryPanel";
+import type { Notify }           from "./notify";
 import type { StructureActions } from "./StructurePanel";
 import type { ConstraintKind } from "../contract";
 import { exportQueryResult } from "./exportQueryResult";

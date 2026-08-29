@@ -278,6 +278,53 @@ export function describeColumnSpecs(specs: AlterTableSpec[]): string[] {
     return specs.map(describeColumnSpec);
 }
 
+/**
+ * Describe a sequence Save diff's alter/owner specs, one line per changed
+ * property (e.g. `"Increment: 10 → 25"`), for the Save preview dialog's form
+ * panel.
+ *
+ * @param specs - the diff's alter/owner specs (either or both may be set).
+ * @param detail - the pre-edit detail, supplying each line's "before" value.
+ * @returns one line per changed property, in declared order; `[]` when
+ *   neither `alter` nor `owner` is set.
+ */
+export function describeSequenceSpecs(specs: SequenceEditSpecs, detail: SequenceDetail): string[] {
+    const lines: string[] = [];
+    const alter = specs.alter;
+
+    if (alter) {
+        if (alter.dataType !== undefined) {
+            lines.push(`Data type: ${detail.dataType} → ${alter.dataType}`);
+        }
+        if (alter.increment !== undefined) {
+            lines.push(`Increment: ${detail.increment} → ${alter.increment}`);
+        }
+        if (alter.start !== undefined) {
+            lines.push(`Start value: ${detail.startValue} → ${alter.start}`);
+        }
+        if (alter.minValue !== undefined) {
+            lines.push(`Min value: ${detail.minValue} → ${alter.minValue}`);
+        }
+        if (alter.maxValue !== undefined) {
+            lines.push(`Max value: ${detail.maxValue} → ${alter.maxValue}`);
+        }
+        if (alter.cache !== undefined) {
+            lines.push(`Cache size: ${detail.cacheSize} → ${alter.cache}`);
+        }
+        if (alter.cycle !== undefined) {
+            lines.push(`Cycle: ${detail.cycle ? "Yes" : "No"} → ${alter.cycle ? "Yes" : "No"}`);
+        }
+        if (alter.restart !== undefined) {
+            lines.push(`Current value: ${detail.lastValue ?? "—"} → ${alter.restart}`);
+        }
+    }
+    if (specs.owner) {
+        lines.push(`Owner: ${detail.owner} → ${specs.owner.owner}`);
+    }
+
+    return lines;
+}
+
 /** The fields a constraint action may carry; which ones apply depends on `action`. */
 export interface ConstraintFields {
     columns?: string[];

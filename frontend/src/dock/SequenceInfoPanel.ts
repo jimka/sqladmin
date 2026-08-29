@@ -51,11 +51,12 @@ import { MemoryStore, Model }          from "@jimka/typescript-ui/data";
 import { save }                        from "@jimka/typescript-ui/glyphs/solid/save";
 import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
 import type { AlterSequenceSpec, DdlPreview, QueryStatusResult, SequenceDetail, SequenceOwnerSpec } from "../contract";
-import { diffSequenceSpecs }           from "./ddlSpecs";
+import { diffSequenceSpecs, describeSequenceSpecs } from "./ddlSpecs";
 import type { EditedSequenceValues, SequenceEditSpecs } from "./ddlSpecs";
 import { dataTypeItems, detailToEditedValues, isSequenceFormDirty, ownedByLabel, ownerItems } from "./sequenceFormState";
 import { glyphButton }                 from "./glyphButton";
 import { openSqlPreviewDialog }        from "./SqlPreviewDialog";
+import { summaryPanel }                from "./summaryPanel";
 import { REFRESH_SHORTCUT }            from "../shell/queryShortcuts";
 import { MUTED_TEXT_COLOR, PRIMARY_COLOR } from "../theme";
 
@@ -320,7 +321,7 @@ class SequenceInfoPanel extends Container {
 
         openSqlPreviewDialog({
             title: "Alter sequence",
-            form:  summaryPanel(specs, this._detail),
+            form:  summaryPanel(describeSequenceSpecs(specs, this._detail)),
             generateSql: async () => {
                 const parts: string[] = [];
 
@@ -359,55 +360,6 @@ class SequenceInfoPanel extends Container {
         this.seedFields(detail);
         this.syncSaveEnabled();
     }
-}
-
-/**
- * Build the minimal read-only summary shown above the SQL preview: one line
- * per changed property, e.g. "Increment: 10 → 25". Display-only — the
- * previewed (and possibly hand-edited) SQL text is authoritative at execute,
- * the same trust model every other DDL phase's preview dialog uses.
- *
- * @param specs - the diff's alter/owner specs (at least one is set).
- * @param detail - the pre-edit detail, supplying each line's "before" value.
- */
-function summaryPanel(specs: SequenceEditSpecs, detail: SequenceDetail): Panel {
-    const lines: string[] = [];
-    const alter = specs.alter;
-
-    if (alter) {
-        if (alter.dataType !== undefined) {
-            lines.push(`Data type: ${detail.dataType} → ${alter.dataType}`);
-        }
-        if (alter.increment !== undefined) {
-            lines.push(`Increment: ${detail.increment} → ${alter.increment}`);
-        }
-        if (alter.start !== undefined) {
-            lines.push(`Start value: ${detail.startValue} → ${alter.start}`);
-        }
-        if (alter.minValue !== undefined) {
-            lines.push(`Min value: ${detail.minValue} → ${alter.minValue}`);
-        }
-        if (alter.maxValue !== undefined) {
-            lines.push(`Max value: ${detail.maxValue} → ${alter.maxValue}`);
-        }
-        if (alter.cache !== undefined) {
-            lines.push(`Cache size: ${detail.cacheSize} → ${alter.cache}`);
-        }
-        if (alter.cycle !== undefined) {
-            lines.push(`Cycle: ${detail.cycle ? "Yes" : "No"} → ${alter.cycle ? "Yes" : "No"}`);
-        }
-        if (alter.restart !== undefined) {
-            lines.push(`Current value: ${detail.lastValue ?? "—"} → ${alter.restart}`);
-        }
-    }
-    if (specs.owner) {
-        lines.push(`Owner: ${detail.owner} → ${specs.owner.owner}`);
-    }
-
-    return Panel({
-        layoutManager: new VBox({ itemAlign: "stretch" }),
-        components:    lines.map(line => new Text(line)),
-    });
 }
 
 const SequenceInfoPanelCallable = callable(SequenceInfoPanel);

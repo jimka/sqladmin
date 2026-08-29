@@ -106,6 +106,7 @@ import {
 } from "../shell/queryShortcuts";
 import type { QueryExplainResult, QueryResult, QueryRowsResult } from "../contract";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, CAUTION_COLOR, HISTORY_COLOR, NEUTRAL_COLOR } from "../theme";
+import type { Notify }                    from "./notify";
 
 Glyph.register(play, eraser, floppy_disk, angle_up, angle_down, file_export, file_csv, file_code, file_lines, diagram_project, flask, sitemap, wand_magic_sparkles, table, chart_simple);
 
@@ -117,9 +118,6 @@ const EDITOR_HEIGHT = 150;
 // ProgressSpinner's "which loading affordance" docs) — refreshDataTab's
 // in-place overlay is the same "component exists, data pending" case.
 const DATA_TAB_OVERLAY_SPINNER_SIZE = 24;
-
-/** Surface a short status message (row count / command tag / hint) to the user. */
-export type Notify = (message: string) => void;
 
 /** Runs one SQL statement and resolves its result. */
 export type RunQuery = (sql: string) => Promise<QueryResult>;
