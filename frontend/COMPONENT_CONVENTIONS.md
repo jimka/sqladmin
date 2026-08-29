@@ -105,6 +105,22 @@ methods) can stay ordinary module-level functions — see `save_` and
 parameters and are called from an inline arrow wrapper (`() =>
 save_(store, columns, notify)`), never registered by reference themselves.
 
+A member a subclass is meant to *override*, though, must be the opposite: a
+plain prototype method, never an arrow-function field. An arrow field
+initializes only after its constructor has run — for a subclass that means
+only after the *base* constructor has already returned, so if the base
+constructor hands that arrow out by reference (to a callback registration,
+say), it captures the base class's own arrow and the subclass's override is
+silently never reached; a plain method is resolved by virtual dispatch at
+call time, so it always sees the subclass's override, however late that
+subclass's own fields finish initializing. Where such an overridable member
+also needs a by-reference handoff, the base keeps one arrow field that
+dispatches through the overridable method, rather than handing the method out
+directly: `FilteredDiagramShell`'s `refilter` arrow field (handed to each
+legend row by reference) dispatches through `this.applyFilter()`, a plain
+protected method a subclass like `RelationDiagramPanel` overrides — see
+`src/dock/filteredDiagramShell.ts`.
+
 ## (d) The instance *is* the component
 
 A class-first component doesn't return a `{ component, ...api }` handle —
