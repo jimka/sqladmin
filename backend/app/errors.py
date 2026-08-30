@@ -46,9 +46,19 @@ class NotFound(DomainError):
     status_code: int = 404
 
 
+class BadRequest(DomainError):
+    """
+    The server rejected the request and it is not a conflict — the status the
+    driver-error handler in ``main.py`` gives every non-integrity Postgres error.
+    """
+
+    status_code: int = 400
+
+
 class ConflictError(DomainError):
     """
-    Integrity / unique violation surfaced from the database.
+    Integrity / unique violation surfaced from the database — raised by the
+    driver-error handler in ``main.py`` when Postgres reports one.
     """
 
     status_code: int = 409
