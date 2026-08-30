@@ -270,14 +270,14 @@ one scroll region inside another.
 
 ## (h) DDL creation edits in a tab
 
-A form that *authors a new object's structure* — a CREATE flow, or the
-composite-type recreate/clone — is hosted in a `DdlFormPanel` dock tab and
-reaches `openSqlPreviewDialog` only from its own `Review SQL…` tool, which
-shows the generated SQL alone (the tab keeps the form). A form that merely
-*confirms or re-parameterizes an existing object* — a drop, a rename, a
-refresh — stays a plain `openSqlPreviewDialog` call with the form embedded
-in the dialog, since a whole tab for a one-line confirmation would be worse
-than the dialog it replaces. `SequenceInfoPanel` and `StructurePanel` are
-the edit-side precedent the creation side now matches: an in-tab form whose
+A form that *authors a new object's structure* — a CREATE flow — is hosted
+in a `DdlFormPanel` dock tab and reaches `openSqlPreviewDialog` only from
+its own `Review SQL…` tool, which shows the generated SQL alone (the tab
+keeps the form). A form that merely *confirms or re-parameterizes an
+existing object* — a drop, a rename, a refresh — stays a plain
+`openSqlPreviewDialog` call with the form embedded in the dialog, since a
+whole tab for a one-line confirmation would be worse than the dialog it
+replaces. `SequenceInfoPanel`, `StructurePanel`, and `TypeInfoPanel` are the
+edit-side precedent the creation side now matches: an in-tab form whose
 Save/Review tool opens the same shared preview dialog, rather than the
 dialog hosting the form itself.
