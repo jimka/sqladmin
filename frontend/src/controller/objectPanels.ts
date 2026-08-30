@@ -7,7 +7,7 @@
 import type { TreeNode } from "@jimka/typescript-ui/component/tree";
 import type { AjaxStore, StoreExceptionEvent, StoreSyncEvent } from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef, FunctionDefinition } from "../contract";
-import { getColumns, getTablePrivileges, getViewDefinition, getStructure, getSequenceDetail, getIndexDetail, getTypeDefinition, getFunctionDefinition, getRoles, executeDdl, previewAlterSequence, previewAlterTable, previewCreateView, previewReplaceMatview, previewSequenceOwner, tableExportUrl } from "../data/api";
+import { getColumns, getTablePrivileges, getViewDefinition, getStructure, getSequenceDetail, getIndexDetail, getTypeDefinition, getFunctionDefinition, getRoles, executeDdl, previewAlterCompositeType, previewAlterSequence, previewAlterTable, previewAlterTypeAddValue, previewAlterTypeRenameValue, previewCreateView, previewRecreateEnumType, previewReplaceMatview, previewSequenceOwner, tableExportUrl } from "../data/api";
 import { downloadUrl } from "../data/download";
 import { buildModel } from "../data/buildModel";
 import { buildStore } from "../data/stores";
@@ -472,11 +472,12 @@ export class ObjectPanels {
     }
 
     /**
-     * Open a read-only info tab for a standalone enum or composite type — its
-     * category, owning role, and ordered labels/attributes — deduping by
-     * type-info-panel id. The detail is fetched fresh (via the same
-     * `getTypeDefinition` chain `DdlLaunchers.editType`'s prefill uses) and
-     * passed to a TypeInfoPanel. A failed fetch closes the tab.
+     * Open an editable info tab for a standalone enum or composite type — its
+     * category, owning role, and inline-editable ordered labels/attributes —
+     * deduping by type-info-panel id. The detail is fetched fresh and passed
+     * to a TypeInfoPanel wired with the alter/preview/execute/reload
+     * callbacks its Save flow needs, mirroring `openSequence`. A failed fetch
+     * closes the tab.
      *
      * Unlike openSequence/openIndex, `node` is a plain `TreeNode | undefined`:
      * nothing opens a type by reference, so there is no in-progress reveal
@@ -510,7 +511,19 @@ export class ObjectPanels {
             this.host.registerPanel(id, { ref, node: node ?? null, detail: "info", refresh });
             this.host.syncToPanel(id);
 
-            panel = new TypeInfoPanel(detail, { schema: ref.schema!, name: ref.name!, onRefresh: refresh });
+            panel = new TypeInfoPanel(detail, {
+                schema:                  ref.schema!,
+                name:                    ref.name!,
+                previewAlterComposite:   spec => previewAlterCompositeType(ref, spec),
+                previewAddEnumValue:     spec => previewAlterTypeAddValue(ref, spec),
+                previewRenameEnumValue:  spec => previewAlterTypeRenameValue(ref, spec),
+                previewRecreateEnum:     spec => previewRecreateEnumType(ref, spec),
+                execute:                 sql => executeDdl(this.host.connectionId, sql),
+                reloadDetail:            () => getTypeDefinition(ref),
+                onStatus:                m => this.host.status(m),
+                onError:                 m => this.host.notifyError(new Error(m), ref),
+                onRefresh:               refresh,
+            });
 
             return panel;
         });

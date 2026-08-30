@@ -9,8 +9,8 @@
 // Decisions).
 
 import type { TreeNode } from "@jimka/typescript-ui/component/tree";
-import type { ColumnMeta, ConstraintKind, DbObjectRef, TypeDefinition } from "../contract";
-import { executeDdl, getColumns, getSchemas, getTypeDefinition, previewAlterTable, previewAlterTypeAddValue, previewConstraint, previewCreateCompositeType, previewCreateEnumType, previewCreateFunction, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropFunction, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropType, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema } from "../data/api";
+import type { ColumnMeta, ConstraintKind, DbObjectRef } from "../contract";
+import { executeDdl, getColumns, getSchemas, previewAlterTable, previewConstraint, previewCreateCompositeType, previewCreateEnumType, previewCreateFunction, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropFunction, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropType, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema } from "../data/api";
 import { openSqlPreviewDialog } from "../dock/SqlPreviewDialog";
 import { DdlFormPanel } from "../dock/DdlFormPanel";
 import type { DdlDraft, DdlExecuteDeps } from "../dock/DdlFormPanel";
@@ -28,7 +28,6 @@ import { CreateSequenceForm } from "../dock/SequenceDdlForms";
 import { FunctionForm } from "../dock/FunctionForm";
 import { EnumTypeForm } from "../dock/EnumTypeForm";
 import { CompositeTypeForm } from "../dock/CompositeTypeForm";
-import { AddEnumValueForm } from "../dock/AddEnumValueForm";
 import { KIND_GLYPH } from "../navigator/objectGlyphs";
 import { structurePanelId, ddlPanelId } from "./controllerText";
 import type { PanelHost } from "./panelHost";
@@ -173,63 +172,6 @@ export class DdlLaunchers {
             reviewTitle: "Create composite type",
             build:       () => {
                 const form = new CompositeTypeForm({ schema: ref.schema! });
-
-                return {
-                    form,
-                    generateSql: async () => (await previewCreateCompositeType(ref, form.readSpec())).sql,
-                };
-            },
-        });
-    }
-
-    /**
-     * Open the edit flow for an existing type (the navigator's "Edit
-     * type…" launcher). Introspects the type first, then routes on its
-     * category: an enum offers `ALTER TYPE ... ADD VALUE` in a dialog
-     * (append-only — Postgres has no `CREATE OR REPLACE TYPE`); a composite
-     * opens a recreate/clone draft tab prefilled with its current attributes
-     * (restructuring an existing composite in place is a stated Non-Goal —
-     * see the function-type-ddl plan's "enum edits are append-only"
-     * decision). The composite path's successful execute closes the tab and
-     * refreshes the navigator (a new `CREATE TYPE` statement); an enum
-     * `ADD VALUE` does not change the object list, so it only sets a status
-     * message, mirroring `alterSequence`.
-     */
-    async editType(ref: DbObjectRef): Promise<void> {
-        let definition: TypeDefinition;
-
-        try {
-            definition = await getTypeDefinition(ref);
-        } catch (err) {
-            this.host.notifyError(err, ref);
-
-            return;
-        }
-
-        if (definition.category === "enum") {
-            const form = new AddEnumValueForm({
-                schema: ref.schema!, name: ref.name!, existingLabels: definition.labels,
-            });
-
-            openSqlPreviewDialog({
-                title:       "Add enum value",
-                form,
-                generateSql: async () => (await previewAlterTypeAddValue(ref, form.readSpec())).sql,
-                onSuccess:   () => this.host.status(`${ref.name}: altered`),
-                ...this.ddlDefaults(ref),
-            });
-
-            return;
-        }
-
-        this.openDdlPanel({
-            ref,
-            slug:        "composite-type",
-            title:       `Recreate ${ref.name} (composite type)`,
-            glyph:       KIND_GLYPH.type,
-            reviewTitle: "Edit composite type (recreate)",
-            build:       () => {
-                const form = new CompositeTypeForm({ schema: ref.schema!, prefill: definition.attributes });
 
                 return {
                     form,

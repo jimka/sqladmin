@@ -6,9 +6,11 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    buildAlterCompositeTypeSpec,
     buildAlterSequenceSpec,
     buildAlterTableSpec,
     buildAlterTypeAddValueSpec,
+    buildAlterTypeRenameValueSpec,
     buildConstraintSpec,
     buildCreateCompositeTypeSpec,
     buildCreateEnumTypeSpec,
@@ -21,19 +23,27 @@ import {
     buildDropSequenceSpec,
     buildDropTypeSpec,
     buildIndexSpec,
+    buildRecreateEnumTypeSpec,
     buildRenameSchemaSpec,
     buildSequenceOwnerSpec,
     describeColumnSpecs,
+    describeCompositeSpecs,
+    describeEnumPlan,
     describeSequenceSpecs,
     diffColumnSpecs,
+    diffCompositeAttributeSpecs,
+    diffEnumLabels,
     diffSequenceSpecs,
     orderColumnsBySelection,
+    orderRenamesForExecution,
     preserveSuggestedColumnOrder,
     parseColumnList,
     parseOptionalInt,
     stripTrailingSemicolon,
 } from "../../src/dock/ddlSpecs";
-import type { ColumnRow, EditedColumnRow, EditedSequenceValues, FunctionArgRow } from "../../src/dock/ddlSpecs";
+import type {
+    ColumnRow, EditedAttributeRow, EditedColumnRow, EditedLabelRow, EditedSequenceValues, FunctionArgRow,
+} from "../../src/dock/ddlSpecs";
 import type { AlterTableSpec, ColumnMeta, SequenceDetail } from "../../src/contract";
 
 // The pre-edit sequence detail shared by describeSequenceSpecs's and
@@ -857,5 +867,485 @@ describe("buildAlterTypeAddValueSpec", () => {
         const spec = buildAlterTypeAddValueSpec("public", "mood", "great", { placement: "after", label: "happy" });
 
         expect(spec.position).toEqual({ placement: "after", label: "happy" });
+    });
+});
+
+describe("buildAlterCompositeTypeSpec", () => {
+    it("carries only the fields dropAttribute needs", () => {
+        const spec = buildAlterCompositeTypeSpec("public", "addr", "dropAttribute", { attribute: "city" });
+
+        expect(spec).toEqual({ schema: "public", name: "addr", action: "dropAttribute", attribute: "city" });
+    });
+
+    it("carries only the fields addAttribute needs", () => {
+        const spec = buildAlterCompositeTypeSpec("public", "addr", "addAttribute", {
+            attributeDef: { name: "zip", type: "varchar(10)" },
+        });
+
+        expect(spec).toEqual({
+            schema: "public", name: "addr", action: "addAttribute",
+            attributeDef: { name: "zip", type: "varchar(10)" },
+        });
+    });
+});
+
+describe("diffCompositeAttributeSpecs", () => {
+    const ORIGINAL = [{ name: "street", type: "text" }, { name: "city", type: "text" }];
+
+    it("returns [] for an unchanged grid", () => {
+        const edited: EditedAttributeRow[] = [
+            { originalName: "street", name: "street", type: "text" },
+            { originalName: "city", name: "city", type: "text" },
+        ];
+
+        expect(diffCompositeAttributeSpecs("public", "addr", ORIGINAL, edited)).toEqual([]);
+    });
+
+    it("emits a delete, a rename and an add, in that order", () => {
+        const edited: EditedAttributeRow[] = [
+            { originalName: "street", name: "road", type: "text" },
+            { originalName: "", name: "zip", type: "varchar(10)" },
+        ];
+
+        const specs = diffCompositeAttributeSpecs("public", "addr", ORIGINAL, edited);
+
+        expect(specs).toEqual([
+            { schema: "public", name: "addr", action: "dropAttribute", attribute: "city" },
+            { schema: "public", name: "addr", action: "renameAttribute", attribute: "street", newName: "road" },
+            {
+                schema: "public", name: "addr", action: "addAttribute",
+                attributeDef: { name: "zip", type: "varchar(10)" },
+            },
+        ]);
+    });
+
+    it("orders a retype-and-rename as changeAttributeType (pre-rename name) then renameAttribute", () => {
+        const original = [{ name: "a", type: "int" }];
+        const edited: EditedAttributeRow[] = [{ originalName: "a", name: "b", type: "bigint" }];
+
+        const specs = diffCompositeAttributeSpecs("public", "addr", original, edited);
+
+        expect(specs).toEqual([
+            { schema: "public", name: "addr", action: "changeAttributeType", attribute: "a", newType: "bigint" },
+            { schema: "public", name: "addr", action: "renameAttribute", attribute: "a", newName: "b" },
+        ]);
+    });
+
+    it("throws when a kept row's name is blank", () => {
+        const edited: EditedAttributeRow[] = [{ originalName: "street", name: "  ", type: "text" }];
+
+        expect(() => diffCompositeAttributeSpecs("public", "addr", ORIGINAL.slice(0, 1), edited))
+            .toThrow('Attribute "street" cannot be renamed to an empty name');
+    });
+
+    it("throws when a kept row's type is blank", () => {
+        const edited: EditedAttributeRow[] = [{ originalName: "street", name: "street", type: "  " }];
+
+        expect(() => diffCompositeAttributeSpecs("public", "addr", ORIGINAL.slice(0, 1), edited))
+            .toThrow('Attribute "street" needs a type');
+    });
+
+    it("throws when an added row has a name but a blank type", () => {
+        const edited: EditedAttributeRow[] = [{ originalName: "", name: "zip", type: "  " }];
+
+        expect(() => diffCompositeAttributeSpecs("public", "addr", [], edited))
+            .toThrow('New attribute "zip" needs a type');
+    });
+
+    it("ignores an added row whose name is blank", () => {
+        const edited: EditedAttributeRow[] = [{ originalName: "", name: "  ", type: "text" }];
+
+        expect(diffCompositeAttributeSpecs("public", "addr", [], edited)).toEqual([]);
+    });
+});
+
+describe("describeCompositeSpecs", () => {
+    it("describes one line per spec, in the given order", () => {
+        const specs = [
+            buildAlterCompositeTypeSpec("public", "addr", "addAttribute", { attributeDef: { name: "zip", type: "varchar(10)" } }),
+            buildAlterCompositeTypeSpec("public", "addr", "dropAttribute", { attribute: "city" }),
+            buildAlterCompositeTypeSpec("public", "addr", "changeAttributeType", { attribute: "a", newType: "bigint" }),
+            buildAlterCompositeTypeSpec("public", "addr", "renameAttribute", { attribute: "street", newName: "road" }),
+        ];
+
+        expect(describeCompositeSpecs(specs)).toEqual([
+            'Add attribute: "zip" varchar(10)',
+            'Drop attribute: "city"',
+            'Change type: "a" → bigint',
+            'Rename: "street" → "road"',
+        ]);
+    });
+});
+
+describe("diffEnumLabels", () => {
+    const ORIGINAL = ["sad", "ok", "happy"];
+
+    function rows(labels: { originalLabel: string; label: string }[]): EditedLabelRow[] {
+        return labels;
+    }
+
+    it("adds a label", () => {
+        const edited = rows([
+            { originalLabel: "sad", label: "sad" },
+            { originalLabel: "ok", label: "ok" },
+            { originalLabel: "happy", label: "happy" },
+            { originalLabel: "", label: "elated" },
+        ]);
+
+        expect(diffEnumLabels("public", "mood", ORIGINAL, edited)).toEqual({
+            kind: "alter",
+            adds: [{ schema: "public", name: "mood", value: "elated" }],
+            renames: [],
+        });
+    });
+
+    it("renames a label", () => {
+        const edited = rows([
+            { originalLabel: "sad", label: "sad" },
+            { originalLabel: "ok", label: "fine" },
+            { originalLabel: "happy", label: "happy" },
+        ]);
+
+        expect(diffEnumLabels("public", "mood", ORIGINAL, edited)).toEqual({
+            kind: "alter",
+            adds: [],
+            renames: [{ schema: "public", name: "mood", value: "ok", newValue: "fine" }],
+        });
+    });
+
+    it("renames a label and adds one, renames first", () => {
+        const edited = rows([
+            { originalLabel: "sad", label: "sad" },
+            { originalLabel: "ok", label: "fine" },
+            { originalLabel: "happy", label: "happy" },
+            { originalLabel: "", label: "elated" },
+        ]);
+
+        const plan = diffEnumLabels("public", "mood", ORIGINAL, edited);
+
+        expect(plan).toEqual({
+            kind: "alter",
+            adds: [{ schema: "public", name: "mood", value: "elated" }],
+            renames: [{ schema: "public", name: "mood", value: "ok", newValue: "fine" }],
+        });
+    });
+
+    it("routes a deleted label through a recreate", () => {
+        const edited = rows([
+            { originalLabel: "sad", label: "sad" },
+            { originalLabel: "happy", label: "happy" },
+        ]);
+
+        expect(diffEnumLabels("public", "mood", ORIGINAL, edited)).toEqual({
+            kind: "recreate",
+            spec: { schema: "public", name: "mood", labels: ["sad", "happy"], renames: [], collidingRenames: [] },
+            removed: ["ok"],
+            renames: [],
+            liveRenames: [],
+        });
+    });
+
+    it("routes a deleted label plus an add through a recreate carrying both", () => {
+        const edited = rows([
+            { originalLabel: "sad", label: "sad" },
+            { originalLabel: "happy", label: "happy" },
+            { originalLabel: "", label: "elated" },
+        ]);
+
+        expect(diffEnumLabels("public", "mood", ORIGINAL, edited)).toEqual({
+            kind: "recreate",
+            spec: {
+                schema: "public", name: "mood", labels: ["sad", "happy", "elated"], renames: [], collidingRenames: [],
+            },
+            removed: ["ok"],
+            renames: [],
+            liveRenames: [],
+        });
+    });
+
+    it("carries a kept rename into the recreate plan, keyed on the pre-rename label", () => {
+        // A rename of a label that survives the edit must run against the
+        // *original* type, before it's renamed aside — otherwise the
+        // migration casts stored data through its stale, pre-rename text
+        // and the recreate fails against any row still holding it. It also
+        // rides in `spec.renames`, since the backend's own dependent-column
+        // introspection runs before this (or any) statement has executed.
+        // It's non-colliding (its target isn't a removed label), so it's
+        // absent from `spec.collidingRenames`.
+        const edited = rows([
+            { originalLabel: "sad", label: "fine" },
+            { originalLabel: "happy", label: "happy" },
+        ]);
+
+        const rename = { schema: "public", name: "mood", value: "sad", newValue: "fine" };
+
+        expect(diffEnumLabels("public", "mood", ORIGINAL, edited)).toEqual({
+            kind: "recreate",
+            spec: {
+                schema: "public", name: "mood", labels: ["fine", "happy"],
+                renames: [{ value: "sad", newValue: "fine" }], collidingRenames: [],
+            },
+            removed: ["ok"],
+            renames: [rename],
+            liveRenames: [rename],
+        });
+    });
+
+    it("excludes a rename from liveRenames when its target collides with a same-edit removal", () => {
+        // Renaming "foo" to "bar" while also deleting the original "bar" in
+        // the same edit: Postgres refuses `RENAME VALUE ... TO 'bar'` while
+        // the type still has a distinct "bar" label (no DROP VALUE exists to
+        // free the name first), so this rename must never run live — the
+        // recreate step's own CREATE TYPE builds the fresh type with "bar"
+        // (the grid's final spelling) directly instead. It's colliding, so
+        // it rides in `spec.collidingRenames` too, for the backend's
+        // rename-aware data migration.
+        const edited = rows([
+            { originalLabel: "foo", label: "bar" },
+            { originalLabel: "baz", label: "baz" },
+        ]);
+
+        const rename = { schema: "public", name: "mood", value: "foo", newValue: "bar" };
+
+        expect(diffEnumLabels("public", "mood", ["foo", "bar", "baz"], edited)).toEqual({
+            kind: "recreate",
+            spec: {
+                schema: "public", name: "mood", labels: ["bar", "baz"],
+                renames: [{ value: "foo", newValue: "bar" }], collidingRenames: [{ value: "foo", newValue: "bar" }],
+            },
+            removed: ["bar"],
+            renames: [rename],
+            liveRenames: [],
+        });
+    });
+
+    it("reports no changes for a row added and then deleted again in the same session", () => {
+        // The grid never carries a phantom row for an add-then-delete — the
+        // row is simply gone from `edited`, identical to the loaded state.
+        const edited = rows([
+            { originalLabel: "sad", label: "sad" },
+            { originalLabel: "ok", label: "ok" },
+            { originalLabel: "happy", label: "happy" },
+        ]);
+
+        expect(diffEnumLabels("public", "mood", ORIGINAL, edited)).toEqual({ kind: "none" });
+    });
+
+    it("throws when every row is deleted", () => {
+        expect(() => diffEnumLabels("public", "mood", ORIGINAL, []))
+            .toThrow('Type "public"."mood" needs at least one label');
+    });
+
+    it("throws when a kept row is renamed to blank", () => {
+        const edited = rows([{ originalLabel: "ok", label: "  " }]);
+
+        expect(() => diffEnumLabels("public", "mood", ["ok"], edited))
+            .toThrow('Label "ok" cannot be renamed to an empty name');
+    });
+
+    it("ignores an added row with a blank label", () => {
+        const edited = rows([{ originalLabel: "ok", label: "ok" }, { originalLabel: "", label: "  " }]);
+
+        expect(diffEnumLabels("public", "mood", ["ok"], edited)).toEqual({ kind: "none" });
+    });
+});
+
+describe("describeEnumPlan", () => {
+    it("returns [] for a no-op plan", () => {
+        expect(describeEnumPlan({ kind: "none" })).toEqual([]);
+    });
+
+    it("describes an alter plan's statements, renames before adds", () => {
+        const plan = diffEnumLabels("public", "mood", ["sad", "ok", "happy"], [
+            { originalLabel: "sad", label: "sad" },
+            { originalLabel: "ok", label: "fine" },
+            { originalLabel: "happy", label: "happy" },
+            { originalLabel: "", label: "elated" },
+        ]);
+
+        expect(describeEnumPlan(plan)).toEqual([
+            "Rename label: 'ok' → 'fine'",
+            "Add label: 'elated'",
+        ]);
+    });
+
+    it("describes a recreate plan's three warning lines, naming every removed label", () => {
+        const plan = diffEnumLabels("public", "mood", ["sad", "ok", "happy"], [
+            { originalLabel: "sad", label: "sad" },
+            { originalLabel: "happy", label: "happy" },
+        ]);
+
+        expect(describeEnumPlan(plan)).toEqual([
+            "Removing label 'ok' needs the type recreated — PostgreSQL has no ALTER TYPE ... DROP VALUE.",
+            "\"public\".\"mood\" is renamed aside, recreated as ('sad', 'happy'), and every table column using it is rewritten.",
+            "This fails and rolls back if a stored row still holds a removed label, or a view depends on one of those columns.",
+        ]);
+    });
+
+    it("leads a recreate plan's summary with its kept renames, before the warning lines", () => {
+        const plan = diffEnumLabels("public", "mood", ["sad", "ok", "happy"], [
+            { originalLabel: "sad", label: "fine" },
+            { originalLabel: "happy", label: "happy" },
+        ]);
+
+        expect(describeEnumPlan(plan)).toEqual([
+            "Rename label: 'sad' → 'fine'",
+            "Removing label 'ok' needs the type recreated — PostgreSQL has no ALTER TYPE ... DROP VALUE.",
+            "\"public\".\"mood\" is renamed aside, recreated as ('fine', 'happy'), and every table column using it is rewritten.",
+            "This fails and rolls back if a stored row still holds a removed label, or a view depends on one of those columns.",
+        ]);
+    });
+
+    it("comma-joins multiple removed labels in the recreate warning's first line", () => {
+        const plan = diffEnumLabels("public", "mood", ["sad", "ok", "happy"], [
+            { originalLabel: "sad", label: "sad" },
+        ]);
+
+        expect(describeEnumPlan(plan)[0]).toBe(
+            "Removing labels 'ok', 'happy' needs the type recreated — PostgreSQL has no ALTER TYPE ... DROP VALUE.",
+        );
+    });
+});
+
+describe("buildAlterTypeRenameValueSpec / buildRecreateEnumTypeSpec", () => {
+    it("builds a rename-value spec", () => {
+        expect(buildAlterTypeRenameValueSpec("public", "mood", "ok", "fine")).toEqual({
+            schema: "public", name: "mood", value: "ok", newValue: "fine",
+        });
+    });
+
+    it("builds a recreate spec with no renames", () => {
+        expect(buildRecreateEnumTypeSpec("public", "mood", ["sad", "happy"], [], [])).toEqual({
+            schema: "public", name: "mood", labels: ["sad", "happy"], renames: [], collidingRenames: [],
+        });
+    });
+
+    it("builds a recreate spec carrying its renames and collidingRenames as {value, newValue} pairs", () => {
+        const rename = { schema: "public", name: "mood", value: "ok", newValue: "fine" };
+
+        expect(buildRecreateEnumTypeSpec("public", "mood", ["fine", "happy"], [rename], [rename])).toEqual({
+            schema: "public", name: "mood", labels: ["fine", "happy"],
+            renames: [{ value: "ok", newValue: "fine" }], collidingRenames: [{ value: "ok", newValue: "fine" }],
+        });
+    });
+});
+
+describe("orderRenamesForExecution", () => {
+    // Simulates running the ordered statements against a live enum's label
+    // set, throwing the same way Postgres's own `RENAME VALUE` would if a
+    // step's source is gone or its target still exists — a pass proves the
+    // sequence is genuinely executable, not just plausible-looking, and the
+    // returned per-entity name proves a rotation's members actually swapped
+    // rather than merely leaving the label *set* unchanged. `currentLabels`
+    // defaults to every rename's own source, the common case in these tests;
+    // the "blocked by a label outside the batch" cases pass their own.
+    function simulate(
+        renames: { value: string; newValue: string }[], currentLabels?: string[],
+    ): Record<string, string> {
+        const specs  = renames.map(x => buildAlterTypeRenameValueSpec("public", "mood", x.value, x.newValue));
+        const labels = currentLabels ?? renames.map(r => r.value);
+        const entities = labels.map(id => ({ id, name: id }));
+        const byName   = new Map(entities.map(e => [e.name, e]));
+
+        for (const r of orderRenamesForExecution(specs, labels)) {
+            const entity = byName.get(r.value);
+
+            if (!entity) throw new Error(`rename source "${r.value}" does not exist at this point`);
+            if (byName.has(r.newValue)) throw new Error(`rename target "${r.newValue}" already exists at this point`);
+
+            byName.delete(r.value);
+            entity.name = r.newValue;
+            byName.set(r.newValue, entity);
+        }
+
+        return Object.fromEntries(entities.map(e => [e.id, e.name]));
+    }
+
+    it("returns an empty sequence for no renames", () => {
+        expect(orderRenamesForExecution([], [])).toEqual([]);
+    });
+
+    it("leaves a single rename untouched", () => {
+        const rename = buildAlterTypeRenameValueSpec("public", "mood", "ok", "fine");
+
+        expect(orderRenamesForExecution([rename], ["ok"])).toEqual([rename]);
+    });
+
+    it("leaves independent renames in their original order", () => {
+        const renames = [
+            buildAlterTypeRenameValueSpec("public", "mood", "a", "x"),
+            buildAlterTypeRenameValueSpec("public", "mood", "c", "y"),
+        ];
+
+        expect(orderRenamesForExecution(renames, ["a", "c"])).toEqual(renames);
+    });
+
+    it("reorders a chain so the blocking rename runs first", () => {
+        // "a"->"b" can't run until "b"->"c" has freed "b".
+        const ordered = orderRenamesForExecution(
+            [
+                buildAlterTypeRenameValueSpec("public", "mood", "a", "b"),
+                buildAlterTypeRenameValueSpec("public", "mood", "b", "c"),
+            ],
+            ["a", "b"],
+        );
+
+        expect(ordered.map(r => `${r.value}->${r.newValue}`)).toEqual(["b->c", "a->b"]);
+        expect(simulate([{ value: "a", newValue: "b" }, { value: "b", newValue: "c" }])).toEqual({ a: "b", b: "c" });
+    });
+
+    it("breaks a two-way rotation with a synthetic temporary label", () => {
+        // Neither order works unaided: renaming "a"->"b" first collides with
+        // the still-live "b", and renaming "b"->"a" first collides with the
+        // still-live "a".
+        expect(simulate([{ value: "a", newValue: "b" }, { value: "b", newValue: "a" }])).toEqual({ a: "b", b: "a" });
+    });
+
+    it("breaks a three-way rotation", () => {
+        expect(simulate([
+            { value: "a", newValue: "b" }, { value: "b", newValue: "c" }, { value: "c", newValue: "a" },
+        ])).toEqual({ a: "b", b: "c", c: "a" });
+    });
+
+    it("breaks a rotation combined with an independent chain in the same edit", () => {
+        expect(simulate([
+            { value: "a", newValue: "b" }, { value: "b", newValue: "a" },
+            { value: "x", newValue: "y" }, { value: "y", newValue: "z" },
+        ])).toEqual({ a: "b", b: "a", x: "y", y: "z" });
+    });
+
+    it("waits on a label outside the renames batch, then succeeds once it's freed by another rename", () => {
+        // "b"->"c" isn't in this batch at all (e.g. EnumEditPlan excluded it
+        // for its own reasons) but it still occupies "b" until *something*
+        // frees it — here, nothing does, so "a"->"b" can never run live.
+        // Compare the next test, where a same-batch rename does free "b".
+        expect(() => simulate([{ value: "a", newValue: "b" }], ["a", "b"])).toThrow();
+    });
+
+    it("runs a rename once a same-batch rename frees its target first", () => {
+        // "z"->"b" only becomes runnable after "b"->"c" has vacated "b".
+        expect(simulate(
+            [{ value: "b", newValue: "c" }, { value: "z", newValue: "b" }],
+        )).toEqual({ b: "c", z: "b" });
+    });
+
+    it("throws instead of looping forever when two renames target the same label", () => {
+        // "x"->"a" and "b"->"a" can never both succeed — Postgres allows only
+        // one label spelled "a". No amount of reordering or temp-labelling
+        // resolves this, so it must raise rather than hang.
+        const renames = [
+            buildAlterTypeRenameValueSpec("public", "mood", "x", "a"),
+            buildAlterTypeRenameValueSpec("public", "mood", "b", "a"),
+        ];
+
+        expect(() => orderRenamesForExecution(renames, ["x", "a", "b"])).toThrow();
+    });
+
+    it("throws when a rename's target is occupied by a label nothing in the batch frees", () => {
+        // "a"->"b" is blocked by the type's own untouched "b" label — no
+        // rename in this batch ever vacates it.
+        const renames = [buildAlterTypeRenameValueSpec("public", "mood", "a", "b")];
+
+        expect(() => orderRenamesForExecution(renames, ["a", "b"])).toThrow();
     });
 });

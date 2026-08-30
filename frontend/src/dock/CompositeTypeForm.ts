@@ -1,10 +1,8 @@
 // The CREATE TYPE ... AS (...) composite-type form: a name field plus
 // an add/remove-row (name, type) attribute grid, built on the shared
-// RowGridPanel base. An optional `prefill` (edit mode — see the
-// function-type-ddl plan's "composite recreate" decision: restructuring an
-// existing composite in place is a Non-Goal, so editing one only clones its
-// current attributes into a fresh CREATE TYPE for the user to reconcile with
-// the original) seeds the grid instead of one empty row.
+// RowGridPanel base, seeded with one empty row. Editing an existing
+// composite in place is handled entirely by TypeInfoPanel's own inline grid
+// (type-panel-inline-editing phase) — this form is CREATE-only.
 
 import { callable } from "@jimka/typescript-ui/core";
 import { TextField } from "@jimka/typescript-ui/component/input";
@@ -26,18 +24,16 @@ const TYPE_WEIGHT = 140;
 /**
  * The CREATE TYPE ... AS (...) form: a type-name field over an add/remove-row
  * attribute grid. Embedded as a `DdlFormPanel` dock tab's form by the
- * controller's `createType` launcher (composite category) and `editType`
- * (composite recreate/clone).
+ * controller's `createType` launcher (composite category).
  */
 class CompositeTypeForm extends RowGridPanel<{ name: string; type: string }> {
     private readonly _schema: string;
     private readonly _nameField: TextField;
 
     /**
-     * @param init - `schema` fixes the new type's schema; `prefill` (edit
-     *   mode) seeds the grid with the existing composite's attributes.
+     * @param init - `schema` fixes the new type's schema.
      */
-    constructor(init: { schema: string; prefill?: { name: string; type: string }[] }) {
+    constructor(init: { schema: string }) {
         const nameField = new TextField({ placeholder: "type name" });
 
         super({
@@ -54,13 +50,7 @@ class CompositeTypeForm extends RowGridPanel<{ name: string; type: string }> {
         this._schema    = init.schema;
         this._nameField = nameField;
 
-        if (init.prefill && init.prefill.length > 0) {
-            for (const attr of init.prefill) {
-                this.appendRow(attr);
-            }
-        } else {
-            this.appendRow(); // seed with one empty row
-        }
+        this.appendRow(); // seed with one empty row
     }
 
     /**
@@ -79,15 +69,17 @@ class CompositeTypeForm extends RowGridPanel<{ name: string; type: string }> {
  * snapshots them into a `{name, type}` pair.
  *
  * @param onRemove - invoked when the row's remove button is pressed.
- * @param prefill - optional initial `{name, type}` text for the row.
+ * @param initial - the row's initial `{name, type}` text — unused: every row
+ *   this form appends starts blank (see `RowGridRow.buildRow`'s general
+ *   signature, shared with grids that do seed rows).
  * @returns the row's cells, a reader, and the remove button.
  */
 function buildAttrRow(
     onRemove: () => void,
-    prefill?: { name: string; type: string },
+    initial?: { name: string; type: string },
 ): RowGridRow<{ name: string; type: string }> {
-    const nameField = new TextField({ placeholder: "attribute name", text: prefill?.name ?? "" });
-    const typeField = new TextField({ placeholder: "type, e.g. text", text: prefill?.type ?? "" });
+    const nameField = new TextField({ placeholder: "attribute name", text: initial?.name ?? "" });
+    const typeField = new TextField({ placeholder: "type, e.g. text", text: initial?.type ?? "" });
 
     const removeButton = Button({
         glyph: "minus", text: "Remove attribute", showText: false, showDescription: false,

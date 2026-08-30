@@ -1,12 +1,15 @@
 // The reusable optional structured form + editable-SQL-preview +
 // Cancel/Execute dialog. Flow: generateSql() seeds an editable SQL preview ->
-// the user optionally edits it -> Execute runs the (possibly edited) SQL,
-// never a spec re-compiled at confirm time — the previewed text is
-// authoritative at execute (see
+// the user optionally edits it (including line breaks — the editor is a real
+// multi-line CodeEditor, not a single-line field) -> Execute runs the
+// (possibly edited) SQL, never a spec re-compiled at confirm time — the
+// previewed text is authoritative at execute (see
 // plans/implemented/ddl-infrastructure.md's "editable preview is
-// authoritative" decision). A "Regenerate SQL" button re-runs generateSql(),
-// discarding any manual edit; infra otherwise only seeds once, on open. The
-// form is optional: a tab-hosted creation flow (see DdlFormPanel) keeps its
+// authoritative" decision). generateSql() only ever seeds once, on open —
+// there is no "Regenerate SQL" action: the form (when present) is a static
+// summary, not an interactive input the user could change while this modal
+// is open, so regenerating from it would only ever reproduce the same seed.
+// The form is optional: a tab-hosted creation flow (see DdlFormPanel) keeps its
 // form in its own dock tab and omits it here, so the dialog is the SQL
 // review alone.
 //
@@ -18,15 +21,14 @@
 // dialog never closes on a failed execute in the first place, so there's
 // nothing to rebuild.
 //
-// Every failure — a failed generateSql (initial seed or "Regenerate SQL") and
-// a failed execute — still calls the caller's `onError` (or the default
-// Notification) exactly as before, preserving StatusBar/Notification-history
-// side effects, but ALSO shows an in-content banner (ErrorBanner, mirroring
-// QueryPanel.ts's durable error banner): a Notification's z-index (10002)
-// sits below the Dialog band (11000, see LayerManager's Z_BAND_DIALOG), so a
-// toast fired while this dialog is open — every failure here except the very
-// first seed, before the dialog exists — would render invisibly behind the
-// modal backdrop.
+// Every failure — the initial generateSql seed and a failed execute — still
+// calls the caller's `onError` (or the default Notification) exactly as
+// before, preserving StatusBar/Notification-history side effects, but ALSO
+// shows an in-content banner (ErrorBanner, mirroring QueryPanel.ts's durable
+// error banner): a Notification's z-index (10002) sits below the Dialog band
+// (11000, see LayerManager's Z_BAND_DIALOG), so a toast fired while this
+// dialog is open — an execute failure, since the seed's own failure happens
+// before the dialog exists — would render invisibly behind the modal backdrop.
 //
 // The Dialog exposes only three result codes ("confirm" | "cancel" | "close"),
 // and every dismiss gesture (Escape, backdrop, the always-present title-bar
@@ -36,7 +38,6 @@
 import { Panel }                   from "@jimka/typescript-ui/core";
 import type { Component }          from "@jimka/typescript-ui/core";
 import { VBox }                    from "@jimka/typescript-ui/layout";
-import { Button }                  from "@jimka/typescript-ui/component/button";
 import { CodeEditor }              from "@jimka/typescript-ui/component/editor";
 import { Dialog, Notification }    from "@jimka/typescript-ui/overlay";
 import type { DialogButtonConfig } from "@jimka/typescript-ui/overlay";
@@ -49,15 +50,6 @@ import type { QueryStatusResult }  from "../contract";
 // to give the SQL editor room to breathe.
 const DEFAULT_DIALOG_WIDTH = 560;
 
-// The editor's placeholder height for the one layout pass before it has
-// mounted and measured its own content (see plans/align-with-library-post-0.4.1.md's
-// "autoHeightMaxRows takes over from preferredSize" decision). Cleared via
-// clearPreferredSize() on the editor's first "heightchange", after which the
-// editor's own live height drives its preferred size instead — keeping this
-// as a permanent preferredSize would fight autoHeightMaxRows on every later
-// relayout, snapping the editor back to this fixed number.
-const EDITOR_SEED_HEIGHT = 180;
-
 // Row cap CodeEditor's autoHeightMaxRows grows the preview to before its own
 // scrollbar takes over. Sized to this app's own "wide table" DDL shape: a
 // generated CREATE TABLE is one line per column plus an opening/closing paren
@@ -65,6 +57,12 @@ const EDITOR_SEED_HEIGHT = 180;
 // standard many-column fixture, see LIBRARY_NOTES.md) is 22 such lines; 24
 // leaves headroom for a trailing clause without immediately scrolling.
 const SQL_PREVIEW_MAX_ROWS = 24;
+
+// Row floor CodeEditor's autoHeightMinRows never shrinks the preview below,
+// even for a one-line ALTER/DROP statement — a comfortable minimum footprint
+// rather than a box that hugs a single line. A row count is right-sized for
+// whatever the live font metrics turn out to be, unlike a fixed pixel guess.
+const SQL_PREVIEW_MIN_ROWS = 3;
 
 /** Options for {@link openSqlPreviewDialog}. */
 export interface SqlPreviewDialogOptions {
@@ -122,37 +120,30 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
     const editor = new CodeEditor("", {
         language:          "sql",
         autoHeightMaxRows: SQL_PREVIEW_MAX_ROWS,
-        preferredSize:     { width: 0, height: EDITOR_SEED_HEIGHT },
+        autoHeightMinRows: SQL_PREVIEW_MIN_ROWS,
     });
 
-    // Once the editor has real measured content — first mount, and every
-    // "Regenerate SQL"/manual edit that changes its row count after — drop the
-    // seed preferredSize constraint (see EDITOR_SEED_HEIGHT's comment above)
-    // and re-fit the dialog to the new height (Dialog does not do this on its
-    // own past its one-time post-open resizeToContent()). `dialog` is defined
-    // further down, but this closure only ever runs once the editor has
-    // mounted — i.e. after `dialog` is assigned below.
-    editor.on("heightchange", () => {
-        editor.clearPreferredSize();
-        dialog.resizeToContent();
-    });
-
-    const regenerateButton = Button({ text: "Regenerate SQL", compact: true });
-    regenerateButton.on("action", () => void refreshPreview());
+    // The editor's own height settles asynchronously (first mount, and any
+    // later edit that changes its row count) — re-fit the dialog to it each
+    // time (Dialog does not do this on its own past its one-time post-open
+    // resizeToContent()). `dialog` is defined further down, but this closure
+    // only ever runs once the editor has mounted — i.e. after `dialog` is
+    // assigned below.
+    editor.on("heightchange", () => dialog.resizeToContent());
 
     const content = Panel({
         layoutManager: VBox({ itemAlign: "stretch", spacing: CONTENT_SPACING }),
-        components:    options.form ? [options.form, regenerateButton, editor] : [regenerateButton, editor],
+        components:    options.form ? [options.form, editor] : [editor],
     });
 
     const errorBanner = new ErrorBanner({ host: content, onChange: () => dialog.resizeToContent() });
 
     /**
-     * Regenerate the preview SQL from the form's current state and load it
-     * into the editor. A rejection is reported and shown in the banner,
-     * leaving the editor's current text untouched.
+     * Seed the preview SQL from the form's current state and load it into
+     * the editor. A rejection is reported and shown in the banner, leaving
+     * the editor's current text untouched.
      */
-    async function refreshPreview(): Promise<void> {
+    async function seedPreview(): Promise<void> {
         errorBanner.hide();
 
         try {
@@ -203,7 +194,7 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
     // `content` itself is never disposed here: Dialog owns that as part of
     // its own teardown (see LoginDialog.ts's identical plain-Dialog pattern).
     try {
-        await refreshPreview();
+        await seedPreview();
         await dialog.show();
     } finally {
         errorBanner.dispose();

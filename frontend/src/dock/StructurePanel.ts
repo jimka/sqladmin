@@ -82,7 +82,7 @@ import type {
     QueryStatusResult,
     TableStructure,
 } from "../contract";
-import { buildColumnsGrid, readOnlyTable } from "./columnsGrid";
+import { buildColumnsGrid, gateOnSelection, readOnlyTable } from "./columnsGrid";
 import type { OpenSequenceHandler } from "./columnsGrid";
 import { toColumnRows } from "./columnSequence";
 import { describeColumnSpecs, diffColumnSpecs } from "./ddlSpecs";
@@ -382,28 +382,6 @@ class StructurePanel extends Panel {
         this.reloadConstraints(structure.constraints);
         this.reloadForeignKeys(structure.foreignKeys);
     }
-}
-
-/**
- * Enable `buttons` only while `grid` has a selected row, and set their
- * initial (disabled) state immediately — every section opens with no
- * selection.
- *
- * @param grid - The section's grid to watch.
- * @param buttons - The toolbar buttons to gate (Alter/Drop; Add and Refresh
- *   stay always-enabled and are never passed here).
- */
-function gateOnSelection(grid: Table, buttons: Button[]): void {
-    const sync = (): void => {
-        const hasSelection = grid.getSelectedRecord() !== null;
-
-        for (const button of buttons) {
-            button.setEnabled(hasSelection);
-        }
-    };
-
-    grid.on("selection", sync);
-    sync();
 }
 
 /**

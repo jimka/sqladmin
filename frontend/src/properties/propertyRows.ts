@@ -79,9 +79,9 @@ function functionRows(ref: DbObjectRef): PropertyValueRow[] {
 /**
  * Rows for a standalone enum/composite type: identity only. The category
  * (enum vs. composite) and its labels/attributes are a separate
- * introspection fetch (`getTypeDefinition`), shown in the edit dialog rather
- * than here — the Properties inspector never round-trips per selection for
- * a non-relation kind.
+ * introspection fetch (`getTypeDefinition`), shown in the type's (editable)
+ * info tab rather than here — the Properties inspector never round-trips
+ * per selection for a non-relation kind.
  */
 function typeRows(ref: DbObjectRef): PropertyValueRow[] {
     return [

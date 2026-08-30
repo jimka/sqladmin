@@ -25,13 +25,13 @@ import type { DiagramPanels }    from "../controller/diagramPanels";
 import { isRelationKind }        from "./objectKinds";
 import { buildTableExportItems } from "../dock/menuItems";
 
-/** The sixteen DDL launchers the object context menu invokes. */
+/** The fifteen DDL launchers the object context menu invokes. */
 export type DdlMenuActions = Pick<DdlLaunchers,
     | "createTable" | "createView" | "createMaterializedView" | "createSequence"
     | "createType" | "createFunction"
     | "renameTable" | "renameSchema"
     | "dropTable" | "dropRelation" | "refreshMaterializedView"
-    | "dropSchema" | "dropSequence" | "dropFunction" | "editType" | "dropType">;
+    | "dropSchema" | "dropSequence" | "dropFunction" | "dropType">;
 
 /** The two query-workspace actions the object context menu invokes. */
 export type WorkspaceMenuActions = Pick<QueryWorkspace, "openQueryFor" | "executeFunction">;
@@ -112,11 +112,10 @@ function functionMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: 
     ];
 }
 
-/** Build a standalone enum/composite type leaf's menu: show its info, edit it, or drop it. */
+/** Build a standalone enum/composite type leaf's menu: show its info, or drop it. */
 function typeMenuItems(ref: DbObjectRef, actions: ObjectMenuActions, node?: TreeNode): MenuItemConfig[] {
     return [
         { text: "Show info", glyph: "cube", action: () => void actions.panels.openType(ref, node) },
-        { text: "Edit", glyph: "pencil", action: () => void actions.ddl.editType(ref) },
         { text: "Drop", glyph: "trash", action: () => actions.ddl.dropType(ref) },
     ];
 }

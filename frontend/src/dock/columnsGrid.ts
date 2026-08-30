@@ -2,7 +2,9 @@
 // introspected columns (name/type/nullable/default/PK/generated/wire type),
 // used by both StructurePanel's Columns section (tables) and DefinitionPanel's
 // Columns section (views/matviews) so the column set and formatting stay
-// identical everywhere a relation's columns are shown.
+// identical everywhere a relation's columns are shown. Also holds the small
+// grid helpers every structure-style editable grid shares — see
+// `gateOnSelection` below.
 //
 // Passing `onOpenSequence` adds a linked `Sequence` column showing the
 // sequence backing each column, plus the Default/originalName/filler fields
@@ -28,6 +30,7 @@
 
 import { Table, LinkCellRenderer } from "@jimka/typescript-ui/component/table";
 import type { CellClickEvent, ColumnSpec } from "@jimka/typescript-ui/component/table";
+import { Button }                  from "@jimka/typescript-ui/component/button";
 import { MemoryStore, Model }      from "@jimka/typescript-ui/data";
 import type { AbstractStore, FieldOptions, ModelRecord } from "@jimka/typescript-ui/data";
 import type { ColumnMeta }         from "../contract";
@@ -221,4 +224,26 @@ function linkedColumnsTable(store: MemoryStore, onOpenSequence: OpenSequenceHand
     });
 
     return grid;
+}
+
+/**
+ * Enable `buttons` only while `grid` has a selected row, and set their
+ * initial (disabled) state immediately — every section opens with no
+ * selection.
+ *
+ * @param grid - The section's grid to watch.
+ * @param buttons - The toolbar buttons to gate (Alter/Drop; Add and Refresh
+ *   stay always-enabled and are never passed here).
+ */
+export function gateOnSelection(grid: Table, buttons: Button[]): void {
+    const sync = (): void => {
+        const hasSelection = grid.getSelectedRecord() !== null;
+
+        for (const button of buttons) {
+            button.setEnabled(hasSelection);
+        }
+    };
+
+    grid.on("selection", sync);
+    sync();
 }

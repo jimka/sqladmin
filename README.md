@@ -66,8 +66,12 @@ It is not hardened for exposure to the public internet:
   Structure tab: rename, retype, toggle NOT NULL, set or clear a default, or
   add/remove a column, then Save generates the matching `ALTER TABLE`
   statements for review in the same editable SQL preview every DDL action
-  uses before executing. Each inspector tab has a Refresh button (also
-  Alt+R) that re-reads the object from the database.
+  uses before executing. A standalone enum or composite type's info tab is
+  editable the same way: add, rename, retype, or remove a composite
+  attribute, or add or rename an enum label — removing an enum label instead
+  recreates the type and migrates every column that uses it, since Postgres
+  has no way to drop an enum label in place. Each inspector tab has a
+  Refresh button (also Alt+R) that re-reads the object from the database.
 - **Diagrams** — schema-overview, per-schema, relation, and role
   grant/membership diagrams, laid out automatically with [elkjs](https://github.com/kieler/elkjs).
 - **Roles explorer** — browse roles, their memberships, and their grants.

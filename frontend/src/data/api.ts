@@ -3,9 +3,11 @@
 // through the proxy/store (that is the row-CRUD path; see stores.ts).
 
 import type {
+    AlterCompositeTypeSpec,
     AlterSequenceSpec,
     AlterTableSpec,
     AlterTypeAddValueSpec,
+    AlterTypeRenameValueSpec,
     ColumnMeta,
     ConstraintSpec,
     CreateCompositeTypeSpec,
@@ -29,6 +31,7 @@ import type {
     ImportPreviewResult,
     IndexDetail,
     IndexSpec,
+    RecreateEnumTypeSpec,
     RefreshMatviewSpec,
     RenameSchemaSpec,
     ReplaceMatviewSpec,
@@ -480,7 +483,7 @@ export function getFunctionDefinition(ref: DbObjectRef, signature: string): Prom
     );
 }
 
-/** Introspect an enum/composite type for the edit-prefill flow (function-type-ddl phase). */
+/** Introspect an enum/composite type for the (editable) info tab (function-type-ddl phase). */
 export function getTypeDefinition(ref: DbObjectRef): Promise<TypeDefinition> {
     return postJson<TypeDefinition>(apiPath(ref.connectionId, "db", ref.database, "ddl", "type-definition"), {
         schema: ref.schema, name: ref.name,
@@ -515,6 +518,21 @@ export function previewDropType(ref: DbObjectRef, spec: DropTypeSpec): Promise<D
 /** Preview an ALTER TYPE ... ADD VALUE statement (function-type-ddl phase). */
 export function previewAlterTypeAddValue(ref: DbObjectRef, spec: AlterTypeAddValueSpec): Promise<DdlPreview> {
     return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "alter-type-add-value"), spec);
+}
+
+/** Preview one composite-type ALTER ATTRIBUTE statement (type-panel-inline-editing phase). */
+export function previewAlterCompositeType(ref: DbObjectRef, spec: AlterCompositeTypeSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "alter-composite-type"), spec);
+}
+
+/** Preview an ALTER TYPE ... RENAME VALUE statement (type-panel-inline-editing phase). */
+export function previewAlterTypeRenameValue(ref: DbObjectRef, spec: AlterTypeRenameValueSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "alter-type-rename-value"), spec);
+}
+
+/** Preview the enum recreate-and-migrate script (type-panel-inline-editing phase). */
+export function previewRecreateEnumType(ref: DbObjectRef, spec: RecreateEnumTypeSpec): Promise<DdlPreview> {
+    return postJson<DdlPreview>(apiPath(ref.connectionId, "db", ref.database, "ddl", "recreate-enum-type"), spec);
 }
 
 /**

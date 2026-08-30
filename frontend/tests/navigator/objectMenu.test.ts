@@ -40,7 +40,7 @@ function stubActions(): ObjectMenuActions {
             renameSchema: vi.fn(), dropSchema: vi.fn(),
             createTable: vi.fn(), createView: vi.fn(), createMaterializedView: vi.fn(), createSequence: vi.fn(),
             createType: vi.fn(), createFunction: vi.fn(),
-            dropSequence: vi.fn(), dropFunction: vi.fn(), editType: vi.fn(), dropType: vi.fn(),
+            dropSequence: vi.fn(), dropFunction: vi.fn(), dropType: vi.fn(),
         },
     } as unknown as ObjectMenuActions;
 }
@@ -159,10 +159,10 @@ describe("buildObjectMenuItems", () => {
         expect(itemLabels(items)).toEqual(["Call", "—", "Show definition", "Drop"]);
     });
 
-    it("builds a type's menu: show info, edit, drop", () => {
+    it("builds a type's menu: show info, drop", () => {
         const items = buildObjectMenuItems(typeRef(), stubActions());
 
-        expect(itemLabels(items)).toEqual(["Show info", "Edit", "Drop"]);
+        expect(itemLabels(items)).toEqual(["Show info", "Drop"]);
     });
 
     it("dispatches a type menu's Show info action to openType", () => {
