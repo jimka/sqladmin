@@ -40,7 +40,9 @@ def client_key(request: Request) -> str:
 
 
 def _live(stamps: list[float], now: float) -> list[float]:
-    """The subset of `stamps` still inside the window."""
+    """
+    The subset of `stamps` still inside the window.
+    """
     cutoff = now - LOGIN_FAILURE_WINDOW_SECONDS
 
     return [t for t in stamps if t > cutoff]

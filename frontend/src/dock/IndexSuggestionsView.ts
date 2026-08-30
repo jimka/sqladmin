@@ -28,10 +28,11 @@ import { CONSTRUCTIVE_COLOR }       from "../theme";
 
 Glyph.register(plus);
 
-// Fixed height (px) of the whole strip: a header row plus a small handful of
-// suggestion rows, pinned the way the Plan-steps table is (ExplainDiagramPanel's
-// PLAN_STEPS_MIN_HEIGHT) — the table scrolls internally for more rows than this
-// shows.
+// Fixed height (px) of the whole strip — the toolbar plus the table — pinned
+// the way the Plan-steps table is (ExplainDiagramPanel's
+// PLAN_STEPS_MIN_HEIGHT). Sized only on the outer strip: the table sits in
+// the BorderLayout's CENTER, so it fills whatever height the toolbar above it
+// leaves, and scrolls internally for more rows than that shows.
 const SUGGESTIONS_HEIGHT = 140;
 
 // The suggestions model: one field per IndexSuggestionRow key. Metric fields are
@@ -69,9 +70,6 @@ class IndexSuggestionsView extends Panel {
         const model = new Model({ fields: SUGGESTION_FIELDS.map((field, order) => ({ ...field, order })) });
         const store = new MemoryStore({ model, data: buildIndexSuggestionRows(suggestions), autoLoad: true });
         const table = Table(store, SUGGESTION_COLUMNS);
-
-        table.setMinSize({ width: 0, height: SUGGESTIONS_HEIGHT });
-        table.setPreferredSize({ width: 0, height: SUGGESTIONS_HEIGHT });
 
         const createButton = glyphButton("plus", CONSTRUCTIVE_COLOR, "Create index…", () => {
             const [record] = table.getSelectedRecords();

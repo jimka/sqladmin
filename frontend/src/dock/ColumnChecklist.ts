@@ -1,15 +1,14 @@
 // A checklist of a table's columns, used by ConstraintForm (PK/unique/FK
 // columns) and IndexForm (indexed columns). readSelected() returns the
 // checked names in the table's own introspected column order — not the
-// order they were checked in — via the pure orderColumnsBySelection helper,
-// since composite-key/index column order is semantically significant to
-// Postgres (see plans/implemented/table-ddl.md's "Composite-key column
-// ordering" mitigation).
+// order they were checked in, since composite-key/index column order is
+// semantically significant to Postgres (see plans/implemented/table-ddl.md's
+// "Composite-key column ordering" mitigation) — which filtering `_columns`
+// directly (rather than the checked names) guarantees for free.
 
 import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
 import { Checkbox } from "@jimka/typescript-ui/component/input";
-import { orderColumnsBySelection } from "./ddlSpecs";
 
 // Vertical gap between checklist rows — a compact list of checkboxes, not a
 // spaced-out form.
@@ -38,9 +37,7 @@ class ColumnChecklist extends Panel {
      * @returns the checked column names, in the table's own column order.
      */
     readSelected(): string[] {
-        const selected = this._columns.filter((_, i) => this._boxes[i].getValue());
-
-        return orderColumnsBySelection(this._columns, selected);
+        return this._columns.filter((_, i) => this._boxes[i].getValue());
     }
 }
 

@@ -28,14 +28,10 @@ import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/r
 import { glyphButton }                 from "./glyphButton";
 import { REFRESH_SHORTCUT }            from "../shell/queryShortcuts";
 import { PRIMARY_COLOR }               from "../theme";
+import { yesNo }                       from "../textFormat";
 import type { IndexDetail }            from "../contract";
 
 Glyph.register(refresh);
-
-/** Human-readable Yes/No for a boolean flag row. */
-function yesNo(value: boolean): string {
-    return value ? "Yes" : "No";
-}
 
 /** Dependencies {@link IndexInfoPanel} needs to link back to the owning table. */
 export interface IndexInfoPanelDeps {

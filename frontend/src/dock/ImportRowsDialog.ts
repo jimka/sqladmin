@@ -34,6 +34,7 @@ import { toFields }                 from "../data/buildModel";
 import { PAGE_SIZE }                from "../data/stores";
 import { buildPreviewGridRows }     from "./importPreviewRows";
 import { readOnlyTable }            from "./columnsGrid";
+import { CONTENT_SPACING }          from "./panelMetrics";
 
 /** Options for {@link openImportRowsDialog}. */
 export interface ImportRowsDialogOptions {
@@ -49,8 +50,6 @@ export interface ImportRowsDialogOptions {
 // SqlPreviewDialog's 560 (a form + SQL editor), since a grid needs more
 // horizontal room to show more than one or two columns unscrolled.
 const DIALOG_WIDTH = 640;
-
-const CONTENT_SPACING = 8;
 
 // The preview grid's own preferred height, in rows' worth of screen space.
 // Table reports no preferred size of its own (it's a virtual-scrolling body

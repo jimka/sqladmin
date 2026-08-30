@@ -42,10 +42,11 @@ interface KindFields {
  * @param kind - the constraint kind the form is collecting fields for.
  * @param columns - the table's own columns, for the local column checklist.
  * @param schemas - the connection's schemas, for the FK's referenced-schema combo.
+ * @param schema - the table's own schema, the referenced-schema combo's default.
  * @returns the components to host and handles to the live inputs (only the
  *   ones this kind renders are set).
  */
-function buildKindFields(kind: ConstraintKind, columns: string[], schemas: string[]): KindFields {
+function buildKindFields(kind: ConstraintKind, columns: string[], schemas: string[], schema: string): KindFields {
     if (kind === "primaryKey" || kind === "unique") {
         const checklist = new ColumnChecklist(columns);
 
@@ -58,8 +59,12 @@ function buildKindFields(kind: ConstraintKind, columns: string[], schemas: strin
         return { components: [expressionField], expressionField };
     }
 
-    const checklist       = new ColumnChecklist(columns);
-    const refSchemaCombo  = new ComboBox({ items: schemas });
+    const checklist = new ColumnChecklist(columns);
+
+    // Default the referenced schema to the table's own — a foreign key most
+    // often points inside its own schema, and an unseeded combo would otherwise
+    // land on whichever schema the list happens to start with.
+    const refSchemaCombo  = new ComboBox({ items: schemas, value: schemas.includes(schema) ? schema : undefined });
     const refTableField   = new TextField({ placeholder: "referenced table" });
     const refColumnsField = new TextField({ placeholder: "referenced columns (comma-separated)" });
     const onUpdateCombo   = new ComboBox({ items: REFERENTIAL_ACTION_CHOICES, value: NO_ACTION_UNSET });
@@ -87,7 +92,7 @@ class ConstraintForm extends Panel {
      * @param schemas - the connection's schemas (for a foreignKey's referenced-schema combo).
      */
     constructor(schema: string, table: string, kind: ConstraintKind, columns: string[], schemas: string[]) {
-        const fields    = buildKindFields(kind, columns, schemas);
+        const fields    = buildKindFields(kind, columns, schemas, schema);
         const nameField = new TextField({ placeholder: "constraint name (optional)" });
 
         super({

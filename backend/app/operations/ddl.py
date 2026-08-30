@@ -26,7 +26,7 @@ import asyncpg
 from ..errors import ValidationError
 from ..sql.ddl import require_text
 from .base import Command, Query
-from .run_query import _affected
+from .common import status_envelope
 
 
 def require_field(spec: Mapping[str, Any], key: str) -> str:
@@ -138,10 +138,10 @@ class ExecuteDdlCommand(Command):
 
         Returns:
             ``{"kind": "status", "command", "rowCount"}`` — the same status
-            envelope ``RunQueryCommand`` emits, via the shared ``_affected``
-            tag parser.
+            envelope ``RunQueryCommand`` emits, via the shared
+            ``status_envelope`` helper.
         """
         if self._status is None:
             raise RuntimeError("get_result() called before apply()")
 
-        return {"kind": "status", "command": self._status or "", "rowCount": _affected(self._status)}
+        return status_envelope(self._status)

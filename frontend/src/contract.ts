@@ -483,12 +483,9 @@ export interface IndexMeta {
 }
 
 /** One index's full detail — used by both the schema-wide Indexes list and
- *  the info tab's per-index fetch on open (IndexDetailQuery). */
-export interface IndexDetail {
-    name: string;
-    definition: string;
-    unique: boolean;
-    primary: boolean;
+ *  the info tab's per-index fetch on open (IndexDetailQuery). `IndexMeta`
+ *  plus the owning table. */
+export interface IndexDetail extends IndexMeta {
     table: string;
 }
 

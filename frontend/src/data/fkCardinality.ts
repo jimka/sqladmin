@@ -215,14 +215,17 @@ export function isColumnPrefixIndexed(columns: string[], structure: TableStructu
 }
 
 /**
- * Builds the optional `"ON UPDATE … ON DELETE …"` edge label from a FK's
- * referential actions, omitting any side left at the Postgres default.
+ * Builds the `"ON UPDATE …"` / `"ON DELETE …"` parts of a FK's referential
+ * actions, omitting any side left at the Postgres default. Shared by every
+ * renderer that turns a FK's actions into text — this module's own edge label
+ * and {@link "./fkEdgeTooltip".referentialActionLine}, which each join the
+ * parts with a different separator for their own display.
  *
  * @param onUpdate - The FK's `ON UPDATE` action.
  * @param onDelete - The FK's `ON DELETE` action.
- * @returns The label, or `undefined` when both actions are `"NO ACTION"`.
+ * @returns Zero, one, or two parts, in `ON UPDATE`-then-`ON DELETE` order.
  */
-function referentialActionLabel(onUpdate: string, onDelete: string): string | undefined {
+export function referentialActionParts(onUpdate: string, onDelete: string): string[] {
     const parts: string[] = [];
 
     if (onUpdate !== "NO ACTION") {
@@ -232,6 +235,20 @@ function referentialActionLabel(onUpdate: string, onDelete: string): string | un
     if (onDelete !== "NO ACTION") {
         parts.push(`ON DELETE ${onDelete}`);
     }
+
+    return parts;
+}
+
+/**
+ * Builds the optional `"ON UPDATE … ON DELETE …"` edge label from a FK's
+ * referential actions, omitting any side left at the Postgres default.
+ *
+ * @param onUpdate - The FK's `ON UPDATE` action.
+ * @param onDelete - The FK's `ON DELETE` action.
+ * @returns The label, or `undefined` when both actions are `"NO ACTION"`.
+ */
+function referentialActionLabel(onUpdate: string, onDelete: string): string | undefined {
+    const parts = referentialActionParts(onUpdate, onDelete);
 
     return parts.length > 0 ? parts.join(" ") : undefined;
 }

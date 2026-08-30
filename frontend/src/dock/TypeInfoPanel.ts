@@ -38,21 +38,11 @@ import { glyphButton }                 from "./glyphButton";
 import { REFRESH_SHORTCUT }            from "../shell/queryShortcuts";
 import { PRIMARY_COLOR }               from "../theme";
 import { categoryLabel, enumLabelRows } from "./typeInfoRows";
+import { FILLER_COLUMN }               from "./columnsGrid";
+import { CONTENT_SPACING, CONTENT_WIDTH_CAP } from "./panelMetrics";
 import type { TypeDefinition }         from "../contract";
 
 Glyph.register(refresh);
-
-// This grid's own auto-width cap, matching columnsGrid.ts's CONTENT_WIDTH_CAP:
-// declaring it on every column but `filler` excludes those columns from the
-// library's leftover-width split, so `filler` alone absorbs whatever width
-// remains instead of Name/Type stretching to fill the panel (see
-// columnsGrid.ts's CONTENT_WIDTH_CAP comment for the full mechanism).
-const CONTENT_WIDTH_CAP = 400;
-
-// Vertical gap between the fieldset and the body grid — this app's usual
-// dialog/panel content spacing (see e.g. ImportRowsDialog.ts's and
-// SqlPreviewDialog.ts's own CONTENT_SPACING).
-const CONTENT_SPACING = 8;
 
 /** The enum body grid's fields: 1-based catalog order, the label text, then a blank filler. */
 const ENUM_FIELDS: FieldOptions[] = [
@@ -82,7 +72,7 @@ function bodyTable(store: MemoryStore, realColumns: string[]): Table {
     const spec: ColumnSpec = {
         columns: [
             ...realColumns.map((field) => ({ field, maxWidth: CONTENT_WIDTH_CAP })),
-            { field: "filler", headerText: "", minWidth: 0, unhideable: true, readOnly: true },
+            FILLER_COLUMN,
         ],
         autoSizeColumns: true,
         appendUnlisted:  false,

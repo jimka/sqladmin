@@ -120,6 +120,43 @@ def test_create_routine_blank_name_raises() -> None:
         ddl.create_routine(spec)
 
 
+def test_create_routine_unknown_language_raises() -> None:
+    spec = ddl.CreateRoutineSpec(
+        schema="public", name="f", kind="function", args=[], language="python", body="return 1",
+    )
+
+    with pytest.raises(ValidationError):
+        ddl.create_routine(spec)
+
+
+def test_create_routine_unknown_volatility_raises() -> None:
+    spec = ddl.CreateRoutineSpec(
+        schema="public", name="f", kind="function", args=[], language="sql", body="SELECT 1", volatility="FAST",
+    )
+
+    with pytest.raises(ValidationError):
+        ddl.create_routine(spec)
+
+
+def test_create_routine_known_language_and_volatility_emit_todays_sql() -> None:
+    spec = ddl.CreateRoutineSpec(
+        schema="public", name="f", kind="function", args=[], language="plpgsql",
+        body="BEGIN\n  RETURN 1;\nEND;", returns="integer", volatility="STABLE",
+    )
+
+    assert ddl.create_routine(spec) == (
+        'CREATE FUNCTION "public"."f"()\n'
+        "RETURNS integer\n"
+        " LANGUAGE plpgsql\n"
+        "STABLE\n"
+        "AS $function$\n"
+        "BEGIN\n"
+        "  RETURN 1;\n"
+        "END;\n"
+        "$function$"
+    )
+
+
 # --- drop_routine -------------------------------------------------------------
 
 

@@ -11,7 +11,7 @@ as the user typed them and reviewed in the editable preview before execute
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,6 +21,7 @@ from .compiler import quote_ident
 __all__ = [
     "quote_ident",
     "qualify",
+    "ident_list",
     "quote_literal",
     "require_text",
     "create_table",
@@ -84,6 +85,20 @@ def qualify(schema: str, name: str) -> str:
         ``"schema"."name"``, with each part independently quoted.
     """
     return f"{quote_ident(schema)}.{quote_ident(name)}"
+
+
+def ident_list(names: Iterable[str]) -> str:
+    """
+    Return a comma-separated list of double-quoted identifiers, for a
+    ``(col1, col2, ...)`` clause.
+
+    Args:
+        names: the identifiers to quote and join, in order.
+
+    Returns:
+        Each name double-quoted, joined by ``", "`` — ``""`` for an empty input.
+    """
+    return ", ".join(quote_ident(n) for n in names)
 
 
 def quote_literal(value: str) -> str:
@@ -233,8 +248,7 @@ def create_table(
     pk_columns = [c["name"] for c in columns if c.get("primary_key")]
 
     if pk_columns:
-        pk_list = ", ".join(quote_ident(c) for c in pk_columns)
-        lines.append(f"PRIMARY KEY ({pk_list})")
+        lines.append(f"PRIMARY KEY ({ident_list(pk_columns)})")
 
     body = ",\n".join(f"{_CREATE_TABLE_INDENT}{line}" for line in lines)
     exists_clause = "IF NOT EXISTS " if if_not_exists else ""
@@ -461,11 +475,9 @@ def _add_key_constraint(
     if not columns:
         raise ValidationError(f"{keyword} requires at least one column")
 
-    col_list = ", ".join(quote_ident(c) for c in columns)
-
     return (
         f"ALTER TABLE {qualify(schema, name)} "
-        f"{_constraint_prefix(constraint_name)}{keyword} ({col_list})"
+        f"{_constraint_prefix(constraint_name)}{keyword} ({ident_list(columns)})"
     )
 
 
@@ -591,8 +603,6 @@ def add_foreign_key(
         if action is not None and action not in _REFERENTIAL_ACTIONS:
             raise ValidationError(f"Unknown {label} action '{action}'")
 
-    col_list = ", ".join(quote_ident(c) for c in columns)
-    ref_col_list = ", ".join(quote_ident(c) for c in ref_columns)
     action_clause = "".join(
         f" {label} {action}"
         for action, label in ((on_update, "ON UPDATE"), (on_delete, "ON DELETE"))
@@ -601,8 +611,8 @@ def add_foreign_key(
 
     return (
         f"ALTER TABLE {qualify(schema, name)} "
-        f"{_constraint_prefix(constraint_name)}FOREIGN KEY ({col_list}) "
-        f"REFERENCES {qualify(ref_schema, ref_table)} ({ref_col_list}){action_clause}"
+        f"{_constraint_prefix(constraint_name)}FOREIGN KEY ({ident_list(columns)}) "
+        f"REFERENCES {qualify(ref_schema, ref_table)} ({ident_list(ref_columns)}){action_clause}"
     )
 
 
@@ -667,8 +677,6 @@ def create_index(
     if method is not None and method not in _INDEX_METHODS:
         raise ValidationError(f"Unknown index method '{method}'")
 
-    col_list = ", ".join(quote_ident(c) for c in columns)
-
     tokens = [
         "CREATE",
         "UNIQUE" if unique else None,
@@ -678,7 +686,7 @@ def create_index(
         "ON",
         qualify(schema, table),
         f"USING {method}" if method else None,
-        f"({col_list})",
+        f"({ident_list(columns)})",
     ]
 
     return " ".join(t for t in tokens if t is not None)
@@ -741,7 +749,7 @@ def create_view(
         <select>``.
     """
     replace_clause = "OR REPLACE " if or_replace else ""
-    columns_clause = f" ({', '.join(quote_ident(c) for c in columns)})" if columns else ""
+    columns_clause = f" ({ident_list(columns)})" if columns else ""
 
     return f"CREATE {replace_clause}VIEW {qualify(schema, name)}{columns_clause} AS\n{select}"
 
@@ -945,7 +953,9 @@ def schema_rename(name: str, new_name: str) -> str:
 # `RESTART` (reset to the sequence's start value) from `RESTART WITH n`.
 # Compared via `is`, never `==`, so it can never collide with a real int.
 class _RestartDefaultType:
-    """The type of the ``RESTART_DEFAULT`` sentinel (see module docstring)."""
+    """
+    The type of the ``RESTART_DEFAULT`` sentinel (see module docstring).
+    """
 
     def __repr__(self) -> str:
         return "RESTART_DEFAULT"
@@ -960,6 +970,34 @@ RESTART_DEFAULT = _RestartDefaultType()
 _SEQUENCE_TYPES: frozenset[str] = frozenset(
     {"smallint", "integer", "bigint", "int2", "int4", "int8"}
 )
+
+
+def _sequence_bound_clauses(
+    *,
+    increment: int | None,
+    min_value: int | None,
+    max_value: int | None,
+    start: int | None,
+    cache: int | None,
+) -> list[str]:
+    """
+    Build the sequence option clauses CREATE and ALTER share, in Postgres's
+    documented clause order, skipping every option left unset.
+    """
+    parts: list[str] = []
+
+    if increment is not None:
+        parts.append(f"INCREMENT BY {int(increment)}")
+    if min_value is not None:
+        parts.append(f"MINVALUE {int(min_value)}")
+    if max_value is not None:
+        parts.append(f"MAXVALUE {int(max_value)}")
+    if start is not None:
+        parts.append(f"START WITH {int(start)}")
+    if cache is not None:
+        parts.append(f"CACHE {int(cache)}")
+
+    return parts
 
 
 def sequence_create(
@@ -1001,17 +1039,10 @@ def sequence_create(
     require_text(name, "name")
 
     parts = [f"CREATE SEQUENCE {qualify(schema, name)}"]
+    parts.extend(_sequence_bound_clauses(
+        increment=increment, min_value=min_value, max_value=max_value, start=start, cache=cache,
+    ))
 
-    if increment is not None:
-        parts.append(f"INCREMENT BY {int(increment)}")
-    if min_value is not None:
-        parts.append(f"MINVALUE {int(min_value)}")
-    if max_value is not None:
-        parts.append(f"MAXVALUE {int(max_value)}")
-    if start is not None:
-        parts.append(f"START WITH {int(start)}")
-    if cache is not None:
-        parts.append(f"CACHE {int(cache)}")
     if cycle:
         parts.append("CYCLE")
     if owned_by:
@@ -1071,20 +1102,23 @@ def sequence_alter(
         if data_type.lower() not in _SEQUENCE_TYPES:
             raise ValidationError(f"Unsupported sequence data type '{data_type}'")
         parts.append(f"AS {data_type}")
-    if increment is not None:
-        parts.append(f"INCREMENT BY {int(increment)}")
-    if min_value is not None:
-        parts.append(f"MINVALUE {int(min_value)}")
-    if max_value is not None:
-        parts.append(f"MAXVALUE {int(max_value)}")
-    if start is not None:
-        parts.append(f"START WITH {int(start)}")
+
+    # RESTART sits between START WITH and CACHE in the canonical clause order,
+    # so the five shared bound clauses are built in two calls rather than one
+    # contiguous block: increment/min/max/start first, then RESTART, then cache.
+    parts.extend(_sequence_bound_clauses(
+        increment=increment, min_value=min_value, max_value=max_value, start=start, cache=None,
+    ))
+
     if restart is RESTART_DEFAULT:
         parts.append("RESTART")
     elif restart is not None:
         parts.append(f"RESTART WITH {int(restart)}")  # type: ignore[arg-type]
-    if cache is not None:
-        parts.append(f"CACHE {int(cache)}")
+
+    parts.extend(_sequence_bound_clauses(
+        increment=None, min_value=None, max_value=None, start=None, cache=cache,
+    ))
+
     if cycle is True:
         parts.append("CYCLE")
     elif cycle is False:
@@ -1158,10 +1192,22 @@ def sequence_drop(schema: str, name: str, *, cascade: bool = False, if_exists: b
 # this fixed allowlist rather than inserted raw.
 _ARG_MODES: frozenset[str] = frozenset({"IN", "OUT", "INOUT", "VARIADIC"})
 
+# The routine languages this app's function form offers. LANGUAGE is a
+# keyword (not a passthrough expression, like a function's raw type strings/
+# defaults/body), so it is validated against this fixed allowlist rather than
+# inserted raw — adding another language is a one-line change with a test.
+_ROUTINE_LANGUAGES: frozenset[str] = frozenset({"sql", "plpgsql"})
+
+# The volatility categories PostgreSQL's CREATE FUNCTION grammar accepts. Also
+# a keyword, validated the same way as _ROUTINE_LANGUAGES above.
+_VOLATILITIES: frozenset[str] = frozenset({"IMMUTABLE", "STABLE", "VOLATILE"})
+
 
 @dataclass(frozen=True)
 class FunctionArg:
-    """One CREATE FUNCTION/PROCEDURE argument."""
+    """
+    One CREATE FUNCTION/PROCEDURE argument.
+    """
 
     type: str
     name: str | None = None
@@ -1171,7 +1217,9 @@ class FunctionArg:
 
 @dataclass(frozen=True)
 class CompositeAttr:
-    """One composite-type attribute."""
+    """
+    One composite-type attribute.
+    """
 
     name: str
     type: str
@@ -1179,7 +1227,9 @@ class CompositeAttr:
 
 @dataclass(frozen=True)
 class CreateRoutineSpec:
-    """A CREATE [OR REPLACE] FUNCTION|PROCEDURE request."""
+    """
+    A CREATE [OR REPLACE] FUNCTION|PROCEDURE request.
+    """
 
     schema: str
     name: str
@@ -1263,8 +1313,10 @@ def create_routine(spec: CreateRoutineSpec) -> str:
             function) its optional return type/volatility.
 
     Raises:
-        ValidationError: if ``spec.schema``/``spec.name`` is blank, or an
-            argument's mode is invalid (see ``render_function_arg``).
+        ValidationError: if ``spec.schema``/``spec.name`` is blank, an
+            argument's mode is invalid (see ``render_function_arg``),
+            ``spec.language`` is not a recognized routine language, or
+            ``spec.volatility`` is set and not a recognized volatility.
 
     Returns:
         A multi-line, human-reviewable ``CREATE [OR REPLACE]
@@ -1274,6 +1326,12 @@ def create_routine(spec: CreateRoutineSpec) -> str:
     """
     require_text(spec.schema, "schema")
     require_text(spec.name, "name")
+
+    if spec.language.lower() not in _ROUTINE_LANGUAGES:
+        raise ValidationError(f"Unknown routine language '{spec.language}'")
+
+    if spec.kind == "function" and spec.volatility and spec.volatility.upper() not in _VOLATILITIES:
+        raise ValidationError(f"Unknown volatility '{spec.volatility}'")
 
     keyword = "FUNCTION" if spec.kind == "function" else "PROCEDURE"
     replace_clause = "OR REPLACE " if spec.replace else ""

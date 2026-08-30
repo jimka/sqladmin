@@ -5,8 +5,8 @@
 // branch also reads — so a column row's rendered vertical centre always agrees
 // with the ELK port an FK edge was pinned to, without either side measuring the
 // other. The card's frame is painted as an outline (not a border) and its
-// insets are zeroed on the vertical axis — see CARD_OUTLINE/ROOT_OUTLINE below
-// — because either one would eat into the card's inner height and shrink every
+// insets are zeroed on the vertical axis — see theme.ts's CARD_FRAME/ROOT_FRAME
+// below — because either one would eat into the card's inner height and shrink every
 // row below schemaCardModel's CARD_ROW_HEIGHT, walking the ports off the row
 // centres they were pinned to (see schemaCardModel's header comment for the
 // renderer contract this follows). A node with no card `data` (or no columns —
@@ -28,6 +28,7 @@ import { Tooltip }           from "@jimka/typescript-ui/overlay";
 import type { DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import { CARD_WIDTH, CARD_HEADER_HEIGHT, CARD_ROW_HEIGHT, cardHeight, cardTooltip, tableTooltip } from "../data/schemaCardModel";
 import type { CardNodeData, ColumnRowData } from "../data/schemaCardModel";
+import { CARD_FRAME, ROOT_FRAME } from "../theme";
 
 // The card's frame, painted as an `outline` rather than a `border`: an outline
 // takes no layout space, so the card's inner height stays exactly
@@ -37,8 +38,6 @@ import type { CardNodeData, ColumnRowData } from "../data/schemaCardModel";
 // off the inner height and shrink every row instead. Same widths and colours as
 // the borders they replace: the root node's 2px accent frame over the plain
 // 1px card frame, so the rooted relation still reads as the anchor of the view.
-const ROOT_OUTLINE = "2px solid var(--ts-ui-accent-color, rgb(30, 100, 200))";
-const CARD_OUTLINE = "1px solid var(--ts-ui-border-color, rgb(180, 180, 180))";
 
 // Horizontal breathing room between the card's frame and its row text — the
 // Panel default, restated because the card must pass explicit insets to get
@@ -156,7 +155,7 @@ class TableCardNode extends Panel {
 
         this.rows = rows;
 
-        this.setOutline(isRoot ? ROOT_OUTLINE : CARD_OUTLINE);
+        this.setOutline(isRoot ? ROOT_FRAME : CARD_FRAME);
         this.setBackgroundColor(CARD_BG);
         this.setCursor("pointer");
         Tooltip.attach(this, tableBlock);

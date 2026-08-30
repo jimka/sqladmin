@@ -3,10 +3,11 @@
 // the schema. No DOM, no ELK — layout runs lazily inside DiagramView itself.
 
 import type { DiagramData, DiagramEdgeData, DiagramNodeData, DiagramPortData } from "@jimka/typescript-ui/component/diagram";
-import type { ColumnMeta, TableStructure } from "../contract";
+import type { ColumnMeta, ForeignKeyMeta, TableStructure } from "../contract";
 import { CARD_WIDTH, cardHeight, columnPortY, deriveColumnRows, portId } from "./schemaCardModel";
 import { uniformNodeWidth } from "./uniformNodeWidth";
 import type { MeasureWidths } from "./uniformNodeWidth";
+import { LAYERED_RIGHT } from "./diagramLayout";
 
 // Left-to-right layered layout: a schema's FK graph reads naturally as a
 // dependency flow (referencing table -> referenced table), matching the
@@ -26,8 +27,7 @@ import type { MeasureWidths } from "./uniformNodeWidth";
 // from 120 to 60 took the width from 42,625 to 39,145 (-8%), leaving 99 gaps at
 // 100 and 50 at 90 — none at 60.
 const LAYOUT_OPTIONS: Record<string, string> = {
-    "elk.algorithm": "layered",
-    "elk.direction": "RIGHT",
+    ...LAYERED_RIGHT,
     "elk.layered.spacing.nodeNodeBetweenLayers": "60",
     "elk.spacing.nodeNode": "40",
     // Room for a junction stub to clear the crow's-foot glyph. At ELK's default
@@ -137,22 +137,7 @@ export function buildSchemaDiagram(
                 continue; // dangling / cross-schema target: no node to link to
             }
 
-            edges.push({
-                // FK constraint names are unique per table but can repeat across
-                // tables, so prefix with the source table for global uniqueness.
-                id    : `${sourceTable}.${fk.name}`,
-                source: sourceTable,
-                target: fk.refTable,
-                // Carried for later cardinality / column-to-column work; ignored
-                // by the current table-to-table rendering.
-                data  : { fks: [{
-                    columns   : fk.columns,
-                    refColumns: fk.refColumns,
-                    refSchema : fk.refSchema,
-                    onUpdate  : fk.onUpdate,
-                    onDelete  : fk.onDelete,
-                }] } satisfies FkEdgeData,
-            });
+            edges.push(fkEdge(sourceTable, fk.refTable, fk));
         }
     });
 
@@ -166,6 +151,36 @@ export function buildSchemaDiagram(
         // so two FKs between the same table pair are not parallel there.
         edges: columnsByTable ? edges : collapseParallelFkEdges(edges),
         layoutOptions: LAYOUT_OPTIONS,
+    };
+}
+
+/**
+ * Build one FK edge from a source table to its referenced table. Shared by
+ * every builder that draws table-to-table FK edges — flat schema mode, card
+ * mode's pre-port pass, and buildDatabaseDiagram's cross-schema graph.
+ *
+ * @param sourceId - The edge's source node id (bare table name in schema
+ *   scope, schema-qualified id in database scope).
+ * @param targetId - The edge's target node id, in the same id space as `sourceId`.
+ * @param fk - The foreign key the edge represents.
+ * @returns The `DiagramEdgeData` for this foreign key.
+ */
+export function fkEdge(sourceId: string, targetId: string, fk: ForeignKeyMeta): DiagramEdgeData {
+    return {
+        // FK constraint names are unique per table but can repeat across
+        // tables, so prefix with the source's id for global uniqueness.
+        id    : `${sourceId}.${fk.name}`,
+        source: sourceId,
+        target: targetId,
+        // Carried for later cardinality / column-to-column work; ignored by the
+        // current table-to-table rendering.
+        data  : { fks: [{
+            columns   : fk.columns,
+            refColumns: fk.refColumns,
+            refSchema : fk.refSchema,
+            onUpdate  : fk.onUpdate,
+            onDelete  : fk.onDelete,
+        }] } satisfies FkEdgeData,
     };
 }
 

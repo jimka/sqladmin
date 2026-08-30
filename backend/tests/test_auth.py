@@ -11,12 +11,13 @@ from typing import cast
 
 import asyncpg
 import pytest
+from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 
 from app import connections
-from app.auth import is_host_allowed, require_session
+from app.auth import SESSION_COOKIE_NAME, is_host_allowed, require_csrf, require_session
 from app.connections import Session, session_pool_for, sweep_idle_sessions
-from app.errors import NotFound
+from app.errors import Forbidden, NotFound
 from app.main import app
 from app.rate_limit import LOGIN_FAILURE_LIMIT
 
@@ -259,6 +260,28 @@ async def test_mutating_route_missing_csrf_is_403() -> None:
     assert resp.status_code == 403
 
 
+class _FakeCsrfRequest:
+    """A minimal Request stand-in: require_csrf reads only request.headers.get()."""
+
+    def __init__(self, headers: dict[str, str]) -> None:
+        self.headers = headers
+
+
+async def test_require_csrf_accepts_a_matching_header() -> None:
+    session = _fake_session(csrf="tok")
+
+    result = await require_csrf(cast(Request, _FakeCsrfRequest({"X-CSRF-Token": "tok"})), session)
+
+    assert result is session
+
+
+async def test_require_csrf_rejects_a_mismatched_header() -> None:
+    session = _fake_session(csrf="tok")
+
+    with pytest.raises(Forbidden):
+        await require_csrf(cast(Request, _FakeCsrfRequest({"X-CSRF-Token": "wrong"})), session)
+
+
 async def test_sweep_evicts_idle_session() -> None:
     class _DummyPool:
         def __init__(self) -> None:
@@ -286,6 +309,53 @@ async def test_sweep_evicts_idle_session() -> None:
         assert pool.closed is True
     finally:
         connections._sessions.pop("old", None)
+
+
+async def test_relogin_invalidates_the_previous_session(monkeypatch) -> None:
+    # A second successful login while the caller still holds a session cookie
+    # must revoke the old session, not just add a second live one — a request
+    # carrying the old cookie afterwards gets 401.
+    monkeypatch.setenv("SQLADMIN_ALLOWED_HOSTS", "h:5432")
+
+    class _DummyPool:
+        async def close(self) -> None:
+            pass
+
+    issued: list[str] = []
+
+    async def _mock_create_session(parts) -> Session:
+        session = _fake_session(csrf=f"tok-{len(issued)}")
+        session.id = f"sid-{len(issued)}"
+        session.pool = cast(asyncpg.Pool, _DummyPool())
+        issued.append(session.id)
+        connections._sessions[session.id] = session
+
+        return session
+
+    monkeypatch.setattr("app.auth.create_session", _mock_create_session)
+
+    body = {"host": "h", "port": 5432, "database": "d", "username": "u", "password": "p"}
+
+    try:
+        async with _client() as client:
+            first = await client.post("/api/login", json=body)
+            old_cookie = first.cookies.get(SESSION_COOKIE_NAME)
+
+            second = await client.post("/api/login", json=body)
+
+        assert second.status_code == 200
+        assert old_cookie is not None
+        assert old_cookie != second.cookies.get(SESSION_COOKIE_NAME)
+        assert old_cookie not in connections._sessions
+
+        async with _client() as stale_client:
+            stale_client.cookies.set(SESSION_COOKIE_NAME, old_cookie)
+            resp = await stale_client.get("/api/whoami")
+
+        assert resp.status_code == 401
+    finally:
+        for sid in issued:
+            connections._sessions.pop(sid, None)
 
 
 # --- cookie Secure derivation ---------------------------------------------

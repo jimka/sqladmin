@@ -17,6 +17,27 @@ function makeStorage(): Storage {
     } as Storage;
 }
 
+// A storage stand-in whose setItem always throws `error` — for pinning a
+// write failure that is not the corrupt-blob SyntaxError _withRepair repairs.
+// Seeded from `seed` so the write is attempted against real (non-corrupt)
+// stored data, and `getItem`'s return proves whether it was ever discarded.
+function makeFailingStorage(seed: string | null, error: Error): Storage {
+    const map = new Map<string, string>();
+
+    if (seed !== null) {
+        map.set(KEY, seed);
+    }
+
+    return {
+        get length() { return map.size; },
+        clear: () => map.clear(),
+        getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+        setItem: () => { throw error; },
+        removeItem: (k: string) => { map.delete(k); },
+        key: (i: number) => Array.from(map.keys())[i] ?? null,
+    } as Storage;
+}
+
 const preset = (name: string, over: Partial<ConnectionPreset> = {}): ConnectionPreset =>
     ({ name, host: "db.host", port: 5432, database: "app", username: "", isDefault: false, ...over });
 
@@ -148,5 +169,26 @@ describe("PresetStore", () => {
         await store.remove("anything"); // must not throw
 
         expect(await store.list()).toEqual([]);
+    });
+
+    it("save() recovers from a SyntaxError on the first write attempt, keeping the retry's data", async () => {
+        localStorage.setItem(KEY, "{not valid json");
+
+        const store = new PresetStore();
+
+        await store.save(preset("Fresh"));
+
+        expect((await store.list()).map(p => p.name)).toEqual(["Fresh"]);
+    });
+
+    it("propagates a non-SyntaxError write failure, leaving stored presets untouched", async () => {
+        const seed = JSON.stringify([preset("Keeper")]);
+
+        vi.stubGlobal("localStorage", makeFailingStorage(seed, new Error("QuotaExceededError")));
+
+        const store = new PresetStore();
+
+        await expect(store.save(preset("New"))).rejects.toThrow("QuotaExceededError");
+        expect(localStorage.getItem(KEY)).toBe(seed);
     });
 });

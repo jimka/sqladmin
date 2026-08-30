@@ -107,7 +107,9 @@ class CreateFunctionPreview(DdlPreview):
         )
 
     def build(self) -> None:
-        """Set ``self._sql`` to the generated CREATE FUNCTION/PROCEDURE statement."""
+        """
+        Set ``self._sql`` to the generated CREATE FUNCTION/PROCEDURE statement.
+        """
         self._sql = ddl.create_routine(self._spec_obj)
 
 
@@ -135,7 +137,9 @@ class DropFunctionPreview(DdlPreview):
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
-        """Set ``self._sql`` to the generated DROP FUNCTION/PROCEDURE statement."""
+        """
+        Set ``self._sql`` to the generated DROP FUNCTION/PROCEDURE statement.
+        """
         self._sql = ddl.drop_routine(
             self._schema,
             self._name,
@@ -167,7 +171,9 @@ class CreateEnumTypePreview(DdlPreview):
         self._labels: list[str] = list(spec.get("labels", []))
 
     def build(self) -> None:
-        """Set ``self._sql`` to the generated CREATE TYPE ... AS ENUM statement."""
+        """
+        Set ``self._sql`` to the generated CREATE TYPE ... AS ENUM statement.
+        """
         self._sql = ddl.create_enum_type(self._schema, self._name, self._labels)
 
 
@@ -198,7 +204,9 @@ class CreateCompositeTypePreview(DdlPreview):
         ]
 
     def build(self) -> None:
-        """Set ``self._sql`` to the generated CREATE TYPE ... AS (...) statement."""
+        """
+        Set ``self._sql`` to the generated CREATE TYPE ... AS (...) statement.
+        """
         self._sql = ddl.create_composite_type(self._schema, self._name, self._attrs)
 
 
@@ -223,7 +231,9 @@ class DropTypePreview(DdlPreview):
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
-        """Set ``self._sql`` to the generated DROP TYPE statement."""
+        """
+        Set ``self._sql`` to the generated DROP TYPE statement.
+        """
         self._sql = ddl.drop_type(
             self._schema,
             self._name,
@@ -259,5 +269,7 @@ class AlterTypeAddValuePreview(DdlPreview):
         self._position: tuple[str, str] | None = _parse_position(spec.get("position"))
 
     def build(self) -> None:
-        """Set ``self._sql`` to the generated ALTER TYPE ... ADD VALUE statement."""
+        """
+        Set ``self._sql`` to the generated ALTER TYPE ... ADD VALUE statement.
+        """
         self._sql = ddl.alter_type_add_value(self._schema, self._name, self._value, self._position)

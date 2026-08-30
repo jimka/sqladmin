@@ -8,7 +8,8 @@
 // it has its own confirmed "Clear saved connections" action instead (see
 // shell/appStorageKeys.ts's partition rule). The proxy owns the normal
 // read/write path; the raw Storage is touched only to discard a corrupt blob
-// so a write can recover (see `_withRepair`).
+// on a `SyntaxError` so a write can recover (see `_withRepair`) — any other
+// write failure propagates instead.
 
 import { Model, ModelRecord, WebStorageProxy } from "@jimka/typescript-ui/data";
 import { normalizeConnectionPreset } from "../contract";
@@ -117,14 +118,21 @@ export class PresetStore {
 
     /**
      * Run a proxy write. WebStorageProxy's `create`/`update`/`destroy` re-parse
-     * the blob and throw synchronously on a corrupt value, so if the first
-     * attempt throws, discard the corrupt blob and retry once — the write then
-     * proceeds against an empty array rather than crashing the caller.
+     * the blob and throw a `SyntaxError` synchronously on a corrupt value, so
+     * if the first attempt throws exactly that, discard the corrupt blob and
+     * retry once — the write then proceeds against an empty array rather than
+     * crashing the caller. Any other failure (e.g. a quota or security error
+     * from the write itself) is not a corrupt blob, so it propagates instead
+     * of destroying the user's presets to no purpose.
      */
     private async _withRepair(write: () => Promise<void>): Promise<void> {
         try {
             await write();
-        } catch {
+        } catch (error) {
+            if (!(error instanceof SyntaxError)) {
+                throw error;
+            }
+
             this._storage.removeItem(PRESETS_KEY);
             await write();
         }

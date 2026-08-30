@@ -28,13 +28,14 @@ import { diagramPanelId, databaseDiagramPanelId, relationDiagramPanelId, depende
 import { PanelLoadError } from "./panelHost";
 import type { PanelHost, ShowObjectContextMenu } from "./panelHost";
 import type { ObjectPanels } from "./objectPanels";
+import { LAYERED_RIGHT, LAYERED_DOWN } from "../data/diagramLayout";
 
 // Dependency graph reads left-to-right as a dependency flow (view -> underlying),
 // matching the FK schema diagram's RIGHT layered layout.
-const DEPENDENCY_LAYOUT = { "elk.algorithm": "layered", "elk.direction": "RIGHT" };
+const DEPENDENCY_LAYOUT = LAYERED_RIGHT;
 
 // Inheritance reads top-to-bottom as a containment tree (parent above children).
-const INHERITANCE_LAYOUT = { "elk.algorithm": "layered", "elk.direction": "DOWN" };
+const INHERITANCE_LAYOUT = LAYERED_DOWN;
 
 /**
  * What the dependency and inheritance graph open paths differ by — everything

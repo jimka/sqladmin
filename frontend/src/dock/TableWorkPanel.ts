@@ -60,11 +60,9 @@ import { findRecordByKey }             from "./recordNavigation";
 import { RecordViewControls }          from "./recordViewControls";
 import { REFRESH_SHORTCUT }            from "../shell/queryShortcuts";
 import { PRIMARY_COLOR, CONSTRUCTIVE_COLOR, DESTRUCTIVE_COLOR } from "../theme";
+import type { Notify }                 from "./notify";
 
 Glyph.register(refresh, plus, minus, save, file_import);
-
-/** Surface a short status message (validation / save feedback) to the user. */
-export type Notify = (message: string) => void;
 
 /** Export the whole relation server-side (the streaming full-table export). */
 export type ExportTable = (format: "csv" | "json") => void;

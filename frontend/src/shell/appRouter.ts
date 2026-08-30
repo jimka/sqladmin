@@ -28,7 +28,6 @@ import { Router } from "@jimka/typescript-ui/router";
 import type { SqlAdminController } from "../SqlAdminController";
 import type { DbObjectRef } from "../contract";
 import { RELATION_KINDS, ROLE_BUCKETS, ROLE_BUCKET_SECTIONS, relationView, schemaView, roleView, routeFlag } from "./routeTargets";
-import type { RelationKind } from "./routeTargets";
 import { findHistoryEntry } from "../data/queryStore";
 
 /**
@@ -57,17 +56,31 @@ function reportUnknownLink(controller: SqlAdminController, path: string): void {
 }
 
 /**
- * A relation ref in the session's database, from a route's path params.
+ * A schema-scoped object ref in the session's database, from a route's path
+ * params.
  *
  * @param controller - Supplies the session's connectionId and database.
- * @param kind - The relation kind the route's object-kind segment named.
+ * @param kind - The object kind the route's object-kind segment named.
  * @param schema - The route's `:schema` param.
  * @param name - The route's `:name` param.
  * @returns The ref, ready to pass to an `open*` method.
  */
-function relationRef(controller: SqlAdminController, kind: RelationKind, schema: string, name: string): DbObjectRef {
+function objectRef(controller: SqlAdminController, kind: DbObjectRef["kind"], schema: string, name: string): DbObjectRef {
     return { connectionId: controller.connectionId, database: controller.database, schema, name, kind };
 }
+
+// The three single-object routes are registered once per entry rather than
+// as three near-identical literal `register` calls — the technique
+// RELATION_KINDS and ROLE_BUCKETS already use in this file.
+const SCHEMA_OBJECT_ROUTES: {
+    segment: string;
+    kind: DbObjectRef["kind"];
+    open: (controller: SqlAdminController, ref: DbObjectRef) => Promise<void>;
+}[] = [
+    { segment: "sequence", kind: "sequence", open: (c, ref) => c.panels.openSequence(ref) },
+    { segment: "index",    kind: "index",    open: (c, ref) => c.panels.openIndex(ref) },
+    { segment: "type",     kind: "type",     open: (c, ref) => c.panels.openType(ref) },
+];
 
 /**
  * Build the app's Router with every route registered, ready to `start()`.
@@ -154,7 +167,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
     // own schema-then-object containment.
     for (const { segment, kind } of RELATION_KINDS) {
         router.register(`/schema/:schema/${segment}/:name`, (params, _path, _fragment, query) => dispatch(controller, () => {
-            const ref = relationRef(controller, kind, params.schema, params.name);
+            const ref = objectRef(controller, kind, params.schema, params.name);
 
             controller.reveal.selectObject(ref);
 
@@ -173,7 +186,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
                 return;
             }
 
-            const ref = relationRef(controller, kind, params.schema, params.name);
+            const ref = objectRef(controller, kind, params.schema, params.name);
 
             controller.reveal.selectObject(ref);
 
@@ -187,47 +200,15 @@ export function buildAppRouter(controller: SqlAdminController): Router {
         }));
     }
 
-    router.register("/schema/:schema/sequence/:name", params => dispatch(controller, () => {
-        const ref: DbObjectRef = {
-            connectionId: controller.connectionId,
-            database    : controller.database,
-            schema      : params.schema,
-            name        : params.name,
-            kind        : "sequence",
-        };
+    for (const { segment, kind, open } of SCHEMA_OBJECT_ROUTES) {
+        router.register(`/schema/:schema/${segment}/:name`, params => dispatch(controller, () => {
+            const ref = objectRef(controller, kind, params.schema, params.name);
 
-        controller.reveal.selectObject(ref);
+            controller.reveal.selectObject(ref);
 
-        return controller.panels.openSequence(ref);
-    }));
-
-    router.register("/schema/:schema/index/:name", params => dispatch(controller, () => {
-        const ref: DbObjectRef = {
-            connectionId: controller.connectionId,
-            database    : controller.database,
-            schema      : params.schema,
-            name        : params.name,
-            kind        : "index",
-        };
-
-        controller.reveal.selectObject(ref);
-
-        return controller.panels.openIndex(ref);
-    }));
-
-    router.register("/schema/:schema/type/:name", params => dispatch(controller, () => {
-        const ref: DbObjectRef = {
-            connectionId: controller.connectionId,
-            database    : controller.database,
-            schema      : params.schema,
-            name        : params.name,
-            kind        : "type",
-        };
-
-        controller.reveal.selectObject(ref);
-
-        return controller.panels.openType(ref);
-    }));
+            return open(controller, ref);
+        }));
+    }
 
     // A single registration: the overload-disambiguating signature is a query
     // parameter, not a second path pattern — see the plan's "Object identity

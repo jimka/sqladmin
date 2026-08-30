@@ -157,6 +157,17 @@ def get_session(session_id: str | None) -> Session:
     return session
 
 
+async def _pop_and_close(session_id: str) -> None:
+    """
+    Remove a session from the registry and close its pool. A no-op for an
+    unknown id — the one pop-and-close every session-removal path shares.
+    """
+    session = _sessions.pop(session_id, None)
+
+    if session is not None:
+        await session.pool.close()
+
+
 async def close_session(session_id: str | None) -> None:
     """
     Drop a session and close its pool (logout / instant revoke). A no-op for an
@@ -165,10 +176,7 @@ async def close_session(session_id: str | None) -> None:
     if not session_id:
         return
 
-    session = _sessions.pop(session_id, None)
-
-    if session is not None:
-        await session.pool.close()
+    await _pop_and_close(session_id)
 
 
 async def sweep_idle_sessions() -> None:
@@ -183,20 +191,15 @@ async def sweep_idle_sessions() -> None:
     ]
 
     for sid in expired:
-        session = _sessions.pop(sid, None)
-
-        if session is not None:
-            await session.pool.close()
+        await _pop_and_close(sid)
 
 
 async def close_all_sessions() -> None:
     """
     Close every open pool and clear the registry (lifespan shutdown).
     """
-    for session in _sessions.values():
-        await session.pool.close()
-
-    _sessions.clear()
+    for sid in list(_sessions):
+        await _pop_and_close(sid)
 
 
 def session_pool_for(session: Session, connection_id: str) -> asyncpg.Pool:

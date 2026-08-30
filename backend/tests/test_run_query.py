@@ -73,35 +73,35 @@ def test_empty_rowset_with_description_is_rows_not_status() -> None:
 
 
 def test_result_capped_at_max_rows_sets_truncated() -> None:
-    # apply() fetches MAX_RESULT_ROWS + 1; that extra row marks the result
-    # truncated, and get_result keeps only the first MAX_RESULT_ROWS.
-    from app.operations.run_query import MAX_RESULT_ROWS
+    # apply() fetches MAX_ROWS_PER_REQUEST + 1; that extra row marks the result
+    # truncated, and get_result keeps only the first MAX_ROWS_PER_REQUEST.
+    from app.operations.common import MAX_ROWS_PER_REQUEST
 
     op = RunQueryCommand(NO_CONN, "select n from t")
     op._attrs = [_attr("n", "int4")]
-    op._records = [(i,) for i in range(MAX_RESULT_ROWS + 1)]
-    op._status = f"SELECT {MAX_RESULT_ROWS + 1}"
+    op._records = [(i,) for i in range(MAX_ROWS_PER_REQUEST + 1)]
+    op._status = f"SELECT {MAX_ROWS_PER_REQUEST + 1}"
 
     result = op.get_result()
 
     assert result["truncated"] is True
-    assert result["rowCount"] == MAX_RESULT_ROWS
-    assert len(result["rows"]) == MAX_RESULT_ROWS
+    assert result["rowCount"] == MAX_ROWS_PER_REQUEST
+    assert len(result["rows"]) == MAX_ROWS_PER_REQUEST
 
 
 def test_result_at_cap_is_not_truncated() -> None:
-    # Exactly MAX_RESULT_ROWS fetched (apply's +1 found nothing more): not truncated.
-    from app.operations.run_query import MAX_RESULT_ROWS
+    # Exactly MAX_ROWS_PER_REQUEST fetched (apply's +1 found nothing more): not truncated.
+    from app.operations.common import MAX_ROWS_PER_REQUEST
 
     op = RunQueryCommand(NO_CONN, "select n from t")
     op._attrs = [_attr("n", "int4")]
-    op._records = [(i,) for i in range(MAX_RESULT_ROWS)]
-    op._status = f"SELECT {MAX_RESULT_ROWS}"
+    op._records = [(i,) for i in range(MAX_ROWS_PER_REQUEST)]
+    op._status = f"SELECT {MAX_ROWS_PER_REQUEST}"
 
     result = op.get_result()
 
     assert result["truncated"] is False
-    assert result["rowCount"] == MAX_RESULT_ROWS
+    assert result["rowCount"] == MAX_ROWS_PER_REQUEST
 
 
 def test_duplicate_and_unnamed_columns_keep_distinct_values() -> None:

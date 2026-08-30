@@ -180,6 +180,15 @@ def test_sequence_alter_canonical_order_combined() -> None:
     )
 
 
+def test_sequence_alter_restart_and_cache_keep_restart_first() -> None:
+    # RESTART sits between START WITH and CACHE in the canonical clause
+    # order — pins that _sequence_bound_clauses' two-call split (increment/
+    # min/max/start, then restart, then cache) doesn't reorder them.
+    sql = ddl.sequence_alter("public", "order_id_seq", restart=9, cache=10)
+
+    assert sql == 'ALTER SEQUENCE "public"."order_id_seq" RESTART WITH 9 CACHE 10'
+
+
 def test_sequence_alter_unsupported_data_type_raises() -> None:
     with pytest.raises(ValidationError):
         ddl.sequence_alter("public", "order_id_seq", data_type="nope")

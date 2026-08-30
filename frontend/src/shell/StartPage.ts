@@ -40,7 +40,6 @@
 import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox, HBox, AnchorType }   from "@jimka/typescript-ui/layout";
 import { Insets, UNBOUNDED }        from "@jimka/typescript-ui/primitive";
-import { Text }                     from "@jimka/typescript-ui/component/input";
 import { Button }                   from "@jimka/typescript-ui/component/button";
 import { Spacer }                   from "@jimka/typescript-ui/component/container";
 import { Glyph, Markdown }          from "@jimka/typescript-ui/component/display";
@@ -49,7 +48,7 @@ import { shouldShowWelcome }        from "./startPageWelcome";
 import { buildShortcutLegend }      from "./shortcutLegend";
 import type { SavedQuery }          from "../data/queryStore";
 import type { SqlAdminController }  from "../SqlAdminController";
-import { MUTED_TEXT_COLOR }         from "../theme";
+import { mutedHeading }             from "./mutedText";
 
 Glyph.register(plus);
 
@@ -277,19 +276,11 @@ function appendList<T>(
         return;
     }
 
-    host.addComponent(heading(title, "600"));
+    host.addComponent(mutedHeading(title));
 
     for (const item of items) {
         host.addComponent(rowFor(item));
     }
-}
-
-/** A section heading (bold, muted). */
-function heading(text: string, fontWeight: string): Component {
-    const header = new Text(text, { fontWeight });
-    header.setForegroundColor(MUTED_TEXT_COLOR);
-
-    return header;
 }
 
 /**

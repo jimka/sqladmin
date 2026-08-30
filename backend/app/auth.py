@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import secrets
 import time
 
 import asyncpg
@@ -37,7 +38,7 @@ SESSION_COOKIE_NAME = "sqladmin_session"
 
 # Env var holding the comma-separated allowlist of dial-able ``host`` /
 # ``host:port`` targets. Unset/empty means deny all (default-deny).
-_ALLOWED_HOSTS_ENV = "SQLADMIN_ALLOWED_HOSTS"
+ALLOWED_HOSTS_ENV = "SQLADMIN_ALLOWED_HOSTS"
 
 # Header carrying the CSRF synchronizer token on mutating requests.
 _CSRF_HEADER = "X-CSRF-Token"
@@ -67,7 +68,7 @@ def allowed_hosts() -> set[str]:
     Returns:
         The set of allowed ``host`` and/or ``host:port`` strings.
     """
-    raw = os.environ.get(_ALLOWED_HOSTS_ENV, "")
+    raw = os.environ.get(ALLOWED_HOSTS_ENV, "")
 
     return {entry.strip().lower() for entry in raw.split(",") if entry.strip()}
 
@@ -129,11 +130,11 @@ def log_dial_policy() -> None:
         _logger.warning(
             "%s is unset — every login will be rejected with 403. Set it to the "
             "host:port of the database(s) this instance may dial.",
-            _ALLOWED_HOSTS_ENV,
+            ALLOWED_HOSTS_ENV,
         )
         return
 
-    _logger.info("%s allows: %s", _ALLOWED_HOSTS_ENV, ", ".join(allowed))
+    _logger.info("%s allows: %s", ALLOWED_HOSTS_ENV, ", ".join(allowed))
 
 
 async def require_session(request: Request) -> Session:
@@ -169,7 +170,9 @@ async def require_csrf(
     Returns:
         The live ``Session`` (so the route can resolve its pool).
     """
-    if request.headers.get(_CSRF_HEADER) != session.csrf_token:
+    header = request.headers.get(_CSRF_HEADER)
+
+    if header is None or not secrets.compare_digest(header, session.csrf_token):
         raise Forbidden("CSRF token missing or invalid")
 
     return session
@@ -222,7 +225,10 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
     Authenticate against the target database and start a session.
 
     Route: ``POST /api/login``. Every failure raised after the rate-limit check
-    counts toward this client's failed-attempt budget.
+    counts toward this client's failed-attempt budget. A caller who was already
+    holding a session cookie has that previous session revoked on success —
+    ``close_session`` is a no-op for an absent or already-unknown token, so a
+    first-time login is unaffected.
 
     Raises:
         TooManyRequests: if this client has too many recent failed attempts
@@ -245,7 +251,7 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
         if not is_host_allowed(parts.host, parts.port):
             raise Forbidden(
                 f"Host not allowed: '{parts.host}:{parts.port}' is not in "
-                f"{_ALLOWED_HOSTS_ENV}"
+                f"{ALLOWED_HOSTS_ENV}"
             )
 
         try:
@@ -270,6 +276,11 @@ async def login(request: Request, response: Response, body: dict = Body(...)) ->
     except DomainError:
         record_login_failure(request)
         raise
+
+    # Re-logging in revokes the caller's previous session: without this the old
+    # token stays live in the registry, and every request under it re-bumps
+    # last_seen, deferring the idle sweep indefinitely.
+    await close_session(request.cookies.get(SESSION_COOKIE_NAME))
 
     clear_login_failures(request)
 

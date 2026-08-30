@@ -10,17 +10,10 @@
 
 import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import type { TableStructure } from "../contract";
-import type { FkEdgeData } from "./buildSchemaDiagram";
-import { collapseParallelFkEdges } from "./buildSchemaDiagram";
+import { collapseParallelFkEdges, fkEdge } from "./buildSchemaDiagram";
 import { uniformNodeWidth } from "./uniformNodeWidth";
 import type { MeasureWidths } from "./uniformNodeWidth";
-
-// Left-to-right layered layout, matching buildSchemaDiagram's choice — a
-// database's FK graph still reads naturally as a dependency flow.
-const LAYOUT_OPTIONS: Record<string, string> = {
-    "elk.algorithm": "layered",
-    "elk.direction": "RIGHT",
-};
+import { LAYERED_RIGHT } from "./diagramLayout";
 
 // The registered glyph name for a table node. Deliberately NOT imported from
 // `../navigator/objectGlyphs` — see buildSchemaDiagram.ts's TABLE_GLYPH for
@@ -110,26 +103,12 @@ export function buildDatabaseDiagram(schemas: SchemaTables[], measureWidths?: Me
                     continue; // dangling / un-fetched target: no node to link to
                 }
 
-                edges.push({
-                    // FK constraint names are unique per table but can repeat
-                    // across tables, so prefix with the source's qualified id
-                    // for global uniqueness.
-                    id    : `${sourceId}.${fk.name}`,
-                    source: sourceId,
-                    target: targetId,
-                    // Carried for later cardinality / column-to-column work;
-                    // ignored by the current table-to-table rendering.
-                    data  : { fks: [{
-                        columns   : fk.columns,
-                        refColumns: fk.refColumns,
-                        refSchema : fk.refSchema,
-                        onUpdate  : fk.onUpdate,
-                        onDelete  : fk.onDelete,
-                    }] } satisfies FkEdgeData,
-                });
+                edges.push(fkEdge(sourceId, targetId, fk));
             }
         });
     }
 
-    return { nodes, edges: collapseParallelFkEdges(edges), layoutOptions: LAYOUT_OPTIONS };
+    // Left-to-right layered layout, matching buildSchemaDiagram's choice — a
+    // database's FK graph still reads naturally as a dependency flow.
+    return { nodes, edges: collapseParallelFkEdges(edges), layoutOptions: LAYERED_RIGHT };
 }

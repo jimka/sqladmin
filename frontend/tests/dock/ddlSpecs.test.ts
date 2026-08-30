@@ -24,6 +24,7 @@ import {
     buildRenameSchemaSpec,
     buildSequenceOwnerSpec,
     describeColumnSpecs,
+    describeSequenceSpecs,
     diffColumnSpecs,
     diffSequenceSpecs,
     orderColumnsBySelection,
@@ -34,6 +35,21 @@ import {
 } from "../../src/dock/ddlSpecs";
 import type { ColumnRow, EditedColumnRow, EditedSequenceValues, FunctionArgRow } from "../../src/dock/ddlSpecs";
 import type { AlterTableSpec, ColumnMeta, SequenceDetail } from "../../src/contract";
+
+// The pre-edit sequence detail shared by describeSequenceSpecs's and
+// diffSequenceSpecs's suites — both describe the same "what changed" shape,
+// one as text lines and the other as wire specs.
+const SEQUENCE_DETAIL: SequenceDetail = {
+    lastValue: null,
+    startValue: "1",
+    minValue: "1",
+    maxValue: "100",
+    increment: "1",
+    cacheSize: "1",
+    cycle: false,
+    dataType: "integer",
+    owner: "alice",
+};
 
 describe("buildCreateTableSpec", () => {
     it("drops blank-name rows", () => {
@@ -336,6 +352,34 @@ describe("describeColumnSpecs", () => {
     });
 });
 
+describe("describeSequenceSpecs", () => {
+    it("returns an empty array when neither alter nor owner is set", () => {
+        expect(describeSequenceSpecs({}, SEQUENCE_DETAIL)).toEqual([]);
+    });
+
+    it("describes a changed increment against the pre-edit value", () => {
+        const detail: SequenceDetail = { ...SEQUENCE_DETAIL, increment: "10" };
+        const specs = { alter: { schema: "public", name: "s", increment: "25" } };
+
+        expect(describeSequenceSpecs(specs, detail)).toEqual(["Increment: 10 → 25"]);
+    });
+
+    it("describes several changed alter fields, data type first, in declared order", () => {
+        const specs = { alter: { schema: "public", name: "s", dataType: "bigint", cache: "50" } };
+
+        expect(describeSequenceSpecs(specs, SEQUENCE_DETAIL)).toEqual([
+            "Data type: integer → bigint",
+            "Cache size: 1 → 50",
+        ]);
+    });
+
+    it("describes an owner-only spec as the owner line alone", () => {
+        const specs = { owner: { schema: "public", name: "s", owner: "bob" } };
+
+        expect(describeSequenceSpecs(specs, SEQUENCE_DETAIL)).toEqual(["Owner: alice → bob"]);
+    });
+});
+
 describe("buildConstraintSpec", () => {
     it("builds an addPrimaryKey spec", () => {
         const spec = buildConstraintSpec("public", "t", "addPrimaryKey", { columns: ["id"] });
@@ -613,17 +657,7 @@ describe("buildDropSequenceSpec", () => {
 });
 
 describe("diffSequenceSpecs", () => {
-    const original: SequenceDetail = {
-        lastValue: null,
-        startValue: "1",
-        minValue: "1",
-        maxValue: "100",
-        increment: "1",
-        cacheSize: "1",
-        cycle: false,
-        dataType: "integer",
-        owner: "alice",
-    };
+    const original: SequenceDetail = SEQUENCE_DETAIL;
 
     // The edited-values snapshot the panel's readEdited() would produce with
     // no edits — every field mirrors `original` (Current value as "—", the

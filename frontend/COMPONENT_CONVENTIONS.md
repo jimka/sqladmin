@@ -15,12 +15,12 @@ is the original in-repo precedent.
 
 ## Why factories at all, historically
 
-Some builders (`SqlAdminShell` among them) were written as factories because
-of a real library bug: the shipped `.d.ts` kept unresolved `~/*` path aliases
-that collapsed every library base class to `any` for external consumers, so a
-subclass inherited no members. That's fixed — see `LIBRARY_NOTES.md`,
-"External consumers couldn't subclass a library class". A factory you find
-today is a not-yet-migrated holdover, not evidence of a current constraint.
+Some builders were written as factories because of a real library bug: the
+shipped `.d.ts` kept unresolved `~/*` path aliases that collapsed every
+library base class to `any` for external consumers, so a subclass inherited
+no members. That's fixed — see `LIBRARY_NOTES.md`, "External consumers
+couldn't subclass a library class". A factory you find today is a
+not-yet-migrated holdover, not evidence of a current constraint.
 
 ## (a) `extends` the callable library base
 
