@@ -184,7 +184,9 @@ published image instead of building it, `docker compose pull` first.
 
 ### Configuration
 
-The backend is driven by environment variables:
+The backend is driven by environment variables. Boolean flags accept
+`1`/`true`/`yes`/`on` and `0`/`false`/`no`/`off`, case-insensitively; an
+unrecognized value falls back to the flag's documented default.
 
 - `SQLADMIN_ALLOWED_HOSTS` — comma-separated `host` / `host:port` allowlist of
   targets the backend may dial. **Required**: an unset allowlist rejects every
@@ -207,8 +209,8 @@ The backend is driven by environment variables:
   cover it.
 - `SERVER_PRESETS` — JSON array of `{name, host, port, database}` connection
   presets offered on the login screen (never credentials).
-- `ALLOW_USER_PRESETS` — set falsy to hide the "save your own preset" UI and
-  suppress browser-local presets.
+- `ALLOW_USER_PRESETS` — on by default; set `false`/`0`/`no`/`off` to hide the
+  "save your own preset" UI and suppress browser-local presets.
 - `SQLADMIN_STATIC_DIR` — directory holding the built frontend
   (`index.html` + `assets/`), default `/srv/static`. The published image sets
   this up already; it exists as an override for a custom image layout.

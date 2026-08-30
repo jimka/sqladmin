@@ -78,18 +78,34 @@ def test_allow_user_presets_default_true(monkeypatch) -> None:
     assert allow_user_presets() is True
 
 
-@pytest.mark.parametrize("value", ["0", "false", "FALSE", "no", "No"])
+@pytest.mark.parametrize("value", ["0", "false", "FALSE", "no", "No", "off", "OFF", "  off  "])
 def test_allow_user_presets_falsey(monkeypatch, value) -> None:
     monkeypatch.setenv("ALLOW_USER_PRESETS", value)
 
     assert allow_user_presets() is False
 
 
-@pytest.mark.parametrize("value", ["1", "true", "yes", "anything"])
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on"])
 def test_allow_user_presets_truthy(monkeypatch, value) -> None:
     monkeypatch.setenv("ALLOW_USER_PRESETS", value)
 
     assert allow_user_presets() is True
+
+
+def test_allow_user_presets_unrecognized_defaults_true(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOW_USER_PRESETS", "anything")
+
+    assert allow_user_presets() is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off"])
+def test_every_boolean_flag_reads_the_same_false_spellings(monkeypatch, value) -> None:
+    monkeypatch.setenv("ALLOW_USER_PRESETS", value)
+    monkeypatch.setenv("SQLADMIN_ENABLE_DOCS", value)
+
+    assert allow_user_presets() is False
+    assert enable_docs() is False
+    assert parse_bool(value) is False
 
 
 async def test_config_endpoint_is_unauthenticated_and_credential_free(monkeypatch) -> None:

@@ -30,8 +30,10 @@ login). Optional:
 - `SERVER_PRESETS` — a JSON array of `{name, host, port, database}` connection
   presets offered on the login screen (never credentials), e.g.
   `SERVER_PRESETS='[{"name":"Local","host":"localhost","port":5432,"database":"sqladmin"}]'`.
-- `ALLOW_USER_PRESETS` — `false`/`0`/`no` hides the "save your own preset" UI and
-  suppresses browser-local presets (default: on).
+- `ALLOW_USER_PRESETS` — on by default; `false`/`0`/`no`/`off` hides the "save
+  your own preset" UI and suppresses browser-local presets. See the root
+  [`README.md`](../README.md#configuration) for the flag spellings every
+  boolean variable accepts.
 
 (Bring the database up first from the repo root: `docker compose up -d db`.)
 

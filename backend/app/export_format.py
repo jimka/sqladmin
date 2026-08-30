@@ -1,8 +1,10 @@
 """
-The pure CSV/JSON export dialect, mirroring the frontend ``serialize.ts``.
-Values fed to these formatters are already wire scalars (the operation runs each
-raw asyncpg row through ``to_wire_value`` first), so a numeric is its precision
-string, a timestamptz is ISO, a bytea is base64.
+The pure CSV/JSON export dialect, mirroring the frontend ``serialize.ts``, plus
+the export format registry (``EXPORT_MEDIA``) and the download header builder
+(``content_disposition``). Values fed to these formatters are already wire
+scalars (the operation runs each raw asyncpg row through ``to_wire_value``
+first), so a numeric is its precision string, a timestamptz is ISO, a bytea is
+base64.
 
 A streamed full-table CSV is byte-identical to a query-result CSV of the same
 data for every wire type EXCEPT floating-point ``number`` values. This side sees
@@ -21,6 +23,8 @@ the cursor iteration in ``ExportRowsQuery.stream`` is I/O.
 from __future__ import annotations
 
 import json
+import re
+from urllib.parse import quote
 
 from .contract import ColumnMeta, WireType
 
@@ -28,6 +32,49 @@ from .contract import ColumnMeta, WireType
 # (the header included) is CRLF-terminated, matching serialize.ts.
 _DELIM = ","
 _EOL = "\r\n"
+
+# The media type and file extension per supported export format. The single
+# source of truth for what "supported" means: ExportRowsQuery derives its
+# accepted-format set from these keys, so the validation and the route's
+# media/extension lookup can never name different sets.
+EXPORT_MEDIA: dict[str, tuple[str, str]] = {
+    "csv": ("text/csv", "csv"),
+    "json": ("application/json", "json"),
+}
+
+# Characters kept verbatim in the ASCII fallback filename; every other character
+# — a double quote, a CR/LF, a non-ASCII letter — becomes "_". Deliberately
+# narrow: the fallback only has to be a legal HTTP quoted-string, and the
+# filename* form carries the exact name for every browser in current use.
+_FILENAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def content_disposition(schema: str, table: str, ext: str) -> str:
+    """
+    Build the export response's ``Content-Disposition`` header value.
+
+    Schema and table names are Postgres identifiers, so they may hold a double
+    quote, a CR/LF, or any Unicode character — none of which may reach a header
+    verbatim. The value therefore carries both forms RFC 6266 allows: a
+    sanitized ASCII ``filename`` fallback, and a percent-encoded ``filename*``
+    preserving the exact name.
+
+    Args:
+        schema: the relation's schema name, unsanitized.
+        table: the relation's name, unsanitized.
+        ext: the file extension for the chosen format (an ``EXPORT_MEDIA`` value).
+
+    Returns:
+        The full header value, e.g. ``attachment; filename="public.customers.csv";
+        filename*=UTF-8''public.customers.csv``.
+    """
+    name = f"{schema}.{table}.{ext}"
+    ascii_name = _FILENAME_UNSAFE.sub("_", name)
+    encoded = quote(name, safe="")
+    fallback = f'filename="{ascii_name}"'
+    exact = f"filename*=UTF-8''{encoded}"
+
+    return f"attachment; {fallback}; {exact}"
 
 
 def _csv_field(value: object, wire_type: WireType) -> str:

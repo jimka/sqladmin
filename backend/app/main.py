@@ -36,6 +36,7 @@ from .connections import (
 )
 from .contract import ColumnMeta, TableRef
 from .errors import DomainError, NotFound, ValidationError
+from .export_format import EXPORT_MEDIA, content_disposition
 from .operations import (
     AlterTypeAddValuePreview,
     CreateCompositeTypePreview,
@@ -1550,10 +1551,6 @@ async def preview_alter_type_add_value(
 # --- Full-table streaming export ------------------------------------------
 
 
-# The content type and file extension per export format.
-_EXPORT_MEDIA = {"csv": ("text/csv", "csv"), "json": ("application/json", "json")}
-
-
 @app.get("/api/{connection_id}/{database}/{schema}/{table}/export")
 async def export_rows(
     connection_id: str, database: str, schema: str, table: str, format: str = "csv",
@@ -1576,7 +1573,9 @@ async def export_rows(
 
     Returns:
         A ``StreamingResponse`` whose ``Content-Disposition`` marks it an
-        attachment named ``<schema>.<table>.<ext>``.
+        attachment named ``<schema>.<table>.<ext>``; the schema/table
+        identifiers are sanitized before reaching the header, since a Postgres
+        identifier may hold a double quote, a CR/LF, or any Unicode character.
     """
     ref = TableRef(database, schema, table)
     pool = session_pool_for(session, connection_id)
@@ -1590,7 +1589,9 @@ async def export_rows(
         await pool.release(conn)
         raise
 
-    media, ext = _EXPORT_MEDIA[format]
+    # Safe to index unguarded: ExportRowsQuery's constructor (above) validates
+    # `format` against the keys of this very map.
+    media, ext = EXPORT_MEDIA[format]
 
     async def body() -> AsyncIterator[str]:
         """
@@ -1606,7 +1607,7 @@ async def export_rows(
     return StreamingResponse(
         body(),
         media_type=media,
-        headers={"Content-Disposition": f'attachment; filename="{schema}.{table}.{ext}"'},
+        headers={"Content-Disposition": content_disposition(schema, table, ext)},
     )
 
 
