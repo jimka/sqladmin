@@ -16,12 +16,12 @@ def test_view_depends_on_table() -> None:
     op = ListDependenciesQuery(NO_CONN, "public")
     op._raw = [
         {
-            "dependent_schema": "public",
-            "dependent_name": "customer_totals",
-            "dependent_kind": "v",
             "source_schema": "public",
-            "source_name": "orders",
-            "source_kind": "r",
+            "source_name": "customer_totals",
+            "source_kind": "v",
+            "target_schema": "public",
+            "target_name": "orders",
+            "target_kind": "r",
         }
     ]
 
@@ -37,12 +37,12 @@ def test_matview_dependent_kind_maps_to_materialized_view() -> None:
     op = ListDependenciesQuery(NO_CONN, "public")
     op._raw = [
         {
-            "dependent_schema": "public",
-            "dependent_name": "mv_totals",
-            "dependent_kind": "m",
             "source_schema": "public",
-            "source_name": "orders",
-            "source_kind": "r",
+            "source_name": "mv_totals",
+            "source_kind": "m",
+            "target_schema": "public",
+            "target_name": "orders",
+            "target_kind": "r",
         }
     ]
 
@@ -53,12 +53,12 @@ def test_matview_source_kind_maps_to_materialized_view() -> None:
     op = ListDependenciesQuery(NO_CONN, "public")
     op._raw = [
         {
-            "dependent_schema": "public",
-            "dependent_name": "v_over_mv",
-            "dependent_kind": "v",
             "source_schema": "public",
-            "source_name": "mv_base",
-            "source_kind": "m",
+            "source_name": "v_over_mv",
+            "source_kind": "v",
+            "target_schema": "public",
+            "target_name": "mv_base",
+            "target_kind": "m",
         }
     ]
 
@@ -69,20 +69,20 @@ def test_partitioned_and_foreign_source_kinds_collapse_to_table() -> None:
     op = ListDependenciesQuery(NO_CONN, "public")
     op._raw = [
         {
-            "dependent_schema": "public",
-            "dependent_name": "v_over_partitioned",
-            "dependent_kind": "v",
             "source_schema": "public",
-            "source_name": "events",
-            "source_kind": "p",
+            "source_name": "v_over_partitioned",
+            "source_kind": "v",
+            "target_schema": "public",
+            "target_name": "events",
+            "target_kind": "p",
         },
         {
-            "dependent_schema": "public",
-            "dependent_name": "v_over_foreign",
-            "dependent_kind": "v",
             "source_schema": "public",
-            "source_name": "remote_events",
-            "source_kind": "f",
+            "source_name": "v_over_foreign",
+            "source_kind": "v",
+            "target_schema": "public",
+            "target_name": "remote_events",
+            "target_kind": "f",
         },
     ]
 
@@ -95,12 +95,12 @@ def test_cross_schema_row_preserves_both_schemas() -> None:
     op = ListDependenciesQuery(NO_CONN, "a")
     op._raw = [
         {
-            "dependent_schema": "a",
-            "dependent_name": "v_cross",
-            "dependent_kind": "v",
-            "source_schema": "b",
-            "source_name": "base_table",
-            "source_kind": "r",
+            "source_schema": "a",
+            "source_name": "v_cross",
+            "source_kind": "v",
+            "target_schema": "b",
+            "target_name": "base_table",
+            "target_kind": "r",
         }
     ]
 
@@ -122,3 +122,28 @@ def test_get_result_before_apply_raises() -> None:
 
     with pytest.raises(RuntimeError):
         op.get_result()
+
+
+def test_partitioned_index_row_is_dropped_not_a_key_error() -> None:
+    # The live bug this plan fixes: pg_depend can surface a relation whose
+    # relkind is 'I'/'i' (a partitioned index's own child index), which is not
+    # in RELKIND_KIND. edge_rows() must drop the row, not raise KeyError.
+    op = ListDependenciesQuery(NO_CONN, "public")
+    op._raw = [
+        {
+            "source_schema": "public",
+            "source_name": "some_idx",
+            "source_kind": "I",
+            "target_schema": "public",
+            "target_name": "some_idx_2024",
+            "target_kind": "i",
+        }
+    ]
+
+    assert op.get_result() == []
+
+
+def test_constructor_binds_relkind_codes() -> None:
+    op = ListDependenciesQuery(NO_CONN, "public")
+
+    assert op._args == ("public", ["r", "p", "f", "v", "m"])

@@ -8,17 +8,14 @@ quoting is needed and injection is impossible.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
 from ..contract import RoleMembership, RolePrivilege
-from .base import Query
+from .base import CatalogQuery
 from .roles import _ROLE_COLUMNS, summary_from_row
 
 
-class RoleAttributesQuery(Query):
+class RoleAttributesQuery(CatalogQuery):
     """
     One role's ``pg_roles`` attribute row, or ``None`` when no such role exists.
     """
@@ -29,15 +26,7 @@ class RoleAttributesQuery(Query):
         """
         Capture the connection and the role name to look up.
         """
-        self._conn: asyncpg.Connection = conn
-        self._role: str = role
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the role's attribute row (zero or one row).
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._role)
+        super().__init__(conn, role)
 
     def get_result(self) -> dict | None:
         """
@@ -50,16 +39,15 @@ class RoleAttributesQuery(Query):
             The ``RoleSummary.to_contract()`` dict, or ``None`` when the role
             does not exist (the route maps ``None`` to a 404).
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
+        rows = self._rows()
 
-        if not self._raw:
+        if not rows:
             return None
 
-        return summary_from_row(self._raw[0]).to_contract()
+        return summary_from_row(rows[0]).to_contract()
 
 
-class RoleMembershipsQuery(Query):
+class RoleMembershipsQuery(CatalogQuery):
     """
     The roles the given role is a member of (its parent/group roles).
     """
@@ -77,15 +65,7 @@ class RoleMembershipsQuery(Query):
         """
         Capture the connection and the member role name.
         """
-        self._conn: asyncpg.Connection = conn
-        self._role: str = role
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the membership edges where this role is the member.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._role)
+        super().__init__(conn, role)
 
     def get_result(self) -> list[dict]:
         """
@@ -97,16 +77,13 @@ class RoleMembershipsQuery(Query):
         Returns:
             ``[RoleMembership.to_contract()]`` ordered by parent role name.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
             RoleMembership(role_name=r["role_name"], admin=bool(r["admin_option"])).to_contract()
-            for r in self._raw
+            for r in self._rows()
         ]
 
 
-class RolePrivilegesQuery(Query):
+class RolePrivilegesQuery(CatalogQuery):
     """
     The table privileges held by the role (``information_schema`` view, so it
     returns only grants the connection role is allowed to observe).
@@ -123,15 +100,7 @@ class RolePrivilegesQuery(Query):
         """
         Capture the connection and the grantee role name.
         """
-        self._conn: asyncpg.Connection = conn
-        self._role: str = role
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the table grants held by the role.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._role)
+        super().__init__(conn, role)
 
     def get_result(self) -> list[dict]:
         """
@@ -143,9 +112,6 @@ class RolePrivilegesQuery(Query):
         Returns:
             ``[RolePrivilege.to_contract()]`` ordered by schema, table, privilege.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
             RolePrivilege(
                 schema=r["table_schema"],
@@ -153,5 +119,5 @@ class RolePrivilegesQuery(Query):
                 privilege=r["privilege_type"],
                 grantable=r["is_grantable"] == "YES",
             ).to_contract()
-            for r in self._raw
+            for r in self._rows()
         ]

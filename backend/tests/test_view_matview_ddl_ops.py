@@ -76,6 +76,20 @@ def test_drop_view_build() -> None:
     assert op.get_result() == {"sql": 'DROP VIEW "public"."v" CASCADE'}
 
 
+def test_drop_view_if_exists() -> None:
+    op = DropViewPreview(NO_CONN, {"schema": "public", "name": "v", "ifExists": True})
+    op.build()
+
+    assert op.get_result() == {"sql": 'DROP VIEW IF EXISTS "public"."v"'}
+
+
+def test_drop_view_without_if_exists_omits_it() -> None:
+    op = DropViewPreview(NO_CONN, {"schema": "public", "name": "v"})
+    op.build()
+
+    assert op.get_result() == {"sql": 'DROP VIEW "public"."v"'}
+
+
 def test_drop_view_blank_name_raises() -> None:
     with pytest.raises(ValidationError):
         DropViewPreview(NO_CONN, {"schema": "public", "name": ""})
@@ -112,6 +126,13 @@ def test_drop_materialized_view_build() -> None:
     op.build()
 
     assert op.get_result() == {"sql": 'DROP MATERIALIZED VIEW "public"."mv"'}
+
+
+def test_drop_materialized_view_if_exists() -> None:
+    op = DropMaterializedViewPreview(NO_CONN, {"schema": "public", "name": "mv", "ifExists": True})
+    op.build()
+
+    assert op.get_result() == {"sql": 'DROP MATERIALIZED VIEW IF EXISTS "public"."mv"'}
 
 
 def test_drop_materialized_view_blank_schema_raises() -> None:

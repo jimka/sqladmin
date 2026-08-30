@@ -10,6 +10,7 @@ import pytest
 
 from app.errors import ValidationError
 from app.operations import DdlPreview, ExecuteDdlCommand
+from app.operations.ddl import require_field
 from tests.conftest import NO_CONN
 
 
@@ -79,3 +80,25 @@ def test_preview_default_apply_calls_build() -> None:
     asyncio.run(op.apply())
 
     assert op.get_result() == {"sql": "CREATE TABLE t (id int)"}
+
+
+# --- require_field --------------------------------------------------------------
+
+
+def test_require_field_missing_key_raises() -> None:
+    with pytest.raises(ValidationError, match="'name' is required"):
+        require_field({}, "name")
+
+
+def test_require_field_blank_value_raises() -> None:
+    with pytest.raises(ValidationError, match="'name' is required"):
+        require_field({"name": ""}, "name")
+
+
+def test_require_field_non_string_value_raises() -> None:
+    with pytest.raises(ValidationError, match="'name' is required"):
+        require_field({"name": 42}, "name")
+
+
+def test_require_field_returns_value() -> None:
+    assert require_field({"name": "t"}, "name") == "t"

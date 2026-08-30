@@ -152,6 +152,14 @@ def test_drop_routine_blank_name_raises() -> None:
         ddl.drop_routine("public", "", "function", "", cascade=False, if_exists=False)
 
 
+def test_drop_routine_cascade_and_if_exists_are_keyword_only() -> None:
+    # cascade/if_exists moved behind a `*` so a positional call fails loudly
+    # rather than silently swapping the two flags. Deliberately ill-typed —
+    # pyright catches this call statically, which is exactly the point.
+    with pytest.raises(TypeError):
+        ddl.drop_routine("public", "add", "function", "", True, False)  # type: ignore[misc]
+
+
 # --- create_enum_type ---------------------------------------------------------
 
 

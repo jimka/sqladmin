@@ -12,22 +12,27 @@ request per table.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
-from ..contract import ColumnMeta, SequenceRef
-from ..wire import pg_type_to_wire
-from .base import Query
-from .table_structure import _CONSTRAINT_TYPES, _FK_ACTIONS
+from .base import CatalogQuery
+from .catalog import (
+    COLUMN_FROM,
+    COLUMN_SELECT,
+    CONSTRAINT_FROM,
+    CONSTRAINT_SELECT,
+    FOREIGN_KEY_FROM,
+    FOREIGN_KEY_SELECT,
+    INDEX_FROM,
+    INDEX_SELECT,
+    SYSTEM_SCHEMAS,
+    column_meta,
+    constraint_payload,
+    foreign_key_payload,
+    index_payload,
+)
 
-# Excluded from every schema/database-wide query below, mirroring
-# list_schemas.py's own copy of this same catalog-scoping constant.
-_SYSTEM_SCHEMAS = ("pg_catalog", "information_schema")
 
-
-class SchemaTablesQuery(Query):
+class SchemaTablesQuery(CatalogQuery):
     """
     Base-table names in scope: a concrete schema restricts to it; ``None``
     spans every non-system schema in the database. The authoritative node set
@@ -48,15 +53,7 @@ class SchemaTablesQuery(Query):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str | None = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the base-table rows in scope.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -68,84 +65,27 @@ class SchemaTablesQuery(Query):
         Returns:
             ``[{"schema": str, "table": str}]`` ordered by schema then table.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
-        return [{"schema": r["schema"], "table": r["table"]} for r in self._raw]
+        return [{"schema": r["schema"], "table": r["table"]} for r in self._rows()]
 
 
-class SchemaColumnsQuery(Query):
+class SchemaColumnsQuery(CatalogQuery):
     """
-    Every base table's columns in scope, generalizing ``ListColumnsQuery``.
-    The matview fallback there is dropped: ``SchemaTablesQuery`` excludes
-    views/matviews, so this only ever needs the ``information_schema`` path.
+    Every base table's columns in scope, generalizing ``ListColumnsQuery``. An
+    ``EXISTS`` guard against ``information_schema.tables`` (excluding views)
+    keeps this to base tables only — ``SchemaTablesQuery``'s own node set —
+    so no matview fallback is needed here.
     """
 
-    # Both the ``pk`` and ``seq`` sub-selects carry (schema, table) throughout
-    # — dropped, primary-key/sequence rows would attribute to the wrong table
-    # whenever a column name repeats across tables. See ListColumnsQuery's
-    # docstring for the seq sub-select's two-arm rationale (OWNED BY vs.
-    # DEFAULT nextval()); the arms are unchanged here, just table-qualified.
-    _SQL = """
-        SELECT
-            c.table_schema AS schema,
-            c.table_name   AS table,
-            c.column_name  AS name,
-            c.data_type    AS data_type,
-            (c.is_nullable = 'YES') AS nullable,
-            COALESCE(
-                c.is_identity = 'YES' OR c.is_generated = 'ALWAYS' OR c.column_default LIKE 'nextval(%',
-                false
-            ) AS is_generated,
-            (c.column_default IS NOT NULL) AS has_default,
-            COALESCE(pk.is_pk, false) AS is_primary_key,
-            seq.sequence_schema AS sequence_schema,
-            seq.sequence_name   AS sequence_name
-        FROM information_schema.columns c
-        JOIN information_schema.tables t
-          ON t.table_schema = c.table_schema
-         AND t.table_name   = c.table_name
-         AND t.table_type  <> 'VIEW'
-        LEFT JOIN (
-            SELECT tc.table_schema, tc.table_name, kcu.column_name, true AS is_pk
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-              ON kcu.constraint_name = tc.constraint_name
-             AND kcu.table_schema    = tc.table_schema
-            WHERE tc.constraint_type = 'PRIMARY KEY'
-        ) pk ON pk.table_schema = c.table_schema
-            AND pk.table_name   = c.table_name
-            AND pk.column_name  = c.column_name
-        LEFT JOIN (
-            SELECT DISTINCT ON (rn.nspname, rc.relname, l.attnum)
-                   rn.nspname AS ref_schema,
-                   rc.relname AS ref_table,
-                   a.attname  AS column_name,
-                   sn.nspname AS sequence_schema,
-                   s.relname  AS sequence_name
-            FROM (
-                SELECT d.refobjid AS attrelid, d.refobjsubid AS attnum, d.objid AS seqid, 1 AS arm
-                FROM pg_catalog.pg_depend d
-                WHERE d.classid = 'pg_class'::regclass AND d.refclassid = 'pg_class'::regclass
-                  AND d.deptype IN ('a', 'i') AND d.refobjsubid > 0
-                UNION ALL
-                SELECT ad.adrelid, ad.adnum, d.refobjid, 2
-                FROM pg_catalog.pg_depend d
-                JOIN pg_catalog.pg_attrdef ad ON ad.oid = d.objid
-                WHERE d.classid = 'pg_attrdef'::regclass AND d.refclassid = 'pg_class'::regclass
-                  AND d.deptype = 'n'
-            ) l
-            JOIN pg_catalog.pg_class s      ON s.oid = l.seqid AND s.relkind = 'S'
-            JOIN pg_catalog.pg_namespace sn ON sn.oid = s.relnamespace
-            JOIN pg_catalog.pg_class rc     ON rc.oid = l.attrelid
-            JOIN pg_catalog.pg_namespace rn ON rn.oid = rc.relnamespace
-            JOIN pg_catalog.pg_attribute a  ON a.attrelid = l.attrelid AND a.attnum = l.attnum
-            ORDER BY rn.nspname, rc.relname, l.attnum, l.arm DESC, sn.nspname, s.relname
-        ) seq ON seq.ref_schema  = c.table_schema
-             AND seq.ref_table   = c.table_name
-             AND seq.column_name = c.column_name
-        WHERE ($1::text IS NULL OR c.table_schema = $1)
-          AND c.table_schema <> ALL($2::text[])
+    _SQL = f"""
+        SELECT c.table_schema AS schema, c.table_name AS table, {COLUMN_SELECT}
+        {COLUMN_FROM}
+          AND c.table_schema <> ALL($3::text[])
+          AND EXISTS (
+              SELECT 1 FROM information_schema.tables t
+              WHERE t.table_schema = c.table_schema
+                AND t.table_name   = c.table_name
+                AND t.table_type  <> 'VIEW'
+          )
         ORDER BY c.table_schema, c.table_name, c.ordinal_position
     """
 
@@ -153,15 +93,7 @@ class SchemaColumnsQuery(Query):
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str | None = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the column metadata rows in scope.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, None, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -175,72 +107,28 @@ class SchemaColumnsQuery(Query):
             ``[{"schema", "table", "payload": <ColumnMeta contract>}]``,
             ordinal-position order preserved within each table.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
-        result = []
-
-        for r in self._raw:
-            meta = ColumnMeta(
-                name=r["name"],
-                data_type=r["data_type"],
-                nullable=r["nullable"],
-                is_primary_key=r["is_primary_key"],
-                is_generated=r["is_generated"],
-                has_default=r["has_default"],
-                wire_type=pg_type_to_wire(r["data_type"]),
-                sequence=(
-                    SequenceRef(schema=r["sequence_schema"], name=r["sequence_name"])
-                    if r["sequence_schema"] is not None
-                    else None
-                ),
-            )
-            result.append({"schema": r["schema"], "table": r["table"], "payload": meta.to_contract()})
-
-        return result
+        return [
+            {"schema": r["schema"], "table": r["table"], "payload": column_meta(r).to_contract()}
+            for r in self._rows()
+        ]
 
 
-class SchemaIndexesQuery(Query):
+class SchemaIndexesQuery(CatalogQuery):
     """
     Every base table's indexes in scope, generalizing ``ListIndexesQuery``.
     """
 
-    # The original's `n.nspname = $1` join predicate is redundant with
-    # `i.schemaname = $1` under a single-table filter (both sides always equal
-    # the same schema), but scoped to many schemas that redundancy would drop
-    # rows outside `$1` even when `$1` is NULL — replaced with `n.nspname =
-    # i.schemaname` so the join stays correct across every schema in scope.
-    _SQL = """
-        SELECT
-            i.schemaname AS schema,
-            i.tablename  AS table,
-            i.indexname   AS name,
-            i.indexdef    AS definition,
-            ix.indisunique  AS unique,
-            ix.indisprimary AS primary
-        FROM pg_indexes i
-        JOIN pg_class ic     ON ic.relname = i.indexname
-        JOIN pg_namespace n  ON n.oid = ic.relnamespace
-        JOIN pg_index ix     ON ix.indexrelid = ic.oid
-        WHERE n.nspname = i.schemaname
-          AND ($1::text IS NULL OR i.schemaname = $1)
-          AND i.schemaname <> ALL($2::text[])
-        ORDER BY i.schemaname, i.tablename, i.indexname
-    """
+    _SQL = (
+        f"SELECT i.schemaname AS schema, i.tablename AS table, {INDEX_SELECT} {INDEX_FROM} "
+        "AND i.schemaname <> ALL($4::text[]) "
+        "ORDER BY i.schemaname, i.tablename, i.indexname"
+    )
 
     def __init__(self, conn: asyncpg.Connection, schema: str | None) -> None:
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str | None = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the index metadata rows in scope.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, None, None, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -252,65 +140,26 @@ class SchemaIndexesQuery(Query):
         Returns:
             ``[{"schema", "table", "payload": {name, definition, unique, primary}}]``.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
-        return [
-            {
-                "schema": r["schema"],
-                "table": r["table"],
-                "payload": {
-                    "name": r["name"],
-                    "definition": r["definition"],
-                    "unique": bool(r["unique"]),
-                    "primary": bool(r["primary"]),
-                },
-            }
-            for r in self._raw
-        ]
+        return [{"schema": r["schema"], "table": r["table"], "payload": index_payload(r)} for r in self._rows()]
 
 
-class SchemaConstraintsQuery(Query):
+class SchemaConstraintsQuery(CatalogQuery):
     """
     Every base table's non-FK constraints in scope, generalizing
     ``ListConstraintsQuery``.
     """
 
-    _SQL = """
-        SELECT
-            n.nspname AS schema,
-            c.relname AS table,
-            con.conname AS name,
-            con.contype::text AS contype,
-            pg_get_constraintdef(con.oid) AS definition,
-            ARRAY(
-                SELECT a.attname
-                FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-                JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
-                ORDER BY k.ord
-            ) AS columns
-        FROM pg_constraint con
-        JOIN pg_class c     ON c.oid = con.conrelid
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE con.contype IN ('p', 'u', 'c')
-          AND ($1::text IS NULL OR n.nspname = $1)
-          AND n.nspname <> ALL($2::text[])
-        ORDER BY n.nspname, c.relname, con.contype, con.conname
-    """
+    _SQL = (
+        f"SELECT n.nspname AS schema, c.relname AS table, {CONSTRAINT_SELECT} {CONSTRAINT_FROM} "
+        "AND n.nspname <> ALL($3::text[]) "
+        "ORDER BY n.nspname, c.relname, con.contype, con.conname"
+    )
 
     def __init__(self, conn: asyncpg.Connection, schema: str | None) -> None:
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str | None = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the non-FK constraint rows in scope.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, None, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -323,75 +172,29 @@ class SchemaConstraintsQuery(Query):
         Returns:
             ``[{"schema", "table", "payload": {name, type, columns, definition}}]``.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
-            {
-                "schema": r["schema"],
-                "table": r["table"],
-                "payload": {
-                    "name": r["name"],
-                    "type": _CONSTRAINT_TYPES[r["contype"]],
-                    "columns": list(r["columns"]),
-                    "definition": r["definition"],
-                },
-            }
-            for r in self._raw
+            {"schema": r["schema"], "table": r["table"], "payload": constraint_payload(r)}
+            for r in self._rows()
         ]
 
 
-class SchemaForeignKeysQuery(Query):
+class SchemaForeignKeysQuery(CatalogQuery):
     """
     Every base table's foreign keys in scope, generalizing
     ``ListForeignKeysQuery``.
     """
 
-    _SQL = """
-        SELECT
-            n.nspname AS schema,
-            c.relname AS table,
-            con.conname AS name,
-            con.confupdtype::text AS on_update,
-            con.confdeltype::text AS on_delete,
-            nr.nspname AS ref_schema,
-            cr.relname AS ref_table,
-            ARRAY(
-                SELECT a.attname
-                FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-                JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
-                ORDER BY k.ord
-            ) AS columns,
-            ARRAY(
-                SELECT a.attname
-                FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
-                JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum
-                ORDER BY k.ord
-            ) AS ref_columns
-        FROM pg_constraint con
-        JOIN pg_class c      ON c.oid = con.conrelid
-        JOIN pg_namespace n  ON n.oid = c.relnamespace
-        JOIN pg_class cr     ON cr.oid = con.confrelid
-        JOIN pg_namespace nr ON nr.oid = cr.relnamespace
-        WHERE con.contype = 'f'
-          AND ($1::text IS NULL OR n.nspname = $1)
-          AND n.nspname <> ALL($2::text[])
-        ORDER BY n.nspname, c.relname, con.conname
-    """
+    _SQL = (
+        f"SELECT n.nspname AS schema, c.relname AS table, {FOREIGN_KEY_SELECT} {FOREIGN_KEY_FROM} "
+        "AND n.nspname <> ALL($3::text[]) "
+        "ORDER BY n.nspname, c.relname, con.conname"
+    )
 
     def __init__(self, conn: asyncpg.Connection, schema: str | None) -> None:
         """
         Capture the connection and the schema scope (``None`` = whole database).
         """
-        self._conn: asyncpg.Connection = conn
-        self._schema: str | None = schema
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the foreign-key constraint rows in scope.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._schema, list(_SYSTEM_SCHEMAS))
+        super().__init__(conn, schema, None, list(SYSTEM_SCHEMAS))
 
     def get_result(self) -> list[dict]:
         """
@@ -405,24 +208,9 @@ class SchemaForeignKeysQuery(Query):
             ``[{"schema", "table", "payload": {name, columns, refSchema,
             refTable, refColumns, onUpdate, onDelete}}]``.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
         return [
-            {
-                "schema": r["schema"],
-                "table": r["table"],
-                "payload": {
-                    "name": r["name"],
-                    "columns": list(r["columns"]),
-                    "refSchema": r["ref_schema"],
-                    "refTable": r["ref_table"],
-                    "refColumns": list(r["ref_columns"]),
-                    "onUpdate": _FK_ACTIONS[r["on_update"]],
-                    "onDelete": _FK_ACTIONS[r["on_delete"]],
-                },
-            }
-            for r in self._raw
+            {"schema": r["schema"], "table": r["table"], "payload": foreign_key_payload(r)}
+            for r in self._rows()
         ]
 
 

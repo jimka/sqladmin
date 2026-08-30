@@ -236,6 +236,7 @@ export interface DropSpec {
     schema: string;
     name: string;
     cascade: boolean;
+    ifExists?: boolean;
 }
 
 /** The spec a CREATE MATERIALIZED VIEW preview/execute call sends. */

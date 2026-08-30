@@ -11,16 +11,13 @@ by (schema, name) so no identifier interpolation is needed.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
 from ..contract import TablePrivileges, TableRef
-from .base import Query
+from .base import CatalogQuery
 
 
-class TablePrivilegesQuery(Query):
+class TablePrivilegesQuery(CatalogQuery):
     """
     The session role's SELECT/INSERT/UPDATE/DELETE privileges on one table.
     """
@@ -45,15 +42,7 @@ class TablePrivilegesQuery(Query):
         """
         Capture the connection and the table to probe.
         """
-        self._conn: asyncpg.Connection = conn
-        self._table: TableRef = table
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Probe the four privileges for the table (zero or one row).
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._table.schema, self._table.name)
+        super().__init__(conn, table.schema, table.name)
 
     def get_result(self) -> dict:
         """
@@ -68,13 +57,12 @@ class TablePrivilegesQuery(Query):
         Returns:
             ``TablePrivileges.to_contract()`` — select/insert/update/delete flags.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
+        rows = self._rows()
 
-        if not self._raw:
+        if not rows:
             return TablePrivileges(select=False, insert=False, update=False, delete=False).to_contract()
 
-        row = self._raw[0]
+        row = rows[0]
 
         return TablePrivileges(
             select=bool(row["can_select"]),

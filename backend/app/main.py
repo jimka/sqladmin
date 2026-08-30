@@ -277,12 +277,13 @@ async def objects(
     session: Session = Depends(require_session),
 ) -> list[dict]:
     """
-    List the tables, views, and materialized views in a schema.
+    List the tables, views, materialized views, and sequences in a schema.
 
     Route: ``GET /api/{connection_id}/{database}/{schema}/objects``.
 
     Returns:
-        ``[{"name": str, "kind": "table" | "view" | "materializedView"}]``.
+        ``[{"name": str, "kind": "table" | "view" | "materializedView" |
+        "sequence"}]``.
     """
     async with session_pool_for(session, connection_id).acquire() as c:
         op = ListObjectsQuery(c, schema)

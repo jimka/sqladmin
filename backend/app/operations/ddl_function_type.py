@@ -19,29 +19,7 @@ import asyncpg
 
 from ..errors import ValidationError
 from ..sql import ddl
-from .ddl import DdlPreview
-
-
-def _require(spec: Mapping[str, Any], key: str) -> str:
-    """
-    Read a required, non-blank string field off a spec.
-
-    Args:
-        spec: the preview op's spec mapping.
-        key: the field to read.
-
-    Raises:
-        ValidationError: if the field is missing, not a string, or blank.
-
-    Returns:
-        The field's value.
-    """
-    value = spec.get(key)
-
-    if not isinstance(value, str) or not value.strip():
-        raise ValidationError(f"'{key}' is required")
-
-    return value
+from .ddl import DdlPreview, require_field
 
 
 def _parse_args(raw_args: Any) -> list[ddl.FunctionArg]:
@@ -62,7 +40,7 @@ def _parse_args(raw_args: Any) -> list[ddl.FunctionArg]:
 
     for raw in raw_args or []:
         parsed.append(ddl.FunctionArg(
-            type=_require(raw, "type"),
+            type=require_field(raw, "type"),
             name=raw.get("name") or None,
             mode=raw.get("mode") or None,
             default=raw.get("default") or None,
@@ -90,7 +68,7 @@ def _parse_position(raw: Any) -> tuple[str, str] | None:
         return None
 
     placement = raw.get("placement")
-    label = _require(raw, "label")
+    label = require_field(raw, "label")
 
     if placement not in ("before", "after"):
         raise ValidationError("'position.placement' must be 'before' or 'after'")
@@ -117,8 +95,8 @@ class CreateFunctionPreview(DdlPreview):
         """
         super().__init__()
         self._spec_obj = ddl.CreateRoutineSpec(
-            schema=_require(spec, "schema"),
-            name=_require(spec, "name"),
+            schema=require_field(spec, "schema"),
+            name=require_field(spec, "name"),
             kind=str(spec.get("kind", "function")),
             args=_parse_args(spec.get("args")),
             language=str(spec.get("language", "sql")),
@@ -150,8 +128,8 @@ class DropFunctionPreview(DdlPreview):
             spec: the ``DropFunctionSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._kind: str = str(spec.get("kind", "function"))
         self._signature: str = str(spec.get("signature", ""))
         self._spec: Mapping[str, Any] = spec
@@ -184,8 +162,8 @@ class CreateEnumTypePreview(DdlPreview):
             spec: the ``CreateEnumTypeSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._labels: list[str] = list(spec.get("labels", []))
 
     def build(self) -> None:
@@ -212,10 +190,10 @@ class CreateCompositeTypePreview(DdlPreview):
             ValidationError: on a blank schema/name/attribute name/type.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._attrs: list[ddl.CompositeAttr] = [
-            ddl.CompositeAttr(name=_require(a, "name"), type=_require(a, "type"))
+            ddl.CompositeAttr(name=require_field(a, "name"), type=require_field(a, "type"))
             for a in spec.get("attributes", [])
         ]
 
@@ -240,8 +218,8 @@ class DropTypePreview(DdlPreview):
             spec: the ``DropTypeSpec`` wire payload.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
         self._spec: Mapping[str, Any] = spec
 
     def build(self) -> None:
@@ -275,9 +253,9 @@ class AlterTypeAddValuePreview(DdlPreview):
                 ``position``.
         """
         super().__init__()
-        self._schema: str = _require(spec, "schema")
-        self._name: str = _require(spec, "name")
-        self._value: str = _require(spec, "value")
+        self._schema: str = require_field(spec, "schema")
+        self._name: str = require_field(spec, "name")
+        self._value: str = require_field(spec, "value")
         self._position: tuple[str, str] | None = _parse_position(spec.get("position"))
 
     def build(self) -> None:

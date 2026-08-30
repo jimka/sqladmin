@@ -54,11 +54,14 @@ def test_drop_view_cascade() -> None:
     assert ddl.drop_view("public", "v", cascade=True) == 'DROP VIEW "public"."v" CASCADE'
 
 
-# --- rename_view ---------------------------------------------------------------
+def test_drop_view_if_exists() -> None:
+    assert ddl.drop_view("public", "v", if_exists=True) == 'DROP VIEW IF EXISTS "public"."v"'
 
 
-def test_rename_view() -> None:
-    assert ddl.rename_view("public", "v", "v2") == 'ALTER VIEW "public"."v" RENAME TO "v2"'
+def test_drop_view_if_exists_and_cascade() -> None:
+    sql = ddl.drop_view("public", "v", cascade=True, if_exists=True)
+
+    assert sql == 'DROP VIEW IF EXISTS "public"."v" CASCADE'
 
 
 # --- create_materialized_view --------------------------------------------------
@@ -89,13 +92,10 @@ def test_drop_materialized_view_basic() -> None:
     assert ddl.drop_materialized_view("public", "mv") == 'DROP MATERIALIZED VIEW "public"."mv"'
 
 
-# --- rename_materialized_view ---------------------------------------------------
+def test_drop_materialized_view_if_exists() -> None:
+    sql = ddl.drop_materialized_view("public", "mv", if_exists=True)
 
-
-def test_rename_materialized_view() -> None:
-    sql = ddl.rename_materialized_view("public", "mv", "mv2")
-
-    assert sql == 'ALTER MATERIALIZED VIEW "public"."mv" RENAME TO "mv2"'
+    assert sql == 'DROP MATERIALIZED VIEW IF EXISTS "public"."mv"'
 
 
 # --- refresh_materialized_view -------------------------------------------------

@@ -13,17 +13,14 @@ quoting is needed.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
 from ..contract import SequenceOwnedBy, TableRef
 from ..errors import NotFound
-from .base import Query
+from .base import CatalogQuery
 
 
-class SequenceDetailQuery(Query):
+class SequenceDetailQuery(CatalogQuery):
     """
     Fetch a sequence's state and parameters from ``pg_sequences``.
     """
@@ -66,15 +63,8 @@ class SequenceDetailQuery(Query):
         """
         Capture the connection and the sequence to introspect.
         """
-        self._conn: asyncpg.Connection = conn
+        super().__init__(conn, table.schema, table.name)
         self._table: TableRef = table
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the detail row (zero or one row) for the sequence.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._table.schema, self._table.name)
 
     def get_result(self) -> dict:
         """
@@ -93,13 +83,12 @@ class SequenceDetailQuery(Query):
             sequence was never read or the role lacks ``USAGE``/``SELECT`` on
             it, and ``ownedBy`` is ``None`` for a standalone sequence.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
+        rows = self._rows()
 
-        if not self._raw:
+        if not rows:
             raise NotFound(f"Sequence '{self._table.schema}.{self._table.name}' not found")
 
-        row = self._raw[0]
+        row = rows[0]
         last_value = row["last_value"]
         owned_by_schema = row["owned_by_schema"]
 

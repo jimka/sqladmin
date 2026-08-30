@@ -8,18 +8,44 @@ when the preview needs to know existing state (e.g. an ALTER TABLE preview
 reading a table's current columns).
 
 ``ExecuteDdlCommand`` is the single execute op every phase reuses: it runs
-one final (possibly user-edited) DDL statement and returns the same status
-envelope ``RunQueryCommand`` emits for a non-row statement, so the frontend's
-``QueryStatusResult`` handling needs no DDL-specific branch.
+one final (possibly user-edited) previewed DDL script and returns the same
+status envelope ``RunQueryCommand`` emits for a non-row statement, so the
+frontend's ``QueryStatusResult`` handling needs no DDL-specific branch. The
+script is normally a single statement, but may be the ``DROP;\nCREATE`` pair
+``replace_materialized_view`` builds — the transaction wrap is what makes
+that pair atomic.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 import asyncpg
 
 from ..errors import ValidationError
+from ..sql.ddl import require_text
 from .base import Command, Query
 from .run_query import _affected
+
+
+def require_field(spec: Mapping[str, Any], key: str) -> str:
+    """
+    Read a required, non-blank string field off a spec — the mapping
+    adapter every DDL preview op's ``__init__`` calls in place of hand-rolled
+    validation, over the shared ``require_text``.
+
+    Args:
+        spec: the preview op's spec mapping.
+        key: the field to read.
+
+    Raises:
+        ValidationError: if the field is missing, not a string, or blank.
+
+    Returns:
+        The field's value.
+    """
+    return require_text(spec.get(key), key)
 
 
 class DdlPreview(Query):
@@ -70,9 +96,9 @@ class DdlPreview(Query):
 
 class ExecuteDdlCommand(Command):
     """
-    Run one final (possibly user-edited) DDL statement and return a status
-    envelope. The single shared execute op every DDL phase reuses — no phase
-    writes its own execute op.
+    Run one final (possibly user-edited) previewed DDL script and return a
+    status envelope. The single shared execute op every DDL phase reuses —
+    no phase writes its own execute op.
     """
 
     def __init__(self, conn: asyncpg.Connection, sql: str) -> None:
@@ -82,7 +108,10 @@ class ExecuteDdlCommand(Command):
 
         Args:
             conn: the connection the statement will run on.
-            sql: the final DDL text to execute (exactly one statement).
+            sql: the final DDL text to execute — normally a single statement,
+                but may be the ``DROP;\\nCREATE`` pair
+                ``replace_materialized_view`` builds, run atomically by the
+                transaction wrap in ``apply()``.
 
         Raises:
             ValidationError: if the SQL is empty or whitespace-only.

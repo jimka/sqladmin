@@ -10,17 +10,14 @@ kinds (``relkind IN ('v', 'm')``) so a table by the same name never leaks its
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 import asyncpg
 
 from ..contract import TableRef
 from ..errors import NotFound
-from .base import Query
+from .base import CatalogQuery
 
 
-class ViewDefinitionQuery(Query):
+class ViewDefinitionQuery(CatalogQuery):
     """
     Fetch a view/matview's ``pg_get_viewdef`` definition SQL.
     """
@@ -36,15 +33,8 @@ class ViewDefinitionQuery(Query):
         """
         Capture the connection and the (materialized) view to introspect.
         """
-        self._conn: asyncpg.Connection = conn
+        super().__init__(conn, table.schema, table.name)
         self._table: TableRef = table
-        self._raw: Sequence[Mapping[str, Any]] | None = None
-
-    async def apply(self) -> None:
-        """
-        Fetch the definition row (zero or one row) for the relation.
-        """
-        self._raw = await self._conn.fetch(self._SQL, self._table.schema, self._table.name)
 
     def get_result(self) -> dict:
         """
@@ -57,10 +47,9 @@ class ViewDefinitionQuery(Query):
         Returns:
             ``{"definition": str}`` — the reconstructed ``SELECT``.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
+        rows = self._rows()
 
-        if not self._raw:
+        if not rows:
             raise NotFound(f"View '{self._table.schema}.{self._table.name}' not found")
 
-        return {"definition": self._raw[0]["definition"]}
+        return {"definition": rows[0]["definition"]}

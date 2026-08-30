@@ -604,6 +604,13 @@ The backend has no generated API docs; [`backend/README.md`](backend/README.md#L
 
 ---
 
+## Implementation Notes
+
+- **The Phase 1 checkpoint's "exactly six files" grep now matches seven.** Step 4 expected `grep -rln "get_result() called before apply()" backend/app/operations/` to list only the six hand-guarded write/no-I/O ops (`explain_query.py`, `update_row.py`, `insert_row.py`, `run_query.py`, `import_rows.py`, `ddl.py`). Centralizing the guard in `CatalogQuery._rows()` (`base.py`) means that literal string now also lives in `base.py` itself, so the same grep returns seven files. The check's intent — no module outside the sanctioned seven hand-rolls its own before-`apply()` guard — still holds; the plan's checkpoint text just predates the base class that now owns the message.
+- **Four test files outside the plan's "Files to Modify" table were touched.** `test_table_structure.py` (Expected Behaviour items 8-9: `ListIndexesQuery`/`IndexDetailQuery` `_args` bind-position assertions), `test_ddl_sql.py` (item 24: `require_text`), and `test_execute_ddl.py` (item 25: `require_field`) each gained new test functions pinning testable behaviour this plan introduced, with no other listed file to put them in; none of those three files' pre-existing tests were edited. `test_ddl_table_sql.py` is also outside the table, and unlike the other three its *pre-existing* `test_add_primary_key_empty_columns_raises`/`test_add_unique_empty_columns_raises` were edited (adding `match=` to pin item 23's exact messages, caught by this loop's own audit round 1). `test_graph.py` *is* in the Files to Modify table (step 18's columns test) and its `test_columns_wraps_column_meta_as_payload` was edited exactly as that step specifies; it also gained two new tests beyond step 18, pinning item 10's `SchemaIndexesQuery` bind positions the same way as the four files above.
+
+---
+
 ## Notes
 
 [^why-subclass]: `CatalogQuery` is a new subclass rather than an extension of `Query` itself because three `Query` subclasses do not fetch rows at all and would silently inherit a broken default. `DdlPreview` and its 18 preview subclasses build SQL with no I/O, `ExportRowsQuery` streams through a server-side cursor and has no `_raw`, and `PreviewImportRowsQuery` validates in memory and stores a `_result` dict. Giving `Query` a default `apply()` that reads `self._SQL`/`self._args` would replace their clear `NotImplementedError` with an `AttributeError`. Keeping `Query` and `Command` as bare markers also preserves `base.py`'s documented role as the contract, with the machinery one level down.

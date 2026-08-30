@@ -1,10 +1,13 @@
 """
-Pure DDL SQL-builder tests: qualify, quote_literal.
+Pure DDL SQL-builder tests: qualify, quote_literal, require_text.
 """
 
 from __future__ import annotations
 
-from app.sql.ddl import qualify, quote_literal
+import pytest
+
+from app.errors import ValidationError
+from app.sql.ddl import qualify, quote_literal, require_text
 
 
 # --- qualify ----------------------------------------------------------------
@@ -28,3 +31,25 @@ def test_quote_literal_wraps_in_single_quotes() -> None:
 
 def test_quote_literal_doubles_embedded_single_quote() -> None:
     assert quote_literal("a'b") == "'a''b'"
+
+
+# --- require_text --------------------------------------------------------------
+
+
+def test_require_text_blank_raises() -> None:
+    with pytest.raises(ValidationError, match="'name' is required"):
+        require_text("", "name")
+
+
+def test_require_text_whitespace_only_raises() -> None:
+    with pytest.raises(ValidationError, match="'name' is required"):
+        require_text("   ", "name")
+
+
+def test_require_text_non_string_raises() -> None:
+    with pytest.raises(ValidationError, match="'name' is required"):
+        require_text(42, "name")
+
+
+def test_require_text_returns_value_unchanged() -> None:
+    assert require_text(" x ", "name") == " x "

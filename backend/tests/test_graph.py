@@ -47,28 +47,31 @@ def test_columns_wraps_column_meta_as_payload() -> None:
     op._raw = [
         {
             "schema": "public", "table": "customers",
-            "name": "id", "data_type": "integer", "nullable": False,
+            "name": "id", "data_type": "integer", "full_type": "integer", "default_expr": None,
+            "nullable": False,
             "is_primary_key": True, "is_generated": True, "has_default": True,
             "sequence_schema": "public", "sequence_name": "customers_id_seq",
         },
         {
             "schema": "public", "table": "customers",
-            "name": "balance", "data_type": "numeric", "nullable": False,
-            "is_primary_key": False, "is_generated": False, "has_default": False,
+            "name": "balance", "data_type": "numeric", "full_type": "numeric(12,2)",
+            "default_expr": "0", "nullable": False,
+            "is_primary_key": False, "is_generated": False, "has_default": True,
             "sequence_schema": None, "sequence_name": None,
         },
     ]
 
-    # This op's raw rows carry no full_type/default_expr, so the ColumnMeta
-    # objects it builds fall back to the dataclass defaults ("" / None) —
-    # SchemaColumnsQuery is unrelated to the editable Structure tab.
+    # COLUMN_FROM's att sub-select gives this op the same full_type/default_expr
+    # columns the editable Structure tab reads — "balance" pins a case where
+    # full_type (carrying the modifier) differs from data_type (the SQL-standard
+    # name alone).
     assert op.get_result() == [
         {
             "schema": "public", "table": "customers",
             "payload": {
                 "name": "id", "dataType": "integer", "nullable": False,
                 "isPrimaryKey": True, "isGenerated": True, "hasDefault": True,
-                "wireType": "number", "fullType": "", "defaultExpr": None,
+                "wireType": "number", "fullType": "integer", "defaultExpr": None,
                 "sequence": {"schema": "public", "name": "customers_id_seq"},
             },
         },
@@ -76,8 +79,8 @@ def test_columns_wraps_column_meta_as_payload() -> None:
             "schema": "public", "table": "customers",
             "payload": {
                 "name": "balance", "dataType": "numeric", "nullable": False,
-                "isPrimaryKey": False, "isGenerated": False, "hasDefault": False,
-                "wireType": "string", "fullType": "", "defaultExpr": None,
+                "isPrimaryKey": False, "isGenerated": False, "hasDefault": True,
+                "wireType": "string", "fullType": "numeric(12,2)", "defaultExpr": "0",
                 "sequence": None,
             },
         },
@@ -144,6 +147,20 @@ def test_foreign_keys_maps_action_codes() -> None:
             },
         },
     ]
+
+
+def test_schema_indexes_binds_schema_no_table_no_index_and_system_schemas() -> None:
+    # SchemaIndexesQuery shares INDEX_FROM with ListIndexesQuery/IndexDetailQuery
+    # (whose $2/$3 it always binds NULL) plus its own $4 system-schema exclusion.
+    op = _query(SchemaIndexesQuery)
+
+    assert op._args == ("public", None, None, ["pg_catalog", "information_schema"])
+
+
+def test_schema_indexes_none_schema_scopes_the_whole_database() -> None:
+    op = SchemaIndexesQuery(NO_CONN, None)
+
+    assert op._args[0] is None
 
 
 def test_get_result_before_apply_raises_for_all_five() -> None:

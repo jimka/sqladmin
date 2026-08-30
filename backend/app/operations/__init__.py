@@ -3,7 +3,6 @@ CQRS operation handlers — one operation per module, aggregated here so call
 sites import from ``app.operations`` regardless of file layout.
 """
 
-from .base import Command, Operation, Query
 from .ddl import DdlPreview, ExecuteDdlCommand
 from .ddl_function_type import (
     AlterTypeAddValuePreview,
@@ -78,9 +77,6 @@ from .update_row import UpdateRowCommand
 from .view_definition import ViewDefinitionQuery
 
 __all__ = [
-    "Operation",
-    "Query",
-    "Command",
     "ListDatabasesQuery",
     "ListSchemasQuery",
     "ListObjectsQuery",

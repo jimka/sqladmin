@@ -8,7 +8,6 @@ any I/O). ``count(*) OVER()`` yields the total in the same round-trip.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from typing import Any
 
 import asyncpg
@@ -16,14 +15,14 @@ import asyncpg
 from ..contract import ColumnMeta, TableRef
 from ..sql.compiler import FilterCompiler, OrderCompiler
 from ..wire import rows_to_wire
-from .base import Query
+from .base import CatalogQuery
 from .common import qualified
 
 # Cap the page size so a hostile/buggy client can't request an unbounded read.
 _MAX_PAGE_SIZE = 1000
 
 
-class ListRowsQuery(Query):
+class ListRowsQuery(CatalogQuery):
     """
     Read one page of a table, with optional sort and filter.
     """
@@ -53,7 +52,7 @@ class ListRowsQuery(Query):
         Raises:
             ValidationError: if a sort/filter identifier is not a known column.
         """
-        self._conn: asyncpg.Connection = conn
+        super().__init__(conn)
         self._table: TableRef = table
         self._columns: list[ColumnMeta] = columns
 
@@ -64,7 +63,6 @@ class ListRowsQuery(Query):
         self._order: str = OrderCompiler(sort, columns).compile()
         self._limit: int = max(1, min(int(page_size), _MAX_PAGE_SIZE))
         self._offset: int = max(0, (max(1, int(page)) - 1) * self._limit)
-        self._raw: Sequence[Mapping[str, Any]] | None = None
 
     async def apply(self) -> None:
         """
@@ -87,10 +85,7 @@ class ListRowsQuery(Query):
         Returns:
             ``{"rows": [...], "totalCount": int}`` with wire-mapped scalar values.
         """
-        if self._raw is None:
-            raise RuntimeError("get_result() called before apply()")
-
-        records = [dict(r) for r in self._raw]
+        records = [dict(r) for r in self._rows()]
         total = int(records[0]["__total"]) if records else 0
 
         for r in records:
