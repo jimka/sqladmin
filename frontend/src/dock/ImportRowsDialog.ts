@@ -6,10 +6,9 @@
 // Files note).
 //
 // Import is a chrome button, always enabled, mirroring SqlPreviewDialog's
-// Cancel/Execute pair — but unlike SqlPreviewDialog (whose Execute always
-// succeeds at closing and retries by rebuilding a fresh Dialog on a failed
-// execute), Import's own click is validated in place via `DialogButtonConfig.
-// onClick`: it returns `false` to veto the close (blocked — no valid preview
+// Cancel/Execute pair: its click is validated in place via
+// `DialogButtonConfig.onClick`, the same guard SqlPreviewDialog's Execute
+// uses. It returns `false` to veto the close (blocked — no valid preview
 // yet; or failed — the commit rejected), keeping this SAME Dialog instance
 // open, or `true` once `executeImportRows` actually succeeds. No retry loop,
 // no RetainedContentDialog: the dialog never closes on a blocked/failed
@@ -24,7 +23,6 @@
 import { Panel }                    from "@jimka/typescript-ui/core";
 import { VBox }                     from "@jimka/typescript-ui/layout";
 import { Text, FileDropZone }       from "@jimka/typescript-ui/component/input";
-import { Table }                    from "@jimka/typescript-ui/component/table";
 import { MemoryStore, Model }       from "@jimka/typescript-ui/data";
 import { Dialog }                   from "@jimka/typescript-ui/overlay";
 import type { DialogButtonConfig }  from "@jimka/typescript-ui/overlay";
@@ -35,6 +33,7 @@ import { parseImportFile }          from "../data/parseImport";
 import { toFields }                 from "../data/buildModel";
 import { PAGE_SIZE }                from "../data/stores";
 import { buildPreviewGridRows }     from "./importPreviewRows";
+import { readOnlyTable }            from "./columnsGrid";
 
 /** Options for {@link openImportRowsDialog}. */
 export interface ImportRowsDialogOptions {
@@ -92,7 +91,7 @@ async function runImportRowsDialog(options: ImportRowsDialogOptions): Promise<vo
         { name: "error", type: "string" as const, order: options.columns.length, description: "Error" },
     ];
     const previewStore = new MemoryStore(new Model({ fields }));
-    const previewGrid  = Table(previewStore, { columns: [], autoSizeColumns: true, rowReadOnly: () => true });
+    const previewGrid  = readOnlyTable(previewStore);
     previewGrid.setPreferredSize({ width: 0, height: PREVIEW_GRID_HEIGHT });
 
     // The last parsed file's ORIGINAL (uncoerced) rows, and their preview

@@ -1,7 +1,8 @@
 // The generic "confirm a drop" form: a one-line summary plus an optional
-// CASCADE checkbox. Reused by drop-table, drop-column, drop-constraint, and
-// drop-index — every drop launcher builds one with its own summary text and
-// embeds it as a SqlPreviewDialog's `form`.
+// CASCADE checkbox. Reused by drop-table, drop-view, drop-materialized-view,
+// drop-schema, drop-sequence, drop-index, drop-constraint, drop-function and
+// drop-type — every drop launcher builds one with its own summary text and
+// embeds it as a SqlPreviewDialog's `form`. There is no drop-column flow.
 
 import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";

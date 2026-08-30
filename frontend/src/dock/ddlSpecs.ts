@@ -1,10 +1,11 @@
-// Pure spec-assembly helpers for the table-DDL dialog forms: translate a
-// form's collected rows/fields into the wire spec the matching preview
-// client sends. Kept DOM-free (see memory "tsui DOM module side effects") so
-// vitest (node-only) can pin them; each form (CreateTableForm, ConstraintForm,
-// IndexForm, ColumnChecklist) is a thin collector that hands its inputs to
-// one of these — as is StructurePanel's Columns-grid Save flow, via
-// diffColumnSpecs/describeColumnSpecs below.
+// Pure spec-assembly helpers for the app's DDL flows: translate a form's
+// collected rows/fields into the wire spec the matching preview client
+// sends. Kept DOM-free (see memory "tsui DOM module side effects") so vitest
+// (node-only) can pin them. Every DDL form under dock/ is a thin collector
+// that hands its inputs to one of these; so are the two in-tab Save flows
+// (StructurePanel's Columns-grid diff, via diffColumnSpecs/
+// describeColumnSpecs below, and SequenceInfoPanel's, via diffSequenceSpecs)
+// and SqlAdminController's own drop launchers.
 
 import type {
     AlterColumnAction,
@@ -437,7 +438,7 @@ export function parseColumnList(text: string): string[] {
  * fetched view/matview definition before it goes back into a `select` spec
  * field. `getViewDefinition` (pg_get_viewdef) always terminates its output
  * with a semicolon, but `CreateViewSpec.select` / `ReplaceMatviewSpec.select`
- * expect a bare SELECT body with none — see ViewFormDialog's
+ * expect a bare SELECT body with none — see ViewForm's
  * `NEW_VIEW_SELECT_SKELETON`. A CREATE VIEW harmlessly absorbs a stray
  * trailing semicolon into its own statement terminator, but a materialized
  * view's DROP+CREATE replace pair appends `WITH DATA` right after the select

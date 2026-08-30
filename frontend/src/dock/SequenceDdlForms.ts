@@ -1,50 +1,23 @@
-// The CREATE / DROP SEQUENCE dialog forms + launchers. Sequences are
-// schema-scoped: create is launched from a schema node, drop from a
-// sequence leaf. ALTER SEQUENCE (parameters and OWNER TO) no longer has a
-// modal dialog — it is now driven from the editable sequence info tab (see
+// The CREATE SEQUENCE form. Sequences are schema-scoped: create is launched
+// from a schema node, drop from a sequence leaf — drop reuses the generic
+// ConfirmCascadeForm and is built inline by the controller's `dropSequence`
+// launcher. ALTER SEQUENCE (parameters and OWNER TO) no longer has a modal
+// dialog either — it is now driven from the editable sequence info tab (see
 // SequenceInfoPanel.ts and plans/implemented/editable-sequence-tab.md),
 // which reuses buildAlterSequenceSpec/buildSequenceOwnerSpec via
 // ddlSpecs.ts's diffSequenceSpecs instead of a form here.
 
-import { Panel } from "@jimka/typescript-ui/core";
+import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
 import { Checkbox, TextField } from "@jimka/typescript-ui/component/input";
-import type {
-    CreateSequenceSpec,
-    DdlPreview,
-    DropSequenceSpec,
-    QueryStatusResult,
-} from "../contract";
-import { openSqlPreviewDialog } from "./SqlPreviewDialog";
-import { ConfirmCascadeForm } from "./ConfirmCascadeForm";
-import {
-    buildCreateSequenceSpec,
-    buildDropSequenceSpec,
-    parseOptionalInt,
-} from "./ddlSpecs";
+import type { CreateSequenceSpec } from "../contract";
+import { buildCreateSequenceSpec, parseOptionalInt } from "./ddlSpecs";
 
-// --- Create -----------------------------------------------------------------
-
-/** Dependencies for {@link openCreateSequenceDialog}. */
-export interface CreateSequenceDialogDeps {
-    /** The schema the new sequence is created in (fixed — the launcher is
-     *  invoked from that schema's navigator node). */
-    schema: string;
-
-    /** Preview the CREATE SEQUENCE statement for the form's current fields. */
-    preview: (spec: CreateSequenceSpec) => Promise<DdlPreview>;
-
-    /** Execute the (possibly edited) previewed SQL. */
-    execute: (sql: string) => Promise<QueryStatusResult>;
-
-    /** Called after a successful execute. */
-    onSuccess: (result: QueryStatusResult) => void;
-
-    /** Reports a preview/execute error. */
-    onError: (message: string) => void;
-}
-
-/** The CREATE SEQUENCE form: a name field, the optional numeric options, and CYCLE. */
+/**
+ * The CREATE SEQUENCE form: a name field, the optional numeric options, and
+ * CYCLE. Embedded as a `DdlFormPanel` dock tab's form by the controller's
+ * `createSequence` launcher.
+ */
 class CreateSequenceForm extends Panel {
     private readonly _schema: string;
     private readonly _nameField: TextField;
@@ -102,60 +75,6 @@ class CreateSequenceForm extends Panel {
     }
 }
 
-/**
- * Open the CREATE SEQUENCE dialog.
- *
- * @param deps - the target schema and preview/execute callbacks.
- */
-export function openCreateSequenceDialog(deps: CreateSequenceDialogDeps): void {
-    const form = new CreateSequenceForm(deps.schema);
-
-    openSqlPreviewDialog({
-        title: "Create sequence",
-        form,
-        generateSql: async () => (await deps.preview(form.readSpec())).sql,
-        execute:     deps.execute,
-        onSuccess:   deps.onSuccess,
-        onError:     deps.onError,
-    });
-}
-
-// --- Drop --------------------------------------------------------------------
-
-/** Dependencies for {@link openDropSequenceDialog}. */
-export interface DropSequenceDialogDeps {
-    schema: string;
-    name: string;
-
-    /** Preview the DROP SEQUENCE statement for the form's current CASCADE toggle. */
-    preview: (spec: DropSequenceSpec) => Promise<DdlPreview>;
-
-    /** Execute the (possibly edited) previewed SQL. */
-    execute: (sql: string) => Promise<QueryStatusResult>;
-
-    /** Called after a successful execute. */
-    onSuccess: (result: QueryStatusResult) => void;
-
-    /** Reports a preview/execute error. */
-    onError: (message: string) => void;
-}
-
-/**
- * Open the DROP SEQUENCE dialog. Reuses the generic {@link ConfirmCascadeForm},
- * matching drop-table/drop-index's idiom.
- *
- * @param deps - the target sequence and preview/execute callbacks.
- */
-export function openDropSequenceDialog(deps: DropSequenceDialogDeps): void {
-    const form = new ConfirmCascadeForm(`Drop sequence "${deps.schema}"."${deps.name}"?`);
-
-    openSqlPreviewDialog({
-        title: "Drop sequence",
-        form,
-        generateSql: async () =>
-            (await deps.preview(buildDropSequenceSpec(deps.schema, deps.name, form.readSpec().cascade))).sql,
-        execute:   deps.execute,
-        onSuccess: deps.onSuccess,
-        onError:   deps.onError,
-    });
-}
+const CreateSequenceFormCallable = callable(CreateSequenceForm);
+type CreateSequenceFormCallable = CreateSequenceForm;
+export { CreateSequenceFormCallable as CreateSequenceForm };

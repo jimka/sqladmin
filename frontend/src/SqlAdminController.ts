@@ -49,22 +49,24 @@ import { openImportRowsDialog }                                                 
 import { StructurePanel }                                                                                                                                                                          from "./dock/StructurePanel";
 import type { StructureActions, StructureRefresh }                                                                                                                                                from "./dock/StructurePanel";
 import { openSqlPreviewDialog }                                                                                                                                                                    from "./dock/SqlPreviewDialog";
+import { DdlFormPanel }                                                                                                                                                                            from "./dock/DdlFormPanel";
+import type { DdlDraft, DdlExecuteDeps }                                                                                                                                                           from "./dock/DdlFormPanel";
 import { CreateTableForm }                                                                                                                                                                         from "./dock/CreateTableForm";
 import { RenameTableForm }                                                                                                                                                                         from "./dock/RenameTableForm";
 import { ConstraintForm }                                                                                                                                                                          from "./dock/ConstraintForm";
 import { IndexForm }                                                                                                                                                                               from "./dock/IndexForm";
 import { ConfirmCascadeForm }                                                                                                                                                                      from "./dock/ConfirmCascadeForm";
-import { openViewDialog }                                                                                                                                                                          from "./dock/ViewFormDialog";
-import { openMaterializedViewDialog }                                                                                                                                                              from "./dock/MaterializedViewFormDialog";
-import { openDropRelationDialog, openRefreshMatviewDialog }                                                                                                                                        from "./dock/RelationDdlActions";
-import { stripTrailingSemicolon }                                                                                                                                                                  from "./dock/ddlSpecs";
-import { openCreateSchemaDialog, openDropSchemaDialog, openRenameSchemaDialog }                                                                                                                    from "./dock/SchemaDdlForms";
-import { openCreateSequenceDialog, openDropSequenceDialog }                                                                                                                                        from "./dock/SequenceDdlForms";
+import { ViewForm }                                                                                                                                                                                from "./dock/ViewForm";
+import { MaterializedViewForm }                                                                                                                                                                    from "./dock/MaterializedViewForm";
+import { RefreshMatviewForm }                                                                                                                                                                      from "./dock/RefreshMatviewForm";
+import { stripTrailingSemicolon, buildDropSchemaSpec, buildRenameSchemaSpec, buildDropSequenceSpec }                                                                                               from "./dock/ddlSpecs";
+import { CreateSchemaForm, RenameSchemaForm }                                                                                                                                                      from "./dock/SchemaDdlForms";
+import { CreateSequenceForm }                                                                                                                                                                      from "./dock/SequenceDdlForms";
 import { FunctionForm }                                                                                                                                                                            from "./dock/FunctionForm";
 import { EnumTypeForm }                                                                                                                                                                            from "./dock/EnumTypeForm";
 import { CompositeTypeForm }                                                                                                                                                                       from "./dock/CompositeTypeForm";
 import { AddEnumValueForm }                                                                                                                                                                        from "./dock/AddEnumValueForm";
-import { buildDropFunctionSpec, buildDropTypeSpec }                                                                                                                                                from "./dock/ddlSpecs";
+import { buildDropFunctionSpec, buildDropTypeSpec, buildConstraintSpec, buildIndexSpec }                                                                                                           from "./dock/ddlSpecs";
 import { DefinitionPanel }                                                                                                                                                                         from "./dock/DefinitionPanel";
 import { FunctionDefinitionPanel }                                                                                                                                                                 from "./dock/FunctionDefinitionPanel";
 import { SequenceInfoPanel }                                                                                                                                                                       from "./dock/SequenceInfoPanel";
@@ -1074,22 +1076,74 @@ export class SqlAdminController {
     }
 
     /**
-     * Open the CREATE TABLE dialog for a schema (the navigator's schema
-     * context-menu launcher). Success refreshes the navigator, since a new
-     * table changes the schema's object list.
+     * The execute + error-report pair every DDL flow — tab-hosted or
+     * dialog-hosted — wires the same way: run the previewed SQL through
+     * `executeDdl`, and report a preview/execute failure through
+     * `notifyError`.
+     *
+     * @param ref - The DDL flow's target, threaded through to `notifyError`.
+     */
+    private ddlDefaults(ref: DbObjectRef): DdlExecuteDeps {
+        return {
+            execute: sql => executeDdl(this._connectionId, sql),
+            onError: msg => this.notifyError(new Error(msg), ref),
+        };
+    }
+
+    /**
+     * Open (or focus) a DDL draft tab: a `DdlFormPanel` hosting `spec.build()`'s
+     * form, deduped by `ddlPanelId`. `build` is a factory so nothing is
+     * constructed on the dedup (already-open) path. A successful execute
+     * closes the tab and refreshes the navigator.
+     *
+     * @param spec - The draft's target ref/slug (together the panel id), its
+     *   tab title/glyph, its review dialog's title, and the form factory.
+     */
+    private openDdlPanel(spec: {
+        ref: DbObjectRef; slug: string; title: string; glyph: string;
+        reviewTitle: string; build: () => DdlDraft;
+    }): void {
+        const id = this.ddlPanelId(spec.ref, spec.slug);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const draft = spec.build();
+        const panel = new DdlFormPanel({
+            reviewTitle: spec.reviewTitle,
+            form:        draft.form,
+            generateSql: draft.generateSql,
+            onSuccess:   () => {
+                this.dock.removePanel(id);
+                this._navigator?.refresh?.();
+            },
+            ...this.ddlDefaults(spec.ref),
+        });
+
+        this.dock.addPanel({ id, title: spec.title, glyph: spec.glyph, content: panel });
+    }
+
+    /**
+     * Open (or focus) the CREATE TABLE draft tab for a schema (the
+     * navigator's schema context-menu launcher). A successful execute closes
+     * the tab and refreshes the navigator, since a new table changes the
+     * schema's object list.
      *
      * @param ref - The target schema (kind "schema"; database + schema set).
      */
     createTable(ref: DbObjectRef): void {
-        const form = new CreateTableForm(ref.schema!);
+        this.openDdlPanel({
+            ref,
+            slug:        "table",
+            title:       `New table (${ref.schema})`,
+            glyph:       KIND_GLYPH.table,
+            reviewTitle: "Create table",
+            build:       () => {
+                const form = new CreateTableForm(ref.schema!);
 
-        openSqlPreviewDialog({
-            title:       "Create table",
-            form,
-            generateSql: async () => (await previewCreateTable(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
-            onSuccess:   () => this._navigator?.refresh?.(),
-            onError:     msg => this.notifyError(new Error(msg), ref),
+                return { form, generateSql: async () => (await previewCreateTable(ref, form.readSpec())).sql };
+            },
         });
     }
 
@@ -1111,13 +1165,12 @@ export class SqlAdminController {
             form,
             generateSql: async () =>
                 (await previewDropTable(ref, { schema: ref.schema!, name: ref.name!, ...form.readSpec() })).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => {
                 this._navigator?.refresh?.();
                 this.dock.removePanel(this.panelId(ref));
                 this.dock.removePanel(this.structurePanelId(ref));
             },
-            onError: msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1138,13 +1191,12 @@ export class SqlAdminController {
             title:       "Rename table",
             form,
             generateSql: async () => (await previewAlterTable(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
             onSuccess:   () => {
                 this._navigator?.refresh?.();
                 this.dock.removePanel(this.panelId(ref));
                 this.dock.removePanel(this.structurePanelId(ref));
             },
-            onError: msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1163,13 +1215,13 @@ export class SqlAdminController {
         let schemas: string[] = [];
 
         if (kind === "foreignKey") {
-            try {
-                schemas = (await getSchemas(ref.connectionId, ref.database!)).map(s => s.name);
-            } catch (err) {
-                this.notifyError(err, ref);
+            const fetched = await this.fetchSchemaNames(ref);
 
+            if (fetched === null) {
                 return;
             }
+
+            schemas = fetched;
         }
 
         const form = new ConstraintForm(ref.schema!, ref.name!, kind, columns, schemas);
@@ -1178,9 +1230,8 @@ export class SqlAdminController {
             title:       "Add constraint",
             form,
             generateSql: async () => (await previewConstraint(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
             onSuccess:   () => this.refreshStructure(ref),
-            onError:     msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1198,12 +1249,12 @@ export class SqlAdminController {
         openSqlPreviewDialog({
             title:       "Drop constraint",
             form,
-            generateSql: async () => (await previewConstraint(ref, {
-                schema: ref.schema!, name: ref.name!, action: "drop", constraintName, ...form.readSpec(),
-            })).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
+            generateSql: async () =>
+                (await previewConstraint(ref, buildConstraintSpec(ref.schema!, ref.name!, "drop", {
+                    constraintName, cascade: form.readSpec().cascade,
+                }))).sql,
             onSuccess: () => this.refreshStructure(ref),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1221,9 +1272,8 @@ export class SqlAdminController {
             title:       "Create index",
             form,
             generateSql: async () => (await previewIndex(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
             onSuccess:   () => this.refreshStructure(ref),
-            onError:     msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1240,12 +1290,12 @@ export class SqlAdminController {
         openSqlPreviewDialog({
             title:       "Drop index",
             form,
-            generateSql: async () => (await previewIndex(ref, {
-                schema: ref.schema!, action: "drop", indexName, ...form.readSpec(),
-            })).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
+            generateSql: async () =>
+                (await previewIndex(ref, buildIndexSpec(ref.schema!, "drop", {
+                    indexName, cascade: form.readSpec().cascade,
+                }))).sql,
             onSuccess: () => this.refreshStructure(ref),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1282,66 +1332,97 @@ export class SqlAdminController {
             title:       "Create index",
             form,
             generateSql: async () => (await previewIndex(ref, form.readSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
             onSuccess:   () => this.refreshStructure(ref),
-            onError:     msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
     /**
-     * Open the CREATE VIEW dialog for a schema (the navigator's schema
-     * context-menu launcher). Fetches the connection's schema list for the
-     * form's schema ComboBox. Success refreshes the navigator, since a new
-     * view changes the schema's object list.
+     * The connection's schema names, for a form's schema combo or a
+     * referenced-schema list. Every DDL launcher that needs the connection's
+     * schemas shares this one preamble.
+     *
+     * @param ref - Identifies the connection/database to fetch from; also
+     *   the target passed to `notifyError` on a failed fetch.
+     * @returns the schema names, or `null` after reporting the failure —
+     *   the caller returns without opening anything on `null`.
+     */
+    private async fetchSchemaNames(ref: DbObjectRef): Promise<string[] | null> {
+        try {
+            return (await getSchemas(ref.connectionId, ref.database!)).map(s => s.name);
+        } catch (err) {
+            this.notifyError(err, ref);
+
+            return null;
+        }
+    }
+
+    /**
+     * The shared body of {@link createView} and {@link createMaterializedView}:
+     * fetch the connection's schema list for the form's schema combo, then
+     * open (or focus) the matching draft tab. A successful execute closes
+     * the tab and refreshes the navigator, since a new relation changes the
+     * schema's object list.
+     *
+     * @param ref - The target schema (kind "schema"; database + schema set).
+     * @param kind - Which relation flow to open.
+     */
+    private async createRelationDraft(ref: DbObjectRef, kind: "view" | "materializedView"): Promise<void> {
+        const schemas = await this.fetchSchemaNames(ref);
+
+        if (schemas === null) {
+            return;
+        }
+
+        if (kind === "view") {
+            this.openDdlPanel({
+                ref,
+                slug:        "view",
+                title:       `New view (${ref.schema})`,
+                glyph:       KIND_GLYPH.view,
+                reviewTitle: "Create view",
+                build:       () => {
+                    const form = new ViewForm(ref, schemas);
+
+                    return { form, generateSql: async () => (await previewCreateView(ref, form.readSpec())).sql };
+                },
+            });
+
+            return;
+        }
+
+        this.openDdlPanel({
+            ref,
+            slug:        "matview",
+            title:       `New materialized view (${ref.schema})`,
+            glyph:       KIND_GLYPH.materializedView,
+            reviewTitle: "Create materialized view",
+            build:       () => {
+                const form = new MaterializedViewForm(ref, schemas);
+
+                return { form, generateSql: async () => (await previewCreateMatview(ref, form.readSpec())).sql };
+            },
+        });
+    }
+
+    /**
+     * Open (or focus) the CREATE VIEW draft tab for a schema (the
+     * navigator's schema context-menu launcher).
      *
      * @param ref - The target schema (kind "schema"; database + schema set).
      */
     async createView(ref: DbObjectRef): Promise<void> {
-        let schemas: string[];
-
-        try {
-            schemas = (await getSchemas(ref.connectionId, ref.database!)).map(s => s.name);
-        } catch (err) {
-            this.notifyError(err, ref);
-
-            return;
-        }
-
-        openViewDialog({
-            ref,
-            schemas,
-            preview:   spec => previewCreateView(ref, spec),
-            execute:   sql => executeDdl(this._connectionId, sql),
-            onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
-        });
+        await this.createRelationDraft(ref, "view");
     }
 
     /**
-     * Open the CREATE MATERIALIZED VIEW dialog for a schema (the
-     * navigator's schema context-menu launcher). Mirrors {@link createView}.
+     * Open (or focus) the CREATE MATERIALIZED VIEW draft tab for a schema
+     * (the navigator's schema context-menu launcher). Mirrors {@link createView}.
      *
      * @param ref - The target schema (kind "schema"; database + schema set).
      */
     async createMaterializedView(ref: DbObjectRef): Promise<void> {
-        let schemas: string[];
-
-        try {
-            schemas = (await getSchemas(ref.connectionId, ref.database!)).map(s => s.name);
-        } catch (err) {
-            this.notifyError(err, ref);
-
-            return;
-        }
-
-        openMaterializedViewDialog({
-            ref,
-            schemas,
-            createPreview:  spec => previewCreateMatview(ref, spec),
-            execute:        sql => executeDdl(this._connectionId, sql),
-            onSuccess:      () => this._navigator?.refresh?.(),
-            onError:        msg => this.notifyError(new Error(msg), ref),
-        });
+        await this.createRelationDraft(ref, "materializedView");
     }
 
     /**
@@ -1352,18 +1433,23 @@ export class SqlAdminController {
      * @param ref - The view/matview to drop.
      */
     dropRelation(ref: DbObjectRef): void {
-        openDropRelationDialog({
-            kind:    ref.kind,
-            schema:  ref.schema!,
-            name:    ref.name!,
-            preview: spec => ref.kind === "materializedView" ? previewDropMatview(ref, spec) : previewDropView(ref, spec),
-            execute: sql => executeDdl(this._connectionId, sql),
+        const label = ref.kind === "materializedView" ? "materialized view" : "view";
+        const form  = new ConfirmCascadeForm(`Drop ${label} "${ref.schema}"."${ref.name}"?`);
+
+        openSqlPreviewDialog({
+            title: `Drop ${label}`,
+            form,
+            generateSql: async () => (await (ref.kind === "materializedView" ? previewDropMatview : previewDropView)(ref, {
+                schema:  ref.schema!,
+                name:    ref.name!,
+                cascade: form.readSpec().cascade,
+            })).sql,
             onSuccess: () => {
                 this._navigator?.refresh?.();
                 this.dock.removePanel(this.panelId(ref));
                 this.dock.removePanel(this.definitionPanelId(ref));
             },
-            onError: msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1376,13 +1462,19 @@ export class SqlAdminController {
      * @param ref - The matview to refresh.
      */
     refreshMaterializedView(ref: DbObjectRef): void {
-        openRefreshMatviewDialog({
-            schema:    ref.schema!,
-            name:      ref.name!,
-            preview:   spec => previewRefreshMatview(ref, spec),
-            execute:   sql => executeDdl(this._connectionId, sql),
+        const form = new RefreshMatviewForm();
+
+        openSqlPreviewDialog({
+            title: "Refresh materialized view",
+            form,
+            generateSql: async () => (await previewRefreshMatview(ref, {
+                schema:       ref.schema!,
+                name:         ref.name!,
+                concurrently: form.concurrently(),
+                withNoData:   form.withNoData(),
+            })).sql,
             onSuccess: () => this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: refreshed`),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1398,11 +1490,25 @@ export class SqlAdminController {
      * @param ref - the launching schema node (its database is the target).
      */
     createSchema(ref: DbObjectRef): void {
-        openCreateSchemaDialog({
-            preview:   spec => previewCreateSchema(ref, spec),
-            execute:   sql => executeDdl(this._connectionId, sql),
-            onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+        // CREATE SCHEMA is database-scoped, but the launcher is a schema
+        // node's context menu (see this module's header) — synthesizing the
+        // database-level target here keys the draft tab on the database, not
+        // the launching schema, so every schema node's "Create schema…"
+        // focuses the same draft (see the plan's "database-scoped schema"
+        // Architecture Decision).
+        const target: DbObjectRef = { connectionId: ref.connectionId, database: ref.database, kind: "database" };
+
+        this.openDdlPanel({
+            ref:         target,
+            slug:        "schema",
+            title:       `New schema (${ref.database})`,
+            glyph:       KIND_GLYPH.schema,
+            reviewTitle: "Create schema",
+            build:       () => {
+                const form = new CreateSchemaForm();
+
+                return { form, generateSql: async () => (await previewCreateSchema(target, form.readSpec())).sql };
+            },
         });
     }
 
@@ -1413,12 +1519,15 @@ export class SqlAdminController {
      * @param ref - the schema to drop.
      */
     dropSchema(ref: DbObjectRef): void {
-        openDropSchemaDialog({
-            name:      ref.schema!,
-            preview:   spec => previewDropSchema(ref, spec),
-            execute:   sql => executeDdl(this._connectionId, sql),
+        const form = new ConfirmCascadeForm(`Drop schema "${ref.schema}"? This drops every object it contains.`);
+
+        openSqlPreviewDialog({
+            title: "Drop schema",
+            form,
+            generateSql: async () =>
+                (await previewDropSchema(ref, buildDropSchemaSpec(ref.schema!, form.readSpec().cascade))).sql,
             onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1430,12 +1539,15 @@ export class SqlAdminController {
      * @param ref - the schema to rename.
      */
     renameSchema(ref: DbObjectRef): void {
-        openRenameSchemaDialog({
-            name:      ref.schema!,
-            preview:   spec => previewRenameSchema(ref, spec),
-            execute:   sql => executeDdl(this._connectionId, sql),
+        const form = new RenameSchemaForm(ref.schema!);
+
+        openSqlPreviewDialog({
+            title: "Rename schema",
+            form,
+            generateSql: async () =>
+                (await previewRenameSchema(ref, buildRenameSchemaSpec(ref.schema!, form.newName()))).sql,
             onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1447,12 +1559,17 @@ export class SqlAdminController {
      * @param ref - the target schema (kind "schema"; database + schema set).
      */
     createSequence(ref: DbObjectRef): void {
-        openCreateSequenceDialog({
-            schema:    ref.schema!,
-            preview:   spec => previewCreateSequence(ref, spec),
-            execute:   sql => executeDdl(this._connectionId, sql),
-            onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+        this.openDdlPanel({
+            ref,
+            slug:        "sequence",
+            title:       `New sequence (${ref.schema})`,
+            glyph:       KIND_GLYPH.sequence,
+            reviewTitle: "Create sequence",
+            build:       () => {
+                const form = new CreateSequenceForm(ref.schema!);
+
+                return { form, generateSql: async () => (await previewCreateSequence(ref, form.readSpec())).sql };
+            },
         });
     }
 
@@ -1463,33 +1580,38 @@ export class SqlAdminController {
      * @param ref - the sequence to drop.
      */
     dropSequence(ref: DbObjectRef): void {
-        openDropSequenceDialog({
-            schema:    ref.schema!,
-            name:      ref.name!,
-            preview:   spec => previewDropSequence(ref, spec),
-            execute:   sql => executeDdl(this._connectionId, sql),
+        const form = new ConfirmCascadeForm(`Drop sequence "${ref.schema}"."${ref.name}"?`);
+
+        openSqlPreviewDialog({
+            title: "Drop sequence",
+            form,
+            generateSql: async () =>
+                (await previewDropSequence(ref, buildDropSequenceSpec(ref.schema!, ref.name!, form.readSpec().cascade))).sql,
             onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
     /**
-     * Open the CREATE FUNCTION/PROCEDURE dialog for a schema (the
-     * navigator's context-menu launcher). Success refreshes the navigator,
-     * since a new routine changes the schema's object list.
+     * Open (or focus) the CREATE FUNCTION/PROCEDURE draft tab for a schema
+     * (the navigator's context-menu launcher). A successful execute closes
+     * the tab and refreshes the navigator, since a new routine changes the
+     * schema's object list.
      *
      * @param ref - the target schema (kind "schema"; database + schema set).
      */
     createFunction(ref: DbObjectRef): void {
-        const form = new FunctionForm({ schema: ref.schema! });
+        this.openDdlPanel({
+            ref,
+            slug:        "function",
+            title:       `New function (${ref.schema})`,
+            glyph:       KIND_GLYPH.function,
+            reviewTitle: "Create function",
+            build:       () => {
+                const form = new FunctionForm({ schema: ref.schema! });
 
-        openSqlPreviewDialog({
-            title:       "Create function",
-            form,
-            generateSql: async () => (await previewCreateFunction(ref, form.getSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
-            onSuccess:   () => this._navigator?.refresh?.(),
-            onError:     msg => this.notifyError(new Error(msg), ref),
+                return { form, generateSql: async () => (await previewCreateFunction(ref, form.readSpec())).sql };
+            },
         });
     }
 
@@ -1625,66 +1747,70 @@ export class SqlAdminController {
             generateSql: async () => (await previewDropFunction(ref, buildDropFunctionSpec(
                 ref.schema!, ref.name!, kind, ref.signature ?? "", form.readSpec().cascade,
             ))).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => {
                 this._navigator?.refresh?.();
                 this.dock.removePanel(this.functionDefinitionPanelId(ref));
             },
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
     /**
-     * Open the CREATE TYPE dialog for a schema (the navigator's "Create
-     * type ▸ Enum | Composite" context-menu submenu). Success refreshes the
-     * navigator, since a new type changes the schema's object list.
+     * Open (or focus) the CREATE TYPE draft tab for a schema (the
+     * navigator's "Create type ▸ Enum | Composite" context-menu submenu). A
+     * successful execute closes the tab and refreshes the navigator, since a
+     * new type changes the schema's object list.
      *
      * @param ref - the target schema (kind "schema"; database + schema set).
      * @param category - which CREATE TYPE form to open.
      */
     createType(ref: DbObjectRef, category: "enum" | "composite"): void {
-        const onSuccess = (): void => this._navigator?.refresh?.();
-        const onError = (msg: string): void => this.notifyError(new Error(msg), ref);
-
         if (category === "enum") {
-            const form = new EnumTypeForm({ schema: ref.schema! });
+            this.openDdlPanel({
+                ref,
+                slug:        "enum-type",
+                title:       `New enum type (${ref.schema})`,
+                glyph:       KIND_GLYPH.type,
+                reviewTitle: "Create enum type",
+                build:       () => {
+                    const form = new EnumTypeForm({ schema: ref.schema! });
 
-            openSqlPreviewDialog({
-                title:       "Create enum type",
-                form,
-                generateSql: async () => (await previewCreateEnumType(ref, form.getSpec())).sql,
-                execute:     sql => executeDdl(this._connectionId, sql),
-                onSuccess,
-                onError,
+                    return { form, generateSql: async () => (await previewCreateEnumType(ref, form.readSpec())).sql };
+                },
             });
 
             return;
         }
 
-        const form = new CompositeTypeForm({ schema: ref.schema! });
+        this.openDdlPanel({
+            ref,
+            slug:        "composite-type",
+            title:       `New composite type (${ref.schema})`,
+            glyph:       KIND_GLYPH.type,
+            reviewTitle: "Create composite type",
+            build:       () => {
+                const form = new CompositeTypeForm({ schema: ref.schema! });
 
-        openSqlPreviewDialog({
-            title:       "Create composite type",
-            form,
-            generateSql: async () => (await previewCreateCompositeType(ref, form.getSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
-            onSuccess,
-            onError,
+                return {
+                    form,
+                    generateSql: async () => (await previewCreateCompositeType(ref, form.readSpec())).sql,
+                };
+            },
         });
     }
 
     /**
-     * Open the edit dialog for an existing type (the navigator's "Edit
+     * Open the edit flow for an existing type (the navigator's "Edit
      * type…" launcher). Introspects the type first, then routes on its
-     * category: an enum offers `ALTER TYPE ... ADD VALUE` (append-only —
-     * Postgres has no `CREATE OR REPLACE TYPE`); a composite offers a
-     * recreate/clone form prefilled with its current attributes (restructuring
-     * an existing composite in place is a stated Non-Goal — see the
-     * function-type-ddl plan's "enum edits are append-only" decision).
-     * Success refreshes the navigator only for the composite path (a new
-     * `CREATE TYPE` statement); an enum `ADD VALUE` does not change the
-     * object list, so it only sets a status message, mirroring
-     * `alterSequence`.
+     * category: an enum offers `ALTER TYPE ... ADD VALUE` in a dialog
+     * (append-only — Postgres has no `CREATE OR REPLACE TYPE`); a composite
+     * opens a recreate/clone draft tab prefilled with its current attributes
+     * (restructuring an existing composite in place is a stated Non-Goal —
+     * see the function-type-ddl plan's "enum edits are append-only"
+     * decision). The composite path's successful execute closes the tab and
+     * refreshes the navigator (a new `CREATE TYPE` statement); an enum
+     * `ADD VALUE` does not change the object list, so it only sets a status
+     * message, mirroring `alterSequence`.
      *
      * @param ref - the type leaf to edit.
      */
@@ -1699,8 +1825,6 @@ export class SqlAdminController {
             return;
         }
 
-        const onError = (msg: string): void => this.notifyError(new Error(msg), ref);
-
         if (definition.category === "enum") {
             const form = new AddEnumValueForm({
                 schema: ref.schema!, name: ref.name!, existingLabels: definition.labels,
@@ -1709,24 +1833,28 @@ export class SqlAdminController {
             openSqlPreviewDialog({
                 title:       "Add enum value",
                 form,
-                generateSql: async () => (await previewAlterTypeAddValue(ref, form.getSpec())).sql,
-                execute:     sql => executeDdl(this._connectionId, sql),
+                generateSql: async () => (await previewAlterTypeAddValue(ref, form.readSpec())).sql,
                 onSuccess:   () => this.statusBar.setMessage(`${this._statusScope} · ${ref.name}: altered`),
-                onError,
+                ...this.ddlDefaults(ref),
             });
 
             return;
         }
 
-        const form = new CompositeTypeForm({ schema: ref.schema!, prefill: definition.attributes });
+        this.openDdlPanel({
+            ref,
+            slug:        "composite-type",
+            title:       `Recreate ${ref.name} (composite type)`,
+            glyph:       KIND_GLYPH.type,
+            reviewTitle: "Edit composite type (recreate)",
+            build:       () => {
+                const form = new CompositeTypeForm({ schema: ref.schema!, prefill: definition.attributes });
 
-        openSqlPreviewDialog({
-            title:       "Edit composite type (recreate)",
-            form,
-            generateSql: async () => (await previewCreateCompositeType(ref, form.getSpec())).sql,
-            execute:     sql => executeDdl(this._connectionId, sql),
-            onSuccess:   () => this._navigator?.refresh?.(),
-            onError,
+                return {
+                    form,
+                    generateSql: async () => (await previewCreateCompositeType(ref, form.readSpec())).sql,
+                };
+            },
         });
     }
 
@@ -1745,9 +1873,8 @@ export class SqlAdminController {
             form,
             generateSql: async () =>
                 (await previewDropType(ref, buildDropTypeSpec(ref.schema!, ref.name!, form.readSpec().cascade))).sql,
-            execute:   sql => executeDdl(this._connectionId, sql),
             onSuccess: () => this._navigator?.refresh?.(),
-            onError:   msg => this.notifyError(new Error(msg), ref),
+            ...this.ddlDefaults(ref),
         });
     }
 
@@ -1766,23 +1893,20 @@ export class SqlAdminController {
     }
 
     /**
-     * Rebuild the structure tab (remove then reopen) after a structure-only
-     * change (a constraint or index add/drop, or a NOT-NULL/default toggle)
-     * — the data tab's column set is unaffected, so it's left open. A no-op
-     * if the structure tab isn't open or was opened without a navigator node
-     * (should not happen in practice — the navigator always supplies one).
+     * Reseed the open Structure tab in place after a structure-only change (a
+     * constraint or index add/drop, or a NOT-NULL/default toggle) — the data
+     * tab's column set is unaffected, so it's left open. Dispatches to the
+     * same in-place `refresh` closure `openStructure` registers (the one
+     * Alt+R and the Columns-Save success path already use), which keeps the
+     * tab's accordion open-state and scroll position rather than a
+     * remove-and-reopen. A no-op if the structure tab isn't open — including
+     * one opened from a deep link with no navigator node, which a
+     * remove-and-reopen used to close permanently.
      *
-     * @param ref - The table whose structure tab to rebuild.
+     * @param ref - The table whose structure tab to reseed.
      */
     private refreshStructure(ref: DbObjectRef): void {
-        const id   = this.structurePanelId(ref);
-        const node = this._openPanels.get(id)?.node;
-
-        this.dock.removePanel(id);
-
-        if (node) {
-            void this.openStructure(ref, node);
-        }
+        this._openPanels.get(this.structurePanelId(ref))?.refresh?.();
     }
 
     /**
@@ -3387,6 +3511,11 @@ export class SqlAdminController {
     /** Stable id for a type's info tab, distinct from any relation tab. */
     private typeInfoPanelId(ref: DbObjectRef): string {
         return `${this.panelId(ref)}::type`;
+    }
+
+    /** Stable id for a DDL draft tab. See the id table in `## Architecture Decisions`. */
+    private ddlPanelId(ref: DbObjectRef, slug: string): string {
+        return `${ref.connectionId}/${ref.database}/${ref.schema ?? ""}/${ref.name ?? ""}::ddl-${slug}`;
     }
 
     /**
