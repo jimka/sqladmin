@@ -9,9 +9,11 @@
 
 import type {
     AlterColumnAction,
+    AlterCompositeTypeSpec,
     AlterSequenceSpec,
     AlterTableSpec,
     AlterTypeAddValueSpec,
+    AlterTypeRenameValueSpec,
     ColumnMeta,
     ColumnSpec,
     ConstraintSpec,
@@ -27,6 +29,7 @@ import type {
     DropTypeSpec,
     FunctionArgSpec,
     IndexSpec,
+    RecreateEnumTypeSpec,
     RenameSchemaSpec,
     SequenceDetail,
     SequenceOwnedBy,
@@ -959,4 +962,480 @@ export function buildAlterTypeAddValueSpec(
     position?: { placement: "before" | "after"; label: string },
 ): AlterTypeAddValueSpec {
     return { schema, name, value, ...(position ? { position } : {}) };
+}
+
+/** The fields a composite-attribute action may carry; which ones apply depends on `action`. */
+export interface AlterCompositeTypeFields {
+    attribute?: string;
+    newName?: string;
+    newType?: string;
+    attributeDef?: { name: string; type: string };
+}
+
+/**
+ * Translate one composite-attribute ALTER gesture into its action-tagged
+ * spec, carrying only the fields that action needs — mirroring the backend's
+ * `AlterCompositeTypePreview.build()` dispatch.
+ *
+ * @param schema - the composite type's schema.
+ * @param name - the composite type's name.
+ * @param action - the ALTER ATTRIBUTE action the diff is emitting.
+ * @param fields - the action's collected fields (unused ones are ignored).
+ * @returns the spec `previewAlterCompositeType` sends.
+ */
+export function buildAlterCompositeTypeSpec(
+    schema: string,
+    name: string,
+    action: AlterCompositeTypeSpec["action"],
+    fields: AlterCompositeTypeFields,
+): AlterCompositeTypeSpec {
+    const base = { schema, name, action };
+
+    switch (action) {
+        case "addAttribute":
+            return { ...base, attributeDef: fields.attributeDef };
+        case "dropAttribute":
+            return { ...base, attribute: fields.attribute };
+        case "changeAttributeType":
+            return { ...base, attribute: fields.attribute, newType: fields.newType };
+        case "renameAttribute":
+            return { ...base, attribute: fields.attribute, newName: fields.newName };
+    }
+}
+
+/** One composite-attribute grid row, as the Save diff reads it. */
+export interface EditedAttributeRow {
+    /** The row's attribute name when the grid was seeded; "" for a row added since. */
+    originalName: string;
+    name: string;
+    type: string;
+}
+
+/**
+ * Diff the edited composite-attribute grid against the attributes the type
+ * tab loaded, returning the ALTER TYPE specs in execution order: drops
+ * (original order), then per-kept-row type changes (grid order, each keyed
+ * on the row's pre-rename `originalName`), then renames (grid order), then
+ * adds (grid order) — the same shape `diffColumnSpecs` uses, for the same
+ * reasons (see the plan's "Composite attributes: one statement per change,
+ * ordered like `diffColumnSpecs`" Architecture Decision). Every spec is
+ * assembled through {@link buildAlterCompositeTypeSpec}.
+ *
+ * @param schema - the composite type's schema.
+ * @param name - the composite type's name.
+ * @param original - the attributes the type tab loaded (the diff's baseline).
+ * @param edited - the body grid's current rows, in store order.
+ * @throws Error if a kept row's name or type is blank, or an added row has a
+ *   name but a blank type — naming the offending attribute, surfaced through
+ *   the Save flow's `onError` rather than opening a preview dialog.
+ * @returns the ordered specs; empty when nothing changed.
+ */
+export function diffCompositeAttributeSpecs(
+    schema: string,
+    name: string,
+    original: { name: string; type: string }[],
+    edited: EditedAttributeRow[],
+): AlterCompositeTypeSpec[] {
+    const byOriginal = new Map(original.map(a => [a.name, a] as const));
+    const kept        = edited.filter(r => r.originalName !== "");
+    const added       = edited.filter(r => r.originalName === "" && r.name.trim() !== "");
+    const keptNames   = new Set(kept.map(r => r.originalName));
+    const specs: AlterCompositeTypeSpec[] = [];
+
+    // 1. Drops, in the original attribute order.
+    for (const a of original) {
+        if (!keptNames.has(a.name)) {
+            specs.push(buildAlterCompositeTypeSpec(schema, name, "dropAttribute", { attribute: a.name }));
+        }
+    }
+
+    // 2. Per-kept-row type changes, always naming the pre-rename `base.name`.
+    for (const r of kept) {
+        const base = byOriginal.get(r.originalName);
+
+        if (!base) {
+            continue; // Defensive: every kept row's originalName came from `original`.
+        }
+        if (r.name.trim() === "") {
+            throw new Error(`Attribute "${r.originalName}" cannot be renamed to an empty name`);
+        }
+        if (r.type.trim() === "") {
+            throw new Error(`Attribute "${r.originalName}" needs a type`);
+        }
+
+        if (r.type.trim() !== base.type) {
+            specs.push(buildAlterCompositeTypeSpec(schema, name, "changeAttributeType", {
+                attribute: base.name, newType: r.type.trim(),
+            }));
+        }
+    }
+
+    // 3. Renames, in grid order — after every type change, so each type
+    //    change still names the pre-rename identifier.
+    for (const r of kept) {
+        const base = byOriginal.get(r.originalName);
+
+        if (base && r.name.trim() !== base.name) {
+            specs.push(buildAlterCompositeTypeSpec(schema, name, "renameAttribute", {
+                attribute: base.name, newName: r.name.trim(),
+            }));
+        }
+    }
+
+    // 4. Adds, in grid order — after drops/renames, so an added attribute
+    //    may reuse a name a drop or rename just freed.
+    for (const r of added) {
+        if (r.type.trim() === "") {
+            throw new Error(`New attribute "${r.name.trim()}" needs a type`);
+        }
+
+        specs.push(buildAlterCompositeTypeSpec(schema, name, "addAttribute", {
+            attributeDef: { name: r.name.trim(), type: r.type.trim() },
+        }));
+    }
+
+    return specs;
+}
+
+/**
+ * Describe one {@link AlterCompositeTypeSpec} as a single human-readable
+ * summary line, for the preview dialog's form panel.
+ *
+ * @param spec - the spec to describe.
+ * @returns the summary line.
+ */
+function describeCompositeSpec(spec: AlterCompositeTypeSpec): string {
+    switch (spec.action) {
+        case "addAttribute":
+            return `Add attribute: "${spec.attributeDef!.name}" ${spec.attributeDef!.type}`;
+        case "dropAttribute":
+            return `Drop attribute: "${spec.attribute}"`;
+        case "changeAttributeType":
+            return `Change type: "${spec.attribute}" → ${spec.newType}`;
+        case "renameAttribute":
+            return `Rename: "${spec.attribute}" → "${spec.newName}"`;
+    }
+}
+
+/**
+ * Describe every spec in `specs`, in order — one summary line per spec, for
+ * the Save preview dialog's form panel.
+ *
+ * @param specs - the diff's specs, in execution order.
+ * @returns one line per spec, in the same order; `[]` for an empty input.
+ */
+export function describeCompositeSpecs(specs: AlterCompositeTypeSpec[]): string[] {
+    return specs.map(describeCompositeSpec);
+}
+
+/** One enum-label grid row, as the Save diff reads it. */
+export interface EditedLabelRow {
+    /** The row's label when the grid was seeded; "" for a row added since. */
+    originalLabel: string;
+    label: string;
+}
+
+/**
+ * What a Save on an enum tab will run: no changes, a batch of in-place
+ * `ADD VALUE`/`RENAME VALUE` statements, or — when a loaded label was
+ * deleted — a full recreate (see the plan's "Enum labels: deleting a label
+ * routes the whole Save through a recreate" Architecture Decision).
+ *
+ * A recreate plan carries every kept rename twice, for two different jobs:
+ *
+ * - `renames` (the full set) rides in `spec.renames`, sent to the recreate
+ *   preview so the backend can rewrite a dependent column's stale DEFAULT
+ *   literal (see `RecreateEnumTypeSpec`'s doc) — needed regardless of
+ *   whether any given rename also runs live, because that introspection
+ *   runs before *any* statement in the script (live rename included) has
+ *   touched the database.
+ * - `liveRenames` is the subset actually run as standalone `RENAME VALUE`
+ *   statements against the original type, before the recreate script: this
+ *   is how a held row's data reads back under the post-rename spelling by
+ *   the time the migration casts it through `::text` (see
+ *   `alter_type_rename_value`'s doc — a rename's catalog-only effect, not a
+ *   physical rewrite). It excludes exactly the rename(s) whose `newValue`
+ *   collides with a label this same edit also removes: Postgres refuses
+ *   `RENAME VALUE ... TO 'x'` while a distinct label `'x'` still exists on
+ *   the type (`enum label "x" already exists`), and there is no `DROP
+ *   VALUE` to free it first — so that one case is left entirely to the
+ *   recreate step, whose `CREATE TYPE` already builds the fresh type from
+ *   `spec.labels`, the grid's final (already-renamed) label list.
+ */
+export type EnumEditPlan =
+    | { kind: "none" }
+    | { kind: "alter"; adds: AlterTypeAddValueSpec[]; renames: AlterTypeRenameValueSpec[] }
+    | {
+          kind: "recreate";
+          spec: RecreateEnumTypeSpec;
+          removed: string[];
+          renames: AlterTypeRenameValueSpec[];
+          liveRenames: AlterTypeRenameValueSpec[];
+      };
+
+/**
+ * Translate one ALTER TYPE ... RENAME VALUE gesture into its spec.
+ *
+ * @param schema - the enum type's schema.
+ * @param name - the enum type's name.
+ * @param value - the label as the database currently has it.
+ * @param newValue - the label's new text.
+ * @returns the spec `previewAlterTypeRenameValue` sends.
+ */
+export function buildAlterTypeRenameValueSpec(
+    schema: string, name: string, value: string, newValue: string,
+): AlterTypeRenameValueSpec {
+    return { schema, name, value, newValue };
+}
+
+/**
+ * Translate the enum recreate's final label list and this same edit's kept
+ * renames into its spec.
+ *
+ * @param schema - the enum type's schema.
+ * @param name - the enum type's name.
+ * @param labels - the recreated type's full label list, in order.
+ * @param renames - this same edit's kept renames, in full — including any
+ *   whose target collides with a same-edit removal (see {@link EnumEditPlan}'s
+ *   doc for why the backend needs the full set even though only some of them
+ *   also run live).
+ * @param collidingRenames - the subset of `renames` whose target collides
+ *   with a same-edit removal (see `RecreateEnumTypeSpec`'s doc for why the
+ *   backend's data migration needs this narrower list separately).
+ * @returns the spec `previewRecreateEnumType` sends.
+ */
+export function buildRecreateEnumTypeSpec(
+    schema: string,
+    name: string,
+    labels: string[],
+    renames: AlterTypeRenameValueSpec[],
+    collidingRenames: AlterTypeRenameValueSpec[],
+): RecreateEnumTypeSpec {
+    return {
+        schema, name, labels,
+        renames:          renames.map(r => ({ value: r.value, newValue: r.newValue })),
+        collidingRenames: collidingRenames.map(r => ({ value: r.value, newValue: r.newValue })),
+    };
+}
+
+/**
+ * Order a same-edit batch of label renames into a sequence of live
+ * `ALTER TYPE ... RENAME VALUE` statements that each succeed when run in
+ * that order. Postgres refuses to rename onto a label the type still has, so
+ * a rename's target can be blocked by more than just a same-edit removal
+ * (see {@link EnumEditPlan}'s doc for that case) — by another same-edit
+ * rename's still-live source, or by any other label the type currently has
+ * that this batch doesn't touch at all (a kept-unchanged label, or a
+ * same-edit rename `EnumEditPlan` itself excluded from live execution):
+ *
+ * - A *chain* (`"a"` → `"b"`, `"b"` → `"c"`) — the first rename must wait
+ *   for the second to run first, freeing `"b"`.
+ * - A *rotation* (`"a"` → `"b"`, `"b"` → `"a"`) — no order works at all,
+ *   since each rename's target is the other's still-live source. Broken by
+ *   rerouting the first rename that would otherwise deadlock through a
+ *   synthetic temporary label (fails loudly, like every other DDL preview,
+ *   on the vanishingly unlikely chance a real label already has that exact
+ *   spelling — see `ddl.py`'s identical no-collision-check precedent for
+ *   its own `__old` recreate suffix), then completing the redirect once the
+ *   rest of the cycle has run and freed the real target.
+ * - A target blocked by a label *outside* this batch (e.g. a rename
+ *   `EnumEditPlan` excluded because its own target collided with a same-edit
+ *   removal) can never be freed by anything this function runs — the
+ *   temp-label trick only ever frees a label some *other* pending rename is
+ *   waiting on. Detected by capping the number of temp labels at
+ *   `renames.length` (a genuine cycle among `renames` never needs more than
+ *   one per disjoint cycle, so hitting the cap proves no live order exists)
+ *   and raising instead of looping forever — this also catches an edited
+ *   grid's duplicate final label (two renames targeting the same name),
+ *   which is equally unresolvable.
+ *
+ * @param renames - the renames to run live, in any order (grid order is the
+ *   natural input — {@link EnumEditPlan}'s `renames`/`liveRenames` already
+ *   excludes one that can never run live at all: a target colliding with a
+ *   same-edit removal).
+ * @param currentLabels - every label the type currently has, before any of
+ *   `renames` runs (typically the tab's loaded `original.labels`) — not just
+ *   `renames`' own sources, since a label this batch doesn't touch still
+ *   occupies its name for the whole live-rename phase.
+ * @throws Error if no live execution order exists at all.
+ * @returns the statements to run, in order — possibly more entries than
+ *   `renames.length` when a cycle needed breaking.
+ */
+export function orderRenamesForExecution(
+    renames: AlterTypeRenameValueSpec[], currentLabels: Iterable<string>,
+): AlterTypeRenameValueSpec[] {
+    const occupied = new Set(currentLabels);
+    let pending = [...renames];
+    const ordered: AlterTypeRenameValueSpec[] = [];
+    let tempSuffix = 0;
+
+    while (pending.length > 0) {
+        const runnableIndex = pending.findIndex(r => !occupied.has(r.newValue));
+
+        if (runnableIndex !== -1) {
+            const rename = pending[runnableIndex];
+
+            ordered.push(rename);
+            occupied.delete(rename.value);
+            occupied.add(rename.newValue);
+            pending = pending.filter((_, i) => i !== runnableIndex);
+            continue;
+        }
+
+        if (tempSuffix >= renames.length) {
+            throw new Error(
+                "Cannot order these label renames to run: a target is still occupied by a label this edit " +
+                "doesn't free, or two renames target the same label",
+            );
+        }
+
+        // Every remaining rename's target is currently occupied — by
+        // another pending rename's not-yet-run source, or (per the
+        // `currentLabels` doc) a label outside this batch. Reroute the
+        // first one through a fresh temporary label now (always immediately
+        // safe — the type can't already have it), and replace it in
+        // `pending` with the temp-to-real-target hop that finishes the
+        // redirect once whatever's blocking the real target has freed it.
+        const [victim, ...rest] = pending;
+        const tempLabel = `__rename_tmp_${tempSuffix++}__`;
+
+        ordered.push({ ...victim, newValue: tempLabel });
+        occupied.delete(victim.value);
+        occupied.add(tempLabel);
+        pending = [{ ...victim, value: tempLabel, newValue: victim.newValue }, ...rest];
+    }
+
+    return ordered;
+}
+
+/**
+ * Diff the edited enum-label grid against the labels the type tab loaded,
+ * producing the plan its Save will run. A loaded label missing from the
+ * grid — a deletion of something the database actually has — routes the
+ * whole Save through a recreate; deleting a row the user added in this same
+ * editing session leaves no trace at all (it was never in `original`), so
+ * that case falls through to the in-place branch untouched.
+ *
+ * @param schema - the enum type's schema.
+ * @param name - the enum type's name.
+ * @param original - the labels the type tab loaded (the diff's baseline), in
+ *   catalog order.
+ * @param edited - the body grid's current rows, in store order.
+ * @throws Error if a kept row is renamed to a blank label, naming the
+ *   offending label; or if the edit would leave the type with no labels at
+ *   all.
+ * @returns the plan Save will run.
+ */
+export function diffEnumLabels(
+    schema: string, name: string, original: string[], edited: EditedLabelRow[],
+): EnumEditPlan {
+    const kept  = edited.filter(r => r.originalLabel !== "");
+    const added = edited.filter(r => r.originalLabel === "" && r.label.trim() !== "");
+
+    for (const r of kept) {
+        if (r.label.trim() === "") {
+            throw new Error(`Label "${r.originalLabel}" cannot be renamed to an empty name`);
+        }
+    }
+
+    const keptOriginals = new Set(kept.map(r => r.originalLabel));
+    const removed        = original.filter(label => !keptOriginals.has(label));
+
+    // The grid's full final label list, in grid order — every kept row
+    // (already validated non-blank above) plus every non-blank added row.
+    const finalLabels = edited
+        .filter(r => r.originalLabel !== "" || r.label.trim() !== "")
+        .map(r => r.label.trim());
+
+    if (finalLabels.length === 0) {
+        throw new Error(`Type "${schema}"."${name}" needs at least one label`);
+    }
+
+    // Computed before the branch below: a recreate plan needs its own kept
+    // renames too (see EnumEditPlan's doc) — the alter branch's `adds` is
+    // the only piece a recreate never carries, since a brand-new label has
+    // no stale stored data that could need its pre-rename text.
+    const renames = kept
+        .filter(r => r.label.trim() !== r.originalLabel)
+        .map(r => buildAlterTypeRenameValueSpec(schema, name, r.originalLabel, r.label.trim()));
+
+    if (removed.length > 0) {
+        // A rename whose target collides with a label this same edit removes
+        // can never run live (see EnumEditPlan's doc); every other kept
+        // rename still does, ahead of the recreate script. The colliding
+        // ones are passed to the backend separately (spec.collidingRenames)
+        // so the data migration can tell a row holding the rename's
+        // pre-rename value apart from one holding the removed label's own
+        // value — see RecreateEnumTypeSpec's doc.
+        const removedSet       = new Set(removed);
+        const liveRenames      = renames.filter(r => !removedSet.has(r.newValue));
+        const collidingRenames = renames.filter(r => removedSet.has(r.newValue));
+
+        return {
+            kind: "recreate",
+            spec: buildRecreateEnumTypeSpec(schema, name, finalLabels, renames, collidingRenames),
+            removed,
+            renames,
+            liveRenames,
+        };
+    }
+
+    const adds = added.map(r => buildAlterTypeAddValueSpec(schema, name, r.label.trim()));
+
+    if (renames.length === 0 && adds.length === 0) {
+        return { kind: "none" };
+    }
+
+    return { kind: "alter", adds, renames };
+}
+
+/**
+ * Describe a recreate plan: one "Rename label" line per kept rename (they
+ * run first — see {@link EnumEditPlan}'s doc — so they lead the summary too,
+ * matching the order their SQL actually runs in), then the fixed three-line
+ * warning: which labels are being removed, what happens to the type, and
+ * what can make the recreate fail. Shown above the migration SQL in the Save
+ * preview dialog.
+ *
+ * @param plan - the recreate plan to describe.
+ * @returns the rename lines (if any) followed by the three warning lines.
+ */
+function describeRecreatePlan(plan: Extract<EnumEditPlan, { kind: "recreate" }>): string[] {
+    const removedNoun = plan.removed.length === 1 ? "label" : "labels";
+    const removedList = plan.removed.map(label => `'${label}'`).join(", ");
+    const labelsList  = plan.spec.labels.map(label => `'${label}'`).join(", ");
+
+    return [
+        ...plan.renames.map(r => `Rename label: '${r.value}' → '${r.newValue}'`),
+        `Removing ${removedNoun} ${removedList} needs the type recreated `
+        + "— PostgreSQL has no ALTER TYPE ... DROP VALUE.",
+        `"${plan.spec.schema}"."${plan.spec.name}" is renamed aside, recreated as (${labelsList}), `
+        + "and every table column using it is rewritten.",
+        "This fails and rolls back if a stored row still holds a removed label, "
+        + "or a view depends on one of those columns.",
+    ];
+}
+
+/**
+ * Describe an enum Save plan for the preview dialog's form panel: no lines
+ * for a no-op, one line per statement for an in-place alter, or the
+ * three-line recreate warning (see {@link describeRecreatePlan}).
+ *
+ * @param plan - the plan to describe.
+ * @returns the summary lines, in the order the plan's SQL would run.
+ */
+export function describeEnumPlan(plan: EnumEditPlan): string[] {
+    switch (plan.kind) {
+        case "none":
+            return [];
+        case "alter":
+            // Renames before adds — the same order `saveEnum()` runs them in
+            // (see the plan's "Renames are emitted before adds" rule).
+            return [
+                ...plan.renames.map(r => `Rename label: '${r.value}' → '${r.newValue}'`),
+                ...plan.adds.map(a => `Add label: '${a.value}'`),
+            ];
+        case "recreate":
+            return describeRecreatePlan(plan);
+    }
 }

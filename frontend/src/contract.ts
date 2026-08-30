@@ -353,7 +353,7 @@ export interface FunctionDefinition {
     language: string;
 }
 
-/** One enum or composite type's introspected shape, for the edit-prefill flow and the info tab. */
+/** One enum or composite type's introspected shape, for the (editable) info tab. */
 export interface TypeDefinition {
     category: "enum" | "composite";
     labels: string[]; // enum only (ordered); empty for a composite
@@ -421,6 +421,54 @@ export interface AlterTypeAddValueSpec {
     name: string;
     value: string;
     position?: { placement: "before" | "after"; label: string };
+}
+
+/** The spec one ALTER TYPE ... ATTRIBUTE preview call sends (action-tagged, like AlterTableSpec). */
+export interface AlterCompositeTypeSpec {
+    schema: string;
+    name: string;
+    action: "addAttribute" | "dropAttribute" | "changeAttributeType" | "renameAttribute";
+    attribute?: string;                            // every action but addAttribute
+    newName?: string;                              // renameAttribute
+    newType?: string;                              // changeAttributeType
+    attributeDef?: { name: string; type: string }; // addAttribute
+}
+
+/** The spec an ALTER TYPE ... RENAME VALUE preview call sends. */
+export interface AlterTypeRenameValueSpec {
+    schema: string;
+    name: string;
+    value: string;    // the label as the database has it
+    newValue: string; // its new text
+}
+
+/** The spec the enum recreate-and-migrate preview call sends. */
+export interface RecreateEnumTypeSpec {
+    schema: string;
+    name: string;
+    labels: string[]; // the type's full label list after the edit, in order
+    // This same edit's kept renames — carried here (not just run live as
+    // separate ALTER TYPE ... RENAME VALUE statements) because the backend's
+    // dependent-column introspection for this preview runs before any
+    // RENAME VALUE has executed against the database, so a column DEFAULT
+    // holding a renamed label needs this map to rewrite its stale pre-rename
+    // literal. See EnumEditPlan's doc for the full reasoning, including why
+    // one specific rename (onto a name this same edit also removes) is never
+    // run live at all.
+    renames: { value: string; newValue: string }[];
+    // The subset of `renames` whose target collides with a same-edit
+    // removal (a strict subset of `renames`, never a superset) — these are
+    // exactly the ones EnumEditPlan.liveRenames excludes, so their
+    // pre-rename spelling still exists on the *old* type (still renamed
+    // aside, not yet dropped) when the migration runs. The backend needs
+    // this narrower list separately from `renames` because a dependent
+    // column's stored *data* (not just a DEFAULT literal) needs a
+    // rename-aware migration cast for exactly these: their target text also
+    // names a distinct, about-to-be-removed label on the old type, so a
+    // blind `::text::newtype` round-trip can't tell "a row holding the
+    // rename's pre-rename value" apart from "a row holding the removed
+    // label's own value" — they'd collapse to the same text.
+    collidingRenames: { value: string; newValue: string }[];
 }
 
 /** EXPLAIN output format. TEXT is the first cut; JSON is the follow-on tree source. */

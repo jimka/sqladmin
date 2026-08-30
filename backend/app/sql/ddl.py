@@ -11,6 +11,7 @@ as the user typed them and reviewed in the editable preview before execute
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -66,6 +67,13 @@ __all__ = [
     "create_composite_type",
     "drop_type",
     "alter_type_add_value",
+    "alter_type_add_attribute",
+    "alter_type_drop_attribute",
+    "alter_type_alter_attribute_type",
+    "alter_type_rename_attribute",
+    "alter_type_rename_value",
+    "EnumColumnDependency",
+    "recreate_enum_type",
 ]
 
 
@@ -1178,8 +1186,12 @@ def sequence_drop(schema: str, name: str, *, cascade: bool = False, if_exists: b
 #
 # Builders for CREATE [OR REPLACE] FUNCTION|PROCEDURE, DROP FUNCTION|PROCEDURE
 # (by full identity signature, disambiguating overloads), CREATE TYPE (enum and
-# composite), DROP TYPE, and ALTER TYPE ADD VALUE (function-type-ddl phase).
-# Identifiers (schema/name/arg-name/attr-name) are quoted via quote_ident/
+# composite), DROP TYPE, ALTER TYPE ADD VALUE, the four composite ALTER
+# ATTRIBUTE actions (add/drop/retype/rename), ALTER TYPE RENAME VALUE, and the
+# enum recreate-and-migrate script (type-panel-inline-editing phase — Postgres
+# has no ALTER TYPE ... DROP VALUE, so deleting an enum label recreates the
+# type and migrates every dependent column instead). Identifiers
+# (schema/name/arg-name/attr-name) are quoted via quote_ident/
 # qualify and validated here, same as schema/sequence DDL. Raw type strings,
 # defaults, function bodies, and enum labels are NOT identifiers — a function
 # body is inherently opaque SQL and cannot be parameterized — so they pass
@@ -1496,3 +1508,644 @@ def alter_type_add_value(
         position_clause = f" {keyword} {quote_literal(existing)}"
 
     return f"ALTER TYPE {qualify(schema, name)} ADD VALUE {quote_literal(value)}{position_clause}"
+
+
+def alter_type_add_attribute(schema: str, name: str, attr: CompositeAttr) -> str:
+    """
+    Build an ``ALTER TYPE ... ADD ATTRIBUTE`` statement.
+
+    Args:
+        schema: the composite type's schema.
+        name: the composite type's name.
+        attr: the attribute to add.
+
+    Raises:
+        ValidationError: if ``schema``/``name`` is blank.
+
+    Returns:
+        ``ALTER TYPE "schema"."name" ADD ATTRIBUTE "attr.name" attr.type`` —
+        the attribute name is quoted; its type is raw.
+    """
+    require_text(schema, "schema")
+    require_text(name, "name")
+
+    return f"ALTER TYPE {qualify(schema, name)} ADD ATTRIBUTE {quote_ident(attr.name)} {attr.type}"
+
+
+def alter_type_drop_attribute(schema: str, name: str, attribute: str) -> str:
+    """
+    Build an ``ALTER TYPE ... DROP ATTRIBUTE`` statement.
+
+    Args:
+        schema: the composite type's schema.
+        name: the composite type's name.
+        attribute: the attribute to drop.
+
+    Raises:
+        ValidationError: if ``schema``/``name`` is blank.
+
+    Returns:
+        ``ALTER TYPE "schema"."name" DROP ATTRIBUTE "attribute"``.
+    """
+    require_text(schema, "schema")
+    require_text(name, "name")
+
+    return f"ALTER TYPE {qualify(schema, name)} DROP ATTRIBUTE {quote_ident(attribute)}"
+
+
+def alter_type_alter_attribute_type(schema: str, name: str, attribute: str, new_type: str) -> str:
+    """
+    Build an ``ALTER TYPE ... ALTER ATTRIBUTE ... TYPE`` statement.
+
+    Args:
+        schema: the composite type's schema.
+        name: the composite type's name.
+        attribute: the attribute to retype.
+        new_type: the attribute's new type, raw.
+
+    Raises:
+        ValidationError: if ``schema``/``name`` is blank.
+
+    Returns:
+        ``ALTER TYPE "schema"."name" ALTER ATTRIBUTE "attribute" TYPE
+        new_type``.
+    """
+    require_text(schema, "schema")
+    require_text(name, "name")
+
+    return f"ALTER TYPE {qualify(schema, name)} ALTER ATTRIBUTE {quote_ident(attribute)} TYPE {new_type}"
+
+
+def alter_type_rename_attribute(schema: str, name: str, attribute: str, new_name: str) -> str:
+    """
+    Build an ``ALTER TYPE ... RENAME ATTRIBUTE`` statement.
+
+    Args:
+        schema: the composite type's schema.
+        name: the composite type's name.
+        attribute: the attribute's current name.
+        new_name: the attribute's new name.
+
+    Raises:
+        ValidationError: if ``schema``/``name`` is blank.
+
+    Returns:
+        ``ALTER TYPE "schema"."name" RENAME ATTRIBUTE "attribute" TO
+        "new_name"``.
+    """
+    require_text(schema, "schema")
+    require_text(name, "name")
+
+    return (
+        f"ALTER TYPE {qualify(schema, name)} RENAME ATTRIBUTE "
+        f"{quote_ident(attribute)} TO {quote_ident(new_name)}"
+    )
+
+
+def alter_type_rename_value(schema: str, name: str, value: str, new_value: str) -> str:
+    """
+    Build an ``ALTER TYPE ... RENAME VALUE`` statement, renaming one existing
+    enum label in place.
+
+    Args:
+        schema: the enum type's schema.
+        name: the enum type's name.
+        value: the label as the database currently has it.
+        new_value: the label's new text.
+
+    Raises:
+        ValidationError: if ``schema``/``name`` is blank.
+
+    Returns:
+        ``ALTER TYPE "schema"."name" RENAME VALUE 'value' TO 'new_value'`` —
+        both labels are quoted via ``quote_literal``.
+    """
+    require_text(schema, "schema")
+    require_text(name, "name")
+
+    return (
+        f"ALTER TYPE {qualify(schema, name)} RENAME VALUE "
+        f"{quote_literal(value)} TO {quote_literal(new_value)}"
+    )
+
+
+# The temporary name an enum recreate renames the old type to before creating
+# the replacement under its original name — see recreate_enum_type. No
+# collision check: if a type by this name already exists, the recreate's
+# first statement fails outright and nothing has run (see that function's
+# docstring).
+_ENUM_RECREATE_SUFFIX = "__old"
+
+
+@dataclass(frozen=True)
+class EnumColumnDependency:
+    """
+    One table column whose type is an enum being recreated.
+    """
+
+    schema: str
+    table: str
+    column: str
+    is_array: bool
+    default_expr: str | None
+
+
+# One complete SQL string literal, single-quoted with `''`-doubled embedded
+# quotes (e.g. `'ok'`, or `'a''b'` for the one-token literal "a'b") — matches
+# greedily, so an embedded `''` is consumed as part of the same literal
+# rather than closing it early. `_rewrite_default_expr` uses this to find
+# every literal in a DEFAULT expression without needing to understand the
+# surrounding expression's shape (a plain cast, a CASE, a function call —
+# the "raw passthrough" trust model this module's Function/type-DDL section
+# already applies to defaults).
+_SQL_STRING_LITERAL_RE = re.compile(r"'(?:[^']|'')*'")
+
+# One Postgres array-literal element: a `"`-quoted element (with `\`-escaped
+# `\`/`"`), or a run of characters excluding the delimiters `,`, `{`, `}` —
+# see https://www.postgresql.org/docs/current/arrays.html#ARRAYS-IO. Postgres
+# always double-quotes an element needing escaping, so this never has to
+# guess which form a given element takes. Left untouched by design: a nested
+# `{`/`}` (a multi-dimensional array's inner braces) matches neither
+# alternative, so `_PG_ARRAY_ELEMENT_RE.sub()` passes it through unchanged
+# while still finding and rewriting every leaf element inside it.
+_PG_ARRAY_ELEMENT_RE = re.compile(r'"(?:[^"\\]|\\.)*"|[^,{}]+')
+
+# An optional leading explicit-bounds prefix Postgres may deparse before an
+# array literal's `{...}` body, e.g. `[2:3]={ok,sad}` for a non-default lower
+# bound, or `[0:1][0:1]={{a,b},{c,d}}` for a multi-dimensional array — see
+# https://www.postgresql.org/docs/current/arrays.html#ARRAYS-IO. Captured
+# separately so `_rewrite_default_expr` can pass the ``{...}`` body alone to
+# the element rewriter and reattach the (label-free, so never itself
+# rewritten) bounds prefix verbatim.
+_PG_ARRAY_DIMS_RE = re.compile(r"^((?:\[-?\d+:-?\d+\])+=)?(\{.*\})$", re.DOTALL)
+
+
+def _unescape_pg_array_element(raw: str) -> str | None:
+    """
+    Undo ``_escape_pg_array_element``'s quoting/escaping.
+
+    Returns:
+        ``None`` for an unquoted ``NULL`` — Postgres's array-literal syntax
+        has no other way to write a genuine SQL null element, and (per
+        ``_escape_pg_array_element``) always `"`-quotes a *label* whose text
+        happens to be ``NULL``, so an unquoted occurrence is unambiguously
+        the null itself. Otherwise the element's text, unescaped if it was
+        `"`-quoted.
+    """
+    if len(raw) >= 2 and raw[0] == '"' and raw[-1] == '"':
+        return re.sub(r"\\(.)", r"\1", raw[1:-1])
+
+    if raw.upper() == "NULL":
+        return None
+
+    return raw
+
+
+def _escape_pg_array_element(value: str | None) -> str:
+    """
+    Render ``value`` as Postgres's own array-literal output format would:
+    the bare token ``NULL`` for the SQL-null sentinel (``None``); otherwise
+    the label unquoted where that round-trips unambiguously, `"`-quoted with
+    `\\`/`"` backslash-escaped otherwise (empty, case-insensitively
+    ``NULL``, leading/trailing whitespace, or containing a delimiter/brace/
+    quote/backslash) — see ``_unescape_pg_array_element`` for why a label
+    spelled ``NULL`` must always be quoted, never left bare.
+    """
+    if value is None:
+        return "NULL"
+
+    needs_quoting = (
+        value == "" or value.upper() == "NULL" or value != value.strip() or any(c in value for c in '{}",\\')
+    )
+
+    if not needs_quoting:
+        return value
+
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _removed_label_sentinel(removed_label: str) -> str:
+    """
+    A text value used to force a stored row still holding ``removed_label``
+    to fail its migration cast (see ``_collision_aware_case_expr``'s doc)
+    rather than silently collapse onto a same-text rename target.
+
+    Not collision-checked against the recreated type's real labels. Unlike
+    this module's ``__old`` recreate suffix or ``EnumEditPlan``'s
+    ``__rename_tmp_N__`` temporary rename labels — where a real label
+    matching the synthetic one makes the *statement itself* fail loudly —
+    a real label that happens to match this sentinel's exact text would
+    make the row *silently* migrate onto that real label instead, since the
+    whole point of the sentinel is to be a valid-looking value the CASE
+    falls through to. Accepted anyway: an application label spelled
+    ``__removed_label_<name>__`` is vanishingly unlikely, and every other
+    label-collision risk in this recreate carries the same kind of
+    unenforced assumption (e.g. a real label spelled exactly like another
+    label's rename target).
+    """
+    return f"__removed_label_{removed_label}__"
+
+
+def _rewrite_default_expr(
+    default_expr: str, is_array: bool, renames: Sequence[tuple[str, str]],
+    colliding_renames: Sequence[tuple[str, str]] = (),
+) -> str:
+    """
+    Rewrite every occurrence of a renamed label inside a dependent column's
+    DEFAULT expression, so it names the label's *post*-rename spelling — see
+    ``recreate_enum_type``'s doc for why this rewrite is needed at all (the
+    introspection that captures ``default_expr`` always runs before any
+    rename, live or not, has touched the database). Also rewrites a
+    colliding rename's target text — when it appears *unrenamed* — to the
+    same sentinel ``_collision_aware_case_expr`` routes a stored row holding
+    that value to: without this, a DEFAULT spelled exactly as the label
+    being removed (not the rename's own pre-rename spelling — see
+    ``colliding_renames``) would pass through unmatched, and since that text
+    is now a valid label of the recreated type (the rename's target),
+    ``SET DEFAULT`` would silently succeed under the wrong meaning instead
+    of failing per ``recreate_enum_type``'s "a stored row still holds a
+    removed label" contract — the same silent-relabeling risk
+    ``_migration_using_clause`` guards a dependent's stored *data* against.
+
+    Works token-by-token over every complete SQL string literal in
+    ``default_expr`` (``_SQL_STRING_LITERAL_RE``), so it doesn't need to
+    understand the surrounding expression's shape. Most literals — a scalar
+    dependent's label, or one element of an array dependent's default
+    written as an ``ARRAY['a'::t, 'b'::t]`` constructor (each element its
+    own, separately-matched literal) — are rewritten as a whole-token match
+    against the rename map. The one different shape: Postgres may instead
+    deparse an array default as a single literal holding its *own* nested
+    array-literal syntax, e.g. ``'{ok,sad}'`` — recognized by its ``{``/``}``
+    wrapping and, only then, rewritten element-by-element
+    (``_PG_ARRAY_ELEMENT_RE``) instead of as one opaque token, since a label
+    there is almost never individually SQL-quoted the way a whole-token
+    literal's is.
+
+    Being shape-agnostic cuts both ways: it also rewrites a string literal
+    that isn't an enum label at all, if its text happens to exactly match a
+    renamed value (e.g. a `CASE` default comparing ``CURRENT_USER = 'ok'``
+    where this same edit renames label ``ok``). Rare in practice for an enum
+    label's typical alphabetic spelling, and — like every other DDL preview
+    — recoverable: the generated script is reviewed and editable before
+    Execute (see the "raw passthrough" trust model this module's
+    Function/type-DDL section already applies to defaults).
+
+    Args:
+        default_expr: the dependent's current DEFAULT expression, as
+            ``pg_get_expr`` deparsed it.
+        is_array: whether the dependent column (and so its default) is an
+            array of the enum — gates the ``{...}``-literal branch, so an
+            ordinary scalar label that happens to *look* like ``{text}`` is
+            never misparsed as an array. Further narrowed to a plain
+            ``'...'``-quoted array literal (see ``is_array_literal_shape``
+            below): an ``ARRAY[...]`` constructor's elements are always
+            independently-quoted SQL literals, never nested array-literal
+            syntax, even when a label's own text happens to look
+            brace-wrapped (e.g. a label literally spelled ``{x}``).
+        renames: this same edit's kept label renames, each a ``(value,
+            new_value)`` pair.
+        colliding_renames: the subset of ``renames`` whose target collides
+            with a same-edit removal — see this function's own doc above and
+            ``_migration_using_clause``'s doc.
+
+    Returns:
+        ``default_expr`` unchanged if ``renames`` is empty or names nothing
+        this default references; otherwise with every matching label
+        rewritten to its post-rename spelling (or, for a colliding rename's
+        target found unrenamed, to the removed-label sentinel).
+    """
+    if not renames:
+        return default_expr
+
+    rename_map = dict(renames)
+
+    for _, new_value in colliding_renames:
+        rename_map.setdefault(new_value, _removed_label_sentinel(new_value))
+    # Only a plain quoted array literal (`'{ok,sad}'`, optionally dimension-
+    # prefixed) can legitimately hold `{...}` array-literal syntax as one
+    # token's content; an `ARRAY[...]` constructor's own elements never do,
+    # regardless of their own text (see the Args note above).
+    is_array_literal_shape = is_array and not default_expr.lstrip().upper().startswith("ARRAY[")
+
+    def rewrite_literal(match: re.Match[str]) -> str:
+        content = match.group(0)[1:-1].replace("''", "'")
+        dims_match = _PG_ARRAY_DIMS_RE.match(content) if is_array_literal_shape else None
+
+        if dims_match:
+            dims_prefix = dims_match.group(1) or ""
+            array_body = dims_match.group(2)
+
+            def rewrite_element(elem_match: re.Match[str]) -> str:
+                label = _unescape_pg_array_element(elem_match.group(0))
+
+                if label is not None:
+                    label = rename_map.get(label, label)
+
+                return _escape_pg_array_element(label)
+
+            content = dims_prefix + "{" + _PG_ARRAY_ELEMENT_RE.sub(rewrite_element, array_body[1:-1]) + "}"
+        else:
+            content = rename_map.get(content, content)
+
+        return "'" + content.replace("'", "''") + "'"
+
+    return _SQL_STRING_LITERAL_RE.sub(rewrite_literal, default_expr)
+
+
+def _collision_aware_case_expr(elem_ref: str, old_enum_ref: str, colliding_renames: Sequence[tuple[str, str]]) -> str:
+    """
+    Build a ``CASE`` expression that maps ``elem_ref`` (an expression typed
+    as the *old* enum) through ``colliding_renames``, so a row holding a
+    rename's pre-rename value migrates to its post-rename text while a row
+    holding the *removed* label the rename's target text collides with
+    fails loudly instead of silently taking on that same text — see
+    ``_migration_using_clause``'s doc for why a blind ``::text`` round-trip
+    can't tell the two apart.
+
+    Args:
+        elem_ref: a SQL expression, typed as ``old_enum_ref``, to migrate —
+            either the dependent column reference itself (scalar) or an
+            ``unnest()`` alias (array).
+        old_enum_ref: the enum's schema-qualified, quoted *old* (renamed-
+            aside) name — every comparison below runs against it, since at
+            migration time the old type still has both a colliding rename's
+            pre-rename label and the distinct, about-to-be-removed label its
+            target text collides with (neither was ever renamed away: the
+            rename never ran live, and Postgres has no ``DROP VALUE``).
+        colliding_renames: this same edit's renames whose target collides
+            with a same-edit removal (never run live — see
+            ``EnumEditPlan.liveRenames``'s doc).
+
+    Returns:
+        A ``CASE ... END`` expression yielding text: a colliding rename's
+        post-rename spelling for its pre-rename value, a sentinel
+        (``_removed_label_sentinel``) for the removed label's own value, or
+        ``elem_ref::text`` unchanged for everything else.
+    """
+    when_clauses = []
+
+    for value, new_value in colliding_renames:
+        when_clauses.append(
+            f"WHEN {elem_ref} = {quote_literal(value)}::{old_enum_ref} THEN {quote_literal(new_value)}"
+        )
+        when_clauses.append(
+            f"WHEN {elem_ref} = {quote_literal(new_value)}::{old_enum_ref} "
+            f"THEN {quote_literal(_removed_label_sentinel(new_value))}"
+        )
+
+    return "CASE " + " ".join(when_clauses) + f" ELSE {elem_ref}::text END"
+
+
+def _migration_using_clause(
+    enum_ref: str,
+    old_enum_ref: str,
+    column: str,
+    is_array: bool,
+    colliding_renames: Sequence[tuple[str, str]],
+    migrate_function_ref: str,
+) -> tuple[list[str], str]:
+    """
+    Build the statements (if any) and ``USING`` clause expression that carry
+    a dependent column's stored data across the recreate.
+
+    Ordinarily a plain ``::text::newtype`` round-trip, no preamble statement.
+    When a same-edit rename's target collides with a same-edit removal, that
+    plain round-trip is wrong: a stored row holding the rename's *pre*-rename
+    value and one holding the *removed* label's own value both read back as
+    the exact same text once cast through ``::text`` (Postgres has already
+    discarded which of the two distinct old-type oids the row held), so the
+    round-trip would silently relabel the removed label's rows as the
+    rename's target instead of failing per ``recreate_enum_type``'s "a
+    stored row still holds a removed label" contract. In that case, use a
+    rename-aware ``CASE`` cast instead (``_collision_aware_case_expr``),
+    keyed on the *old* type's oids (still distinct at migration time) rather
+    than text.
+
+    A scalar column's ``CASE`` is a plain expression, usable directly in
+    ``USING``. An array column's isn't: Postgres refuses a subquery in a
+    column-type "transform expression" (confirmed empirically against the
+    project's own ``postgres:16-alpine`` container — both the plain
+    ``ARRAY(SELECT ...)`` and scalar-subquery forms of an element-wise
+    ``unnest()``/``array_agg()`` mapping raise "cannot use subquery in
+    transform expression"), so the per-element ``CASE`` is wrapped in a
+    ``pg_temp`` SQL function instead — a plain function call *is* usable in
+    ``USING``. The function is still explicitly dropped once used (see
+    ``_migrate_dependent_column``): a session-temporary function would
+    otherwise outlive the statement that calls it, and because it is typed
+    over the *old* enum, that would block the script's own final
+    ``DROP TYPE``.
+
+    Args:
+        enum_ref: the recreated enum's schema-qualified, quoted name (its
+            final name, not the temporary ``__old`` one — this runs after
+            the ``CREATE TYPE`` step).
+        old_enum_ref: the enum's schema-qualified, quoted *old* name.
+        column: the dependent column's quoted identifier.
+        is_array: whether the column (and so the cast) is an array of the
+            enum. A colliding-rename-aware array cast maps each element,
+            preserving ``NULL``-ness, emptiness, and element order — but not
+            a non-default lower bound (e.g. ``'[2:3]={a,b}'`` comes back
+            ``'[1:2]={c,b}'``) or a dimension beyond the first (``unnest()``
+            flattens every dimension). Both are accepted residual
+            limitations for this narrow combination (a colliding rename
+            *and* one of these array shapes on the same dependent column) —
+            see the type-panel-inline-editing plan's ``## Implementation
+            Notes`` for the full reasoning; the ordinary, far more common
+            shapes (``NULL``, ``'{}'``, a plain 1-D 1-based array) are exact.
+        colliding_renames: this same edit's renames whose target collides
+            with a same-edit removal.
+        migrate_function_ref: a ``pg_temp``-schema-qualified, quoted name
+            unique to this dependent, used only when ``is_array`` and
+            ``colliding_renames`` are both non-empty.
+
+    Returns:
+        A ``(preamble_statements, using_expression)`` pair: zero or one
+        ``CREATE FUNCTION`` statement, and the ``USING`` clause's expression
+        (the part after ``USING``).
+    """
+    suffix = "[]" if is_array else ""
+
+    if not colliding_renames:
+        return [], f"{column}::text{suffix}::{enum_ref}{suffix}"
+
+    if is_array:
+        case_expr = _collision_aware_case_expr("elem", old_enum_ref, colliding_renames)
+        # array_agg() over unnest() of a NULL or empty array both return no
+        # rows, so array_agg() itself returns NULL either way — silently
+        # turning a stored empty array into a NULL column value unless
+        # distinguished up front. array_length(arr, 1) is NULL for an empty
+        # array (it has no elements in dimension 1) but not for a NULL
+        # argument (the whole CASE short-circuits on the WHEN arr IS NULL
+        # arm first), so it's the right test for "empty, not null".
+        function_body = (
+            "SELECT CASE "
+            "WHEN arr IS NULL THEN NULL "
+            "WHEN array_length(arr, 1) IS NULL THEN '{}'::text[] "
+            f"ELSE (SELECT array_agg({case_expr} ORDER BY elem_ord) FROM unnest(arr) WITH ORDINALITY AS u(elem, elem_ord)) "
+            "END"
+        )
+        preamble = [
+            f"CREATE FUNCTION {migrate_function_ref}(arr {old_enum_ref}[]) RETURNS text[] LANGUAGE sql AS "
+            f"{_dollar_quote(function_body)}"
+        ]
+
+        return preamble, f"{migrate_function_ref}({column})::{enum_ref}[]"
+
+    case_expr = _collision_aware_case_expr(column, old_enum_ref, colliding_renames)
+
+    return [], f"({case_expr})::{enum_ref}"
+
+
+def _migrate_dependent_column(
+    enum_ref: str,
+    old_enum_ref: str,
+    dependent: EnumColumnDependency,
+    renames: Sequence[tuple[str, str]],
+    colliding_renames: Sequence[tuple[str, str]],
+    index: int,
+) -> list[str]:
+    """
+    Build the statements that carry one dependent column across an enum
+    recreate: drop its default (if any — Postgres refuses to retype a
+    column whose default it cannot cast), retype it to the recreated enum
+    (see ``_migration_using_clause``, which may prepend a helper function),
+    then restore the default.
+
+    Args:
+        enum_ref: the recreated enum's schema-qualified, quoted name (its
+            final name, not the temporary ``__old`` one — this runs after the
+            ``CREATE TYPE`` step).
+        old_enum_ref: the enum's schema-qualified, quoted *old* name — see
+            ``_migration_using_clause``'s doc.
+        dependent: the column, its array-ness, and its current default.
+        renames: this same edit's kept label renames, each a
+            ``(value, new_value)`` pair — see ``recreate_enum_type``'s doc for
+            why the default's literal needs rewriting through this map.
+        colliding_renames: this same edit's renames whose target collides
+            with a same-edit removal — see ``_migration_using_clause``'s doc.
+        index: this dependent's position among every dependent this recreate
+            is migrating — makes its helper function's name (if any) unique
+            within the script.
+
+    Returns:
+        The dependent's migration statements, in execution order.
+    """
+    table_ref = qualify(dependent.schema, dependent.table)
+    column = quote_ident(dependent.column)
+    migrate_function_ref = f"pg_temp.{quote_ident(f'__enum_recreate_migrate_{index}__')}"
+    preamble, using = _migration_using_clause(
+        enum_ref, old_enum_ref, column, dependent.is_array, colliding_renames, migrate_function_ref,
+    )
+    suffix = "[]" if dependent.is_array else ""
+    type_clause = f"{enum_ref}{suffix} USING {using}"
+
+    default_expr = dependent.default_expr
+
+    if default_expr is not None:
+        default_expr = _rewrite_default_expr(default_expr, dependent.is_array, renames, colliding_renames)
+
+    statements = list(preamble)
+
+    if default_expr is not None:
+        statements.append(f"ALTER TABLE {table_ref} ALTER COLUMN {column} DROP DEFAULT")
+
+    statements.append(f"ALTER TABLE {table_ref} ALTER COLUMN {column} TYPE {type_clause}")
+
+    if preamble:
+        # The helper function _migration_using_clause prepended is typed
+        # over the *old* enum (its one argument is old_enum_ref[]), so it
+        # would otherwise keep DROP TYPE old_enum_ref (recreate_enum_type's
+        # final statement) from succeeding — Postgres refuses to drop a type
+        # something still depends on. Its job ends the moment the ALTER
+        # COLUMN ... TYPE above has run.
+        statements.append(f"DROP FUNCTION {migrate_function_ref}({old_enum_ref}[])")
+
+    if default_expr is not None:
+        statements.append(f"ALTER TABLE {table_ref} ALTER COLUMN {column} SET DEFAULT {default_expr}")
+
+    return statements
+
+
+def recreate_enum_type(
+    schema: str,
+    name: str,
+    labels: Sequence[str],
+    dependents: Sequence[EnumColumnDependency],
+    renames: Sequence[tuple[str, str]] = (),
+    colliding_renames: Sequence[tuple[str, str]] = (),
+) -> str:
+    """
+    Build the rename/create/migrate/drop script that replaces an enum type
+    with a fresh one under the same name — Postgres has no ``ALTER TYPE ...
+    DROP VALUE``, so removing a label goes through this recreate instead (see
+    the type-panel-inline-editing plan's "Enum labels: deleting a label
+    routes the whole Save through a recreate" Architecture Decision).
+
+    The whole script is meant to run inside one transaction (``";\\n"``-joined
+    into the single statement ``ExecuteDdlCommand`` wraps), so a failure
+    anywhere — a stored row still holding a removed label, a view or a
+    ``CHECK`` constraint depending on a migrated column — rolls the lot back
+    and leaves the original type untouched.
+
+    Args:
+        schema: the enum type's schema.
+        name: the enum type's name (unchanged across the recreate).
+        labels: the recreated type's full label list, in order — already
+            reflecting every rename (the caller resolves renames into
+            ``labels`` before calling this; see ``diffEnumLabels``).
+        dependents: every table column whose type is this enum (or its array
+            type), each carrying its current default expression (if any) —
+            see ``RecreateEnumTypePreview``'s two catalog reads. That default
+            expression was introspected before this script (or any live
+            ``RENAME VALUE``) has run, so it may still carry a label's
+            pre-rename spelling.
+        renames: this same edit's kept label renames, each a ``(value,
+            new_value)`` pair, used to rewrite a dependent's default literal
+            from its pre-rename spelling to its post-rename one (e.g. a
+            default of ``'ok'::mood`` becomes ``'fine'::mood`` when this
+            edit also renames label ``ok`` to ``fine``) — see
+            ``_migrate_dependent_column``.
+        colliding_renames: the subset of ``renames`` whose ``new_value``
+            collides with a label this same edit removes — a strict subset,
+            never a superset, of ``renames`` (see ``EnumEditPlan.
+            liveRenames``'s doc for why that pair is never run live). Passed
+            separately from ``renames`` because a dependent's *stored data*
+            (not just its DEFAULT literal) needs rename-aware handling for
+            exactly this subset: see ``_migration_using_clause``'s doc for
+            why a plain ``::text`` round-trip can't tell a row holding the
+            rename's pre-rename value apart from one holding the removed
+            label's own value once their text collides.
+
+    Raises:
+        ValidationError: if ``schema``/``name`` is blank, or ``labels`` is
+            empty.
+
+    Returns:
+        ``ALTER TYPE ... RENAME TO "name__old"``, then ``CREATE TYPE`` under
+        the original name, then each dependent's migration statements (see
+        ``_migrate_dependent_column``), then ``DROP TYPE "name__old"`` —
+        ``";\\n"``-joined into one script, no trailing semicolon.
+    """
+    require_text(schema, "schema")
+    require_text(name, "name")
+
+    if not labels:
+        raise ValidationError("'labels' must not be empty")
+
+    old_name = f"{name}{_ENUM_RECREATE_SUFFIX}"
+    enum_ref = qualify(schema, name)
+    old_enum_ref = qualify(schema, old_name)
+
+    statements = [
+        f"ALTER TYPE {enum_ref} RENAME TO {quote_ident(old_name)}",
+        create_enum_type(schema, name, labels),
+    ]
+
+    for index, dependent in enumerate(dependents):
+        statements.extend(
+            _migrate_dependent_column(enum_ref, old_enum_ref, dependent, renames, colliding_renames, index)
+        )
+
+    statements.append(f"DROP TYPE {old_enum_ref}")
+
+    return ";\n".join(statements)

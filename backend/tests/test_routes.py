@@ -76,7 +76,7 @@ EXPECTED_ROUTES: tuple[tuple[str, str, str], ...] = (
     # endpoints/ddl.py — the two hand-written definition reads
     ("POST", f"{D}/ddl/function-definition", "function_definition"),
     ("POST", f"{D}/ddl/type-definition", "type_definition"),
-    # endpoints/ddl.py — the 24 PREVIEW_OPS routes
+    # endpoints/ddl.py — the 27 PREVIEW_OPS routes
     ("POST", f"{D}/ddl/table/create", "preview_table_create"),
     ("POST", f"{D}/ddl/table/drop", "preview_table_drop"),
     ("POST", f"{D}/ddl/table/alter", "preview_table_alter"),
@@ -101,6 +101,9 @@ EXPECTED_ROUTES: tuple[tuple[str, str, str], ...] = (
     ("POST", f"{D}/ddl/create-composite-type", "preview_create_composite_type"),
     ("POST", f"{D}/ddl/drop-type", "preview_drop_type"),
     ("POST", f"{D}/ddl/alter-type-add-value", "preview_alter_type_add_value"),
+    ("POST", f"{D}/ddl/alter-composite-type", "preview_alter_composite_type"),
+    ("POST", f"{D}/ddl/alter-type-rename-value", "preview_alter_type_rename_value"),
+    ("POST", f"{D}/ddl/recreate-enum-type", "preview_recreate_enum_type"),
 )
 
 
@@ -200,8 +203,8 @@ def _resolve(method: str, path: str) -> tuple[str, dict[str, str]]:
 
 
 def test_route_table_matches_expected_exactly() -> None:
-    assert len(EXPECTED_ROUTES) == 58
-    assert len(set(EXPECTED_ROUTES)) == 58  # no duplicate entries in the table itself
+    assert len(EXPECTED_ROUTES) == 61
+    assert len(set(EXPECTED_ROUTES)) == 61  # no duplicate entries in the table itself
     assert _actual_routes() == set(EXPECTED_ROUTES)
 
 
@@ -275,8 +278,8 @@ def _exported_ddl_preview_subclasses() -> set[type]:
     return subclasses
 
 
-def test_preview_ops_has_24_entries_matching_ddlpreview_exports() -> None:
-    assert len(PREVIEW_OPS) == 24
+def test_preview_ops_has_27_entries_matching_ddlpreview_exports() -> None:
+    assert len(PREVIEW_OPS) == 27
     assert all(issubclass(op_class, DdlPreview) for op_class in PREVIEW_OPS.values())
     assert set(PREVIEW_OPS.values()) == _exported_ddl_preview_subclasses()
 

@@ -1,7 +1,7 @@
 """
-TypeDefinitionQuery — introspect one enum or composite type for the edit-
-prefill flow (an enum's existing labels, or a composite's attributes) and the
-read-only info tab (which also wants the owning role).
+TypeDefinitionQuery — introspect one enum or composite type for the
+(editable) info tab: an enum's existing labels, or a composite's attributes,
+plus the owning role the tab's read-only fieldset rows show.
 
 There is no ``pg_get_typedef`` for a standalone type, so this reads
 ``pg_type``/``pg_enum``/``pg_attribute`` directly: first the type row (to

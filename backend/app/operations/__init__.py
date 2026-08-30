@@ -5,12 +5,15 @@ sites import from ``app.operations`` regardless of file layout.
 
 from .ddl import DdlPreview, ExecuteDdlCommand
 from .ddl_function_type import (
+    AlterCompositeTypePreview,
     AlterTypeAddValuePreview,
+    AlterTypeRenameValuePreview,
     CreateCompositeTypePreview,
     CreateEnumTypePreview,
     CreateFunctionPreview,
     DropFunctionPreview,
     DropTypePreview,
+    RecreateEnumTypePreview,
 )
 from .ddl_schema_sequence import (
     SchemaCreatePreview,
@@ -141,4 +144,7 @@ __all__ = [
     "CreateCompositeTypePreview",
     "DropTypePreview",
     "AlterTypeAddValuePreview",
+    "AlterCompositeTypePreview",
+    "AlterTypeRenameValuePreview",
+    "RecreateEnumTypePreview",
 ]

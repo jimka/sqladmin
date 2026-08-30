@@ -1,11 +1,12 @@
 """
-DDL routes for one database: the 24 preview routes (registered from a
+DDL routes for one database: the 27 preview routes (registered from a
 declared ``{path suffix: op class}`` table, since every preview route's body
-is identical apart from the op class it constructs) plus the two hand-written
-definition reads that prefill an edit form. The single execute route lives in
-``query.py`` instead, since it is connection-scoped rather than
-database-scoped. Every route here is POST + CSRF because the spec travels in
-the body, though a preview mutates nothing.
+is identical apart from the op class it constructs) plus two hand-written
+definition reads: one that prefills the create-function form, one that seeds
+the (editable) type info tab. The single execute route lives in ``query.py``
+instead, since it is connection-scoped rather than database-scoped. Every
+route here is POST + CSRF because the spec travels in the body, though a
+preview mutates nothing.
 """
 
 from __future__ import annotations
@@ -20,7 +21,9 @@ from fastapi import APIRouter, Body, Depends
 from ..auth import require_csrf
 from ..connections import Session, session_pool_for
 from ..operations import (
+    AlterCompositeTypePreview,
     AlterTypeAddValuePreview,
+    AlterTypeRenameValuePreview,
     CreateCompositeTypePreview,
     CreateEnumTypePreview,
     CreateFunctionPreview,
@@ -37,6 +40,7 @@ from ..operations import (
     PreviewCreateTable,
     PreviewDropTable,
     PreviewIndex,
+    RecreateEnumTypePreview,
     RefreshMaterializedViewPreview,
     ReplaceMaterializedViewPreview,
     SchemaCreatePreview,
@@ -85,6 +89,9 @@ PREVIEW_OPS: dict[str, type[DdlPreview]] = {
     "create-composite-type": CreateCompositeTypePreview,
     "drop-type": DropTypePreview,
     "alter-type-add-value": AlterTypeAddValuePreview,
+    "alter-composite-type": AlterCompositeTypePreview,
+    "alter-type-rename-value": AlterTypeRenameValuePreview,
+    "recreate-enum-type": RecreateEnumTypePreview,
 }
 
 
@@ -188,8 +195,7 @@ async def type_definition(
     connection_id: str, database: str, body: dict = Body(...), session: Session = Depends(require_csrf)
 ) -> dict:
     """
-    Introspect an enum or composite type for the edit-prefill flow and the
-    read-only info tab.
+    Introspect an enum or composite type for the (editable) info tab.
 
     Route: ``POST /api/{connection_id}/db/{database}/ddl/type-definition``.
 
