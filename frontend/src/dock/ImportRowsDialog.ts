@@ -15,33 +15,26 @@
 // no RetainedContentDialog: the dialog never closes on a blocked/failed
 // attempt in the first place, so there's nothing to rebuild.
 //
-// Errors surface in an in-content banner (ensureErrorBanner/showErrorBanner/
-// hideErrorBanner, mirroring QueryPanel.ts's durable error banner) rather
-// than a Notification: a Notification's z-index (10002) sits below the
-// Dialog band (11000, see LayerManager's Z_BAND_DIALOG) so a toast fired while
-// this dialog is open — every error case here — would render invisibly behind
-// the modal backdrop.
+// Errors surface in an in-content banner (ErrorBanner, mirroring
+// QueryPanel.ts's durable error banner) rather than a Notification: a
+// Notification's z-index (10002) sits below the Dialog band (11000, see
+// LayerManager's Z_BAND_DIALOG) so a toast fired while this dialog is open —
+// every error case here — would render invisibly behind the modal backdrop.
 
-import { Panel, Container }         from "@jimka/typescript-ui/core";
-import { VBox, HBox }               from "@jimka/typescript-ui/layout";
+import { Panel }                    from "@jimka/typescript-ui/core";
+import { VBox }                     from "@jimka/typescript-ui/layout";
 import { Text, FileDropZone }       from "@jimka/typescript-ui/component/input";
 import { Table }                    from "@jimka/typescript-ui/component/table";
-import { Glyph }                    from "@jimka/typescript-ui/component/display";
-import { circle_exclamation }       from "@jimka/typescript-ui/glyphs/solid/circle_exclamation";
-import { xmark }                    from "@jimka/typescript-ui/glyphs/solid/xmark";
 import { MemoryStore, Model }       from "@jimka/typescript-ui/data";
 import { Dialog }                   from "@jimka/typescript-ui/overlay";
 import type { DialogButtonConfig }  from "@jimka/typescript-ui/overlay";
-import { glyphButton }              from "./glyphButton";
-import { DESTRUCTIVE_COLOR, NEUTRAL_COLOR } from "../theme";
+import { ErrorBanner }              from "./ErrorBanner";
 import type { ColumnMeta, DbObjectRef, ImportRowResult } from "../contract";
 import { previewImportRows, executeImportRows } from "../data/api";
 import { parseImportFile }          from "../data/parseImport";
 import { toFields }                 from "../data/buildModel";
 import { PAGE_SIZE }                from "../data/stores";
 import { buildPreviewGridRows }     from "./importPreviewRows";
-
-Glyph.register(circle_exclamation, xmark);
 
 /** Options for {@link openImportRowsDialog}. */
 export interface ImportRowsDialogOptions {
@@ -70,11 +63,6 @@ const CONTENT_SPACING = 8;
 // intended for a data grid — unlike SqlPreviewDialog's SQL editor, this never
 // needs to grow further with content.
 const PREVIEW_GRID_HEIGHT = 320;
-
-// The error banner's background — same token/fallback as QueryPanel.ts's own
-// (private) ERROR_BANNER_BG; duplicated rather than shared since neither file
-// exports it and it's a single CSS-var literal.
-const ERROR_BANNER_BG = "var(--ts-ui-notification-error-bg, rgba(244, 214, 214, 0.75))";
 
 /** Cancel has no onClick guard — every dismiss gesture should always work. */
 const CANCEL_BUTTON: DialogButtonConfig = { text: "Cancel", result: "close" };
@@ -124,68 +112,7 @@ async function runImportRowsDialog(options: ImportRowsDialogOptions): Promise<vo
     });
     content.addComponent(previewGrid, { weight: 1 });
 
-    let errorBanner: Container | null = null;
-    let errorBannerText: Text | null = null;
-    let errorBannerShown = false;
-
-    /** Build the banner row on first use: warning glyph, wrapping message text, dismiss button. */
-    function ensureErrorBanner(): Container {
-        if (!errorBanner) {
-            const icon    = new Glyph("circle-exclamation", { foregroundColor: DESTRUCTIVE_COLOR });
-            const dismiss = glyphButton("xmark", NEUTRAL_COLOR, "Dismiss", () => hideErrorBanner());
-            const banner  = Container({ layoutManager: new HBox({ spacing: 8, itemAlign: "stretch" }) });
-
-            errorBannerText = new Text("", { whiteSpace: "normal", truncate: false });
-
-            banner.addComponent(icon);
-            banner.addComponent(errorBannerText, { weight: 1 });
-            banner.addComponent(dismiss);
-            banner.setBackgroundColor(ERROR_BANNER_BG);
-
-            errorBanner = banner;
-        }
-
-        return errorBanner;
-    }
-
-    /** Show (or refresh) the error banner with `error`'s message. */
-    function showError(error: unknown): void {
-        const banner = ensureErrorBanner();
-
-        errorBannerText!.setText(error instanceof Error ? error.message : String(error));
-
-        if (!errorBannerShown) {
-            content.addComponent(banner);
-            errorBannerShown = true;
-        }
-
-        dialog.resizeToContent();
-    }
-
-    /** Hide the error banner (Dismiss, or a new file being dropped/picked). A no-op when not showing. */
-    function hideErrorBanner(): void {
-        if (errorBannerShown) {
-            content.removeComponent(errorBanner!);
-            errorBannerShown = false;
-            dialog.resizeToContent();
-        }
-    }
-
-    /**
-     * Dispose the error banner if it exists but isn't currently attached to
-     * `content` — Dialog's own teardown only cascades into content's
-     * CURRENTLY attached children, so a dismissed (detached) banner would
-     * otherwise leak (same reasoning as QueryPanel.ts's own errorBanner
-     * teardown). A separate function, not inlined at the call site: TypeScript
-     * narrows `errorBanner` to `never` at that position when checked inline in
-     * a `try/finally` (a quirk of its control-flow analysis there, not a real
-     * impossibility) — calling a fresh function sidesteps it.
-     */
-    function disposeDetachedErrorBanner(): void {
-        if (!errorBannerShown && errorBanner) {
-            errorBanner.dispose();
-        }
-    }
+    const errorBanner = new ErrorBanner({ host: content, onChange: () => dialog.resizeToContent() });
 
     dropZone.on("change", (files: File[]) => void handleFile(files));
 
@@ -205,7 +132,7 @@ async function runImportRowsDialog(options: ImportRowsDialogOptions): Promise<vo
             return;
         }
 
-        hideErrorBanner();
+        errorBanner.hide();
 
         let parsed;
 
@@ -213,7 +140,7 @@ async function runImportRowsDialog(options: ImportRowsDialogOptions): Promise<vo
             parsed = parseImportFile(file.name, await file.text());
         } catch (err) {
             resetPreview();
-            showError(err);
+            errorBanner.show(err);
 
             return;
         }
@@ -224,7 +151,7 @@ async function runImportRowsDialog(options: ImportRowsDialogOptions): Promise<vo
             preview = await previewImportRows(options.ref, parsed.rows);
         } catch (err) {
             resetPreview();
-            showError(err);
+            errorBanner.show(err);
 
             return;
         }
@@ -255,7 +182,7 @@ async function runImportRowsDialog(options: ImportRowsDialogOptions): Promise<vo
      */
     async function tryImport(): Promise<boolean> {
         if (!canImport()) {
-            showError(blockedReason());
+            errorBanner.show(blockedReason());
 
             return false;
         }
@@ -271,7 +198,7 @@ async function runImportRowsDialog(options: ImportRowsDialogOptions): Promise<vo
 
             return true;
         } catch (err) {
-            showError(err);
+            errorBanner.show(err);
 
             return false;
         }
@@ -296,6 +223,6 @@ async function runImportRowsDialog(options: ImportRowsDialogOptions): Promise<vo
     try {
         await dialog.show();
     } finally {
-        disposeDetachedErrorBanner();
+        errorBanner.dispose();
     }
 }

@@ -660,6 +660,28 @@ release.
 
 ---
 
+## Implementation Notes
+
+- **`ErrorBanner.show()` fires `onChange` on every call, not just the
+  attach.** `## Internal Structure`'s sketch put `this._onChange?.()` inside
+  the `if (!this._shown)` guard, matching `QueryPanel.ts`'s original
+  `showErrorBanner`. But the other two original copies —
+  `SqlPreviewDialog.ts`'s and `ImportRowsDialog.ts`'s `showError` —  called
+  `dialog.resizeToContent()` *unconditionally*, after the guard, so a second
+  failure's (possibly longer) message still resized the dialog even though
+  the banner was already shown. `SqlPreviewDialog.ts` masked this because
+  both its call sites `hide()` the banner before every `show()`, so the
+  guard's `false` branch never ran in practice — but `ImportRowsDialog.ts`'s
+  `tryImport()` calls `show()` directly on an already-shown banner (a second
+  blocked/failed Import with the banner still up from the first), where the
+  sketch's version would have left the dialog un-resized for the new
+  message. Firing `onChange` unconditionally in `show()` matches both DDL
+  dialogs' original behaviour exactly and is a harmless superset for
+  `QueryPanel.ts` (one extra, idempotent relayout call on a repeat error).
+  Found during the audit's BLOCKING pass, not during initial implementation.
+
+---
+
 ## Notes
 
 [^why-subclass]: The audit's own suggestion for finding #13 was a shared

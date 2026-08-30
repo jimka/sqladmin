@@ -222,3 +222,22 @@ conversion of `QueryPanel`, `QueryResultChart`, `QueryResultGrid`,
 `DefinitionPanel`, and `DocumentationPanel`, and
 `plans/in-progress/adopt-dock-owned-teardown.md` for the removal of every
 wrapper `dispose` this section used to require.
+
+## (g) Dialogs are `Dialog` subclasses
+
+A reusable dialog `extends` the callable `Dialog` export from
+`@jimka/typescript-ui/overlay`, the same as any other library base under (a):
+its `contentComponent` is built as a pre-`super()` local per (b), never
+assigned after. `DismissDialog` (`src/shell/DismissDialog.ts`) is the worked
+example — a dismiss-only modal whose constructor owns the padded content
+wrapper every caller used to build by hand.
+
+A dialog that needs footer-button click guards (`DialogButtonConfig.onClick`
+vetoing the close) or a non-dismissable modal extends `Dialog` directly
+instead of `DismissDialog`. `SqlPreviewDialog.ts` and `ImportRowsDialog.ts`
+need exactly this guard today but predate this convention and remain
+function-based (`openXDialog`, not yet class-first) — no worked `extends`
+example for the guarded case exists yet. A `Dialog` subclass's content never
+sets its own `autoScroll`: `Dialog`'s own content container already wraps
+whatever it is handed in a scrolling `Panel`, so a second `autoScroll` nests
+one scroll region inside another.
