@@ -9,7 +9,7 @@
 import { AjaxStore, JsonReader }        from "@jimka/typescript-ui/data";
 import type { Model }                   from "@jimka/typescript-ui/data";
 import type { ColumnMeta, DbObjectRef } from "../contract";
-import { csrfHeader }                   from "./api";
+import { csrfHeader, tableRowsUrl }     from "./api";
 import { SqlAdminWriter }               from "./SqlAdminWriter";
 
 /** Rows per page for the paginated data grids (row-CRUD tables and role grants). */
@@ -22,7 +22,7 @@ export function buildStore(ref: DbObjectRef, model: Model, columns: ColumnMeta[]
     return new AjaxStore({
         model,
         proxy: {
-            url: `/api/${ref.connectionId}/${ref.database}/${ref.schema}/${ref.name}/rows`,
+            url: tableRowsUrl(ref),
             // The session's CSRF token, read at build time (after login has set
             // it). AjaxProxy merges it into every request; write routes require
             // it and read routes ignore it.

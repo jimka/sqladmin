@@ -1,8 +1,9 @@
 // The localStorage inspector: a floating, resizable Window (reached from the
 // Tools menu) that lists every key currently in the browser's localStorage
-// beside its value, and offers a one-click "Clear SQLAdmin data" that removes
-// the app's own keys. A non-modal Window (not a Dialog) so it can stay open
-// beside the app while you inspect or clear stored state.
+// beside its value, and offers two clear actions — one for the app's
+// regenerable state, one (confirmed) for saved connections. A non-modal
+// Window (not a Dialog) so it can stay open beside the app while you inspect
+// or clear stored state.
 //
 // Layout is key/value, split horizontally by a draggable gutter:
 //   - left  — a Tree of keys, with the `sqladmin.` prefix trimmed and the
@@ -12,22 +13,28 @@
 //             intermediate segments are pure grouping. The left pane is pinned
 //             (weight 0), so resizing the window only grows the value editor.
 //   - right — a read-only CodeEditor showing the selected key's value. The
-//             value is color-coded and pretty-printed as JSON when it parses
-//             (which every `sqladmin.*` value does), else shown as raw text
-//             with highlighting off.
+//             value is color-coded and pretty-printed as JSON when it parses,
+//             else shown as raw text with highlighting off — `sqladmin.notes.*`
+//             (data/notesStore.ts) stores raw Markdown with no JSON wrapper at
+//             all, so it always falls to the raw-text branch.
 //
 // Self-contained on window.localStorage: the app's persisted state is exactly
-// the `sqladmin.*` keys — query history + saved queries (data/queryStore.ts),
-// notes (data/notesStore.ts), and Split/Accordion layout geometry
-// (data/layoutStore.ts). History, saved queries, and notes are read fresh on
-// each access, so removing them here needs no cache invalidation; the Queries
-// rail, if open, only reflects a clear on its next refresh. Layout is
-// different: a live Split/Accordion keeps its on-screen geometry after a
-// clear (nothing here reaches into the mounted components), so the reset
-// only takes effect on the next reload — and a subsequent drag re-creates the
-// key it just cleared.
+// five `sqladmin.*` key families — `sqladmin.history.*` and `sqladmin.saved.*`
+// (data/queryStore.ts), `sqladmin.notes.*` (data/notesStore.ts),
+// `sqladmin.layout.*` (data/layoutStore.ts), and the flat `sqladmin.presets`
+// (data/presetStore.ts). "Clear SQLAdmin data" removes the first four —
+// regenerable or cheap to lose — in one click; "Clear saved connections"
+// removes only `sqladmin.presets`, behind a confirm, since a saved preset
+// carries a host/port/database/username the user typed once and cannot get
+// back (see appStorageKeys.ts's partition rule). History, saved queries, and
+// notes are read fresh on each access, so removing them here needs no cache
+// invalidation; the Queries rail, if open, only reflects a clear on its next
+// refresh. Layout is different: a live Split/Accordion keeps its on-screen
+// geometry after a clear (nothing here reaches into the mounted components),
+// so the reset only takes effect on the next reload — and a subsequent drag
+// re-creates the key it just cleared.
 
-import { Window }               from "@jimka/typescript-ui/overlay";
+import { Window, Dialog }       from "@jimka/typescript-ui/overlay";
 import { Component, Panel }     from "@jimka/typescript-ui/core";
 import { Border, HBox, Split }  from "@jimka/typescript-ui/layout";
 import { Tree }                 from "@jimka/typescript-ui/component/tree";
@@ -37,12 +44,7 @@ import { Button }               from "@jimka/typescript-ui/component/button";
 import { Spacer }               from "@jimka/typescript-ui/component/container";
 import { Insets, Placement }    from "@jimka/typescript-ui/primitive";
 import { APP_NAME }             from "../appIdentity";
-
-// The prefix the app namespaces its persisted keys under (data/queryStore.ts,
-// data/notesStore.ts, data/layoutStore.ts). "Clear SQLAdmin data" removes
-// exactly these, leaving any unrelated origin keys the inspector also lists
-// untouched. The prefix is also trimmed from the key list's row labels.
-const APP_KEY_PREFIX = "sqladmin.";
+import { APP_KEY_PREFIX, isDisposableAppKey, isPresetKey } from "./appStorageKeys";
 
 // Initial window geometry; the window is freely movable and resizable after.
 // Wider than a single-column dump to seat the key tree beside the value editor.
@@ -150,24 +152,45 @@ function toTreeNodes(level: Map<string, TrieNode>): TreeNode[] {
         }));
 }
 
-/** Remove the app's own (`sqladmin.*`) keys, leaving any other origin keys intact. */
-function clearAppKeys(): void {
-    // Snapshot the keys first: removing while iterating window.localStorage by
-    // live index would skip entries as the collection shifts under us.
+/**
+ * Remove every localStorage key `matches` selects. Snapshots the keys first:
+ * removing while iterating window.localStorage by live index would skip
+ * entries as the collection shifts under us.
+ */
+function clearKeys(matches: (key: string) => boolean): void {
     const keys = allEntries().map(entry => entry.key);
 
     for (const key of keys) {
-        if (key.startsWith(APP_KEY_PREFIX)) {
+        if (matches(key)) {
             window.localStorage.removeItem(key);
         }
     }
 }
 
 /**
+ * Confirm, then remove every saved connection preset. Mirrors
+ * SqlAdminShell's `confirmSignOut`: only the presets action asks, since it is
+ * the one clear action that discards something the user cannot regenerate.
+ *
+ * @param onCleared - Run after a confirmed clear (re-reads the key tree in place).
+ */
+async function confirmClearPresets(onCleared: () => void): Promise<void> {
+    const confirmed = await Dialog.confirm(
+        "Clear saved connections",
+        "Delete every saved connection? Saved connections cannot be recovered.",
+    );
+
+    if (confirmed) {
+        clearKeys(isPresetKey);
+        onCleared();
+    }
+}
+
+/**
  * Load a key's value into the editor: pretty-printed and JSON-highlighted when
- * it parses (every `sqladmin.*` value does), else the raw string with
- * highlighting off. Passing `undefined` (a grouping node, or nothing selected)
- * blanks the editor.
+ * it parses, else the raw string with highlighting off — `sqladmin.notes.*`
+ * stores raw Markdown with no JSON wrapper, so it always takes this branch.
+ * Passing `undefined` (a grouping node, or nothing selected) blanks the editor.
  *
  * @param editor - the value editor to load into.
  * @param key - the selected node's full storage key, or undefined for none.
@@ -211,9 +234,9 @@ export function openLocalStorageWindow(): void {
 
 /**
  * Build the window content: a key Tree beside a color-coded value editor, split
- * horizontally, above a trailing button row (Clear · Close). Selecting a leaf
- * loads its value; Clear re-reads the emptied storage in place without reopening
- * the window.
+ * horizontally, above a trailing button row (Clear · Clear saved connections ·
+ * Close). Selecting a leaf loads its value; either Clear button re-reads the
+ * emptied storage in place without reopening the window.
  */
 function buildContent(win: Window): Component {
     // Weight 0 in the Split below pins the tree at its own preferred
@@ -267,9 +290,14 @@ function buildContent(win: Window): Component {
 
     const clearButton = Button({ text: `Clear ${APP_NAME} data`, showText: true, compact: true });
     clearButton.on("action", () => {
-        clearAppKeys();
+        clearKeys(isDisposableAppKey);
         refresh();
     });
+
+    // Presets are excluded from the button above and get their own confirmed
+    // action instead — see appStorageKeys.ts's partition rule.
+    const clearPresetsButton = Button({ text: "Clear saved connections", showText: true, compact: true });
+    clearPresetsButton.on("action", () => { void confirmClearPresets(refresh); });
 
     const closeButton = Button({ text: "Close", showText: true, compact: true });
     closeButton.on("action", () => win.requestClose());
@@ -284,6 +312,7 @@ function buildContent(win: Window): Component {
     });
     buttons.addComponent(Spacer.flex());
     buttons.addComponent(clearButton);
+    buttons.addComponent(clearPresetsButton);
     buttons.addComponent(closeButton);
 
     const root = Panel({ layoutManager: new Border() });

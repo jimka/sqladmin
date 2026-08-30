@@ -1,13 +1,146 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
     getViewDefinition, getStructure, getSchemaGraph, getDatabaseGraph, runExplain, runQuery, tableExportUrl,
-    setCsrfToken, csrfHeader, executeDdl,
+    setCsrfToken, csrfHeader, executeDdl, apiPath, tableRowsUrl, getObjects, previewDropTable, previewImportRows,
+    getRoleDetail,
 } from "../../src/data/api";
 import type { DbObjectRef } from "../../src/contract";
 
 afterEach(() => {
     vi.restoreAllMocks();
     setCsrfToken(null); // reset module-level token so header assertions stay isolated
+});
+
+describe("apiPath", () => {
+    it("joins plain segments under /api/", () => {
+        expect(apiPath("default", "shop", "public", "orders", "columns"))
+            .toBe("/api/default/shop/public/orders/columns");
+    });
+
+    it("percent-encodes a slash inside a segment rather than splitting it", () => {
+        expect(apiPath("default", "shop", "we/ird", "objects"))
+            .toBe("/api/default/shop/we%2Fird/objects");
+    });
+
+    it("percent-encodes a hash inside a segment", () => {
+        expect(apiPath("default", "shop", "a#b", "t", "structure"))
+            .toBe("/api/default/shop/a%23b/t/structure");
+    });
+
+    it("percent-encodes a space inside a segment", () => {
+        expect(apiPath("default", "my db", "public", "objects"))
+            .toBe("/api/default/my%20db/public/objects");
+    });
+
+    it("renders an undefined segment as empty rather than the literal 'undefined'", () => {
+        expect(apiPath("default", undefined, "public", "objects"))
+            .toBe("/api/default//public/objects");
+    });
+
+    it("returns /api/ for no segments", () => {
+        expect(apiPath()).toBe("/api/");
+    });
+
+    it("returns /api/login for a single segment", () => {
+        expect(apiPath("login")).toBe("/api/login");
+    });
+});
+
+describe("getObjects with a hostile schema name", () => {
+    it("percent-encodes the schema segment rather than dropping the rest of the path", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => [] });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await getObjects("default", "shop", "we/ird");
+
+        expect(fetchMock).toHaveBeenCalledWith("/api/default/shop/we%2Fird/objects");
+    });
+});
+
+describe("getStructure with hostile schema and name", () => {
+    it("percent-encodes both segments", async () => {
+        const ref: DbObjectRef = {
+            connectionId: "default",
+            database    : "shop",
+            schema      : "a#b",
+            name        : "my table",
+            kind        : "table",
+        };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await getStructure(ref);
+
+        expect(fetchMock).toHaveBeenCalledWith("/api/default/shop/a%23b/my%20table/structure");
+    });
+});
+
+describe("previewDropTable with a hostile database name", () => {
+    it("percent-encodes the database segment", async () => {
+        const ref: DbObjectRef = {
+            connectionId: "default",
+            database    : "my db",
+            schema      : "public",
+            name        : "orders",
+            kind        : "table",
+        };
+        const spec      = { schema: "public", name: "orders" };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sql: "" }) });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await previewDropTable(ref, spec as never);
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/default/my%20db/ddl/table/drop",
+            expect.objectContaining({ method: "POST" }),
+        );
+    });
+});
+
+describe("previewImportRows with a hostile table name", () => {
+    it("percent-encodes the name segment", async () => {
+        const ref: DbObjectRef = {
+            connectionId: "default",
+            database    : "shop",
+            schema      : "public",
+            name        : "od/d",
+            kind        : "table",
+        };
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await previewImportRows(ref, []);
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/default/shop/public/od%2Fd/rows/import/preview",
+            expect.objectContaining({ method: "POST" }),
+        );
+    });
+});
+
+describe("getRoleDetail with a hostile role name", () => {
+    it("percent-encodes the role segment", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await getRoleDetail("default", "role/x");
+
+        expect(fetchMock).toHaveBeenCalledWith("/api/default/roles/role%2Fx");
+    });
+});
+
+describe("tableRowsUrl", () => {
+    it("percent-encodes the name segment and ends in /rows", () => {
+        const ref: DbObjectRef = {
+            connectionId: "default",
+            database    : "shop",
+            schema      : "public",
+            name        : "my table",
+            kind        : "table",
+        };
+
+        expect(tableRowsUrl(ref)).toBe("/api/default/shop/public/my%20table/rows");
+    });
 });
 
 describe("getViewDefinition", () => {

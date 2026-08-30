@@ -14,7 +14,7 @@ import { Component, callable } from "@jimka/typescript-ui/core";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
 import type { Button }             from "@jimka/typescript-ui/component/button";
 import { refreshTool, bindRefreshShortcut } from "./refreshTool";
-import type { ExplorerTree }       from "../navigator/NavigatorTree";
+import type { ExplorerTree }       from "./explorerTree";
 import type { AccordionLayoutBinding } from "../data/layoutStore";
 
 /** One explorer view: a tree section over a read-only inspector section. */

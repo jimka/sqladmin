@@ -47,21 +47,22 @@ const MAX_HISTORY = 100;
 // localStorage key prefixes, namespaced per user AND connection ("<user>.<conn>")
 // so neither two users nor two connections ever cross-read. History and saved
 // queries are the user's own work against a specific database, so both segments
-// matter (unlike the per-user-only layout/notes settings).
+// matter (unlike the per-user-only layout settings, which have no connection to scope by).
 const HISTORY_KEY_PREFIX = "sqladmin.history.";
 const SAVED_KEY_PREFIX   = "sqladmin.saved.";
 
 /**
- * The per-user, per-connection storage-key suffix (`<user>.<connection>`) both
- * query stores append to their prefix. Kept in one place so the two stores stay
- * in step and the scoping rule reads once.
+ * The per-user, per-connection storage-key suffix (`<user>.<connection>`)
+ * every `<user>.<connection>`-scoped store appends to its own prefix. Kept in
+ * one place so the stores that use it stay in step and the scoping rule
+ * reads once.
  *
  * @param userId - The signed-in user, isolating one user's work from another's.
  * @param connectionId - The connection, isolating one database from another.
  *
  * @returns The `<user>.<connection>` key suffix.
  */
-function scopeKey(userId: string, connectionId: string): string {
+export function scopeKey(userId: string, connectionId: string): string {
     return `${userId}.${connectionId}`;
 }
 

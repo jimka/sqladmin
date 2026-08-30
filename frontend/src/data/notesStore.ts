@@ -7,6 +7,7 @@
 // separate from queryStore.ts (the query workspace) since notes are not a query
 // concept.
 
+import { scopeKey } from "./queryStore";
 import type { KeyValueStore } from "./queryStore";
 
 // localStorage key prefix, namespaced per user AND connection ("<user>.<conn>")
@@ -25,7 +26,7 @@ export class NotesStore {
      * @param storage - The backing key-value store (localStorage or a fake).
      */
     constructor(userId: string, connectionId: string, storage: KeyValueStore) {
-        this._key     = `${NOTES_KEY_PREFIX}${userId}.${connectionId}`;
+        this._key     = NOTES_KEY_PREFIX + scopeKey(userId, connectionId);
         this._storage = storage;
     }
 

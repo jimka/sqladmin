@@ -2,17 +2,20 @@
 // connection presets. Persists { name, host, port, database, username,
 // isDefault } — never a password (that stays per-login, handled by the
 // browser's own password manager). Backed by web storage under a single
-// `sqladmin.*` key so the shell's "Clear SQLAdmin data" and the localStorage
-// inspector cover it for free. The proxy owns the normal read/write path; the
-// raw Storage is touched only to discard a corrupt blob so a write can
-// recover (see `_withRepair`).
+// `sqladmin.*` key, so the localStorage inspector lists it for free —  but it
+// is NOT covered by the shell's "Clear SQLAdmin data": a saved preset carries
+// a host/port/database/username the user typed once and cannot get back, so
+// it has its own confirmed "Clear saved connections" action instead (see
+// shell/appStorageKeys.ts's partition rule). The proxy owns the normal
+// read/write path; the raw Storage is touched only to discard a corrupt blob
+// so a write can recover (see `_withRepair`).
 
 import { Model, ModelRecord, WebStorageProxy } from "@jimka/typescript-ui/data";
 import { normalizeConnectionPreset } from "../contract";
 import type { ConnectionPreset } from "../contract";
 
 /** Web-storage key holding the preset array (flat — presets predate any connection). */
-const PRESETS_KEY = "sqladmin.presets";
+export const PRESETS_KEY = "sqladmin.presets";
 
 /** The preset record schema; primary key `name` drives upsert/remove matching. */
 const PRESET_MODEL = new Model(

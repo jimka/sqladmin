@@ -1,17 +1,20 @@
 // The lazy object navigator: a Tree rooted at the logged-in database's schemas,
 // whose levels (schemas -> Tables/Views/Materialized Views/Sequences/Functions/
-// Types category groups -> object leaves) are fetched on first expansion via
-// the introspection api. The app connects to one database per session, so
+// Types/Indexes category groups -> object leaves) are fetched on first expansion
+// via the introspection api. The app connects to one database per session, so
 // there is no database level. Each
 // object leaf carries its
 // DbObjectRef on node.data; selecting one shows its metadata in the Properties
 // inspector, and double-clicking a relation (or its "Show data" context item)
 // opens the object in the Dock through the controller. Category nodes carry no
 // data, so selecting them is a no-op. The Tree caches loaded children, so a
-// collapse/re-expand does not refetch.
+// collapse/re-expand does not refetch. The load lifecycle itself (arm/fetch/
+// map/restore/default-expand/settle) is owned by shell/explorerTree.ts's
+// ExplorerTreeBase — this class supplies only its own load/toNodes/
+// applyDefaultExpansion.
 
 import { callable } from "@jimka/typescript-ui/core";
-import { Tree, IconLabelTreeNodeRenderer }      from "@jimka/typescript-ui/component/tree";
+import { IconLabelTreeNodeRenderer }            from "@jimka/typescript-ui/component/tree";
 import type { TreeNode }                        from "@jimka/typescript-ui/component/tree";
 import { Menu }                                 from "@jimka/typescript-ui/overlay";
 import { Glyph }                                from "@jimka/typescript-ui/component/display";
@@ -25,8 +28,8 @@ import { share_nodes }                          from "@jimka/typescript-ui/glyph
 import { circle_nodes }                         from "@jimka/typescript-ui/glyphs/solid/circle_nodes";
 import type { DbObjectKind, DbObjectRef }       from "../contract";
 import { getFunctions, getIndexes, getObjects, getSchemas, getTypes } from "../data/api";
-import { TreeExpansionPersistence }             from "../data/treeExpansion";
-import { LoadSignal }                           from "../data/loadSignal";
+import { ExplorerTreeBase }                     from "../shell/explorerTree";
+import type { ExplorerTree }                    from "../shell/explorerTree";
 import { KIND_GLYPH }                           from "./objectGlyphs";
 import { isRelationKind, objectCategories }     from "./objectKinds";
 import { showObjectMenu }                       from "./objectMenu";
@@ -99,33 +102,18 @@ function nodeGlyph(node: TreeNode): string {
     return CATEGORY_GLYPH.get(node.label) ?? "folder";
 }
 
-/** A `Tree` that also exposes a `refresh` action reloading its top level. */
-export interface ExplorerTree extends Tree {
-    refresh(): void;
-    /**
-     * Resolves once the tree's top level has loaded; already resolved when no
-     * load is running. Await it before a reveal, which searches the tree's
-     * current nodes and would silently find nothing in a tree still filling.
-     */
-    whenLoaded(): Promise<void>;
-}
-
 /** Build the navigator Tree, wired to open tables and report load errors. */
-class NavigatorTree extends Tree implements ExplorerTree {
-    private readonly controller: SqlAdminController;
+class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements ExplorerTree {
     private readonly conn:       string;
     // The logged-in database, whose schemas are the tree's top level. `?? ""`
     // covers only DOM-less callers that omit it; in-app it is always set.
     private readonly database:   string;
     private readonly contextMenu = Menu();
-    private readonly _expansion: TreeExpansionPersistence;
-    private readonly _loaded: LoadSignal = new LoadSignal();
 
     constructor(controller: SqlAdminController) {
-        super();
-        this.controller = controller;
-        this.conn       = controller.connectionId;
-        this.database   = controller.database ?? "";
+        super(controller, controller.layout.bindTreeExpansion("database"));
+        this.conn     = controller.connectionId;
+        this.database = controller.database ?? "";
 
         // Render each row as a kind glyph beside its label.
         this.setRendererFactory(() => new IconLabelTreeNodeRenderer(nodeGlyph));
@@ -211,10 +199,6 @@ class NavigatorTree extends Tree implements ExplorerTree {
         // Let the controller drive selection when a dock tab is focused.
         this.controller.setNavigator(this);
 
-        this._expansion = new TreeExpansionPersistence(this, controller.layout.bindTreeExpansion("database"));
-        this.on("expand",   this._expansion.save);
-        this.on("collapse", this._expansion.save);
-
         // (Re)load the top-level schemas; the lazy object levels reload on their
         // next expansion. Used for the initial load.
         this.refresh();
@@ -222,48 +206,23 @@ class NavigatorTree extends Tree implements ExplorerTree {
 
     // (Re)load the top-level schemas of the logged-in database (there is no
     // database level); the lazy object levels reload on their next expansion.
-    // Used for the initial load and the section refresh tool. A public
-    // arrow-function field: refreshTool/bindRefreshShortcut hold this by
-    // reference, which would lose `this` if it were a plain method.
-    refresh = (): void => {
-        this._loaded.arm();
-
-        void loadSchemas(this.conn, this.database)
-            .then(async nodes => {
-                this.setNodes(nodes);
-
-                const restored = await this._expansion.restore();
-
-                // A single-schema database: expand that lone schema immediately so
-                // its category folders show without an extra click. nodes[0] IS
-                // that schema's own TreeNode (see schemaNode below); expandNode
-                // loads its children via the node's loadChildren if not cached yet.
-                // Skipped once the user has expansion state of their own.
-                if (!restored && nodes.length === 1) {
-                    this.expandNode(nodes[0]);
-                }
-            })
-            .catch(error => this.controller.notifyError(error))
-            // After the whole chain — the expansion restore included — so a
-            // waiting reveal never races the restore into re-collapsing the path
-            // it just opened. Attached after the .catch so the signal settles on
-            // the failure path too, rather than depending on handler order.
-            .finally(() => this._loaded.settle());
-    };
-
-    /**
-     * @returns A promise resolving once {@link refresh}'s load chain has
-     * finished; an already-resolved one when no load is running.
-     */
-    whenLoaded(): Promise<void> {
-        return this._loaded.whenSettled();
+    protected load(): Promise<{ name: string }[]> {
+        return getSchemas(this.conn, this.database);
     }
-}
 
-async function loadSchemas(conn: string, database: string): Promise<TreeNode[]> {
-    const schemas = await getSchemas(conn, database);
+    protected toNodes(schemas: { name: string }[]): TreeNode[] {
+        return schemas.map(s => schemaNode(this.conn, this.database, s.name));
+    }
 
-    return schemas.map(s => schemaNode(conn, database, s.name));
+    // A single-schema database: expand that lone schema immediately so its
+    // category folders show without an extra click. nodes[0] IS that schema's
+    // own TreeNode (see schemaNode below); expandNode loads its children via
+    // the node's loadChildren if not cached yet.
+    protected applyDefaultExpansion(_schemas: { name: string }[], nodes: TreeNode[]): void {
+        if (nodes.length === 1) {
+            this.expandNode(nodes[0]);
+        }
+    }
 }
 
 function schemaNode(conn: string, database: string, schema: string): TreeNode {

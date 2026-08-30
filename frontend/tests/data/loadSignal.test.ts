@@ -49,7 +49,7 @@ describe("LoadSignal", () => {
         expect(await hasResolved(settled)).toBe(true);
     });
 
-    it("a second arm() does not replace the deferred, so one settle() resolves it", async () => {
+    it("a second arm() extends the wait: one settle() leaves it pending", async () => {
         const signal = new LoadSignal();
 
         signal.arm();
@@ -57,6 +57,20 @@ describe("LoadSignal", () => {
         const settled = signal.whenSettled();
 
         signal.arm();
+        signal.settle();
+
+        expect(await hasResolved(settled)).toBe(false);
+    });
+
+    it("the matching second settle() resolves the extended wait", async () => {
+        const signal = new LoadSignal();
+
+        signal.arm();
+
+        const settled = signal.whenSettled();
+
+        signal.arm();
+        signal.settle();
         signal.settle();
 
         expect(await hasResolved(settled)).toBe(true);

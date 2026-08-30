@@ -30,8 +30,5 @@ export const NEUTRAL_COLOR = "rgb(66, 66, 66)";
 /** Secondary navigation kept visually quieter than the colored actions — query history. */
 export const HISTORY_COLOR = "rgb(90, 90, 90)";
 
-/** Active-filter indicator tint (the filter button while a filter is applied). */
-export const FILTER_ACTIVE_COLOR = "rgb(230, 145, 30)";
-
 /** Secondary / hint text — start-page lines, dialog captions, empty-state hints. */
 export const MUTED_TEXT_COLOR = "rgb(140, 140, 140)";

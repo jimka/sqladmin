@@ -103,12 +103,6 @@ export interface SequenceDetail {
     ownedBy?: SequenceOwnedBy | null;
 }
 
-/** The list endpoint envelope the configured JsonReader parses. */
-export interface TableListEnvelope {
-    rows: Record<string, unknown>[];
-    totalCount: number;
-}
-
 /** One result column from an arbitrary query (name + inferred wire scalar). */
 export interface QueryColumnMeta {
     name: string;
