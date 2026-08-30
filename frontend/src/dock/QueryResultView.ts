@@ -1,12 +1,11 @@
 // Render a rows query result as two independent tab bodies, hosted by
 // QueryPanel's result TabPanel:
 //
-//   * QueryResultGrid — the read-only results grid, with a record-view toggle
-//     (Previous/Next steppers) and a quick search over the loaded rows —
-//     mirroring TableWorkPanel.ts's grid toolbar, the same view a table's
-//     "view"/materialized-view browse query and any ad-hoc "run SQL" query
-//     land on. Built for every rows result. Needs no disposal of its own: the
-//     grid is `content`, so the Dock's teardown on tab close reaches it
+//   * QueryResultGrid — the read-only results grid, with the shared
+//     RecordViewControls toolbar group (record-view toggle, Previous/Next
+//     steppers, quick search) — the same group TableWorkPanel mounts over its
+//     data grid. Built for every rows result. Needs no disposal of its own:
+//     the grid is `content`, so the Dock's teardown on tab close reaches it
 //     directly.
 //   * QueryResultChart — a bar/line chart of the same rows over a config strip
 //     (x/y column combos + a line/bar type toggle). Built only for a chartable
@@ -16,15 +15,10 @@
 //     the outgoing instance explicitly, since a config change swaps it for a
 //     fresh one inside a live tab, which no teardown recursion runs for.
 //
-// QueryResultGrid's quick search narrows the loaded rows via the library's own
-// `Table.setQuickSearch`, matching each cell's displayed text rather than a
-// record's raw stored value — see gridQuickSearch.ts (shared with
-// TableWorkPanel.ts) for why `quickSearchFields`/`matchesQuery` still exist
-// alongside it: the record-view stepper needs to know which records currently
-// match, and the grid exposes no query for that. Unlike TableWorkPanel's
-// table grid, a query result is never paginated (MemoryStore holds every
-// returned row already), so there is no "N more on the server" status line —
-// just the row-hiding and the stepper.
+// RecordViewControls owns the row-hiding and the stepper; unlike
+// TableWorkPanel's grid, a query result is never paginated (MemoryStore holds
+// every returned row), so this grid shows no "N more on the server" status
+// line — it passes no `onQuery` hook at all.
 //
 // The chart is built in-memory from `buildChartSeries` (see chartConfig.ts)
 // rather than store-bound: a re-run always rebuilds the whole view (the result
@@ -38,48 +32,38 @@ import { Placement }                             from "@jimka/typescript-ui/prim
 import { Border as BorderLayout, Fit, HBox }     from "@jimka/typescript-ui/layout";
 import { ToolBar }                               from "@jimka/typescript-ui/component/menubar";
 import { Spacer }                                from "@jimka/typescript-ui/component/container";
-import { Text, TextField, ComboBox }             from "@jimka/typescript-ui/component/input";
+import { Text, ComboBox }                        from "@jimka/typescript-ui/component/input";
 import { ToggleButton }                          from "@jimka/typescript-ui/component/button";
-import { Table }                                 from "@jimka/typescript-ui/component/table";
 import { MemoryStore }                           from "@jimka/typescript-ui/data";
-import type { ModelRecord }                      from "@jimka/typescript-ui/data";
 import { Glyph }                                 from "@jimka/typescript-ui/component/display";
 import { LineChart, BarChart }                   from "@jimka/typescript-ui/component/chart";
 import { chart_line }                            from "@jimka/typescript-ui/glyphs/solid/chart_line";
 import { chart_column }                          from "@jimka/typescript-ui/glyphs/solid/chart_column";
-import { table_list }                            from "@jimka/typescript-ui/glyphs/solid/table_list";
-import { angle_left }                            from "@jimka/typescript-ui/glyphs/solid/angle_left";
-import { angle_right }                           from "@jimka/typescript-ui/glyphs/solid/angle_right";
 import { buildQueryModel }                       from "../data/buildModel";
 import {
     defaultChartConfig, xCandidates, numericColumns, isTimeX, buildChartSeries,
 } from "../data/chartConfig";
 import type { ChartConfig } from "../data/chartConfig";
 import type { QueryRowsResult } from "../contract";
-import { glyphButton, glyphToggleButton } from "./glyphButton";
-import { stepIndex, visibleRecords } from "./recordNavigation";
-import { quickSearchFields, matchesQuery } from "./gridQuickSearch";
-import { PRIMARY_COLOR } from "../theme";
+import { readOnlyTable } from "./columnsGrid";
+import { RecordViewControls } from "./recordViewControls";
 
-// The line/bar type toggles inside the chart strip, plus the record-view toggle
-// and its Previous/Next steppers on the Data tab. The grid/chart glyphs that
-// label the Data/Chart tabs are registered by QueryPanel, which owns the tabs.
-Glyph.register(chart_line, chart_column, table_list, angle_left, angle_right);
+// The line/bar type toggles inside the chart strip. The record-view/stepper
+// glyphs are registered by recordViewControls.ts, which RecordViewControls
+// draws on; the grid/chart glyphs that label the Data/Chart tabs are
+// registered by QueryPanel, which owns the tabs.
+Glyph.register(chart_line, chart_column);
 
 // Horizontal gap (px) separating the x-axis pair from the y-axis pair in the
 // chart config strip, so "x: [..]" and "y: [..]" read as two distinct groups.
 const AXIS_GROUP_GAP = 12;
 
 /**
- * The results grid for a rows result: a toolbar (record-view toggle plus its
- * Previous/Next steppers, and a quick search) over the read-only grid. A
- * class-first composition wrapper: the instance owns `content` (the
- * toolbar-over-grid subtree) alone — the Dock destroys it, and the
- * MemoryStore beneath it needs no teardown of its own. `toggleRecordView`,
- * `applyQuickSearch`, `stepRecord`, and `syncStepEnabled` are plain functions
- * closing over the constructor's own locals, not arrow-function fields — see
- * COMPONENT_CONVENTIONS.md (f): a composition wrapper has no `this` for an
- * arrow field to bind.
+ * The results grid for a rows result: a toolbar (the shared
+ * `RecordViewControls` group) over the read-only grid. A class-first
+ * composition wrapper: the instance owns `content` (the toolbar-over-grid
+ * subtree) alone — the Dock destroys it, and the MemoryStore beneath it needs
+ * no teardown of its own.
  */
 export class QueryResultGrid {
     readonly content: Component;
@@ -94,92 +78,16 @@ export class QueryResultGrid {
         // A result set's shape is unknown until it arrives, so its columns are
         // sized from the returned rows; a free-text column is capped by the
         // library at 400px.
-        const grid  = Table(store, { columns: [], autoSizeColumns: true, rowReadOnly: () => true });
-        // Captured now, while the grid is still guaranteed "normal" — see
-        // gridQuickSearch.ts's `quickSearchFields` doc comment for why a
-        // later call (e.g. once the record-view toggle has rotated the grid)
-        // would silently resolve to the wrong field names.
-        const searchFields = quickSearchFields(grid);
-
-        const recordToggle     = glyphToggleButton("table-list", PRIMARY_COLOR, "Record view (one record as field/value rows)", false);
-        const prevButton       = glyphButton("angle-left",  PRIMARY_COLOR, "Previous record", () => stepRecord(-1));
-        const nextButton       = glyphButton("angle-right", PRIMARY_COLOR, "Next record",     () => stepRecord(1));
-        // Local, network-free row hiding over the already-loaded rows, via
-        // Table.setQuickSearch — see this file's header comment.
-        const quickSearchField = new TextField({ placeholder: "Quick search" });
+        const grid     = readOnlyTable(store);
+        const controls = new RecordViewControls({ grid, searchPlaceholder: "Quick search" });
 
         const toolbar = new ToolBar({
-            components: [recordToggle, prevButton, nextButton, Spacer.flex(), quickSearchField],
+            components: [...controls.buttons, Spacer.flex(), controls.searchField],
         });
 
         const content = Container({ layoutManager: new BorderLayout({ spacing: 0 }) });
         content.addComponent(toolbar, { placement: Placement.NORTH });
         content.addComponent(grid,    { placement: Placement.CENTER });
-
-        recordToggle.on("action", toggleRecordView);
-        grid.on("selection", syncStepEnabled);
-        quickSearchField.on("change", applyQuickSearch);
-        syncStepEnabled();
-
-        /** Flip the grid's display mode and re-seed/re-sync the steppers. */
-        function toggleRecordView(): void {
-            const record = grid.getSelectedRecord();
-
-            if (recordToggle.isSelected()) {
-                grid.setDisplayMode("rotated");
-            } else {
-                grid.setDisplayMode("normal");
-                // setDisplayMode re-selects the displayed record but does not reveal
-                // it; selectRecord's normal-mode path scrolls the row back into view.
-                grid.selectRecord(record);
-            }
-
-            syncStepEnabled();
-        }
-
-        /**
-         * Installs a fresh quick-search predicate on the grid; empty clears it
-         * entirely. Also re-syncs the steppers: their enabled state depends on
-         * the query too (see syncStepEnabled), and only 'selection' would
-         * otherwise trigger a re-check, lagging behind what was just typed.
-         */
-        function applyQuickSearch(): void {
-            grid.setQuickSearch(quickSearchField.getValue().trim());
-            syncStepEnabled();
-        }
-
-        /**
-         * The rows currently matching the live quick-search query — see
-         * gridQuickSearch.ts's `matchesQuery`, tested against each field's
-         * displayed cell text the same way `Table.setQuickSearch` itself does.
-         */
-        function matchingRecords(): ModelRecord[] {
-            const needle = quickSearchField.getValue().trim().toLowerCase();
-
-            return visibleRecords(store.getRecords(), (r: ModelRecord) => matchesQuery(grid, searchFields, r, needle));
-        }
-
-        /** Step the displayed record by `delta` within the rows matching the live query, clamped. */
-        function stepRecord(delta: number): void {
-            const records = matchingRecords();
-            const current = grid.getSelectedRecord();
-            const target  = stepIndex(current ? records.indexOf(current) : -1, delta, records.length);
-
-            if (target !== null) {
-                grid.selectRecord(records[target]);
-            }
-        }
-
-        /** Enable Previous/Next only in record view, and only where a matching neighbour exists. */
-        function syncStepEnabled(): void {
-            const rotated = grid.getDisplayMode() === "rotated";
-            const records = matchingRecords();
-            const current = grid.getSelectedRecord();
-            const index   = current ? records.indexOf(current) : -1;
-
-            prevButton.setEnabled(rotated && stepIndex(index, -1, records.length) !== null);
-            nextButton.setEnabled(rotated && stepIndex(index,  1, records.length) !== null);
-        }
 
         this.content = content;
     }

@@ -3,7 +3,7 @@
 // query is executed, the editor fills the panel and no result pane is shown. A
 // result adds a resizable pane below the editor (a draggable Split gutter),
 // seeded so the editor starts ~150px tall; the pane is a TabPanel holding up to
-// three independently-refreshed tabs:
+// four independently-refreshed tabs:
 //
 //   * Data    — the read-only results grid (a query result has no PK and is
 //               never written back). Driven by Run; present for every rows result.
@@ -23,12 +23,18 @@
 //               QueryResultView.
 //   * Explain — a read-only, SQL-highlighted CodeEditor holding an EXPLAIN or
 //               EXPLAIN ANALYZE plan; closeable.
+//   * Diagram — the plan tree plus its ELK diagram, built from the shown
+//               Explain plan re-fetched as FORMAT JSON; opened and refreshed
+//               by the Explain-diagram toolbar button (enabled only while a
+//               plan is on screen) and closeable. See ExplainDiagramPanel /
+//               showDiagram.
 //
 // Each tab is owned by its own toolbar action and they persist independently:
-// Run refreshes only Data, the Chart button only Chart, Explain only Explain —
-// EXPLAIN no longer destroys the data view, and a re-run does not disturb an open
-// Chart/Explain tab. The pane appears with the first tab and vanishes with the
-// last (the Tab "empty" event). A non-row statement (INSERT/UPDATE/DDL) reports
+// Run refreshes only Data, the Chart button only Chart, Explain only Explain,
+// and the Explain-diagram button only Diagram — EXPLAIN no longer destroys the
+// data view, and a re-run does not disturb an open Chart/Explain/Diagram tab.
+// The pane appears with the first tab and vanishes with the last (the Tab
+// "empty" event). A non-row statement (INSERT/UPDATE/DDL) reports
 // its command tag and drops only the Data tab, leaving any Chart/Explain tab. A
 // re-run's fetch error or non-rows result never discards an already-loaded Data
 // tab — the old tab is only removed once the new fetch is confirmed to hold
@@ -378,37 +384,81 @@ export class QueryPanel {
             }
         }
 
-        /** Remove the Data tab (if present); removeTabSilently's tab.closeTab disposes its content. */
+        /**
+         * Mount `content` as the result pane's `title` tab, replacing the tab of the
+         * same kind.
+         *
+         * The replacement is added BEFORE the outgoing tab is removed, and both run
+         * under `refreshingTabs`. A newly added tab only lands in the Tab manager's
+         * content list on the next scheduled layout, so removing the old one first —
+         * or removing it outside the guard — can momentarily drain the strip to zero
+         * and fire "empty", which would hide the very pane the replacement is about to
+         * land in. Adding first also means a re-run never shows two tabs of the same
+         * kind, not even for one frame.
+         *
+         * The caller must already have shown the result pane: `ensureResultPaneShown()`
+         * for a tab built from scratch, or, on the Data-refresh path, the
+         * `refreshDataTab` call that started the run.
+         *
+         * @param content - The freshly built tab content to mount.
+         * @param title - The tab strip's label.
+         * @param options - Tab options, passed straight to `TabPanel.addTab`.
+         * @param removeOutgoing - Removes the outgoing tab of this kind and clears its
+         *   slot (one of the four `remove*Tab` functions). A no-op when none is open.
+         */
+        function swapTab(
+            content: Component,
+            title: string,
+            options: { closeable?: boolean; glyph?: string },
+            removeOutgoing: () => void,
+        ): void {
+            refreshingTabs = true;
+
+            try {
+                resultHost.addTab(content, title, options);
+                removeOutgoing();
+            } finally {
+                refreshingTabs = false;
+            }
+        }
+
+        /**
+         * Remove one result tab and clear its slot, if that tab is present.
+         * `removeTabSilently`'s `tab.closeTab` disposes the removed content.
+         *
+         * @param content - The slot's mounted content, or undefined when the slot is empty.
+         * @param clearSlot - Nulls the slot, plus any re-sync that hangs off it.
+         */
+        function removeTab(content: Component | undefined, clearSlot: () => void): void {
+            if (!content) {
+                return;
+            }
+
+            removeTabSilently(content);
+            clearSlot();
+        }
+
+        /** Remove the Data tab (if present). */
         function removeDataTab(): void {
-            if (dataSlot) {
-                removeTabSilently(dataSlot.content);
-                dataSlot = null;
-            }
+            removeTab(dataSlot?.content, () => { dataSlot = null; });
         }
 
-        /** Remove the Chart tab (if present); removeTabSilently's tab.closeTab disposes its content. */
+        /** Remove the Chart tab (if present). */
         function removeChartTab(): void {
-            if (chartSlot) {
-                removeTabSilently(chartSlot.content);
-                chartSlot = null;
-            }
+            removeTab(chartSlot?.content, () => { chartSlot = null; });
         }
 
-        /** Remove the Explain tab (if present); removeTabSilently's tab.closeTab disposes its content. */
+        /** Remove the Explain tab (if present). */
         function removeExplainTab(): void {
-            if (explainSlot) {
-                removeTabSilently(explainSlot.editor);
+            removeTab(explainSlot?.editor, () => {
                 explainSlot = null;
                 syncDiagramButton();
-            }
+            });
         }
 
-        /** Remove the Diagram tab (if present); removeTabSilently's tab.closeTab disposes its content. */
+        /** Remove the Diagram tab (if present). */
         function removeDiagramTab(): void {
-            if (diagramSlot) {
-                removeTabSilently(diagramSlot.content);
-                diagramSlot = null;
-            }
+            removeTab(diagramSlot?.content, () => { diagramSlot = null; });
         }
 
         /**
@@ -714,8 +764,7 @@ export class QueryPanel {
 
         /**
          * Mount the plan tree + diagram as the (closeable) Diagram tab, replacing any
-         * prior one. Mirrors showChart's add-then-remove-under-refreshingTabs dance so
-         * the interim strip-drain can't hide the pane before the replacement lands.
+         * prior one.
          *
          * @param roots - The parsed plan roots to diagram.
          * @param summary - The plan's top-level planning/execution times.
@@ -725,15 +774,7 @@ export class QueryPanel {
             const nextDiagram = new ExplainDiagramPanel(roots, summary, explainDiagramLayout, advisor);
 
             ensureResultPaneShown();
-
-            refreshingTabs = true;
-
-            try {
-                resultHost.addTab(nextDiagram, "Diagram", { closeable: true, glyph: "sitemap" });
-                removeDiagramTab();
-            } finally {
-                refreshingTabs = false;
-            }
+            swapTab(nextDiagram, "Diagram", { closeable: true, glyph: "sitemap" }, removeDiagramTab);
 
             diagramSlot = { content: nextDiagram };
 
@@ -1018,16 +1059,7 @@ export class QueryPanel {
                     // stay pinned to the rows that tab is about to lose.
                     const oldDataTabWasActive = tab.getActiveContent() === oldContent;
 
-                    // Add-then-remove in the same tick (mirroring showChart's dance)
-                    // is the point of this whole function: unlike the lazy-tab path,
-                    // there is never a moment with two Data tabs on screen.
-                    refreshingTabs = true;
-                    try {
-                        resultHost.addTab(grid.content, "Data", { glyph: "table" });
-                        removeDataTab();
-                    } finally {
-                        refreshingTabs = false;
-                    }
+                    swapTab(grid.content, "Data", { glyph: "table" }, removeDataTab);
 
                     dataSlot = { content: grid.content, result };
                     syncChartButton();
@@ -1065,15 +1097,7 @@ export class QueryPanel {
             const nextChart = new QueryResultChart(result);
 
             ensureResultPaneShown();
-
-            refreshingTabs = true;
-
-            try {
-                resultHost.addTab(nextChart.content, "Chart", { closeable: true, glyph: "chart-simple" });
-                removeChartTab();
-            } finally {
-                refreshingTabs = false;
-            }
+            swapTab(nextChart.content, "Chart", { closeable: true, glyph: "chart-simple" }, removeChartTab);
 
             chartSlot = { content: nextChart.content, result };
 
@@ -1120,18 +1144,7 @@ export class QueryPanel {
             const editor = new CodeEditor(result.plan, { language: "sql", readOnly: true });
 
             ensureResultPaneShown();
-
-            // Add the new plan tab, then remove the old one, under refreshingTabs so
-            // the interim strip-drain (when Explain was the only tab) can't hide the
-            // pane before the replacement lands on the next layout.
-            refreshingTabs = true;
-
-            try {
-                resultHost.addTab(editor, "Explain", { closeable: true, glyph: "diagram-project" });
-                removeExplainTab();
-            } finally {
-                refreshingTabs = false;
-            }
+            swapTab(editor, "Explain", { closeable: true, glyph: "diagram-project" }, removeExplainTab);
 
             explainSlot = { editor, result, sql };
 

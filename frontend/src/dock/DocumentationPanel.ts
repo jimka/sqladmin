@@ -1,10 +1,13 @@
 // The editable documentation/notes panel: a WYSIWYG MarkdownEditor filling a
 // Fit host, seeded from the persisted per-connection notes and reporting every
-// edit back for persistence — the editable counterpart to DefinitionPanel's
-// read-only CodeEditor. A class-first composition wrapper: the instance owns
-// `content` alone — the editor is its only child, so the Dock's teardown on
-// tab close reaches it with no disposal of this class's own, and the editor
-// itself is not exposed to the caller.
+// edit back for persistence — the app's only Markdown editor. DefinitionPanel's
+// SQL editor is editable too (a DefinitionEditor with a dirty-gated Save
+// button, not a read-only view); the genuinely read-only editors are
+// IndexInfoPanel's index definition (IndexInfoPanel.ts) and QueryPanel's
+// Explain plan viewer (QueryPanel.ts's showPlan). A class-first composition
+// wrapper: the instance owns `content` alone — the editor is its only child,
+// so the Dock's teardown on tab close reaches it with no disposal of this
+// class's own, and the editor itself is not exposed to the caller.
 
 import { Container }      from "@jimka/typescript-ui/core";
 import { Fit }            from "@jimka/typescript-ui/layout";

@@ -3,6 +3,9 @@
 // by the RoleGrantsPanel toolbar button, the controller's Query-menu entry point
 // (the active grants tab), and the roles context menu, so the column mapping and
 // filename stay in one place. The table analogue is exportQueryResult.
+//
+// The download() call is mocked in tests/dock/exportRoleGrants.test.ts, so the
+// filename, MIME type and CSV/JSON shape are unit-tested here.
 
 import { toCSV, toJSON }      from "../data/serialize";
 import type { ExportColumn }  from "../data/serialize";

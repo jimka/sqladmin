@@ -3,8 +3,9 @@
 // button and the controller's Query-menu entry point, so the filename stays in one
 // place.
 //
-// This is DOM-bound (it calls download()) and so manual-verify; its serialization
-// core (serialize.ts) is unit-tested.
+// The download() call is mocked in tests/dock/exportQueryResult.test.ts, so the
+// filename, MIME type and status message are unit-tested here, while
+// serialize.ts covers the serialization itself.
 
 import { toCSV, toJSON }           from "../data/serialize";
 import type { ExportColumn }       from "../data/serialize";

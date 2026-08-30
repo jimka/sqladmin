@@ -29,7 +29,7 @@
 import { Table, LinkCellRenderer } from "@jimka/typescript-ui/component/table";
 import type { CellClickEvent, ColumnSpec } from "@jimka/typescript-ui/component/table";
 import { MemoryStore, Model }      from "@jimka/typescript-ui/data";
-import type { FieldOptions, ModelRecord } from "@jimka/typescript-ui/data";
+import type { AbstractStore, FieldOptions, ModelRecord } from "@jimka/typescript-ui/data";
 import type { ColumnMeta }         from "../contract";
 import { toColumnRows }            from "./columnSequence";
 
@@ -112,14 +112,17 @@ const SEQUENCE_COLUMN_WIDTH = 220;
  * Build a read-only grid over a store. Structure/definition edits are
  * toolbar- or Save-button-launched flows, never inline cell edits, so every
  * column stays locked regardless of caller. Shared by relation Columns
- * (views/matviews), Indexes and Constraints; `autoSizeColumns` applies to all
- * three, since each holds short identifiers plus one long definition-style
- * column that content sizing handles well.
+ * (views/matviews), Indexes and Constraints, the query-result grid, and the
+ * role-grants grid; `autoSizeColumns` applies to all of them, since each
+ * holds short identifiers plus one long definition-style column that content
+ * sizing handles well.
  *
- * @param store - The grid's backing store.
+ * @param store - The grid's backing store, typed as the `AbstractStore` base
+ *   so a `Store`-backed grid (role grants) fits alongside the
+ *   `MemoryStore`-backed ones.
  * @returns A read-only Table over the store.
  */
-export function readOnlyTable(store: MemoryStore): Table {
+export function readOnlyTable(store: AbstractStore): Table {
     return Table(store, { columns: [], autoSizeColumns: true, rowReadOnly: () => true });
 }
 

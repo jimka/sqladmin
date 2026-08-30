@@ -1,5 +1,6 @@
 // Shared quick-search wiring for any `Table`-backed grid, used by
-// TableWorkPanel.ts and QueryResultView.ts's QueryResultGrid.
+// recordViewControls.ts, which backs both TableWorkPanel.ts's data grid and
+// QueryResultView.ts's QueryResultGrid.
 //
 // Row-hiding itself is never reimplemented here — a grid calls the library's
 // own `Table.setQuickSearch` directly. What's left is the status line's
@@ -30,7 +31,7 @@ import type { ModelRecord }             from "@jimka/typescript-ui/data";
  * return `["field", "value"]`-ish names that match nothing on a source
  * record — silently starving `matchesQuery` rather than throwing. A grid is
  * always `"normal"` at construction, before any caller has a chance to
- * rotate it, which is why every call site captures this immediately.
+ * rotate it, which is why its one call site captures this immediately.
  *
  * @param dataGrid - the table whose default search scope to compute.
  * @returns the field names to test.

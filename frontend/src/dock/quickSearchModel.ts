@@ -4,7 +4,7 @@
 // time, which the project's node-environment test runner has no stand-in for
 // — see vitest.config.ts, and tableWriteRules.ts for the same split).
 //
-// The matching itself is no longer reimplemented here: TableWorkPanel.ts
+// The matching itself is no longer reimplemented here: recordViewControls.ts
 // delegates row-hiding to the library's own `Table.setQuickSearch`, which
 // matches against each cell's displayed text (via `Table.getCellText`)
 // rather than the record's raw stored values — so a date/time/datetime

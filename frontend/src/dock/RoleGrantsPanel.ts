@@ -15,13 +15,13 @@ import { Border as BorderLayout } from "@jimka/typescript-ui/layout";
 import { Placement }          from "@jimka/typescript-ui/primitive";
 import { ToolBar }            from "@jimka/typescript-ui/component/menubar";
 import { Spacer }             from "@jimka/typescript-ui/component/container";
-import { Table }              from "@jimka/typescript-ui/component/table";
 import { Store, Model }       from "@jimka/typescript-ui/data";
 import { PaginationBar }      from "@jimka/typescript-ui/component/display";
 import type { RolePrivilege } from "../contract";
 import { PagingMemoryProxy }  from "../data/PagingMemoryProxy";
 import { exportRoleGrants }   from "./exportRoleGrants";
 import { buildExportButton }  from "./exportButton";
+import { readOnlyTable }      from "./columnsGrid";
 import { PAGE_SIZE }          from "../data/stores";
 
 /** A Dock panel showing a role's table grants as a paginated read-only grid. */
@@ -47,7 +47,7 @@ class RoleGrantsPanel extends Container {
         store.setPageSize(PAGE_SIZE);
 
         const toolbar    = buildToolBar(role, privileges);
-        const grid       = Table(store, { columns: [], autoSizeColumns: true, rowReadOnly: () => true });
+        const grid       = readOnlyTable(store);
         const pagination = new PaginationBar(store);
 
         super({ layoutManager: new BorderLayout({ spacing: 0 }) });

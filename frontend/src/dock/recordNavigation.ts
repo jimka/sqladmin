@@ -10,11 +10,12 @@
 // `visibleRecords` and `stepIndex` are deliberately separate: `stepIndex` is
 // pure arithmetic over an index and a count, with no notion of quick search;
 // `visibleRecords` narrows the record list to whatever a caller-supplied
-// predicate accepts, so TableWorkPanel.ts's `stepRecord`/`syncStepEnabled`
+// predicate accepts, so recordViewControls.ts's `stepRecord`/`syncStepEnabled`
 // compose the two (`stepIndex(visibleRecords(records, matches).indexOf(current),
 // delta, ...)`) to make Previous/Next skip records the current quick-search
-// query doesn't match. The predicate itself lives in TableWorkPanel.ts, built
-// against the grid's own `Table.getCellText` — matching what the library's
+// query doesn't match. The predicate itself is gridQuickSearch.ts's
+// `matchesQuery`, which recordViewControls.ts supplies, built against the
+// grid's own `Table.getCellText` — matching what the library's
 // `Table.setQuickSearch` hides/shows — rather than here, since testing it
 // needs no DOM-backed `Table` at all.
 
