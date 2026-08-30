@@ -1,8 +1,10 @@
 // The dock's button-triggered dropdown item builders: the CSV/JSON export
-// chooser (table export and query-result export) and the Structure panel's
-// Add-constraint submenu. Pulled out of their panel modules so the guards and
-// branches — the only real logic in this change — can be pinned by node
-// vitest.
+// chooser — shared by the table/role-grants export buttons, the
+// query-result export button, the navigator's object menu, the roles tree,
+// and the menu bar's Tools -> Export results submenu — and the Structure
+// panel's Add-constraint submenu. Pulled out of their panel modules so the
+// guards and branches — the only real logic in this change — can be pinned
+// by node vitest.
 //
 // Kept DOM-free (see memory "tsui DOM module side effects") so the node-only
 // vitest can import it: the library import below is `import type`, which
@@ -30,6 +32,37 @@ const ADD_CONSTRAINT_KINDS: ReadonlyArray<{ label: string; kind: ConstraintKind 
 ];
 
 /**
+ * Build the CSV/JSON (or plan's Text/JSON) format-chooser pair every export
+ * surface in the app shows. Shared by the table/role-grants Export buttons,
+ * the query-result Export button, the navigator's object menu, the roles
+ * tree's context menu, and the menu bar's Tools -> Export results submenu.
+ *
+ * The callback always receives `"csv"` for the first slot and `"json"` for
+ * the second, even when `kind` is `"plan"` and the first slot's label reads
+ * "Text (.txt)": `SqlAdminController.exportActive` ({@link
+ * ../SqlAdminController.ts:2599}) maps the same way, treating the plan's text
+ * export as the `"csv"` branch.
+ *
+ * @param kind - Whether the exportable result is tabular rows or an EXPLAIN plan.
+ * @param onExport - Runs the export in the chosen format.
+ *
+ * @returns The two format items.
+ */
+export function buildExportFormatItems(
+    kind: "rows" | "plan",
+    onExport: (format: "csv" | "json") => void,
+): MenuItemConfig[] {
+    const first = kind === "plan"
+        ? { text: "Text (.txt)", glyph: "file-lines" }
+        : { text: "CSV (.csv)",  glyph: "file-csv" };
+
+    return [
+        { ...first, action: () => onExport("csv") },
+        { text: "JSON (.json)", glyph: "file-code", action: () => onExport("json") },
+    ];
+}
+
+/**
  * Build the table/role-grants Export button's CSV/JSON chooser.
  *
  * @param onExport - Runs the export in the chosen format.
@@ -37,10 +70,7 @@ const ADD_CONSTRAINT_KINDS: ReadonlyArray<{ label: string; kind: ConstraintKind 
  * @returns The two format items.
  */
 export function buildTableExportItems(onExport: (format: "csv" | "json") => void): MenuItemConfig[] {
-    return [
-        { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => onExport("csv") },
-        { text: "Export JSON (.json)", glyph: "file-code", action: () => onExport("json") },
-    ];
+    return buildExportFormatItems("rows", onExport);
 }
 
 /**
@@ -62,16 +92,10 @@ export function buildQueryExportItems(active: ActiveExport | null, notify: Notif
     }
 
     if (active.kind === "rows") {
-        return [
-            { text: "Export CSV (.csv)",   glyph: "file-csv",  action: () => exportQueryResult(active.result, "csv", notify) },
-            { text: "Export JSON (.json)", glyph: "file-code", action: () => exportQueryResult(active.result, "json", notify) },
-        ];
+        return buildExportFormatItems("rows", format => exportQueryResult(active.result, format, notify));
     }
 
-    return [
-        { text: "Export text (.txt)",  glyph: "file-lines", action: () => void exportExplainPlan(active.plan, "txt", notify) },
-        { text: "Export JSON (.json)", glyph: "file-code",  action: () => void exportExplainPlan(active.plan, "json", notify) },
-    ];
+    return buildExportFormatItems("plan", format => void exportExplainPlan(active.plan, format === "csv" ? "txt" : "json", notify));
 }
 
 /**

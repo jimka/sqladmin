@@ -35,6 +35,7 @@ import { MemoryStore, Model }          from "@jimka/typescript-ui/data";
 import type { FieldOptions }           from "@jimka/typescript-ui/data";
 import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
 import { glyphButton }                 from "./glyphButton";
+import { REFRESH_SHORTCUT }            from "../shell/queryShortcuts";
 import { PRIMARY_COLOR }               from "../theme";
 import { categoryLabel, enumLabelRows } from "./typeInfoRows";
 import type { TypeDefinition }         from "../contract";
@@ -160,7 +161,7 @@ class TypeInfoPanel extends Container {
         // pinned at the toolbar's left edge — matches the other info tabs'
         // Refresh placement.
         const toolbar = new ToolBar({
-            components: [Spacer.flex(), glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", () => deps.onRefresh())],
+            components: [Spacer.flex(), glyphButton("refresh", PRIMARY_COLOR, `Refresh (${REFRESH_SHORTCUT})`, () => deps.onRefresh())],
         });
 
         // The fieldset and grid sit in a nested Border below the toolbar —

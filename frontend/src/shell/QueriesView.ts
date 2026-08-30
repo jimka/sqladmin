@@ -24,7 +24,7 @@
 import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { Fit }                     from "@jimka/typescript-ui/layout";
 import { Event }                   from "@jimka/typescript-ui/core";
-import { Button }                  from "@jimka/typescript-ui/component/button";
+import type { Button }             from "@jimka/typescript-ui/component/button";
 import { AccordionPanel }          from "@jimka/typescript-ui/component/container";
 import { List, GlyphListItemRenderer } from "@jimka/typescript-ui/component/list";
 import { Glyph }                   from "@jimka/typescript-ui/component/display";
@@ -35,6 +35,7 @@ import { floppy_disk }             from "@jimka/typescript-ui/glyphs/solid/flopp
 import { clock_rotate_left }       from "@jimka/typescript-ui/glyphs/solid/clock_rotate_left";
 import { terminal }                from "@jimka/typescript-ui/glyphs/solid/terminal";
 import { refreshTool, bindRefreshShortcut } from "./refreshTool";
+import { glyphButton }             from "../dock/glyphButton";
 import type { SqlAdminController } from "../SqlAdminController";
 import { PRIMARY_COLOR, DESTRUCTIVE_COLOR } from "../theme";
 
@@ -358,25 +359,13 @@ function buildList(emptyText: string): List {
  * @returns The button component.
  */
 function actionButton(action: RowAction, selected: () => QueryRow | undefined): Button {
-    // showText:false keeps the face glyph-only while the label drives both the
-    // hover tooltip and the aria-label (accessible name).
-    const button = Button({
-        glyph          : action.glyph,
-        text           : action.label,
-        showText       : false,
-        foregroundColor: action.color,
-        compact        : true,
-    });
-
-    button.on("action", () => {
+    return glyphButton(action.glyph, action.color, action.label, () => {
         const row = selected();
 
         if (row) {
             action.run(row);
         }
     });
-
-    return button;
 }
 
 /**

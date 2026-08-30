@@ -56,6 +56,7 @@ import type { EditedSequenceValues, SequenceEditSpecs } from "./ddlSpecs";
 import { dataTypeItems, detailToEditedValues, isSequenceFormDirty, ownedByLabel, ownerItems } from "./sequenceFormState";
 import { glyphButton }                 from "./glyphButton";
 import { openSqlPreviewDialog }        from "./SqlPreviewDialog";
+import { REFRESH_SHORTCUT }            from "../shell/queryShortcuts";
 import { MUTED_TEXT_COLOR, PRIMARY_COLOR } from "../theme";
 
 Glyph.register(save, refresh);
@@ -206,7 +207,7 @@ class SequenceInfoPanel extends Container {
         formHost.addComponent(form);
 
         const saveButton = glyphButton("save", PRIMARY_COLOR, "Save", () => this.handleSave());
-        const refreshButton = glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", () => deps.onRefresh());
+        const refreshButton = glyphButton("refresh", PRIMARY_COLOR, `Refresh (${REFRESH_SHORTCUT})`, () => deps.onRefresh());
         // Flex spacer pushes Refresh to the far right, away from Save — the
         // same edit-actions-left/Refresh-far-right grouping TableWorkPanel's
         // data-grid toolbar uses.

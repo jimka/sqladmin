@@ -18,7 +18,7 @@ import { Glyph }                                from "@jimka/typescript-ui/compo
 import { plus }                                 from "@jimka/typescript-ui/glyphs/solid/plus";
 import { pencil }                               from "@jimka/typescript-ui/glyphs/solid/pencil";
 import { trash }                                from "@jimka/typescript-ui/glyphs/solid/trash";
-import { arrows_rotate }                        from "@jimka/typescript-ui/glyphs/solid/arrows_rotate";
+import { refresh }                              from "@jimka/typescript-ui/glyphs/solid/refresh";
 import { play }                                 from "@jimka/typescript-ui/glyphs/solid/play";
 import { sitemap }                              from "@jimka/typescript-ui/glyphs/solid/sitemap";
 import { share_nodes }                          from "@jimka/typescript-ui/glyphs/solid/share_nodes";
@@ -42,7 +42,7 @@ import type { SqlAdminController }              from "../SqlAdminController";
 // controller for the matching dock tabs); "diagram-project"/"table-columns"/
 // "file-code" (the schema/relations diagram, structure, and definition items)
 // come from the controller's own registration.
-Glyph.register(plus, pencil, trash, arrows_rotate, play, sitemap, share_nodes, circle_nodes);
+Glyph.register(plus, pencil, trash, refresh, play, sitemap, share_nodes, circle_nodes);
 
 /**
  * One object leaf, merged from whichever endpoint supplied it: `/objects`

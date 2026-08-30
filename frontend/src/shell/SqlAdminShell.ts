@@ -24,7 +24,7 @@ import { database }                from "@jimka/typescript-ui/glyphs/solid/datab
 import { circle_info }             from "@jimka/typescript-ui/glyphs/solid/circle_info";
 import { users }                   from "@jimka/typescript-ui/glyphs/solid/users";
 import { terminal }                from "@jimka/typescript-ui/glyphs/solid/terminal";
-import { arrows_rotate }           from "@jimka/typescript-ui/glyphs/solid/arrows_rotate";
+import { refresh }                 from "@jimka/typescript-ui/glyphs/solid/refresh";
 import { plus }                    from "@jimka/typescript-ui/glyphs/solid/plus";
 import { floppy_disk }             from "@jimka/typescript-ui/glyphs/solid/floppy_disk";
 import { clock_rotate_left }       from "@jimka/typescript-ui/glyphs/solid/clock_rotate_left";
@@ -57,6 +57,7 @@ import { logout }                  from "../data/api";
 import { openShortcutsDialog }     from "./shortcutsDialog";
 import { openChangelogDialog }     from "./changelogDialog";
 import { openLocalStorageWindow }  from "./localStorageWindow";
+import { buildExportFormatItems }  from "../dock/menuItems";
 import type { SqlAdminController } from "../SqlAdminController";
 
 // Glyphs used across the sidebar subtree: a database for the Database view (rail
@@ -64,7 +65,7 @@ import type { SqlAdminController } from "../SqlAdminController";
 // and a people icon for the Roles view (rail button + roles section), plus a
 // rotate icon for the section refresh tools. Registered once here, the
 // composition root, and referenced by name downstream.
-Glyph.register(database, circle_info, users, terminal, arrows_rotate);
+Glyph.register(database, circle_info, users, terminal, refresh);
 // Glyphs decorating the menu bar's menus, items, and submenus.
 Glyph.register(plus, floppy_disk, clock_rotate_left, wrench, eye, file_export, file_lines, file_csv, file_code, bars, keyboard, right_from_bracket, scroll);
 
@@ -384,20 +385,11 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
                 // toolbar button is the primary surface; this acts on whichever tab
                 // is focused. Both this list and the submenu are providers, re-run
                 // each time their menu opens: the item greys out when the focused
-                // tab has nothing to export, and the submenu labels track its kind
-                // (a plan shows text / JSON, everything else CSV / JSON).
+                // tab has nothing to export, and the submenu labels track its kind.
                 { text: "Export results…", glyph: "file-export", enabled: actions.canExportActive(),
-                  submenu: { label: "Export results…", items: () => {
-                    const plan = actions.activeExportKind() === "plan";
-
-                    return [
-                        // First slot: plain-text plan (file-lines) vs. CSV (file-csv);
-                        // second is JSON (file-code) either way. Glyphs match every
-                        // other export menu across the app.
-                        { text: plan ? "Text (.txt)" : "CSV (.csv)", glyph: plan ? "file-lines" : "file-csv", action: () => actions.onExportResults("csv") },
-                        { text: "JSON (.json)",                      glyph: "file-code",                     action: () => actions.onExportResults("json") },
-                    ];
-                } } },
+                  submenu: { label: "Export results…", items: () => buildExportFormatItems(
+                    actions.activeExportKind() === "plan" ? "plan" : "rows",
+                    format => actions.onExportResults(format)) } },
                 { separator: true },
                 { text: "Notes…", glyph: "file-lines", action: actions.onOpenDocumentation },
                 // Opens the localStorage inspector window (view + clear stored state).
@@ -411,7 +403,7 @@ function buildMenuBar(actions: MenuBarActions): MenuBar {
                 { text: "Roles",     glyph: "users",    shortcut: ROLES_RAIL_SHORTCUT,     action: actions.onShowRoles },
                 { text: "Queries",   glyph: "terminal", shortcut: QUERIES_RAIL_SHORTCUT,   action: actions.onShowQueries },
                 { separator: true },
-                { text: "Refresh", glyph: "arrows-rotate", shortcut: REFRESH_SHORTCUT, action: actions.onRefresh },
+                { text: "Refresh", glyph: "refresh", shortcut: REFRESH_SHORTCUT, action: actions.onRefresh },
                 { separator: true },
                 { text: "Toggle Sidebar", glyph: "bars", action: actions.onToggleSidebar },
             ] },

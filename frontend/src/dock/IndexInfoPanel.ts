@@ -26,6 +26,7 @@ import { Glyph }                       from "@jimka/typescript-ui/component/disp
 import { CodeEditor }                  from "@jimka/typescript-ui/component/editor";
 import { refresh }                     from "@jimka/typescript-ui/glyphs/solid/refresh";
 import { glyphButton }                 from "./glyphButton";
+import { REFRESH_SHORTCUT }            from "../shell/queryShortcuts";
 import { PRIMARY_COLOR }               from "../theme";
 import type { IndexDetail }            from "../contract";
 
@@ -97,7 +98,7 @@ class IndexInfoPanel extends Container {
         // pinned at the toolbar's left edge — matches the other four tabs'
         // Refresh placement.
         const toolbar = new ToolBar({
-            components: [Spacer.flex(), glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", () => deps.onRefresh())],
+            components: [Spacer.flex(), glyphButton("refresh", PRIMARY_COLOR, `Refresh (${REFRESH_SHORTCUT})`, () => deps.onRefresh())],
         });
 
         // The fieldset and editor sit in a nested Border below the toolbar —

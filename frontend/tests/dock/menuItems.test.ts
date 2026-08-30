@@ -6,6 +6,7 @@ vi.mock("../../src/dock/exportQueryResult",  () => ({ exportQueryResult: vi.fn()
 vi.mock("../../src/dock/exportExplainResult", () => ({ exportExplainPlan: vi.fn() }));
 
 import {
+    buildExportFormatItems,
     buildTableExportItems,
     buildQueryExportItems,
     buildAddConstraintItems,
@@ -31,12 +32,42 @@ function structureActions(): StructureActions {
     };
 }
 
+describe("buildExportFormatItems", () => {
+    it("returns the CSV/JSON pair for a rows result; both actions pass their own format", () => {
+        const cb = vi.fn();
+        const items = buildExportFormatItems("rows", cb);
+
+        expect(items.map(i => i.text)).toEqual(["CSV (.csv)", "JSON (.json)"]);
+        expect(items.map(i => i.glyph)).toEqual(["file-csv", "file-code"]);
+
+        items[0].action?.();
+        expect(cb).toHaveBeenCalledWith("csv");
+
+        items[1].action?.();
+        expect(cb).toHaveBeenCalledWith("json");
+    });
+
+    it("returns the Text/JSON pair for a plan; the first action still passes \"csv\"", () => {
+        const cb = vi.fn();
+        const items = buildExportFormatItems("plan", cb);
+
+        expect(items.map(i => i.text)).toEqual(["Text (.txt)", "JSON (.json)"]);
+        expect(items.map(i => i.glyph)).toEqual(["file-lines", "file-code"]);
+
+        items[0].action?.();
+        expect(cb).toHaveBeenCalledWith("csv");
+
+        items[1].action?.();
+        expect(cb).toHaveBeenCalledWith("json");
+    });
+});
+
 describe("buildTableExportItems", () => {
     it("returns the CSV/JSON pair and wires each action to onExport", () => {
         const onExport = vi.fn();
         const items = buildTableExportItems(onExport);
 
-        expect(items.map(i => i.text)).toEqual(["Export CSV (.csv)", "Export JSON (.json)"]);
+        expect(items.map(i => i.text)).toEqual(["CSV (.csv)", "JSON (.json)"]);
         expect(items.map(i => i.glyph)).toEqual(["file-csv", "file-code"]);
 
         items[0].action?.();
@@ -57,7 +88,7 @@ describe("buildQueryExportItems", () => {
         const active: ActiveExport = { kind: "rows", result };
         const items = buildQueryExportItems(active, notify);
 
-        expect(items.map(i => i.text)).toEqual(["Export CSV (.csv)", "Export JSON (.json)"]);
+        expect(items.map(i => i.text)).toEqual(["CSV (.csv)", "JSON (.json)"]);
         expect(items.map(i => i.glyph)).toEqual(["file-csv", "file-code"]);
         expect(items.every(i => i.enabled !== false)).toBe(true);
 
@@ -73,7 +104,7 @@ describe("buildQueryExportItems", () => {
         const active: ActiveExport = { kind: "plan", plan };
         const items = buildQueryExportItems(active, notify);
 
-        expect(items.map(i => i.text)).toEqual(["Export text (.txt)", "Export JSON (.json)"]);
+        expect(items.map(i => i.text)).toEqual(["Text (.txt)", "JSON (.json)"]);
         expect(items.map(i => i.glyph)).toEqual(["file-lines", "file-code"]);
         expect(items.every(i => i.enabled !== false)).toBe(true);
 

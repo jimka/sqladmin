@@ -17,6 +17,7 @@ import { Glyph }      from "@jimka/typescript-ui/component/display";
 import { save }       from "@jimka/typescript-ui/glyphs/solid/save";
 import { refresh }    from "@jimka/typescript-ui/glyphs/solid/refresh";
 import { glyphButton } from "./glyphButton";
+import { REFRESH_SHORTCUT } from "../shell/queryShortcuts";
 import { PRIMARY_COLOR } from "../theme";
 
 Glyph.register(save, refresh);
@@ -82,7 +83,7 @@ export class DefinitionEditor {
         // same edit-actions-left/Refresh-far-right grouping TableWorkPanel's
         // data-grid toolbar uses.
         this.toolbar = new ToolBar({
-            components: [this._saveButton, Spacer.flex(), glyphButton("refresh", PRIMARY_COLOR, "Refresh (Alt+R)", onRefresh)],
+            components: [this._saveButton, Spacer.flex(), glyphButton("refresh", PRIMARY_COLOR, `Refresh (${REFRESH_SHORTCUT})`, onRefresh)],
         });
 
         // Enable Save only once the definition is edited; seeding starts it disabled.
