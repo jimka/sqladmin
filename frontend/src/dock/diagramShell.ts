@@ -33,13 +33,14 @@ import { Border, HBox, VBox } from "@jimka/typescript-ui/layout";
 import { Placement } from "@jimka/typescript-ui/primitive";
 import { Checkbox, ComboBox, Text } from "@jimka/typescript-ui/component/input";
 import type { DiagramView } from "@jimka/typescript-ui/component/diagram";
-import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
+import type { DiagramData } from "@jimka/typescript-ui/component/diagram";
 import type { TraversalDirection } from "../data/relationDiagram";
 import { rootChoices } from "../data/relationDiagram";
-import { DEPTH_CHOICES, DEFAULT_DEPTH, depthChoice, depthFromChoice } from "./depthChoices";
+import { DEPTH_CHOICES, depthChoice } from "./depthChoices";
+import { DiagramShellState, sameSettle } from "./diagramShellState";
 
 /** The root selector's sentinel item: no root chosen, so the whole graph shows. */
-export const ROOT_NONE = "(none)";
+const ROOT_NONE = "(none)";
 
 // Fixed width of the WEST side panel: enough for a checkbox plus a typical
 // table name without stealing canvas width from the diagram.
@@ -58,81 +59,6 @@ export function labelledRow(caption: string, control: Component): Component {
         layoutManager: new VBox({ spacing: 2 }),
         components   : [new Text(caption), control],
     });
-}
-
-/**
- * One legend row: a checkbox (checked = shown) beside the node's name. Toggling
- * it off adds the node id to `hidden`; on removes it; then re-filters. The root
- * row is disabled and pinned checked — hiding the root is meaningless.
- *
- * @param n - The node this row represents.
- * @param rootId - The root node id (its row is locked shown).
- * @param hidden - The shared hidden-id set this row mutates.
- * @param applyFilter - Re-filters the view after a toggle.
- * @returns The row component.
- */
-export function legendRow(
-    n: DiagramNodeData,
-    rootId: string,
-    hidden: Set<string>,
-    applyFilter: () => void,
-): Component {
-    const isRoot = n.id === rootId;
-
-    const checkbox = Checkbox({
-        value: !hidden.has(n.id),
-        listeners: {
-            change: (v: boolean) => {
-                if (v) {
-                    hidden.delete(n.id);
-                } else {
-                    hidden.add(n.id);
-                }
-
-                applyFilter();
-            },
-        },
-    });
-
-    if (isRoot) {
-        checkbox.setValue(true);
-        checkbox.setEnabled(false);
-    }
-
-    return new Component({
-        layoutManager: new HBox({ spacing: 4 }),
-        components   : [checkbox, new Text(n.label ?? n.id)],
-    });
-}
-
-/**
- * Fill a legend column with one row per node in `base`, the root's row locked
- * shown. Disposes the previous rows (not just detaches them, which would leak
- * their listeners) and adds nothing when `rootId` is null — an unrooted view
- * draws the whole graph and has nothing to hide against.
- *
- * @param legend - The legend column to refill.
- * @param base - The graph whose nodes get a row.
- * @param rootId - The chosen root's node id, or null.
- * @param hidden - The shared hidden-id set the rows mutate.
- * @param applyFilter - Re-filters the view after a toggle.
- */
-export function fillLegend(
-    legend: Panel,
-    base: DiagramData,
-    rootId: string | null,
-    hidden: Set<string>,
-    applyFilter: () => void,
-): void {
-    legend.disposeAllComponents();
-
-    if (rootId === null) {
-        return;
-    }
-
-    for (const n of base.nodes) {
-        legend.addComponent(legendRow(n, rootId, hidden, applyFilter));
-    }
 }
 
 /** The CENTER view plus the subclass's extra control slots. */
@@ -193,12 +119,8 @@ class DiagramShell extends Panel {
     private readonly rootControl: ComboBox  | null;
     private readonly rootedBlock: Panel;
 
-    private rootId: string | null;
-    /** False while the panel is not showing a rooted graph at all (Overview mode). */
-    private rootingDisplayed = true;
-    private direction: TraversalDirection = "both";
-    private depthIndex = DEPTH_CHOICES.indexOf(String(DEFAULT_DEPTH));
-    private prune = false;
+    /** The DOM-free root / direction / depth / prune state the controls drive. */
+    private readonly state: DiagramShellState;
 
     /** @param config - The CENTER view, the root mode, and the extra control slots. */
     constructor(config: DiagramShellConfig) {
@@ -278,13 +200,7 @@ class DiagramShell extends Panel {
         this.rootRow     = rootRow;
         this.rootControl = rootControl;
         this.rootedBlock = rootedBlock;
-        this.rootId      = initialRoot;
-
-        // Overwrites the field initializer's default, which cannot see
-        // `config` (it runs immediately after super() returns, before the
-        // rest of this constructor body). depthChoice guarantees indexOf
-        // finds initialDepth, so this is never -1.
-        this.depthIndex = DEPTH_CHOICES.indexOf(initialDepth);
+        this.state       = new DiagramShellState(initialRoot, config.initialDepth);
 
         // Reads only this shell's own fields, so no subclass field is touched
         // before the subclass body has run.
@@ -293,19 +209,19 @@ class DiagramShell extends Panel {
         // Wire listeners after super() (this now available), per
         // COMPONENT_CONVENTIONS.md (b).
         directionControl.on("change", (v: string) => {
-            this.direction = v as TraversalDirection;
+            this.state.setDirection(v as TraversalDirection);
             this.rootingChanged();
             this.settleViewport();
         });
 
         depthControl.on("change", (v: string) => {
-            this.depthIndex = DEPTH_CHOICES.indexOf(v);
+            this.state.setDepthChoice(v);
             this.rootingChanged();
             this.settleViewport();
         });
 
         pruneControl.on("change", (v: boolean) => {
-            this.prune = v;
+            this.state.setPrune(v);
             this.pruneChanged();
             this.settleViewport();
         });
@@ -315,15 +231,18 @@ class DiagramShell extends Panel {
         // DiagramView now opens every view already fitted to the viewport on
         // its own (its fitOnLoad option, default true), so an unrooted panel
         // needs nothing further here. A panel that already has a root at
-        // construction (fixedRoot, or a SelectableRoot opened with one) still
-        // does: the library has no notion of this shell's root, so its own
-        // fit shows the whole graph rather than the chosen root. Deferred to
-        // the view's first connected+sized layout: called straight from the
-        // constructor, `settleViewport` would race the ELK layout this view's
-        // own constructor kicks off against the browser's first sizing pass,
-        // and could silently no-op if the ELK pass lands first, since the
-        // view would have no width/height yet.
-        if (this.rootId !== null) {
+        // construction still does: a `fixedRoot` panel already passes
+        // `initialFocusNode: root.id` to the view, so this call mostly
+        // restates what the view will already do on its own — but a
+        // `SelectableRoot` panel opened with a root passes no
+        // `initialFocusNode` (the view was never told a root at all), so this
+        // is the only thing that centres it rather than fitting the whole
+        // graph. Deferred to the view's first connected+sized layout: called
+        // straight from the constructor, `settleViewport` would race the ELK
+        // layout this view's own constructor kicks off against the browser's
+        // first sizing pass, and could silently no-op if the ELK pass lands
+        // first, since the view would have no width/height yet.
+        if (initialRoot !== null) {
             view.onFirstLayout(() => this.settleViewport());
         }
     }
@@ -345,7 +264,7 @@ class DiagramShell extends Panel {
      * @returns The current root id, or null.
      */
     protected getRoot(): string | null {
-        return this.rootId;
+        return this.state.getRoot();
     }
 
     /**
@@ -357,7 +276,7 @@ class DiagramShell extends Panel {
      * @returns This shell, for method chaining.
      */
     protected setRoot(root: string | null): this {
-        this.rootId = root;
+        this.state.setRoot(root);
 
         // A programmatic ComboBox.setValue fires no `change` (the inner List
         // fires only from its click / keyboard reducers), so this does not
@@ -380,7 +299,7 @@ class DiagramShell extends Panel {
      * @returns This shell, for method chaining.
      */
     protected setRootingDisplayed(displayed: boolean): this {
-        this.rootingDisplayed = displayed;
+        this.state.setRootingDisplayed(displayed);
         this.applyRootVisibility();
 
         return this;
@@ -392,7 +311,7 @@ class DiagramShell extends Panel {
      * @returns The current traversal direction.
      */
     protected getDirection(): TraversalDirection {
-        return this.direction;
+        return this.state.getDirection();
     }
 
     /**
@@ -401,7 +320,7 @@ class DiagramShell extends Panel {
      * @returns The hop count, or `Number.POSITIVE_INFINITY` for `All`.
      */
     protected getDepth(): number {
-        return depthFromChoice(DEPTH_CHOICES[this.depthIndex]);
+        return this.state.getDepth();
     }
 
     /**
@@ -410,7 +329,7 @@ class DiagramShell extends Panel {
      * @returns True when hiding a node also prunes what it orphans.
      */
     protected isPrune(): boolean {
-        return this.prune;
+        return this.state.isPrune();
     }
 
     /** The root, Direction, or Depth changed. Subclasses re-root here. */
@@ -445,22 +364,22 @@ class DiagramShell extends Panel {
      * Waits for `whenLaidOut` rather than acting synchronously: node ids are
      * stable across a re-derivation, so a synchronous call would target the
      * graph `setData` has just started replacing and spend the one-shot centring
-     * on it. Re-checks the root afterwards, because `whenLaidOut`'s promise is
-     * shared across passes and the user may have changed a control again
-     * meanwhile.
+     * on it. Re-checks the settle target afterwards, because `whenLaidOut`'s
+     * promise is shared across passes and the user may have changed a control
+     * (or, for `DatabaseDiagramPanel`, the Mode) again meanwhile.
      */
     protected settleViewport(): void {
-        const root = this.rootId;
+        const target = this.state.settle();
 
         void this.view.whenLaidOut().then(() => {
-            if (this.rootId !== root) {
-                return;
+            if (!sameSettle(this.state.settle(), target)) {
+                return; // a control moved again while the layout ran
             }
 
-            if (root === null) {
+            if (target.kind === "fit") {
                 this.view.zoomToFit();
             } else {
-                this.view.focusNode(root);
+                this.view.focusNode(target.nodeId);
             }
         });
     }
@@ -468,9 +387,11 @@ class DiagramShell extends Panel {
     // The selector row and the legend follow "is this a rooted view at all";
     // the traversal block additionally needs a root to act on.
     private applyRootVisibility(): void {
-        this.rootRow?.setDisplayed(this.rootingDisplayed);
-        this.legend.setDisplayed(this.rootingDisplayed);
-        this.rootedBlock.setDisplayed(this.rootingDisplayed && this.rootId !== null);
+        const visibility = this.state.visibility();
+
+        this.rootRow?.setDisplayed(visibility.rootRow);
+        this.legend.setDisplayed(visibility.legend);
+        this.rootedBlock.setDisplayed(visibility.rootedBlock);
     }
 }
 

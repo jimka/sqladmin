@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildDatabaseDiagram, qualifiedId } from "../../src/data/buildDatabaseDiagram";
 import type { SchemaTables } from "../../src/data/buildDatabaseDiagram";
 import type { TableStructure, ForeignKeyMeta } from "../../src/contract";
+import { uniformNodeWidth } from "../../src/data/uniformNodeWidth";
 
 /** Build a minimal ForeignKeyMeta, filling in the fields these tests don't vary. */
 function fk(name: string, refSchema: string, refTable: string): ForeignKeyMeta {
@@ -34,10 +35,45 @@ describe("buildDatabaseDiagram", () => {
         ];
 
         const data = buildDatabaseDiagram(schemas);
+        const width = uniformNodeWidth(["users"]);
 
         expect(data.nodes).toEqual([
-            { id: "a.users", label: "users", glyph: "table", data: { schema: "a", table: "users" } },
+            { id: "a.users", label: "users", glyph: "table", width, data: { schema: "a", table: "users" } },
         ]);
+    });
+
+    it("gives every leaf the same width, sized to the widest bare table name", () => {
+        const schemas: SchemaTables[] = [
+            { schema: "a", tables: ["t", "a_considerably_longer_table_name"], structures: [structure(), structure()] },
+        ];
+
+        const data = buildDatabaseDiagram(schemas);
+
+        expect(data.nodes[0].width).toBe(data.nodes[1].width);
+        expect(data.nodes[0].width).toBe(uniformNodeWidth(["a_considerably_longer_table_name"]));
+    });
+
+    it("measures bare table names, not schema-qualified ids, for the width", () => {
+        const schemas: SchemaTables[] = [
+            { schema: "a_very_long_schema_name", tables: ["t"], structures: [structure()] },
+        ];
+
+        const data = buildDatabaseDiagram(schemas);
+
+        // Only "t" (the bare table name) is measured — not "a_very_long_schema_name.t".
+        expect(data.nodes[0].width).toBe(uniformNodeWidth(["t"]));
+    });
+
+    it("passes a stub measurer through to uniformNodeWidth, changing the width", () => {
+        const schemas: SchemaTables[] = [
+            { schema: "a", tables: ["users"], structures: [structure()] },
+        ];
+
+        const stub = (texts: string[]): number[] => texts.map(() => 500);
+        const data = buildDatabaseDiagram(schemas, stub);
+
+        expect(data.nodes[0].width).toBe(uniformNodeWidth(["users"], stub));
+        expect(data.nodes[0].width).not.toBe(uniformNodeWidth(["users"]));
     });
 
     it("keeps two schemas' same-named tables as distinct nodes", () => {

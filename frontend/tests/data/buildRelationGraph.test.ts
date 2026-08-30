@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildRelationGraph, relationNodeId } from "../../src/data/buildRelationGraph";
 import type { RelationEdge, RelationNodeRef } from "../../src/contract";
+import { uniformNodeWidth } from "../../src/data/uniformNodeWidth";
 
 const LAYOUT = { "elk.algorithm": "layered", "elk.direction": "RIGHT" };
 
@@ -109,5 +110,37 @@ describe("buildRelationGraph", () => {
         const data = buildRelationGraph(edges, "home", LAYOUT, true);
 
         expect(data.edges.every(e => e.style?.dashed === true)).toBe(true);
+    });
+
+    it("gives every node the same width, sized to the widest node label", () => {
+        const edges = [edge(ref("home", "a"), ref("other", "a_considerably_longer_name"))];
+
+        const data = buildRelationGraph(edges, "home", LAYOUT);
+
+        expect(data.nodes[0].width).toBe(data.nodes[1].width);
+        // "other.a_considerably_longer_name" is the foreign-schema label actually shown.
+        expect(data.nodes[0].width).toBe(uniformNodeWidth(["other.a_considerably_longer_name"]));
+    });
+
+    it("measures each node's own shown label (bare name at home, schema.name foreign)", () => {
+        const edges = [edge(ref("home", "a"), ref("other", "b"))];
+        const data = buildRelationGraph(edges, "home", LAYOUT);
+
+        expect(data.nodes[0].width).toBe(uniformNodeWidth(["a", "other.b"]));
+    });
+
+    it("passes a stub measurer through to uniformNodeWidth, changing the width", () => {
+        const edges = [edge(ref("home", "a"), ref("home", "b"))];
+        const stub = (texts: string[]): number[] => texts.map(() => 500);
+
+        const data = buildRelationGraph(edges, "home", LAYOUT, false, stub);
+
+        expect(data.nodes[0].width).toBe(uniformNodeWidth(["a", "b"], stub));
+        expect(data.nodes[0].width).not.toBe(uniformNodeWidth(["a", "b"]));
+    });
+
+    it("returns no nodes and throws nothing for an empty edge list, with the measurer given", () => {
+        expect(() => buildRelationGraph([], "home", LAYOUT, false, () => [])).not.toThrow();
+        expect(buildRelationGraph([], "home", LAYOUT, false, () => []).nodes).toEqual([]);
     });
 });

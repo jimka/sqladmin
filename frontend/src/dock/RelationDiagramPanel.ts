@@ -1,38 +1,40 @@
 // The relation-rooted entity-relationship diagram, opened as its own Dock tab
 // from the navigator's right-click "Show relations" on a table/view/matview.
-// Extends DiagramShell (see ./diagramShell.ts) with a fixed root for its WEST
-// direction/depth+legend column; this class supplies the CENTER DiagramView
-// (ELK-laid-out, pan/zoom) over the whole schema graph buildSchemaDiagram
-// assembled, and everything specific to the FK diagram: card-mode nodes,
-// column-emphasis wiring, and the coverage-highlight checkbox. Double-clicking
-// a node reports its table name back to the controller via onSelectTable — the
-// same open path the schema diagram and an FK link in StructurePanel use. This
-// tab's title names its root (`invoices (relations)`), so the root never
-// changes and no `Root …` selector is built.
+// Extends FilteredDiagramShell (see ./filteredDiagramShell.ts) with a fixed
+// root for its WEST direction/depth+legend column; this class supplies the
+// CENTER DiagramView (ELK-laid-out, pan/zoom) over the whole schema graph
+// buildSchemaDiagram assembled, and everything specific to the FK diagram:
+// card-mode nodes, column-emphasis wiring, and the coverage-highlight
+// checkbox. Double-clicking a node reports its table name back to the
+// controller via onSelectTable — the same open path the schema diagram and an
+// FK link in StructurePanel use. This tab's title names its root (`invoices
+// (relations)`), so the root never changes and no `Root …` selector is built.
 //
-// Class-first (see ../../COMPONENT_CONVENTIONS.md): extends DiagramShell
-// directly. Every former factory-closure `let` becomes a private instance
-// field, assigned after `super()`. The closure helpers (`applyFilter`,
-// `rebuildLegend`, `rebuildBase`) become arrow-function fields: `applyFilter`
-// is passed by reference to `legendRow`, so it must be an arrow field (a plain
-// method would drop `this`); the others call/are called among this set, so
-// they stay arrow fields too for consistency. The child controls and the
-// `JunctionDiagramView` are built as locals before `super()` (they are
-// `super()`'s children), assigned to fields after, and their `change` listeners are wired
-// after `super()` via `.on("change", …)` rather than the construction-time
-// `listeners:` bag, so `this` is available.
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): extends
+// FilteredDiagramShell directly, which owns the derive/legend/filter
+// lifecycle; this class overrides `applyFilter()` (a plain protected method,
+// per FilteredDiagramShell's own header on why an overridable member must
+// stay a method, not an arrow field) to clear `cards` and fold in the
+// coverage style before delegating to the base `filteredGraph()`. Every
+// former factory-closure `let` becomes a private instance field, assigned
+// after `super()`. `selectColumn` is still an arrow field: it is handed by
+// reference to the nodeRenderer, not overridden by any subclass. The child
+// controls and the `JunctionDiagramView` are built as locals before `super()`
+// (they are `super()`'s children), assigned to fields after, and their
+// `change` listeners are wired after `super()` via `.on("change", …)` rather
+// than the construction-time `listeners:` bag, so `this` is available.
 
 import { Component, callable } from "@jimka/typescript-ui/core";
 import { HBox }                     from "@jimka/typescript-ui/layout";
 import { Checkbox, Text }           from "@jimka/typescript-ui/component/input";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
-import { rootedDiagram, applyHide, withDepthBadges } from "../data/relationDiagram";
+import { fixedRootBase }            from "../data/relationDiagram";
 import { applyCoverageStyle }       from "../data/fkCardinality";
 import { columnEmphasis }           from "../data/columnEmphasis";
 import { TableCardNode }            from "./TableCardNode";
 import { attachFkEdgeTooltip }      from "./edgeTooltip";
-import { DiagramShell, legendRow }  from "./diagramShell";
-import type { DiagramShellConfig } from "./diagramShell";
+import { FilteredDiagramShell }     from "./filteredDiagramShell";
+import type { FilteredDiagramConfig } from "./filteredDiagramShell";
 import { depthChoice, depthFromChoice } from "./depthChoices";
 import { JunctionDiagramView }      from "./JunctionDiagramView";
 
@@ -41,12 +43,8 @@ import { JunctionDiagramView }      from "./JunctionDiagramView";
  * legend column plus a CENTER DiagramView. The root node is emphasized;
  * double-clicking any node invokes `onSelectTable` with its id.
  */
-class RelationDiagramPanel extends DiagramShell {
-    private readonly full: DiagramData;
-    private readonly root: DiagramNodeData;
+class RelationDiagramPanel extends FilteredDiagramShell {
     private showCoverage = false;
-    private readonly hidden = new Set<string>();
-    private base!: DiagramData;
 
     // Cards keyed by node id, so a column click can re-tint every card's rows
     // without a lookup through the view. Rebuilt by the nodeRenderer on every
@@ -60,8 +58,7 @@ class RelationDiagramPanel extends DiagramShell {
      *   edges).
      * @param onSelectTable - Invoked with the activated node's table name (its id).
      * @param onContextMenu - Invoked with a right-clicked node's table name and
-     *   the originating event; omitted callers get no context menu (e.g. the
-     *   role-membership graph, whose nodes are roles, not database objects).
+     *   the originating event; omitted callers get no context menu.
      * @param initialDepth - The `DEPTH_CHOICES` entry the Depth control opens
      *   at (see `depthChoices.ts`); anything else opens at the default.
      */
@@ -74,7 +71,7 @@ class RelationDiagramPanel extends DiagramShell {
         // not touch `this`); it can only ever be invoked by a user click, long
         // after that.
         const depth = depthChoice(initialDepth);
-        const base  = withDepthBadges(rootedDiagram(full, root, "both", depthFromChoice(depth)), full.edges, "both");
+        const base  = fixedRootBase(full, root, "both", depthFromChoice(depth));
         const cards = new Map<string, TableCardNode>();
         let selectColumn: (nodeId: string, column: string) => void = () => {};
 
@@ -94,10 +91,11 @@ class RelationDiagramPanel extends DiagramShell {
         const view = JunctionDiagramView({ data: base, nodeRenderer, initialFocusNode: root.id });
         const coverageControl = Checkbox({ value: false });
 
-        const config: DiagramShellConfig = {
+        const config: FilteredDiagramConfig = {
             view,
+            full,
             fixedRoot: true,
-            root: root.id,
+            rootNode: root,
             extraControls: [
                 new Component({
                     layoutManager: new HBox({ spacing: 4 }),
@@ -109,13 +107,8 @@ class RelationDiagramPanel extends DiagramShell {
 
         super(config);
 
-        this.full = full;
-        this.root = root;
-        this.base = base;
         this.cards = cards;
         selectColumn = this.selectColumn;
-
-        this.rebuildLegend();
 
         // Wire listeners after super() (this now available). Moved from the
         // construction-time `listeners:` bag to post-super() `.on()` calls so
@@ -141,25 +134,14 @@ class RelationDiagramPanel extends DiagramShell {
         attachFkEdgeTooltip(this.view);
     }
 
-    protected rootingChanged(): void {
-        this.rebuildBase();
-    }
-
-    protected pruneChanged(): void {
-        this.applyFilter();
-    }
-
-    // Passed by reference to legendRow — MUST be an arrow field, or it would
-    // lose `this` when invoked as a callback.
-    private applyFilter = (): void => {
+    protected applyFilter(): void {
         // The nodeRenderer repopulates `cards` as setData rebuilds every node
-        // below — cleared first so a card removed by this filter change
-        // cannot linger as a stale entry.
+        // below — cleared first so a card this filter change removes cannot
+        // linger as a stale entry.
         this.cards.clear();
 
-        this.view.setData(applyCoverageStyle(
-            applyHide(this.base, this.root.id, this.hidden, this.isPrune(), this.getDirection()), this.showCoverage));
-    };
+        this.view.setData(applyCoverageStyle(this.filteredGraph(), this.showCoverage));
+    }
 
     // Passed to the nodeRenderer (via the pre-super() `selectColumn` local) —
     // MUST be an arrow field, since it is handed off by reference.
@@ -181,29 +163,6 @@ class RelationDiagramPanel extends DiagramShell {
         for (const [id, card] of this.cards) {
             card.setEmphasisedColumns(emphasis.columns.get(id) ?? []);
         }
-    };
-
-    private rebuildLegend = (): void => {
-        this.legend.disposeAllComponents();
-
-        for (const n of this.base.nodes) {
-            this.legend.addComponent(legendRow(n, this.root.id, this.hidden, this.applyFilter));
-        }
-    };
-
-    private rebuildBase = (): void => {
-        const direction = this.getDirection();
-
-        this.base = withDepthBadges(
-            rootedDiagram(this.full, this.root, direction, this.getDepth()),
-            this.full.edges,
-            direction,
-        );
-
-        this.hidden.clear();
-
-        this.rebuildLegend();
-        this.applyFilter();
     };
 }
 

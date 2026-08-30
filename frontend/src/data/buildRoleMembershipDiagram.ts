@@ -4,6 +4,8 @@
 
 import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import type { RoleDetail } from "../contract";
+import { uniformNodeWidth } from "./uniformNodeWidth";
+import type { MeasureWidths } from "./uniformNodeWidth";
 
 // Left-to-right layered layout: a membership DAG reads naturally as a
 // hierarchy flow (member -> parent), matching the schema FK graph's layout.
@@ -22,7 +24,7 @@ const LAYOUT_OPTIONS: Record<string, string> = {
 const ROLE_GLYPH = "user";
 
 /** Opaque metadata carried on a membership edge (admin_option on the grant). */
-export interface MembershipEdgeData {
+interface MembershipEdgeData {
     admin: boolean;
 }
 
@@ -31,15 +33,21 @@ export interface MembershipEdgeData {
  * edge `role -> parent` per membership whose parent is also a known role.
  *
  * @param details - Every role's detail (its memberOf drives the edges).
- * @returns Nodes + edges + layered layout options.
+ * @param measureWidths - Optional real text measurer passed through to
+ *   `uniformNodeWidth`. Omitting it keeps the estimated node width, which is
+ *   what this builder's own tests do; the app supplies `Util.measureTextWidths`.
+ * @returns Nodes + edges + layered layout options. Every node carries the
+ *   same `width` (see `uniformNodeWidth`), measured over every role name.
  */
-export function buildRoleMembershipDiagram(details: RoleDetail[]): DiagramData {
+export function buildRoleMembershipDiagram(details: RoleDetail[], measureWidths?: MeasureWidths): DiagramData {
     const roleNames = new Set(details.map(d => d.role.name));
+    const nodeWidth = uniformNodeWidth(details.map(d => d.role.name), measureWidths);
 
     const nodes: DiagramNodeData[] = details.map(d => ({
         id   : d.role.name,
         label: d.role.name,
         glyph: ROLE_GLYPH,
+        width: nodeWidth,
     }));
 
     const edges: DiagramEdgeData[] = [];

@@ -1,29 +1,31 @@
 // The relation-rooted dependency/inheritance graph, opened as its own Dock tab
 // from the navigator's right-click "Dependencies" / "Inheritance" on a
-// table/view/matview. Extends DiagramShell (see ./diagramShell.ts) with a
-// fixed root for its WEST direction/depth+legend column; this class supplies
-// the CENTER DiagramView over the whole schema's dependency or inheritance
-// graph, narrowed to the chosen root's neighbourhood via the shared
-// direction+depth traversal. Reuses RelationGraphPanel's node renderer
-// (relationGraphNodeRenderer) so a rooted and an unrooted relation graph draw
-// nodes identically. Double-clicking a node reports its RelationNodeData back
-// to the controller, which routes activation through openReferencedTable.
-// This tab's title names its root, so the root never changes and no
-// `Root …` selector is built.
+// table/view/matview. Extends FilteredDiagramShell (see
+// ./filteredDiagramShell.ts) with a fixed root for its WEST direction/depth+
+// legend column; this class supplies the CENTER DiagramView over the whole
+// schema's dependency or inheritance graph, narrowed to the chosen root's
+// neighbourhood via the shared direction+depth traversal. Reuses
+// RelationGraphPanel's node renderer (relationGraphNodeRenderer) so a rooted
+// and an unrooted relation graph draw nodes identically. Double-clicking a
+// node reports its RelationNodeData back to the controller, which routes
+// activation through openReferencedTable. This tab's title names its root, so
+// the root never changes and no `Root …` selector is built.
 //
-// Class-first (see ../../COMPONENT_CONVENTIONS.md): extends DiagramShell
-// directly. The `JunctionDiagramView` and its badged base graph are built as locals
-// before `super()` (they are `super()`'s children); the "activate" /
-// "contextmenu" listeners are wired after `super()` since they close over
-// `this.cards`-free state but still need `this` for `rebuildBase`/`applyFilter`
-// dispatch via the protected hooks.
+// Class-first (see ../../COMPONENT_CONVENTIONS.md): extends
+// FilteredDiagramShell directly, which owns the whole derive/legend/filter
+// lifecycle. The `JunctionDiagramView` and its badged base graph are built as
+// locals before `super()` (they are `super()`'s children, and the pre-super()
+// base seeds the view's own initial `data` so it renders before
+// FilteredDiagramShell's constructor derives its own — see that class's
+// header for why both calls agree); the "activate" / "contextmenu" listeners
+// are wired after `super()`.
 
 import { callable } from "@jimka/typescript-ui/core";
 import type { DiagramData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
-import { rootedDiagram, applyHide, withDepthBadges } from "../data/relationDiagram";
+import { fixedRootBase } from "../data/relationDiagram";
 import type { RelationNodeData } from "../data/buildRelationGraph";
 import { relationGraphNodeRenderer } from "./RelationGraphPanel";
-import { DiagramShell, legendRow } from "./diagramShell";
+import { FilteredDiagramShell } from "./filteredDiagramShell";
 import { depthChoice, depthFromChoice } from "./depthChoices";
 import { JunctionDiagramView } from "./JunctionDiagramView";
 
@@ -33,12 +35,7 @@ import { JunctionDiagramView } from "./JunctionDiagramView";
  * is emphasized; double-clicking any node invokes `onSelect` with its
  * RelationNodeData.
  */
-class RootedRelationGraphPanel extends DiagramShell {
-    private readonly full: DiagramData;
-    private readonly root: DiagramNodeData;
-    private readonly hidden = new Set<string>();
-    private base!: DiagramData;
-
+class RootedRelationGraphPanel extends FilteredDiagramShell {
     /**
      * @param full - The whole schema's dependency or inheritance graph.
      * @param root - The rooted relation's node data (id = `schema.name`).
@@ -58,20 +55,14 @@ class RootedRelationGraphPanel extends DiagramShell {
         // Locals before super() — they are super()'s children (this is
         // unavailable until super() returns).
         const depth = depthChoice(initialDepth);
-        const base  = withDepthBadges(rootedDiagram(full, root, "both", depthFromChoice(depth)), full.edges, "both");
+        const base  = fixedRootBase(full, root, "both", depthFromChoice(depth));
         const view = JunctionDiagramView({
             data: base,
             nodeRenderer: relationGraphNodeRenderer(root.id),
             initialFocusNode: root.id,
         });
 
-        super({ view, fixedRoot: true, root: root.id, initialDepth: depth });
-
-        this.full = full;
-        this.root = root;
-        this.base = base;
-
-        this.rebuildLegend();
+        super({ view, full, fixedRoot: true, rootNode: root, initialDepth: depth });
 
         // Wire listeners after super() (this now available).
         this.view.on("activate", (n: DiagramNodeData) => onSelect(n.data as RelationNodeData));
@@ -79,43 +70,6 @@ class RootedRelationGraphPanel extends DiagramShell {
             onContextMenu?.(n.data as RelationNodeData, event);
         });
     }
-
-    protected rootingChanged(): void {
-        this.rebuildBase();
-    }
-
-    protected pruneChanged(): void {
-        this.applyFilter();
-    }
-
-    // Passed by reference to legendRow — MUST be an arrow field, or it would
-    // lose `this` when invoked as a callback.
-    private applyFilter = (): void => {
-        this.view.setData(applyHide(this.base, this.root.id, this.hidden, this.isPrune(), this.getDirection()));
-    };
-
-    private rebuildLegend = (): void => {
-        this.legend.removeAllComponents();
-
-        for (const n of this.base.nodes) {
-            this.legend.addComponent(legendRow(n, this.root.id, this.hidden, this.applyFilter));
-        }
-    };
-
-    private rebuildBase = (): void => {
-        const direction = this.getDirection();
-
-        this.base = withDepthBadges(
-            rootedDiagram(this.full, this.root, direction, this.getDepth()),
-            this.full.edges,
-            direction,
-        );
-
-        this.hidden.clear();
-
-        this.rebuildLegend();
-        this.applyFilter();
-    };
 }
 
 const RootedRelationGraphPanelCallable = callable(RootedRelationGraphPanel);

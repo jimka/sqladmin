@@ -40,6 +40,7 @@ import { annotateFkCardinality }                                                
 import { buildRoleMembershipDiagram }                                                                                                                                                              from "./data/buildRoleMembershipDiagram";
 import { buildRoleGrantsDiagram }                                                                                                                                                                  from "./data/buildRoleGrantsDiagram";
 import { buildRelationGraph, relationNodeId }                                                                                                                                                      from "./data/buildRelationGraph";
+import type { RelationNodeData }                                                                                                                                                                   from "./data/buildRelationGraph";
 import { buildSelectSql, buildRoutineCallSql, routineCallIsComplete }                                                                                                                              from "./data/sql";
 import { buildStore }                                                                                                                                                                              from "./data/stores";
 import { TableWorkPanel }                                                                                                                                                                          from "./dock/TableWorkPanel";
@@ -80,6 +81,7 @@ import type { SchemaTables }                                                    
 import { RoleGrantsDiagramPanel }                                                                                                                                                                  from "./dock/RoleGrantsDiagramPanel";
 import { RelationGraphPanel }                                                                                                                                                                      from "./dock/RelationGraphPanel";
 import { RootedRelationGraphPanel }                                                                                                                                                                from "./dock/RootedRelationGraphPanel";
+import { RoleMembershipDiagramPanel }                                                                                                                                                              from "./dock/RoleMembershipDiagramPanel";
 import type { DiagramData, DiagramNodeData }                                                                                                                                                       from "@jimka/typescript-ui/component/diagram";
 import { PropertiesPanel }                                                                                                                                                                          from "./properties/PropertiesPanel";
 import { RolesPropertiesPanel }                                                                                                                                                                    from "./roles/RolesPropertiesPanel";
@@ -206,6 +208,24 @@ const DEPENDENCY_LAYOUT = { "elk.algorithm": "layered", "elk.direction": "RIGHT"
 
 // Inheritance reads top-to-bottom as a containment tree (parent above children).
 const INHERITANCE_LAYOUT = { "elk.algorithm": "layered", "elk.direction": "DOWN" };
+
+/**
+ * What the dependency and inheritance graph open paths differ by — everything
+ * `openSchemaRelationGraph`/`openRootedRelationGraph` need to build either
+ * graph without branching on which one it is.
+ */
+interface RelationGraphKind {
+    /** Route key, title suffix, and status-line word ("dependencies"/"inheritance"). */
+    key: "dependencies" | "inheritance";
+    /** The tab glyph. */
+    glyph: string;
+    /** The whole schema's graph, or null after the failure was already reported. */
+    fetch: (ref: DbObjectRef) => Promise<DiagramData | null>;
+    /** The schema-wide tab's panel id. */
+    schemaPanelId: (ref: DbObjectRef) => string;
+    /** The relation-rooted tab's panel id. */
+    relationPanelId: (ref: DbObjectRef) => string;
+}
 
 /**
  * A panel-load failure, carrying the object being opened so the Dock's
@@ -2046,7 +2066,7 @@ export class SqlAdminController {
         try {
             const edges = await getDependencies(ref.connectionId, ref.database!, ref.schema!);
 
-            return buildRelationGraph(edges, ref.schema!, DEPENDENCY_LAYOUT, true);
+            return buildRelationGraph(edges, ref.schema!, DEPENDENCY_LAYOUT, true, Util.measureTextWidths);
         } catch (err) {
             this.notifyError(err, ref);
 
@@ -2067,12 +2087,156 @@ export class SqlAdminController {
         try {
             const edges = await getInheritance(ref.connectionId, ref.database!, ref.schema!);
 
-            return buildRelationGraph(edges, ref.schema!, INHERITANCE_LAYOUT);
+            return buildRelationGraph(edges, ref.schema!, INHERITANCE_LAYOUT, undefined, Util.measureTextWidths);
         } catch (err) {
             this.notifyError(err, ref);
 
             return null;
         }
+    }
+
+    /** What the dependency and inheritance graph paths differ by. */
+    private graphKind(key: "dependencies" | "inheritance"): RelationGraphKind {
+        return key === "dependencies"
+            ? {
+                key,
+                glyph          : "share-nodes",
+                fetch          : ref => this.fetchDependencyGraph(ref),
+                schemaPanelId  : ref => this.dependencyPanelId(ref),
+                relationPanelId: ref => this.relationDependencyPanelId(ref),
+            }
+            : {
+                key,
+                glyph          : "sitemap",
+                fetch          : ref => this.fetchInheritanceGraph(ref),
+                schemaPanelId  : ref => this.inheritancePanelId(ref),
+                relationPanelId: ref => this.relationInheritancePanelId(ref),
+            };
+    }
+
+    /**
+     * The activate / context-menu arrow pair every dependency/inheritance
+     * graph panel wires: both route through openReferencedTable /
+     * diagramContextMenu, built from the activated node's own schema/name/kind
+     * but `ref`'s connectionId/database — a graph node can name a relation in a
+     * different schema than the one being diagrammed, but never a different
+     * database.
+     *
+     * @param ref - The schema or relation the graph was opened for.
+     * @returns The `onSelect`/`onContextMenu` pair to hand a graph panel.
+     */
+    private relationGraphHandlers(ref: DbObjectRef): {
+        onSelect: (node: RelationNodeData) => void;
+        onContextMenu: (node: RelationNodeData, event: MouseEvent) => void;
+    } {
+        return {
+            onSelect: nd => this.openReferencedTable({
+                connectionId: ref.connectionId,
+                database    : ref.database,
+                schema      : nd.schema,
+                name        : nd.name,
+                kind        : nd.kind,
+            }),
+            onContextMenu: (nd, event) => this.diagramContextMenu({
+                connectionId: ref.connectionId,
+                database    : ref.database,
+                schema      : nd.schema,
+                name        : nd.name,
+                kind        : nd.kind,
+            }, event),
+        };
+    }
+
+    /**
+     * Open a read-only dependency/inheritance graph for a whole schema in the
+     * Dock (deduped by panel id): the schema's relations as nodes, laid out
+     * left-to-right by ELK. Node activation is kind-aware: a view opens
+     * read-only, a table opens for data.
+     *
+     * @param ref - The schema to diagram (kind "schema"; database + schema set).
+     * @param kind - Which graph (dependencies or inheritance) to open.
+     */
+    private async openSchemaRelationGraph(ref: DbObjectRef, kind: RelationGraphKind): Promise<void> {
+        const id = kind.schemaPanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const route = objectPath(ref, kind.key) ?? undefined;
+
+        this.openAsyncPanel({
+            id,
+            title         : `${ref.schema} (${kind.key})`,
+            glyph         : kind.glyph,
+            ref,
+            route,
+        }, async () => {
+            const data = await kind.fetch(ref);
+
+            if (!data) {
+                // The helper already reported. Throwing closes the tab without a second toast.
+                throw new PanelLoadError(null, ref, true);
+            }
+
+            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: ${kind.key} (${data.nodes.length} relations)`);
+
+            const { onSelect, onContextMenu } = this.relationGraphHandlers(ref);
+
+            return RelationGraphPanel(data, onSelect, onContextMenu);
+        });
+    }
+
+    /**
+     * Open a relation-rooted dependency/inheritance graph in the Dock (deduped
+     * by panel id): the relation as the emphasized root plus its connected
+     * component within the direction/depth the panel's own controls choose
+     * (seeded at Both/1) from the whole schema's graph. Node activation is
+     * kind-aware via openReferencedTable.
+     *
+     * @param ref - The relation to root at (kind table/view/matview; name set).
+     * @param kind - Which graph (dependencies or inheritance) to open.
+     * @param depth - A `DEPTH_CHOICES` entry (see `depthChoices.ts`) the Depth
+     *   control opens at; anything else opens at the default.
+     */
+    private async openRootedRelationGraph(ref: DbObjectRef, kind: RelationGraphKind, depth?: string): Promise<void> {
+        const id = kind.relationPanelId(ref);
+
+        if (this.dock.focusPanel(id)) {
+            return;
+        }
+
+        const built = objectPath(ref, kind.key);
+        const route: PanelRoute | undefined = built ? { path: built.path, query: depth ? { depth } : undefined } : undefined;
+
+        this.openAsyncPanel({
+            id,
+            title         : `${ref.name} (${kind.key})`,
+            glyph         : kind.glyph,
+            tooltip       : this.panelTooltip(ref),
+            ref,
+            route,
+        }, async () => {
+            const full = await kind.fetch(ref);
+
+            if (!full) {
+                // The helper already reported. Throwing closes the tab without a second toast.
+                throw new PanelLoadError(null, ref, true);
+            }
+
+            const root: DiagramNodeData = {
+                id   : relationNodeId(ref as RelationNodeRef),
+                label: ref.name!,
+                glyph: KIND_GLYPH[ref.kind],
+                data : { schema: ref.schema!, name: ref.name!, kind: ref.kind },
+            };
+
+            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: ${kind.key}`);
+
+            const { onSelect, onContextMenu } = this.relationGraphHandlers(ref);
+
+            return RootedRelationGraphPanel(full, root, onSelect, onContextMenu, depth);
+        });
     }
 
     /**
@@ -2087,48 +2251,7 @@ export class SqlAdminController {
      *   _openPanels, so there is no node to remember.
      */
     async openSchemaDependencyGraph(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
-        const id = this.dependencyPanelId(ref);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const route = objectPath(ref, "dependencies") ?? undefined;
-
-        this.openAsyncPanel({
-            id,
-            title         : `${ref.schema} (dependencies)`,
-            glyph         : "share-nodes",
-            ref,
-            route,
-        }, async () => {
-            const data = await this.fetchDependencyGraph(ref);
-
-            if (!data) {
-                // The helper already reported. Throwing closes the tab without a second toast.
-                throw new PanelLoadError(null, ref, true);
-            }
-
-            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: dependencies (${data.nodes.length} relations)`);
-
-            return RelationGraphPanel(
-                data,
-                nd => this.openReferencedTable({
-                    connectionId: ref.connectionId,
-                    database    : ref.database,
-                    schema      : nd.schema,
-                    name        : nd.name,
-                    kind        : nd.kind,
-                }),
-                (nd, event) => this.diagramContextMenu({
-                    connectionId: ref.connectionId,
-                    database    : ref.database,
-                    schema      : nd.schema,
-                    name        : nd.name,
-                    kind        : nd.kind,
-                }, event),
-            );
-        });
+        return this.openSchemaRelationGraph(ref, this.graphKind("dependencies"));
     }
 
     /**
@@ -2145,59 +2268,7 @@ export class SqlAdminController {
      *   control opens at; anything else opens at the default.
      */
     async openRelationDependencyGraph(ref: DbObjectRef, _node?: TreeNode, depth?: string): Promise<void> {
-        const id = this.relationDependencyPanelId(ref);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const built = objectPath(ref, "dependencies");
-        const route: PanelRoute | undefined = built ? { path: built.path, query: depth ? { depth } : undefined } : undefined;
-
-        this.openAsyncPanel({
-            id,
-            title         : `${ref.name} (dependencies)`,
-            glyph         : "share-nodes",
-            tooltip       : this.panelTooltip(ref),
-            ref,
-            route,
-        }, async () => {
-            const full = await this.fetchDependencyGraph(ref);
-
-            if (!full) {
-                // The helper already reported. Throwing closes the tab without a second toast.
-                throw new PanelLoadError(null, ref, true);
-            }
-
-            const root: DiagramNodeData = {
-                id   : relationNodeId(ref as RelationNodeRef),
-                label: ref.name!,
-                glyph: KIND_GLYPH[ref.kind],
-                data : { schema: ref.schema!, name: ref.name!, kind: ref.kind },
-            };
-
-            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: dependencies`);
-
-            return RootedRelationGraphPanel(
-                full,
-                root,
-                nd => this.openReferencedTable({
-                    connectionId: ref.connectionId,
-                    database    : ref.database,
-                    schema      : nd.schema,
-                    name        : nd.name,
-                    kind        : nd.kind,
-                }),
-                (nd, event) => this.diagramContextMenu({
-                    connectionId: ref.connectionId,
-                    database    : ref.database,
-                    schema      : nd.schema,
-                    name        : nd.name,
-                    kind        : nd.kind,
-                }, event),
-                depth,
-            );
-        });
+        return this.openRootedRelationGraph(ref, this.graphKind("dependencies"), depth);
     }
 
     /**
@@ -2210,48 +2281,7 @@ export class SqlAdminController {
      *   with the other open methods but unused.
      */
     async openSchemaInheritanceGraph(ref: DbObjectRef, _node?: TreeNode): Promise<void> {
-        const id = this.inheritancePanelId(ref);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const route = objectPath(ref, "inheritance") ?? undefined;
-
-        this.openAsyncPanel({
-            id,
-            title         : `${ref.schema} (inheritance)`,
-            glyph         : "sitemap",
-            ref,
-            route,
-        }, async () => {
-            const data = await this.fetchInheritanceGraph(ref);
-
-            if (!data) {
-                // The helper already reported. Throwing closes the tab without a second toast.
-                throw new PanelLoadError(null, ref, true);
-            }
-
-            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}: inheritance (${data.nodes.length} relations)`);
-
-            return RelationGraphPanel(
-                data,
-                nd => this.openReferencedTable({
-                    connectionId: ref.connectionId,
-                    database    : ref.database,
-                    schema      : nd.schema,
-                    name        : nd.name,
-                    kind        : nd.kind,
-                }),
-                (nd, event) => this.diagramContextMenu({
-                    connectionId: ref.connectionId,
-                    database    : ref.database,
-                    schema      : nd.schema,
-                    name        : nd.name,
-                    kind        : nd.kind,
-                }, event),
-            );
-        });
+        return this.openSchemaRelationGraph(ref, this.graphKind("inheritance"));
     }
 
     /**
@@ -2269,59 +2299,7 @@ export class SqlAdminController {
      *   control opens at; anything else opens at the default.
      */
     async openRelationInheritanceGraph(ref: DbObjectRef, _node?: TreeNode, depth?: string): Promise<void> {
-        const id = this.relationInheritancePanelId(ref);
-
-        if (this.dock.focusPanel(id)) {
-            return;
-        }
-
-        const built = objectPath(ref, "inheritance");
-        const route: PanelRoute | undefined = built ? { path: built.path, query: depth ? { depth } : undefined } : undefined;
-
-        this.openAsyncPanel({
-            id,
-            title         : `${ref.name} (inheritance)`,
-            glyph         : "sitemap",
-            tooltip       : this.panelTooltip(ref),
-            ref,
-            route,
-        }, async () => {
-            const full = await this.fetchInheritanceGraph(ref);
-
-            if (!full) {
-                // The helper already reported. Throwing closes the tab without a second toast.
-                throw new PanelLoadError(null, ref, true);
-            }
-
-            const root: DiagramNodeData = {
-                id   : relationNodeId(ref as RelationNodeRef),
-                label: ref.name!,
-                glyph: KIND_GLYPH[ref.kind],
-                data : { schema: ref.schema!, name: ref.name!, kind: ref.kind },
-            };
-
-            this.statusBar.setMessage(`${this._statusScope} · ${ref.schema}.${ref.name}: inheritance`);
-
-            return RootedRelationGraphPanel(
-                full,
-                root,
-                nd => this.openReferencedTable({
-                    connectionId: ref.connectionId,
-                    database    : ref.database,
-                    schema      : nd.schema,
-                    name        : nd.name,
-                    kind        : nd.kind,
-                }),
-                (nd, event) => this.diagramContextMenu({
-                    connectionId: ref.connectionId,
-                    database    : ref.database,
-                    schema      : nd.schema,
-                    name        : nd.name,
-                    kind        : nd.kind,
-                }, event),
-                depth,
-            );
-        });
+        return this.openRootedRelationGraph(ref, this.graphKind("inheritance"), depth);
     }
 
     /**
@@ -3193,8 +3171,8 @@ export class SqlAdminController {
 
     /**
      * Open (or focus) the role-membership graph rooted at `name`: every role as
-     * a node, `role -> parent` edges from each role's `memberOf`, driven by the
-     * reused RelationDiagramPanel (direction / depth / legend). The membership
+     * a node, `role -> parent` edges from each role's `memberOf`, driven by
+     * RoleMembershipDiagramPanel (direction / depth / legend). The membership
      * DAG needs every role's detail, so this fans out N per-role fetches —
      * unlike buildSchemaGraphData/buildDatabaseGraphData's single bulk `/graph`
      * request, there is no combined role-detail endpoint to collapse this into,
@@ -3227,12 +3205,12 @@ export class SqlAdminController {
             const roles   = await this.loadRoles();
             const details = await Promise.all(roles.map(r => getRoleDetail(this._connectionId, r.name)));
 
-            const full = buildRoleMembershipDiagram(details);
+            const full = buildRoleMembershipDiagram(details, Util.measureTextWidths);
             const root: DiagramNodeData = { id: name, label: name, glyph: ROLE_GLYPH };
 
             this.statusBar.setMessage(`${this._statusScope} · ${name}: membership (${full.nodes.length} roles)`);
 
-            return RelationDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName), undefined, depth);
+            return RoleMembershipDiagramPanel(full, root, roleName => void this.showRoleProperties(roleName), depth);
         });
     }
 
@@ -3265,7 +3243,7 @@ export class SqlAdminController {
                 throw new PanelLoadError(null, undefined, true);
             }
 
-            const data = buildRoleGrantsDiagram(name, detail.privileges);
+            const data = buildRoleGrantsDiagram(name, detail.privileges, Util.measureTextWidths);
 
             this.statusBar.setMessage(`${this._statusScope} · ${name}: grants graph (${data.nodes.length - 1} tables)`);
 

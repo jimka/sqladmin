@@ -3,7 +3,7 @@ import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/types
 import {
     reachableNodeIds, subgraph, rootedDiagram, applyHide,
     hiddenNeighbourCounts, depthBadgeLabel, withDepthBadges,
-    rootChoices, rootedBase, filteredBase,
+    rootChoices, rootedBase, filteredBase, fixedRootBase,
 } from "../../src/data/relationDiagram";
 
 /** A bare node with matching id/label. */
@@ -357,6 +357,29 @@ describe("rootedBase", () => {
 
         expect(out.nodes.every(n => n.badge === undefined)).toBe(true);
         expect(out.nodes.map(n => n.id).sort()).toEqual(["a", "b", "c", "d", "e", "f"]);
+    });
+});
+
+describe("fixedRootBase", () => {
+    it("equals withDepthBadges(rootedDiagram(...)) for a root present in full", () => {
+        const full: DiagramData = {
+            nodes: [node("a"), node("b"), node("c"), node("d"), node("e"), node("f")],
+            edges: workedGraph(),
+        };
+
+        const out = fixedRootBase(full, node("a"), "both", 1);
+        const expected = withDepthBadges(rootedDiagram(full, node("a"), "both", 1), full.edges, "both");
+
+        expect(out).toEqual(expected);
+    });
+
+    it("injects a root absent from full, keeping it alone at depth 1", () => {
+        const full = graph();
+        const root: DiagramNodeData = { id: "v", label: "v", glyph: "eye" };
+
+        const out = fixedRootBase(full, root, "both", 1);
+
+        expect(out.nodes).toEqual([root]);
     });
 });
 

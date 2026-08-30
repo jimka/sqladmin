@@ -6,6 +6,8 @@
 import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import type { DbObjectKind, RelationEdge, RelationNodeRef } from "../contract";
 import { OBJECT_KINDS } from "../navigator/objectKinds";
+import { uniformNodeWidth } from "./uniformNodeWidth";
+import type { MeasureWidths } from "./uniformNodeWidth";
 
 // Built from the objectKinds.ts registry rather than navigator/objectGlyphs.ts's
 // own KIND_GLYPH: that module runs DOM side effects (Glyph.register) on import
@@ -63,13 +65,19 @@ function addNode(nodes: Map<string, DiagramNodeData>, ref: RelationNodeRef, home
  * @param dashed - When true, every edge renders dashed (distinguishes a
  *   dependency graph's edges from a plain FK diagram's). Omitted/false leaves
  *   edges with no `style` (plain).
- * @returns The assembled DiagramData.
+ * @param measureWidths - Optional real text measurer passed through to
+ *   `uniformNodeWidth`. Omitting it keeps the estimated node width, which is
+ *   what this builder's own tests do; the app supplies `Util.measureTextWidths`.
+ * @returns The assembled DiagramData. Every node carries the same `width` (see
+ *   `uniformNodeWidth`), measured over each node's own shown label — the bare
+ *   name at home, `schema.name` foreign.
  */
 export function buildRelationGraph(
     edges: RelationEdge[],
     homeSchema: string,
     layoutOptions: Record<string, string>,
     dashed?: boolean,
+    measureWidths?: MeasureWidths,
 ): DiagramData {
     const nodes = new Map<string, DiagramNodeData>();
     const edgeMap = new Map<string, DiagramEdgeData>();
@@ -88,6 +96,12 @@ export function buildRelationGraph(
             target: targetId,
             ...(dashed ? { style: { dashed: true } } : {}),
         });
+    }
+
+    const nodeWidth = uniformNodeWidth([...nodes.values()].map(n => n.label ?? n.id), measureWidths);
+
+    for (const node of nodes.values()) {
+        node.width = nodeWidth;
     }
 
     return { nodes: [...nodes.values()], edges: [...edgeMap.values()], layoutOptions };

@@ -9,7 +9,7 @@ import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/types
 import type { SchemaTables } from "./buildDatabaseDiagram";
 
 /** The aggregated cross-schema FK count carried on an overview edge's `data`. */
-export interface SchemaOverviewEdgeData {
+interface SchemaOverviewEdgeData {
     count: number;
 }
 

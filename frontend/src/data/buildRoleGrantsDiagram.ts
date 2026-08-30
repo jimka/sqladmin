@@ -5,6 +5,8 @@
 
 import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 import type { RolePrivilege } from "../contract";
+import { uniformNodeWidth } from "./uniformNodeWidth";
+import type { MeasureWidths } from "./uniformNodeWidth";
 
 // Left-to-right layered layout, matching the schema/membership graphs' layout
 // even though a depth-1 star has no real hierarchy to speak of.
@@ -30,7 +32,7 @@ export type GrantNodeData =
     | { kind: "table"; schema: string; table: string };
 
 /** Opaque metadata carried on a grant edge: the table's privilege list. */
-export interface GrantEdgeData {
+interface GrantEdgeData {
     privileges: string[]; // distinct privileges held on this table, sorted
 }
 
@@ -41,9 +43,18 @@ export interface GrantEdgeData {
  *
  * @param role - The role name (the centre node).
  * @param privileges - The role's full grant list (RoleDetail.privileges).
- * @returns Nodes (role + tables) + edges (one per table).
+ * @param measureWidths - Optional real text measurer passed through to
+ *   `uniformNodeWidth`. Omitting it keeps the estimated node width, which is
+ *   what this builder's own tests do; the app supplies `Util.measureTextWidths`.
+ * @returns Nodes (role + tables) + edges (one per table). The role node and
+ *   every table node carry the same `width` (see `uniformNodeWidth`),
+ *   measured over the role name plus every `schema.table` label.
  */
-export function buildRoleGrantsDiagram(role: string, privileges: RolePrivilege[]): DiagramData {
+export function buildRoleGrantsDiagram(
+    role: string,
+    privileges: RolePrivilege[],
+    measureWidths?: MeasureWidths,
+): DiagramData {
     const roleNodeId = `role:${role}`;
 
     const nodes: DiagramNodeData[] = [
@@ -85,6 +96,12 @@ export function buildRoleGrantsDiagram(role: string, privileges: RolePrivilege[]
             label : privs.join(", "),
             data  : { privileges: privs } satisfies GrantEdgeData,
         });
+    }
+
+    const nodeWidth = uniformNodeWidth(nodes.map(n => n.label ?? n.id), measureWidths);
+
+    for (const node of nodes) {
+        node.width = nodeWidth;
     }
 
     return { nodes, edges, layoutOptions: LAYOUT_OPTIONS };
