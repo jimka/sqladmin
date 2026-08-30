@@ -1,10 +1,13 @@
-// The client-side download trigger for the query-result export: wrap a string in
-// a Blob and click a temporary <a download> anchor. Kept in its own DOM-bound
-// module so serialize.ts stays pure and node-testable — the serializer returns a
-// string, this module turns that string into a file the browser saves.
+// Two client-side download triggers, both clicking a temporary <a download>
+// anchor: `download` wraps a client-serialized string in a Blob first (the
+// query-result export — serialize.ts stays pure and node-testable, since the
+// serializer returns a string and this module alone turns it into a file the
+// browser saves); `downloadUrl` points the anchor straight at a server URL
+// instead, for a response the backend streams (the table/view export route).
+// Kept in its own DOM-bound module for that same node-testability reason.
 //
-// This is manual-verify: node vitest has no DOM anchor to click, so the behaviour
-// (a file named `filename` downloads with the given content and MIME type) is
+// This is manual-verify: node vitest has no DOM anchor to click, so the
+// behaviour (a file named `filename` downloads with the given content) is
 // checked in the browser smoke test, not a unit test.
 
 /**
@@ -20,6 +23,23 @@ export function download(content: string, filename: string, mimeType: string): v
     const blob = new Blob([content], { type: mimeType });
     const url  = URL.createObjectURL(blob);
 
+    downloadUrl(url, filename);
+
+    URL.revokeObjectURL(url);
+}
+
+/**
+ * Trigger a browser download by navigating a hidden `<a download>` anchor
+ * straight to `url` — for a server-streamed export (e.g. the table/view
+ * export endpoint), where the browser downloads the response body itself
+ * rather than the app serializing content into a Blob first (see
+ * {@link download} for that case). The `download` attribute makes this a
+ * file save rather than a top-level navigation.
+ *
+ * @param url - The URL to navigate the anchor to.
+ * @param filename - The suggested download filename.
+ */
+export function downloadUrl(url: string, filename: string): void {
     const anchor = document.createElement("a");
     anchor.href     = url;
     anchor.download = filename;
@@ -28,6 +48,4 @@ export function download(content: string, filename: string, mimeType: string): v
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
-
-    URL.revokeObjectURL(url);
 }

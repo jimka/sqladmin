@@ -131,7 +131,7 @@ class StartPage extends Panel {
         // dispose-then-remove convenience method for exactly this case — once
         // it ships, replace the loop below with that single call. A
         // constructor-local closure captures `this` lexically, so passing
-        // `rebuild` to `controller.onWorkspaceChanged` below is safe without an
+        // `rebuild` to `controller.workspace.onWorkspaceChanged` below is safe without an
         // arrow-function field.
         const rebuild = (): void => {
             // Manual stand-in for the library's future disposeAllComponents()
@@ -148,7 +148,7 @@ class StartPage extends Panel {
             this.doLayout();
         };
 
-        controller.onWorkspaceChanged(rebuild);
+        controller.workspace.onWorkspaceChanged(rebuild);
         rebuild();
     }
 }
@@ -211,7 +211,7 @@ function buildLeftColumn(controller: SqlAdminController): Panel {
         maxSize      : { width: COLUMN_WIDTH, height: UNBOUNDED },
     });
 
-    if (shouldShowWelcome(controller)) {
+    if (shouldShowWelcome(controller.workspace)) {
         column.addComponent(Markdown(GETTING_STARTED_MARKDOWN));
     }
 
@@ -231,12 +231,12 @@ function buildLeftColumn(controller: SqlAdminController): Panel {
 function buildQuickActions(controller: SqlAdminController): Panel {
     const panel = Panel({ layoutManager: new VBox({ itemAlign: "stretch", spacing: ENTRY_SPACING }) });
 
-    panel.addComponent(actionButton("New Query", () => controller.openQuery(), "plus"));
+    panel.addComponent(actionButton("New Query", () => controller.workspace.openQuery(), "plus"));
 
-    appendList(panel, "Recent tables", controller.recentTables(),
+    appendList(panel, "Recent tables", controller.workspace.recentTables(),
         ref => actionButton(ref.name ?? "(table)", () => controller.reopenTable(ref)));
-    appendList(panel, "Saved queries", controller.savedList(),
-        (q: SavedQuery) => actionButton(q.name, () => controller.openSavedQuery(q.name)));
+    appendList(panel, "Saved queries", controller.workspace.savedList(),
+        (q: SavedQuery) => actionButton(q.name, () => controller.workspace.openSavedQuery(q.name)));
 
     return panel;
 }

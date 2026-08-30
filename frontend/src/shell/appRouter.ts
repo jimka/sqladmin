@@ -11,7 +11,7 @@
 // view-mode properties live in the query string" Architecture Decision.
 //
 // Every object-bearing route also reveals its object in the sidebar: one
-// `controller.selectObject(ref)` / `controller.selectRole(name)` statement per
+// `controller.reveal.selectObject(ref)` / `controller.reveal.selectRole(name)` statement per
 // handler, immediately before its `open*` call and after any view-segment
 // check, so an unknown view segment reveals nothing. That pairing is
 // caller-side by design — the reveal is not baked into the `open*` methods,
@@ -88,7 +88,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
     // unknown link — the start page already shows while the Dock is empty.
     router.register("/", () => {});
 
-    router.register("/notes", () => dispatch(controller, () => controller.openDocumentation()));
+    router.register("/notes", () => dispatch(controller, () => controller.workspace.openDocumentation()));
 
     // Replays a run behind an opaque local key into QueryHistoryStore — never
     // arbitrary SQL — and auto-runs it, so a revisited link matches the state
@@ -97,7 +97,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
     // Architecture Decision for why this reopens the "seed and auto-run" shape
     // router-deep-linking rejected for arbitrary SQL.
     router.register("/query/history/:timestamp", (params, path) => dispatch(controller, () => {
-        const entry = findHistoryEntry(controller.historyList(), params.timestamp);
+        const entry = findHistoryEntry(controller.workspace.historyList(), params.timestamp);
 
         if (!entry) {
             reportUnknownLink(controller, path);
@@ -105,7 +105,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             return;
         }
 
-        controller.openQuery(entry.sql, true);
+        controller.workspace.openQuery(entry.sql, true);
     }));
 
     router.register("/database/diagram", () => dispatch(controller, () => {
@@ -115,9 +115,9 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             kind        : "database",
         };
 
-        controller.selectObject(ref);
+        controller.reveal.selectObject(ref);
 
-        return controller.openDatabaseDiagram(ref);
+        return controller.diagrams.openDatabaseDiagram(ref);
     }));
 
     // Reveals the schema container in the sidebar without opening a tab — see
@@ -125,7 +125,7 @@ export function buildAppRouter(controller: SqlAdminController): Router {
     // Decision. Two segments, so matchPattern's exact-segment-count rule keeps
     // it distinct from the three-segment /schema/:schema/:view below.
     router.register("/schema/:schema", params => dispatch(controller, () => {
-        controller.revealSchema(params.schema);
+        controller.reveal.revealSchema(params.schema);
     }));
 
     router.register("/schema/:schema/:view", (params, path) => dispatch(controller, () => {
@@ -139,12 +139,12 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
         const ref: DbObjectRef = { connectionId: controller.connectionId, database: controller.database, schema: params.schema, kind: "schema" };
 
-        controller.selectObject(ref);
+        controller.reveal.selectObject(ref);
 
         switch (view) {
-            case "diagram":      return controller.openSchemaDiagram(ref);
-            case "dependencies": return controller.openSchemaDependencyGraph(ref);
-            case "inheritance":  return controller.openSchemaInheritanceGraph(ref);
+            case "diagram":      return controller.diagrams.openSchemaDiagram(ref);
+            case "dependencies": return controller.diagrams.openSchemaDependencyGraph(ref);
+            case "inheritance":  return controller.diagrams.openSchemaInheritanceGraph(ref);
         }
     }));
 
@@ -156,9 +156,9 @@ export function buildAppRouter(controller: SqlAdminController): Router {
         router.register(`/schema/:schema/${segment}/:name`, (params, _path, _fragment, query) => dispatch(controller, () => {
             const ref = relationRef(controller, kind, params.schema, params.name);
 
-            controller.selectObject(ref);
+            controller.reveal.selectObject(ref);
 
-            return controller.openTable(ref, undefined, {
+            return controller.panels.openTable(ref, undefined, {
                 rotated: routeFlag(query.rotated),
                 record:  query.record,
             });
@@ -175,14 +175,14 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
             const ref = relationRef(controller, kind, params.schema, params.name);
 
-            controller.selectObject(ref);
+            controller.reveal.selectObject(ref);
 
             switch (view) {
-                case "structure":    return controller.openStructure(ref);
-                case "definition":   return controller.openDefinition(ref);
-                case "diagram":      return controller.openRelationDiagram(ref, undefined, query.depth);
-                case "dependencies": return controller.openRelationDependencyGraph(ref, undefined, query.depth);
-                case "inheritance":  return controller.openRelationInheritanceGraph(ref, undefined, query.depth);
+                case "structure":    return controller.panels.openStructure(ref);
+                case "definition":   return controller.panels.openDefinition(ref);
+                case "diagram":      return controller.diagrams.openRelationDiagram(ref, undefined, query.depth);
+                case "dependencies": return controller.diagrams.openRelationDependencyGraph(ref, undefined, query.depth);
+                case "inheritance":  return controller.diagrams.openRelationInheritanceGraph(ref, undefined, query.depth);
             }
         }));
     }
@@ -196,9 +196,9 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             kind        : "sequence",
         };
 
-        controller.selectObject(ref);
+        controller.reveal.selectObject(ref);
 
-        return controller.openSequence(ref);
+        return controller.panels.openSequence(ref);
     }));
 
     router.register("/schema/:schema/index/:name", params => dispatch(controller, () => {
@@ -210,9 +210,9 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             kind        : "index",
         };
 
-        controller.selectObject(ref);
+        controller.reveal.selectObject(ref);
 
-        return controller.openIndex(ref);
+        return controller.panels.openIndex(ref);
     }));
 
     router.register("/schema/:schema/type/:name", params => dispatch(controller, () => {
@@ -224,9 +224,9 @@ export function buildAppRouter(controller: SqlAdminController): Router {
             kind        : "type",
         };
 
-        controller.selectObject(ref);
+        controller.reveal.selectObject(ref);
 
-        return controller.openType(ref);
+        return controller.panels.openType(ref);
     }));
 
     // A single registration: the overload-disambiguating signature is a query
@@ -245,9 +245,9 @@ export function buildAppRouter(controller: SqlAdminController): Router {
 
         // The reveal matches on name and kind, not signature, so an overloaded
         // routine selects its first leaf while the tab opens the exact overload.
-        controller.selectObject(ref);
+        controller.reveal.selectObject(ref);
 
-        return controller.openFunctionDefinition(ref);
+        return controller.panels.openFunctionDefinition(ref);
     }));
 
     // The three role buckets are registered once per ROLE_BUCKETS entry, the
@@ -261,12 +261,12 @@ export function buildAppRouter(controller: SqlAdminController): Router {
         // the role-bucket twin of the bare /schema/:schema route above. Two
         // segments, distinct from the three-segment /role/:bucket/:role below.
         router.register(`/role/${bucket}`, () => dispatch(controller, () => {
-            controller.revealRoleSection(ROLE_BUCKET_SECTIONS[bucket]);
+            controller.reveal.revealRoleSection(ROLE_BUCKET_SECTIONS[bucket]);
         }));
 
         router.register(`/role/${bucket}/:role`, params => dispatch(controller, () => {
-            controller.selectRole(params.role);
-            controller.showRole(params.role);
+            controller.reveal.selectRole(params.role);
+            controller.roles.showRole(params.role);
         }));
 
         router.register(`/role/${bucket}/:role/:view`, (params, path, _fragment, query) => dispatch(controller, () => {
@@ -278,11 +278,11 @@ export function buildAppRouter(controller: SqlAdminController): Router {
                 return;
             }
 
-            controller.selectRole(params.role);
+            controller.reveal.selectRole(params.role);
 
             switch (view) {
-                case "grants-diagram": return controller.openRoleGrantsDiagram(params.role);
-                case "membership":     return controller.openRoleMembershipDiagram(params.role, query.depth);
+                case "grants-diagram": return controller.roles.openRoleGrantsDiagram(params.role);
+                case "membership":     return controller.roles.openRoleMembershipDiagram(params.role, query.depth);
             }
         }));
     }

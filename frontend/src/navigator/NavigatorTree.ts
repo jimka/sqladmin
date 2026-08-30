@@ -144,7 +144,7 @@ class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements Expl
             // data tab. Checked before the isRelation guard below, mirroring
             // the sequence branch in the contextmenu handler.
             if (ref && ref.kind === "sequence") {
-                void this.controller.openSequence(ref, node);
+                void this.controller.panels.openSequence(ref, node);
 
                 return;
             }
@@ -154,7 +154,7 @@ class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements Expl
             // arguments), the closest thing to a table's data tab. Its
             // definition is reached from the context menu's "Show definition".
             if (ref && ref.kind === "function") {
-                this.controller.executeFunction(ref);
+                this.controller.workspace.executeFunction(ref);
 
                 return;
             }
@@ -162,7 +162,7 @@ class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements Expl
             // An index has no rows either — double-click opens its read-only
             // info tab, mirroring the sequence branch above.
             if (ref && ref.kind === "index") {
-                void this.controller.openIndex(ref, node);
+                void this.controller.panels.openIndex(ref, node);
 
                 return;
             }
@@ -170,13 +170,13 @@ class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements Expl
             // A type has no rows either — double-click opens its read-only
             // info tab, mirroring the sequence and index branches above.
             if (ref && ref.kind === "type") {
-                void this.controller.openType(ref, node);
+                void this.controller.panels.openType(ref, node);
 
                 return;
             }
 
             if (ref && isRelation(ref.kind)) {
-                void this.controller.openTable(ref, node);
+                void this.controller.panels.openTable(ref, node);
             }
         });
 
@@ -196,8 +196,8 @@ class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements Expl
 
         this.on("loaderror", (_node: TreeNode, error: unknown) => this.controller.notifyError(error));
 
-        // Let the controller drive selection when a dock tab is focused.
-        this.controller.setNavigator(this);
+        // Let the reveal coordinator drive selection when a dock tab is focused.
+        this.controller.reveal.setNavigator(this);
 
         // (Re)load the top-level schemas; the lazy object levels reload on their
         // next expansion. Used for the initial load.

@@ -1,7 +1,7 @@
 // The WEST region: a VSCode-style activity bar — a vertical ToolBar rail of
 // icon-only ToggleButtons (one per view) beside a Card deck showing the selected
-// view. Phase 1 ships a single "Database" button; adding a view is one more
-// button + one more Card page (the Phase-2 seam).
+// view. Ships three buttons — Database, Roles, Queries — over a seam that
+// stays open: adding a view is one more button + one more Card page.
 //
 // The rail is an app-managed mode selector (ToggleButton has no built-in radio
 // group) and stays visible at all times — only the deck collapses, VSCode-style.

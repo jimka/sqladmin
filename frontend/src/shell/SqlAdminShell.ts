@@ -93,13 +93,13 @@ class SqlAdminShell extends Container {
         const workArea = buildWorkArea(sidebar, controller);
         const menuBar  = buildMenuBar({
             onToggleSidebar    : sidebar.toggleCollapsed,
-            onNewQuery         : () => controller.openQuery(),
-            onOpenSaved        : () => controller.showQueriesView("saved"),
-            onQueryHistory     : () => controller.showQueriesView("recent"),
+            onNewQuery         : () => controller.workspace.openQuery(),
+            onOpenSaved        : () => controller.workspace.showQueriesView("saved"),
+            onQueryHistory     : () => controller.workspace.showQueriesView("recent"),
             onExportResults    : format => controller.exportActive(format),
             activeExportKind   : () => controller.activeExportKind(),
             canExportActive    : () => controller.canExportActive(),
-            onOpenDocumentation: () => controller.openDocumentation(),
+            onOpenDocumentation: () => controller.workspace.openDocumentation(),
             onShowLocalStorage : () => openLocalStorageWindow(),
             onShowShortcuts    : () => openShortcutsDialog(),
             onShowChangelog    : () => openChangelogDialog(),
@@ -143,9 +143,9 @@ class SqlAdminShell extends Container {
         // next time they expand it). The New-Query menu shortcut is a display
         // hint only (MenuItem.ts), so install the real Alt+N accelerator as a
         // document keydown listener.
-        controller.setShowQueriesView(() => sidebar.selectView(QUERIES_VIEW_ID));
-        controller.setShowDatabaseView(() => sidebar.revealView(DATABASE_VIEW_ID));
-        controller.setShowRolesView(() => sidebar.revealView(ROLES_VIEW_ID));
+        controller.workspace.setShowQueriesView(() => sidebar.selectView(QUERIES_VIEW_ID));
+        controller.reveal.setShowDatabaseView(() => sidebar.revealView(DATABASE_VIEW_ID));
+        controller.reveal.setShowRolesView(() => sidebar.revealView(ROLES_VIEW_ID));
         installAccelerators(controller, sidebar);
     }
 }
@@ -171,11 +171,11 @@ function installAccelerators(controller: SqlAdminController, sidebar: ActivityBa
         let matched = true;
 
         if (isNewQueryChord(event)) {
-            controller.openQuery();
+            controller.workspace.openQuery();
         } else if (isOpenSavedChord(event)) {
-            controller.showQueriesView("saved");
+            controller.workspace.showQueriesView("saved");
         } else if (isQueryHistoryChord(event)) {
-            controller.showQueriesView("recent");
+            controller.workspace.showQueriesView("recent");
         } else if (isDatabasesRailChord(event)) {
             sidebar.selectView(DATABASE_VIEW_ID);
         } else if (isRolesRailChord(event)) {
@@ -288,10 +288,9 @@ function buildWorkArea(sidebar: ActivityBar, controller: SqlAdminController): Co
 
 /**
  * The CENTER Card deck: the Dock work area and the empty-workspace start page,
- * one visible at a time. The Dock exposes no emptyContent hook or "became empty"
- * event (see StartPage / the plan's Dock investigation), so the controller
- * tracks an open-panel count and drives this deck through the injected toggle —
- * mirroring how the ActivityBar takes a SidebarSizer.
+ * one visible at a time. The Dock emits an "emptychange" event, which the
+ * controller subscribes to in its constructor, driving this deck through the
+ * injected toggle — mirroring how the ActivityBar takes a SidebarSizer.
  *
  * @param controller - The mediator owning the Dock and the panel count.
  *
@@ -447,9 +446,9 @@ async function confirmSignOut(): Promise<void> {
 
 /**
  * WEST sidebar: a VSCode-style activity bar whose icon rail toggles its deck.
- * Phase 1 ships one view — the Database explorer (navigator + properties
- * accordion) — which is also the documented Phase-2 seam (one more rail button +
- * one more deck page adds a view).
+ * Ships three views — Database (navigator + properties accordion), Roles, and
+ * Queries — over a seam that stays open: one more rail button + one more
+ * deck page adds a view.
  */
 function buildSidebar(controller: SqlAdminController, onLogout: () => void): ActivityBar {
     const explorer = new DatabaseExplorerView(controller, DATABASE_VIEW_ID);
