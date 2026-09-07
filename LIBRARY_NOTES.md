@@ -8,6 +8,38 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️🔎 `CodeEditor`'s built-in `"sql"` language lints against generic SQL, not PostgreSQL (0.9.0)
+
+Hit while wiring `CodeEditor`'s new `lint` option into the query editor and the
+view/matview definition editor (`sql-editor-live-linting`). The library's `"sql"`
+`LanguageDefinition` calls `@codemirror/lang-sql`'s `sql()` with no dialect
+argument, which defaults to `StandardSQL`. Three constructs PostgreSQL accepts are
+reported as parse errors under that dialect but parse clean under the same
+package's `PostgreSQL` dialect:
+
+- `@>` — `SELECT * FROM t WHERE c @> '{}'::jsonb;` → 1 error (`Unexpected input`)
+  under `StandardSQL`, 0 under `PostgreSQL`.
+- `<@` — `SELECT * FROM t WHERE c <@ '{}'::jsonb;` → 1 error under `StandardSQL`,
+  0 under `PostgreSQL`.
+- Dollar quoting — `CREATE OR REPLACE FUNCTION f() RETURNS int AS $$ BEGIN RETURN
+  1; END; $$ LANGUAGE plpgsql;` → 2 errors under `StandardSQL`, 0 under
+  `PostgreSQL`; the tagged form (`$function$ … $function$`) → 4 errors under
+  `StandardSQL`, 0 under `PostgreSQL`.
+
+The dollar-quoted case is why `FunctionDefinitionPanel`'s definition tab and
+`SqlPreviewDialog`'s CREATE FUNCTION preview both keep `lint` off:
+`pg_get_functiondef` always returns a dollar-quoted body and
+`backend/app/sql/ddl.py`'s `create_routine` always generates one, so either
+surface would show a permanent false error on every open if lint were on. The
+`@>`/`<@` case is a lesser, content-dependent false positive the query editor and
+the view/matview definition editor accept, since both are otherwise legitimate
+free-form SQL authoring surfaces. Left open rather than worked around — see
+`plans/implemented/sql-editor-live-linting.md`'s `## Architecture Decisions` for
+why registering a PostgreSQL-dialect `LanguageDefinition` inside sqladmin was
+rejected.
+
+---
+
 ## ✅ `DiagramView` low-zoom node simplification verified against the real 325-table diagram
 
 Manual verification for the `diagram-level-of-detail-rendering` library plan, run
