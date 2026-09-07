@@ -44,6 +44,10 @@ export class FunctionDefinitionPanel {
         onSave: (newDefinition: string) => void | Promise<void>,
         onRefresh: () => void,
     ) {
+        // No lint option: pg_get_functiondef text is always dollar-quoted,
+        // which the library's generic-SQL grammar reports as an error, so
+        // this owner leaves lint off (see
+        // plans/implemented/sql-editor-live-linting.md's decision table).
         const editor = new DefinitionEditor(definition, onSave, onRefresh);
 
         this.content = Container({ layoutManager: new Border({ spacing: 0 }) });
