@@ -237,7 +237,12 @@ export class QueryPanel {
     constructor(options: QueryPanelOptions) {
         const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult, splitLayout, explainDiagramLayout, indexAdvisor } = options;
 
-        const editor = new CodeEditor(initialSql, { language: "sql" });
+        // lint: live parser-error diagnostics — a wavy underline plus a gutter
+        // mark, refreshed 750ms after the last edit. On here because this is the
+        // app's one free-form SQL authoring surface; the read-only viewers and the
+        // dollar-quoted routine surfaces stay off (see
+        // plans/implemented/sql-editor-live-linting.md's decision table).
+        const editor = new CodeEditor(initialSql, { language: "sql", lint: true });
 
         // The result pane is a TabPanel with up to three independently-driven tabs,
         // each owned by its own toolbar action: Data (the grid, from Run), Chart (a
