@@ -147,6 +147,10 @@ class DatabaseDiagramPanel extends DiagramShell {
             }
         });
 
+        // markClean() at the end: the Mode toggle is transient view state
+        // (see diagramShell.ts's identical note on Direction/Depth/prune/Root),
+        // not data the app-wide unsaved-changes guards should treat as
+        // unsaved work.
         modeControl.on("change", (v: string) => {
             this.mode = v as DiagramMode;
 
@@ -160,6 +164,7 @@ class DatabaseDiagramPanel extends DiagramShell {
             }
 
             this.settleViewport();
+            modeControl.markClean();
         });
     }
 
@@ -252,6 +257,10 @@ function schemaLegendRow(
     const checkbox = Checkbox({
         value: !hiddenSchemas.has(schema),
         listeners: {
+            // markClean() at the end: a legend row's own visibility toggle is
+            // transient view state (see diagramShell.ts's identical note), not
+            // data the app-wide unsaved-changes guards should ever treat as
+            // unsaved work.
             change: (v: boolean) => {
                 if (v) {
                     hiddenSchemas.delete(schema);
@@ -260,6 +269,7 @@ function schemaLegendRow(
                 }
 
                 applyFilter();
+                checkbox.markClean();
             },
         },
     });

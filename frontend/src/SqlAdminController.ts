@@ -8,10 +8,10 @@
 // Every collaborator reaches back through the PanelHost interface alone
 // (controller/panelHost.ts, implemented below) — no import cycle can form.
 
-import { Dock, Menu, Notification, NotificationHistoryButton, Tooltip }                                                                                                                            from "@jimka/typescript-ui/overlay";
+import { Dialog, Dock, Menu, Notification, NotificationHistoryButton, Tooltip }                                                                                                                    from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent, DockExceptionEvent }                                                                                                                                                 from "@jimka/typescript-ui/overlay";
 import { Component }                                                                                                                                                                               from "@jimka/typescript-ui/core";
-import { HBox }                                                                                                                                                                                    from "@jimka/typescript-ui/layout";
+import { HBox, Tab }                                                                                                                                                                               from "@jimka/typescript-ui/layout";
 import { StatusBar }                                                                                                                                                                               from "@jimka/typescript-ui/component/container";
 import { Text }                                                                                                                                                                                    from "@jimka/typescript-ui/component/input";
 import { Glyph }                                                                                                                                                                                   from "@jimka/typescript-ui/component/display";
@@ -166,6 +166,10 @@ export class SqlAdminController implements PanelHost {
     private readonly _activeRoleGrants: Map<string, RoleGrants> = new Map();
     private _activePanelId: string | null = null;
 
+    // Every currently open tab's content, tiled or torn into a float — see
+    // hasUnsavedWork() below.
+    private readonly _openContents = new Set<Component>();
+
     /**
      * Wire the Dock, StatusBar, and Properties inspector, and subscribe to the
      * Dock's panel-close and focus events.
@@ -219,6 +223,18 @@ export class SqlAdminController implements PanelHost {
             this._activeRoleGrants.delete(e.id);
             this._panelRoutes.delete(e.id);
             this._queryPanelRuns.delete(e.id);
+            this._openContents.delete(e.content);
+        });
+
+        // Tracks every currently open tab's content, tiled or torn into a
+        // float, for hasUnsavedWork() below. "attach" fires on a panel's
+        // first appearance in any host (a fresh open, or a tear-off into a
+        // new float) — a re-attach of already-tracked content is a Set no-op,
+        // and "close" (above) is the only event the Dock fires on genuine
+        // content destruction, so this Set exactly mirrors what is actually
+        // open, independent of which host currently displays it.
+        this.dock.on("attach", (e: DockPanelEvent) => {
+            this._openContents.add(e.content);
         });
 
         // A deferred panel whose fetch rejected: the Dock has already closed the tab,
@@ -252,6 +268,49 @@ export class SqlAdminController implements PanelHost {
 
             this.syncAddressBarFor(e ? e.id : null);
         });
+
+        // Dirty-tab close guard. Wired once per Tab region — the region a tab
+        // lives in when the Dock is split or a tab is torn into a float, not
+        // just the region present at construction. "attach" and "move" are
+        // the only two Dock events that can introduce a region this
+        // controller has not wired yet; a WeakSet dedupes so each Tab
+        // instance gets exactly one listener.
+        const wiredTabRegions = new WeakSet<Tab>();
+
+        const wireBeforeTabClose = (e: DockPanelEvent): void => {
+            const region = e.content.getParentComponent();
+            const tab    = region?.getLayoutManager();
+
+            if (!(tab instanceof Tab) || wiredTabRegions.has(tab)) {
+                return;
+            }
+
+            wiredTabRegions.add(tab);
+            tab.on("beforetabclose", (content, closeController) => {
+                if (!content.isDirty()) {
+                    return;
+                }
+
+                // The veto must happen synchronously; Dialog.confirm is
+                // async, so veto now and close the tab ourselves once the
+                // user answers. dock.removePanel is the programmatic path
+                // "beforetabclose" does not guard, so this cannot re-trigger
+                // the same prompt.
+                closeController.preventDefault();
+
+                void Dialog.confirm(
+                    "Close tab",
+                    "This tab has unsaved changes. Are you sure that you want to close it?",
+                ).then(confirmed => {
+                    if (confirmed) {
+                        this.dock.removePanel(content.getId());
+                    }
+                });
+            });
+        };
+
+        this.dock.on("attach", wireBeforeTabClose);
+        this.dock.on("move",   wireBeforeTabClose);
 
         // Show the connected database in the status bar's left zone.
         this.statusBar.setMessage(`Database: ${this._statusScope}`);
@@ -587,6 +646,33 @@ export class SqlAdminController implements PanelHost {
     /** Close every tab that can exist for `ref` (PanelHost; see panelIdsFor). */
     closeTabsFor(ref: DbObjectRef): void {
         panelIdsFor(ref).forEach(id => this.dock.removePanel(id));
+    }
+
+    /**
+     * Whether any currently open tab has unsaved work — the check
+     * `installUnloadGuard` (SqlAdminShell.ts) gates the `beforeunload` prompt
+     * on. Checks `_openContents` directly rather than `this.dock.isDirty()`:
+     * a tab torn into a floating window is reparented into that
+     * `AbstractWindow`'s own subtree, mounted via the library's
+     * `LayerManager` rather than an `addComponent` call anywhere under
+     * `dock`, so `wireChild`/`unwireChild`'s ordinary ancestor-chain dirty
+     * fold stops reaching `dock` the moment a tab is torn off — `dock.isDirty()`
+     * would silently miss unsaved work sitting in a float. Each content's own
+     * `isDirty()` already folds its full subtree correctly regardless of
+     * where that content is currently mounted, so checking every tracked
+     * content directly covers both a tiled tab and a floated one with the
+     * same call.
+     *
+     * @returns True when at least one open tab (tiled or floated) is dirty.
+     */
+    hasUnsavedWork(): boolean {
+        for (const content of this._openContents) {
+            if (content.isDirty()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

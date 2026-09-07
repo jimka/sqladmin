@@ -147,6 +147,7 @@ class SqlAdminShell extends Container {
         controller.reveal.setShowDatabaseView(() => sidebar.revealView(DATABASE_VIEW_ID));
         controller.reveal.setShowRolesView(() => sidebar.revealView(ROLES_VIEW_ID));
         installAccelerators(controller, sidebar);
+        installUnloadGuard(controller);
     }
 }
 
@@ -196,6 +197,38 @@ function installAccelerators(controller: SqlAdminController, sidebar: ActivityBa
         if (matched) {
             event.preventDefault();
         }
+    });
+}
+
+// Set just before confirmSignOut's own window.location.reload() — a
+// programmatic navigation fires "beforeunload" exactly like a manual one, so
+// without this the browser's native prompt would fire a second time (after
+// the user already answered "Sign out" above) and, if declined there, would
+// leave the page up with a server-side session confirmSignOut already
+// dropped. Session-scoped module state, mirroring buildWorkArea's `lastWidth`
+// closure below.
+let unloadGuardSuppressed = false;
+
+/**
+ * Warns before a refresh, tab close, or navigate-away that would silently
+ * drop unsynced work in an open Dock tab — tiled or torn into a float; see
+ * `SqlAdminController.hasUnsavedWork`'s doc comment for why that check, not
+ * `controller.dock.isDirty()`, is the right one. Scoped to the controller's
+ * own open tabs, not the whole shell, so an AbstractInput elsewhere in the
+ * shell (a navigator search field, say) can never trigger it — see
+ * plans/implemented/app-wide-unsaved-changes-guard.md's Architecture
+ * Decisions.
+ *
+ * @param controller - The mediator whose open tabs gate the prompt.
+ */
+function installUnloadGuard(controller: SqlAdminController): void {
+    window.addEventListener("beforeunload", (event: BeforeUnloadEvent) => {
+        if (unloadGuardSuppressed || !controller.hasUnsavedWork()) {
+            return;
+        }
+
+        event.preventDefault();
+        event.returnValue = "";
     });
 }
 
@@ -440,6 +473,16 @@ async function confirmSignOut(): Promise<void> {
 
     if (confirmed) {
         await logout();
+
+        // Set only once logout() has actually settled, and right before the
+        // reload it guards: the user already answered "leave unsaved work
+        // behind" by confirming Sign out, so this suppresses
+        // installUnloadGuard's listener from firing its native prompt a
+        // second time on the reload below. Setting it any earlier (e.g.
+        // before awaiting logout()) would leave the guard silently and
+        // permanently disabled for the rest of the session if logout()
+        // rejected and the reload below never ran.
+        unloadGuardSuppressed = true;
         window.location.reload();
     }
 }

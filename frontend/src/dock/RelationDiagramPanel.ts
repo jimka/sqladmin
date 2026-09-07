@@ -130,7 +130,14 @@ class RelationDiagramPanel extends FilteredDiagramShell {
                 }
             }
         });
-        coverageControl.on("change", (v: boolean) => { this.showCoverage = v; this.applyFilter(); });
+        // markClean() at the end: the coverage highlight is transient view
+        // state (see diagramShell.ts's identical note), not data the app-wide
+        // unsaved-changes guards should ever treat as unsaved work.
+        coverageControl.on("change", (v: boolean) => {
+            this.showCoverage = v;
+            this.applyFilter();
+            coverageControl.markClean();
+        });
         attachFkEdgeTooltip(this.view);
     }
 

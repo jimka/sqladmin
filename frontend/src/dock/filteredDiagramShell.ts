@@ -49,6 +49,10 @@ function legendRow(
     const checkbox = Checkbox({
         value: !hidden.has(n.id),
         listeners: {
+            // markClean() at the end: a legend row's own visibility toggle is
+            // transient view state (see diagramShell.ts's identical note), not
+            // data the app-wide unsaved-changes guards should ever treat as
+            // unsaved work.
             change: (v: boolean) => {
                 if (v) {
                     hidden.delete(n.id);
@@ -57,6 +61,7 @@ function legendRow(
                 }
 
                 applyFilter();
+                checkbox.markClean();
             },
         },
     });

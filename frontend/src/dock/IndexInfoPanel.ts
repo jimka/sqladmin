@@ -5,11 +5,19 @@
 //
 // Read-only throughout, unlike SequenceInfoPanel: CREATE/DROP INDEX already
 // live on StructurePanel's onCreateIndex/onDropIndex (see the plan's
-// Non-Goals), so this tab has no Save toolbar and no dirty tracking — but it
-// does carry a Refresh button, the only toolbar action it has. The definition
-// renders in a bare CodeEditor — the same read-only construction
-// QueryPanel.showPlan uses for the EXPLAIN plan pane ("Read-only (not
-// disabled) keeps the plan selectable and copyable while blocking edits").
+// Non-Goals), so this tab has no Save toolbar and no user-facing dirty
+// gating — but it does carry a Refresh button, the only toolbar action it
+// has. The definition renders in a bare CodeEditor — the same read-only
+// construction QueryPanel.showPlan uses for the EXPLAIN plan pane
+// ("Read-only (not disabled) keeps the plan selectable and copyable while
+// blocking edits"). A read-only CodeEditor still tracks its own isDirty()
+// against the text setValue() last wrote (CodeEditor.ts's `_cleanValue`),
+// independent of AbstractInput and of any Save button — the same trap
+// DefinitionEditor.reload() guards against — so reload() below marks it
+// clean right after reseeding it, or a Refresh (or reopening after a
+// rename) would falsely flag a never-edited tab dirty forever, tripping the
+// app-wide unsaved-changes guard
+// (plans/implemented/app-wide-unsaved-changes-guard.md).
 //
 // Needs no disposal of its own: this panel `extends`-es a library base rather
 // than composing one, so every child (the toolbar, the LabeledFieldSet's
@@ -121,7 +129,9 @@ class IndexInfoPanel extends Container {
     /**
      * Reseed every widget after a successful Refresh — called by the
      * controller instead of rebuilding the tab, so the panel simply reflects
-     * the index's new state in place.
+     * the index's new state in place. `markClean()` right after `setValue()`
+     * keeps the read-only editor's own `isDirty()` reporting the truth for
+     * the app-wide unsaved-changes guard — see this class's header comment.
      *
      * @param detail - the freshly re-fetched index detail.
      */
@@ -131,6 +141,7 @@ class IndexInfoPanel extends Container {
         this._uniqueText.setText(yesNo(detail.unique));
         this._primaryText.setText(yesNo(detail.primary));
         this._editor.setValue(detail.definition);
+        this._editor.markClean();
     }
 }
 

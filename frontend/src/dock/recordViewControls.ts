@@ -141,11 +141,19 @@ export class RecordViewControls {
      * the query too, and only "selection" would otherwise trigger a
      * re-check, lagging behind what was just typed. Registered by reference
      * on `searchField` ("change") — arrow-function field.
+     *
+     * markClean() right after applying the query keeps `searchField` (an
+     * `AbstractInput`) from leaking into the host panel's automatic dirty
+     * fold: a quick-search term is transient view state the panel never
+     * persists, not unsaved work, so it must never trip the app-wide
+     * unsaved-changes guards (plans/implemented/app-wide-unsaved-changes-guard.md)
+     * — the same reasoning that plan applies to DocumentationPanel's autosave.
      */
     private applyQuickSearch = (): void => {
         this._grid.setQuickSearch(this.getQuery());
         this.syncStepEnabled();
         this._onQuery?.();
+        this.searchField.markClean();
     };
 
     /** Step the displayed record by `delta` within the rows matching the live query, clamped. */

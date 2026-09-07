@@ -207,26 +207,39 @@ class DiagramShell extends Panel {
         this.applyRootVisibility();
 
         // Wire listeners after super() (this now available), per
-        // COMPONENT_CONVENTIONS.md (b).
+        // COMPONENT_CONVENTIONS.md (b). Each handler ends with markClean() on
+        // the control it fired from: Direction/Depth/prune/Root are transient
+        // view configuration, not data the user could lose, and would
+        // otherwise fold their own AbstractInput.isDirty() into this panel's
+        // isDirty() forever after the first change — tripping the app-wide
+        // unsaved-changes guards for a tab with nothing actually unsaved (see
+        // plans/implemented/app-wide-unsaved-changes-guard.md's
+        // [^searchfield-leak], the identical defect this mirrors).
         directionControl.on("change", (v: string) => {
             this.state.setDirection(v as TraversalDirection);
             this.rootingChanged();
             this.settleViewport();
+            directionControl.markClean();
         });
 
         depthControl.on("change", (v: string) => {
             this.state.setDepthChoice(v);
             this.rootingChanged();
             this.settleViewport();
+            depthControl.markClean();
         });
 
         pruneControl.on("change", (v: boolean) => {
             this.state.setPrune(v);
             this.pruneChanged();
             this.settleViewport();
+            pruneControl.markClean();
         });
 
-        rootControl?.on("change", (v: string) => this.chooseRoot(v === ROOT_NONE ? null : v));
+        rootControl?.on("change", (v: string) => {
+            this.chooseRoot(v === ROOT_NONE ? null : v);
+            rootControl?.markClean();
+        });
 
         // DiagramView now opens every view already fitted to the viewport on
         // its own (its fitOnLoad option, default true), so an unrooted panel

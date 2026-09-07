@@ -26,7 +26,15 @@ class DocumentationPanel extends MarkdownDocumentPanel {
     constructor(initial: string, onChange: (markdown: string) => void) {
         super({ value: initial });
 
-        this.on("change", ({ value }) => onChange(value));
+        // markClean() right after onChange (NotesStore.save persists
+        // synchronously, no network round trip) keeps isDirty() reporting the
+        // truth for the app-wide unsaved-changes guards (SqlAdminController's
+        // beforetabclose veto, SqlAdminShell's beforeunload guard): text that
+        // is already durably saved must never read as unsaved.
+        this.on("change", ({ value }) => {
+            onChange(value);
+            this.markClean();
+        });
 
         const editor = this.getEditor();
 
