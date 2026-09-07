@@ -240,3 +240,29 @@ Also confirm: the existing editor accelerators (`Ctrl+Enter` run, `Ctrl+S` save,
 [^no-app-grammar]: Registering an app-local `LanguageDefinition` that parses with the `PostgreSQL` dialect is technically possible — `registerLanguage`, `getLanguage`, `LanguageDefinition` and `collectSyntaxErrors` are all public exports of `@jimka/typescript-ui/component/editor` — but it was rejected for three reasons. It would make `@codemirror/lang-sql` a direct dependency of an app that deliberately depends on `@jimka/typescript-ui` and `elkjs` and nothing else. Under the symlink override it would load a **second** copy of the CodeMirror packages (bare specifiers in the linked `dist/lib` resolve from the library checkout's own `node_modules`, while sqladmin's own import resolves from `frontend/node_modules`), and CodeMirror's facets are identity-based across module instances — a duplicate-instance hazard for a dev-only convenience. And it would leave the library's own `"sql"` language still wrong for every other consumer. The dialect belongs to the package that owns the CodeMirror dependency.
 
 [^definition-editor-option]: An options bag rather than a fourth positional `boolean`: a bare `new DefinitionEditor(definition, onSave, onRefresh, true)` says nothing at the call site about what the `true` means. One optional field also leaves room for a second editor option later without another positional parameter. `FunctionDefinitionPanel` is the owner left off rather than `DefinitionPanel` because its text is dollar-quoted every single time, whereas a view's `SELECT` body never is; see the dialect footnote for the measured counts.
+
+---
+
+## Implementation Notes
+
+**The symlink override this plan calls for (`## Architecture Decisions`'s "Verify under
+the symlink override" and [^unreleased-dependency]) was unnecessary by the time
+implementation started, and was not performed.** The plan was written against a
+state where `lint` was unreleased and `frontend/package.json` pinned
+`@jimka/typescript-ui` `^0.8.0`. Before this plan reached implementation, a separate
+step (outside this plan — the batch's setup, per `plans/typescript-ui-0-9-0-upgrade`-
+style version work) bumped sqladmin to 0.9.0 and the dependency pin to `^0.9.0`, and
+the published 0.9.0 tarball already contains `lint`: `frontend/node_modules` in the
+worktree is a symlink to the main tree's `frontend/node_modules` (not to the sibling
+`typescript-ui` checkout), and inside it `@jimka/typescript-ui` is a real,
+`npm`-installed directory — confirmed via `frontend/package-lock.json` resolving it to
+`https://registry.npmjs.org/@jimka/typescript-ui/-/typescript-ui-0.9.0.tgz` — whose
+`dist/lib/types/component/editor/CodeEditor.d.ts` already declares `lint?: boolean`.
+`npm run typecheck`, `npm run build`, and all manual verification therefore ran
+directly against the real published dependency, with no symlink to the library
+checkout at any point. This makes the plan's "Potential Challenges" entry about the
+release image build failing, and the "Bumping `@jimka/typescript-ui`" non-goal, moot
+for this branch: the pin was already at `^0.9.0` with `lint` included before this
+plan's first commit. Nothing about the chosen implementation changed as a result —
+every call-site edit and the `LIBRARY_NOTES.md` entry are exactly as the plan
+specifies — only the verification mechanics were simpler than planned.
