@@ -28,11 +28,21 @@ truly cannot continue. That is standard LR error-recovery: the parser reports
 the point of no return, not the root cause. `collectSyntaxErrors`
 (`packages/lib/src/typescript/lib/component/editor/syntaxDiagnostics.ts`) has
 no opinion here — it walks the tree Lezer already built and reports whatever
-error nodes exist, verbatim, with no relocation heuristic. Fixing this would
-mean teaching `collectSyntaxErrors` (or a wrapper around it) to walk back from
-an error node to the nearest unmatched opening delimiter — a real
-improvement, but general parser tooling, not something specific to this app.
-Left open rather than worked around.
+error nodes exist, verbatim, with no relocation heuristic. A narrow fix would
+teach `collectSyntaxErrors` (or a wrapper around it) to walk back from an
+error node to the nearest unmatched opening delimiter. A more thorough one —
+which would also close the dialect gap in the entry below, since both stem
+from the same root cause (a generic-SQL grammar standing in for real
+PostgreSQL) — is swapping the `"sql"` `LanguageDefinition`'s `loadLintSource`
+for one backed by a `libpg_query` binding (`libpg-query` or `pgsql-parser` on
+npm), which wraps Postgres's actual C parser via WASM and so reports real
+Postgres error text and positions instead of Lezer's best-effort recovery.
+That parser is batch, not incremental, but re-parsing one SQL statement on
+the existing 750ms lint debounce is cheap enough that this is unlikely to
+matter. It would only replace what feeds diagnostics — Lezer's own grammar
+would stay in place for syntax highlighting, folding, and completion, which
+`libpg_query` doesn't provide. Either fix is general parser tooling, not
+something specific to this app. Left open rather than worked around.
 
 ---
 
@@ -64,7 +74,9 @@ the view/matview definition editor accept, since both are otherwise legitimate
 free-form SQL authoring surfaces. Left open rather than worked around — see
 `plans/implemented/sql-editor-live-linting.md`'s `## Architecture Decisions` for
 why registering a PostgreSQL-dialect `LanguageDefinition` inside sqladmin was
-rejected.
+rejected. See the entry above for a candidate fix (a `libpg_query`-backed
+`loadLintSource`) that would close this dialect gap too, not just the
+mislocation issue it was written for.
 
 ---
 
