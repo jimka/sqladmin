@@ -22,6 +22,18 @@ import { PRIMARY_COLOR } from "../theme";
 
 Glyph.register(save, refresh);
 
+/** Options for {@link DefinitionEditor}. */
+export interface DefinitionEditorOptions {
+    /**
+     * Whether the editor shows live parser-error diagnostics. Default
+     * `false`: FunctionDefinitionPanel's `pg_get_functiondef` text is
+     * dollar-quoted, which the library's generic-SQL grammar reports as an
+     * error, so only DefinitionPanel opts in (see
+     * plans/implemented/sql-editor-live-linting.md's decision table).
+     */
+    lint?: boolean;
+}
+
 /**
  * An SQL CodeEditor paired with a NORTH toolbar carrying a dirty-gated Save
  * button and a Refresh button. A composition helper (not a component): the
@@ -53,13 +65,15 @@ export class DefinitionEditor {
      *   Save is disabled for its duration and re-evaluated once it settles.
      * @param onRefresh - re-fetches the definition and reseeds the editor,
      *   discarding any unsaved edit with no confirmation prompt.
+     * @param options - see {@link DefinitionEditorOptions}.
      */
     constructor(
         definition: string,
         onSave: (text: string) => void | Promise<void>,
         onRefresh: () => void,
+        options: DefinitionEditorOptions = {},
     ) {
-        this.editor = new CodeEditor(definition, { language: "sql" });
+        this.editor = new CodeEditor(definition, { language: "sql", lint: options.lint ?? false });
         this._baseline = definition;
 
         // Save is disabled for the duration of `onSave` and `_saving`

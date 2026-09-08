@@ -8,6 +8,78 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️🔎 Unclosed-paren diagnostics land at the statement's failure point, not the paren (0.9.0)
+
+Hit while manually verifying `sql-editor-live-linting`'s live diagnostics.
+`SELECT count(* FROM t;` reports one "Missing input" diagnostic at the `;`
+(offset 21), not after `count(` (offset 13) where the mistake actually is.
+Confirmed this is unrelated to the dialect gap in the entry below: parsing the
+same string with `@codemirror/lang-sql`'s `sql({ dialect: PostgreSQL })`
+produces the identical error node at the identical offset as the library's
+undialected default — the mislocation happens the same way under every
+dialect, so choosing a PostgreSQL-aware `LanguageDefinition` would not fix it.
+
+The parse tree explains why: `Script(Statement(Keyword,Keyword,Parens("(",
+Operator,Keyword,Identifier,⚠),";"))` — once `count(` opens a `Parens` node,
+Lezer's LR grammar keeps absorbing whatever comes next (`FROM`, `t`) as long
+as each token is locally consistent with still being inside an open
+expression list, and only plants its single synthetic error token where it
+truly cannot continue. That is standard LR error-recovery: the parser reports
+the point of no return, not the root cause. `collectSyntaxErrors`
+(`packages/lib/src/typescript/lib/component/editor/syntaxDiagnostics.ts`) has
+no opinion here — it walks the tree Lezer already built and reports whatever
+error nodes exist, verbatim, with no relocation heuristic. A narrow fix would
+teach `collectSyntaxErrors` (or a wrapper around it) to walk back from an
+error node to the nearest unmatched opening delimiter. A more thorough one —
+which would also close the dialect gap in the entry below, since both stem
+from the same root cause (a generic-SQL grammar standing in for real
+PostgreSQL) — is swapping the `"sql"` `LanguageDefinition`'s `loadLintSource`
+for one backed by a `libpg_query` binding (`libpg-query` or `pgsql-parser` on
+npm), which wraps Postgres's actual C parser via WASM and so reports real
+Postgres error text and positions instead of Lezer's best-effort recovery.
+That parser is batch, not incremental, but re-parsing one SQL statement on
+the existing 750ms lint debounce is cheap enough that this is unlikely to
+matter. It would only replace what feeds diagnostics — Lezer's own grammar
+would stay in place for syntax highlighting, folding, and completion, which
+`libpg_query` doesn't provide. Either fix is general parser tooling, not
+something specific to this app. Left open rather than worked around.
+
+---
+
+## ✂️🔎 `CodeEditor`'s built-in `"sql"` language lints against generic SQL, not PostgreSQL (0.9.0)
+
+Hit while wiring `CodeEditor`'s new `lint` option into the query editor and the
+view/matview definition editor (`sql-editor-live-linting`). The library's `"sql"`
+`LanguageDefinition` calls `@codemirror/lang-sql`'s `sql()` with no dialect
+argument, which defaults to `StandardSQL`. Three constructs PostgreSQL accepts are
+reported as parse errors under that dialect but parse clean under the same
+package's `PostgreSQL` dialect:
+
+- `@>` — `SELECT * FROM t WHERE c @> '{}'::jsonb;` → 1 error (`Unexpected input`)
+  under `StandardSQL`, 0 under `PostgreSQL`.
+- `<@` — `SELECT * FROM t WHERE c <@ '{}'::jsonb;` → 1 error under `StandardSQL`,
+  0 under `PostgreSQL`.
+- Dollar quoting — `CREATE OR REPLACE FUNCTION f() RETURNS int AS $$ BEGIN RETURN
+  1; END; $$ LANGUAGE plpgsql;` → 2 errors under `StandardSQL`, 0 under
+  `PostgreSQL`; the tagged form (`$function$ … $function$`) → 4 errors under
+  `StandardSQL`, 0 under `PostgreSQL`.
+
+The dollar-quoted case is why `FunctionDefinitionPanel`'s definition tab and
+`SqlPreviewDialog`'s CREATE FUNCTION preview both keep `lint` off:
+`pg_get_functiondef` always returns a dollar-quoted body and
+`backend/app/sql/ddl.py`'s `create_routine` always generates one, so either
+surface would show a permanent false error on every open if lint were on. The
+`@>`/`<@` case is a lesser, content-dependent false positive the query editor and
+the view/matview definition editor accept, since both are otherwise legitimate
+free-form SQL authoring surfaces. Left open rather than worked around — see
+`plans/implemented/sql-editor-live-linting.md`'s `## Architecture Decisions` for
+why registering a PostgreSQL-dialect `LanguageDefinition` inside sqladmin was
+rejected. See the entry above for a candidate fix (a `libpg_query`-backed
+`loadLintSource`) that would close this dialect gap too, not just the
+mislocation issue it was written for.
+
+---
+
 ## ✅ `DiagramView` low-zoom node simplification verified against the real 325-table diagram
 
 Manual verification for the `diagram-level-of-detail-rendering` library plan, run

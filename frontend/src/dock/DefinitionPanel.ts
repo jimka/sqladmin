@@ -66,7 +66,7 @@ export class DefinitionPanel {
      */
     constructor(definition: string, columns: ColumnMeta[], onSave: (newDefinition: string) => void | Promise<void>,
                 onRefresh: () => void, layout: SplitLayoutBinding) {
-        const editor = new DefinitionEditor(definition, onSave, onRefresh);
+        const editor = new DefinitionEditor(definition, onSave, onRefresh, { lint: true });
         const { grid: columnsGrid, store: columnsStore } = buildColumnsGrid(columns);
 
         const columnsSection = Container({
