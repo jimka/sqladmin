@@ -8,6 +8,34 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️🔎 Unclosed-paren diagnostics land at the statement's failure point, not the paren (0.9.0)
+
+Hit while manually verifying `sql-editor-live-linting`'s live diagnostics.
+`SELECT count(* FROM t;` reports one "Missing input" diagnostic at the `;`
+(offset 21), not after `count(` (offset 13) where the mistake actually is.
+Confirmed this is unrelated to the dialect gap in the entry below: parsing the
+same string with `@codemirror/lang-sql`'s `sql({ dialect: PostgreSQL })`
+produces the identical error node at the identical offset as the library's
+undialected default — the mislocation happens the same way under every
+dialect, so choosing a PostgreSQL-aware `LanguageDefinition` would not fix it.
+
+The parse tree explains why: `Script(Statement(Keyword,Keyword,Parens("(",
+Operator,Keyword,Identifier,⚠),";"))` — once `count(` opens a `Parens` node,
+Lezer's LR grammar keeps absorbing whatever comes next (`FROM`, `t`) as long
+as each token is locally consistent with still being inside an open
+expression list, and only plants its single synthetic error token where it
+truly cannot continue. That is standard LR error-recovery: the parser reports
+the point of no return, not the root cause. `collectSyntaxErrors`
+(`packages/lib/src/typescript/lib/component/editor/syntaxDiagnostics.ts`) has
+no opinion here — it walks the tree Lezer already built and reports whatever
+error nodes exist, verbatim, with no relocation heuristic. Fixing this would
+mean teaching `collectSyntaxErrors` (or a wrapper around it) to walk back from
+an error node to the nearest unmatched opening delimiter — a real
+improvement, but general parser tooling, not something specific to this app.
+Left open rather than worked around.
+
+---
+
 ## ✂️🔎 `CodeEditor`'s built-in `"sql"` language lints against generic SQL, not PostgreSQL (0.9.0)
 
 Hit while wiring `CodeEditor`'s new `lint` option into the query editor and the
