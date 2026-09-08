@@ -1,11 +1,13 @@
 // The shared, dirty-gated "editable SQL definition + Save/Refresh toolbar"
 // core behind both DefinitionPanel (a view/matview's editable SELECT body
 // over its columns grid) and FunctionDefinitionPanel (a routine's editable
-// CREATE OR REPLACE statement). It owns the CodeEditor, the NORTH toolbar's
-// Save and Refresh buttons, and the dirty-gating that keeps Save disabled
-// until the text actually differs from the last-saved baseline — the part
-// that is fiddly to get right (a mid-save edit must not re-enable Save; a
-// successful reload — from either a Save or a Refresh — must re-disable it).
+// CREATE OR REPLACE statement). It owns the CodeEditor and the NORTH
+// toolbar's Save and Refresh buttons; the dirty flag itself comes from
+// CodeEditor.isDirty(). The two remaining fiddly parts this class still owns
+// are `_saving`'s gating of Save during an in-flight save (a mid-save edit
+// must not re-enable it) and reload()'s setValue()-then-markClean() order
+// (so a successful reload — from either a Save or a Refresh — re-disables
+// Save instead of leaving it stuck dirty).
 // Each panel supplies its own body layout around `editor` and its own
 // `onSave`/`onRefresh`; this class carries no view/function specifics.
 
@@ -52,15 +54,13 @@ export class DefinitionEditor {
 
     private readonly _saveButton: Button;
 
-    /** The last-saved text; Save enables only when the editor differs from it. */
-    private _baseline: string;
-
     /** True while an onSave is in flight, suppressing `syncDirty` so a mid-save edit can't re-enable Save. */
     private _saving = false;
 
     /**
-     * @param definition - the initial definition text (the editor's seed and
-     *   the starting Save baseline — Save begins disabled).
+     * @param definition - the initial definition text (the editor's seed
+     *   text; Save begins disabled since a freshly constructed `CodeEditor`
+     *   reports itself clean).
      * @param onSave - writes the editor's current text back to the database;
      *   Save is disabled for its duration and re-evaluated once it settles.
      * @param onRefresh - re-fetches the definition and reseeds the editor,
@@ -74,14 +74,13 @@ export class DefinitionEditor {
         options: DefinitionEditorOptions = {},
     ) {
         this.editor = new CodeEditor(definition, { language: "sql", lint: options.lint ?? false });
-        this._baseline = definition;
 
         // Save is disabled for the duration of `onSave` and `_saving`
         // suppresses `syncDirty`, so neither a double-click nor a mid-save edit
         // can fire a second overlapping save. After the save settles,
         // `syncDirty` restores the right state: a successful save reloads the
-        // panel (baseline updated → not dirty → disabled); a failed one leaves
-        // the edits (still dirty → enabled).
+        // panel (`reload` marks the editor clean → not dirty → disabled); a
+        // failed one leaves the edits in place (still dirty → enabled).
         const handleSave = (): void => {
             this._saving = true;
             this._saveButton.setEnabled(false);
@@ -101,34 +100,30 @@ export class DefinitionEditor {
         });
 
         // Enable Save only once the definition is edited; seeding starts it disabled.
-        this.editor.on("change", () => this.syncDirty());
+        this.editor.onDirtyChange(() => this.syncDirty());
         this.syncDirty();
     }
 
     /**
-     * Reseed the editor text and Save baseline after a successful save, so the
-     * panel reflects the object's new state in place and Save re-disables until
-     * the user edits again.
+     * Reseed the editor text after a successful save, so the panel reflects
+     * the object's new state in place and Save re-disables until the user
+     * edits again.
      *
      * @param definition - the freshly re-fetched definition text.
      */
     reload(definition: string): void {
-        this._baseline = definition;
         this.editor.setValue(definition);
+        this.editor.markClean();
         this.syncDirty();
     }
 
     /**
-     * Enable Save only when the editor's text differs from the last-saved
-     * baseline, and never while a save is in flight (`_saving`). Wired to the
-     * editor's "change" event and called after the initial seed and each
+     * Enable Save only when {@link CodeEditor.isDirty} is true, and never
+     * while a save is in flight (`_saving`). Wired to the editor's
+     * `onDirtyChange` and called after the initial seed and each
      * {@link reload}.
      */
     private syncDirty(): void {
-        if (this._saving) {
-            return;
-        }
-
-        this._saveButton.setEnabled(this.editor.getValue() !== this._baseline);
+        this._saveButton.setEnabled(!this._saving && this.editor.isDirty());
     }
 }
