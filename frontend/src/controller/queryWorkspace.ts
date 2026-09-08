@@ -250,7 +250,7 @@ export class QueryWorkspace {
 
         this.host.setPanelRoute(id, notesPath());
 
-        this.host.dock.addPanel({ id, title: "Notes", glyph: "file-lines", content: panel.content });
+        this.host.dock.addPanel({ id, title: "Notes", glyph: "file-lines", content: panel });
     }
 
     /** @returns The run history, newest-first (for the Queries view's Recent section). */

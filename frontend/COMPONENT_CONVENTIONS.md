@@ -244,9 +244,9 @@ This is a **fallback from the preferred `extends` form (section (d))**, not
 an equal alternative — reach for `extends` first, and use composition only
 when the super-cascade hoist genuinely doesn't pay for itself. See
 `plans/implemented/class-first-lifecycle-panels.md` for the worked
-conversion of `QueryPanel`, `QueryResultChart`, `QueryResultGrid`,
-`DefinitionPanel`, and `DocumentationPanel`, and
-`plans/in-progress/adopt-dock-owned-teardown.md` for the removal of every
+conversion of `QueryPanel`, `QueryResultChart`, `QueryResultGrid`, and
+`DefinitionPanel`, and
+`plans/implemented/adopt-dock-owned-teardown.md` for the removal of every
 wrapper `dispose` this section used to require.
 
 ## (g) Dialogs are `Dialog` subclasses
