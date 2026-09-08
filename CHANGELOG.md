@@ -4,6 +4,148 @@ All notable changes to SQLAdmin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-09-08
+
+### Added
+- **The query editor and a view or materialized view's definition editor now
+  show live syntax diagnostics as you type.** A wavy underline plus a gutter
+  marker flag SQL that fails to parse — an unmatched parenthesis, a missing
+  argument — refreshed about 750ms after you stop typing. This is a grammar
+  check, not a full validator, and because it parses against generic SQL
+  rather than PostgreSQL specifically, valid PostgreSQL syntax using `@>`,
+  `<@`, or dollar-quoted strings can show a false diagnostic; for that reason
+  the function-definition tab, the index and Explain viewers, and the DDL
+  preview dialog don't show diagnostics at all.
+- **The Notes tab gains a formatting toolbar** above the editor —
+  bold/italic-style toggles, a Link button, Insert and Table dropdowns, Text
+  style/Alignment/Columns dropdowns, and an "Edit Markdown source" toggle to
+  switch to raw Markdown and back. Notes still autosave on every keystroke
+  with no explicit Save step.
+- **Closing a dock tab with unsaved changes now asks for confirmation.** An
+  in-app "Close tab" dialog appears when closing a dirty tab via its ✕, its
+  context menu, or a bulk-close action — covering table edits, unsaved query
+  text, in-progress DDL drafts, and unsaved definition edits, whether the tab
+  is tiled or torn into a floating window. Closing a floating window from its
+  own title-bar button, rather than from its tab, isn't covered yet.
+- **Refreshing the page, closing the browser tab, or navigating away with
+  unsaved work open now triggers the browser's own "leave site?" warning.**
+  This checks every open dock tab, tiled or floated, but not other parts of
+  the app shell; signing out doesn't also trigger it on top of its own
+  confirmation. The Notes tab, quick-search fields, diagram view controls,
+  and chart axis pickers never trigger either warning, since they autosave or
+  hold only transient view state.
+- **A composite or enum type's info tab is now editable in place**,
+  following the same edit-then-review pattern as the Structure tab's Columns
+  section and a sequence's info tab: add, drop, retype, or rename a composite
+  attribute, or add or rename an enum label, then Save to review the
+  generated `ALTER TYPE` statements before they run.
+- **Deleting an enum label** — something PostgreSQL has no direct statement
+  for — **now runs a full recreate-and-migrate script**: the type is renamed
+  aside, a replacement is created with the final label list, every column
+  using the type (including array-typed columns) is migrated over with its
+  data and defaults preserved, and the old type is dropped, all as one
+  transaction with a warning shown before it runs.
+
+### Changed
+- **Creating a table, view, materialized view, schema, sequence, function,
+  enum type, or composite type now opens in its own dock tab instead of a
+  modal dialog.** The form stays in the tab; a "Review SQL…" toolbar action
+  opens a focused, SQL-only dialog to check the generated statements before
+  running them. Re-launching the same creation while a draft tab is open
+  focuses that tab instead of opening a second one, and the dialog no longer
+  previews SQL against a still-empty form the moment it opens.
+- **The navigator's separate "Edit" action for types is gone.** A type
+  leaf's context menu now offers only "Show info" and "Drop" — editing
+  happens directly in the info tab.
+- **Export dropdowns now read the same way everywhere** — "CSV (.csv)" /
+  "JSON (.json)" (or "Text (.txt)" / "JSON (.json)" for an EXPLAIN plan) —
+  matching what the navigator's right-click Export menu and Tools → Export
+  results already showed.
+- **"Clear SQLAdmin data" no longer clears saved connection presets.** It
+  now clears only history, saved queries, notes, and layout; removing saved
+  connections requires the new, separate "Clear saved connections" button,
+  which asks for confirmation first.
+- **Diagram nodes now align into clean, aligned columns** on the database
+  diagram's Tables mode, a schema's Dependency/Inheritance graphs, and a
+  role's grants and membership graphs, instead of staggering based on each
+  node's own label length.
+- **A role's membership graph is now rendered by its own diagram panel**,
+  with plain glyph-and-label nodes and a distinct role icon, instead of being
+  drawn through the foreign-key relationship diagram — so it no longer shows
+  a "Highlight FKs without a covering index" checkbox or foreign-key edge
+  tooltips that never applied to it.
+
+### Fixed
+- **Database, schema, table, and role names containing spaces, `#`, `/`, or
+  other special characters now work correctly everywhere the app calls the
+  API.** Every request path is now consistently percent-encoded; previously
+  such a name could be silently truncated client-side, breaking listing,
+  structure loading, and export for that object.
+- **Repeatedly changing Direction or Depth on a relation's rooted
+  Dependencies or Inheritance diagram no longer leaks memory.** Its per-node
+  legend now disposes its old rows instead of just detaching them.
+- **Switching a database diagram from Tables mode back to Overview now
+  re-fits the view** to the whole diagram instead of leaving it at the
+  previous rooted table's zoom level.
+- **Fixed a double scrollbar in the Keyboard Shortcuts dialog** when the
+  shortcut legend overflowed the dialog's height.
+- **A table's Structure tab no longer closes permanently** when adding or
+  dropping a constraint or index on a tab that was opened via a deep link or
+  a reveal navigation with no navigator node behind it — it now reseeds in
+  place, keeping its scroll position and expanded sections.
+- **Saved connection presets are no longer wiped out by an unrelated storage
+  failure.** Only a genuinely corrupt stored blob now triggers the
+  repair-by-deleting-everything path; a quota or security error just fails
+  the save and leaves existing presets intact.
+- **The Index Suggestions panel's toolbar is no longer squeezed to no
+  visible height** above its results table.
+- **The Add Foreign Key form's "referenced schema" field now defaults to
+  the table's own schema** instead of whichever schema happened to load
+  first.
+- **A schema's Inheritance diagram no longer fails with a server error when
+  the schema has a partitioned table.** Its automatically-created partition
+  indexes are now excluded, since they aren't a displayable node kind.
+- **A role named `schemas` or `graph` can now be opened from the Roles
+  rail.** A URL-matching ambiguity previously routed those specific role
+  names to the wrong page.
+- **Dropping or renaming a table, view, function, or schema now closes
+  every tab open for that object** — including its diagram, dependencies,
+  and inheritance tabs, not just its Data/Structure/Definition tab — instead
+  of leaving some pointed at an object that no longer exists.
+- **Login now returns a generic "Login failed" for any server-side
+  rejection** — no CONNECT grant, max connections reached, a protocol
+  violation — instead of a response exposing Postgres's raw error text, and
+  these attempts now count toward the login lockout like every other
+  failure.
+- **Exporting a table whose schema or table name contains quotes, newlines,
+  or non-ASCII characters no longer risks a malformed or injectable download
+  header.**
+- **`ALLOW_USER_PRESETS=off` (and other case variants) is now honored.**
+  Previously only `0`/`false`/`no` disabled the feature; `off` was silently
+  ignored and left it enabled.
+- **Logging in again now invalidates the previous session** instead of
+  leaving its token valid for up to 30 minutes.
+- **CSRF token verification now uses a constant-time comparison**, closing
+  a theoretical timing side-channel.
+
+### Internal
+- Migrated to `@jimka/typescript-ui` 0.9.0.
+- Completed the first pass of a whole-codebase health audit: consolidated
+  the backend's duplicated catalog queries and DDL identifier/DROP-statement
+  builders onto shared bases, split route registration out of a single
+  1,600-line `main.py` into per-resource routers behind a collision-proof
+  `/db/` URL segment, converged the frontend's diagram panels onto a shared
+  shell, deduplicated the Refresh/Export toolbar wiring and the
+  record-view/quick-search controls shared by table and query-result grids,
+  and split the `SqlAdminController` god-object into six focused
+  collaborator modules behind one `PanelHost` seam.
+- Added `DismissDialog` and `ErrorBanner` base classes and migrated the
+  About/Changelog/Shortcuts dialogs and existing hand-rolled error banners
+  onto them.
+- Expanded unit-test coverage across the backend connection/session layer
+  and the frontend's diagram-shell state, load-signal accounting, and DDL
+  identifier validation.
+
 ## [0.8.0] — 2026-08-29
 
 ### Added
@@ -284,6 +426,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 First public release: browse schemas and roles, edit rows, run and EXPLAIN SQL,
 and visualize schema and role relationships as diagrams.
 
+[0.9.0]: https://github.com/jimka/sqladmin/releases/tag/v0.9.0
 [0.8.0]: https://github.com/jimka/sqladmin/releases/tag/v0.8.0
 [0.7.0]: https://github.com/jimka/sqladmin/releases/tag/v0.7.0
 [0.6.0]: https://github.com/jimka/sqladmin/releases/tag/v0.6.0

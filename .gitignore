@@ -18,3 +18,7 @@ dist/
 
 # CodeGraph index
 .codegraph/
+
+# Helper scripts
+branches.txt
+merge.sh

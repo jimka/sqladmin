@@ -239,6 +239,7 @@ already covered in full in Section 1 are included here too, for completeness.
 | @codemirror/lang-javascript | 6.2.5 | MIT |
 | @codemirror/lang-json | 6.0.2 | MIT |
 | @codemirror/lang-markdown | 6.5.1 | MIT |
+| @codemirror/lang-python | 6.2.1 | MIT |
 | @codemirror/lang-sql | 6.10.0 | MIT |
 | @codemirror/language | 6.12.4 | MIT |
 | @codemirror/lint | 6.9.7 | MIT |
@@ -246,7 +247,7 @@ already covered in full in Section 1 are included here too, for completeness.
 | @codemirror/state | 6.7.1 | MIT |
 | @codemirror/view | 6.43.6 | MIT |
 | @fontsource-variable/manrope | 5.3.0 | OFL-1.1 |
-| @jimka/typescript-ui | 0.8.0 | PolyForm-Noncommercial-1.0.0 |
+| @jimka/typescript-ui | 0.9.0 | PolyForm-Noncommercial-1.0.0 |
 | @lexical/clipboard | 0.49.0 | MIT |
 | @lexical/code | 0.49.0 | MIT |
 | @lexical/code-core | 0.49.0 | MIT |
@@ -272,6 +273,7 @@ already covered in full in Section 1 are included here too, for completeness.
 | @lezer/json | 1.0.3 | MIT |
 | @lezer/lr | 1.4.10 | MIT |
 | @lezer/markdown | 1.7.2 | MIT |
+| @lezer/python | 1.1.19 | MIT |
 | @marijn/find-cluster-break | 1.0.3 | MIT |
 | @preact/signals-core | 1.14.4 | MIT |
 | @types/trusted-types | 2.0.7 | MIT |
