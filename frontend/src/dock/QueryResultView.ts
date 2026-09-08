@@ -121,17 +121,26 @@ export class QueryResultChart {
         content.addComponent(buildStrip(), { placement: Placement.NORTH });
         content.addComponent(viewHost, { placement: Placement.CENTER });
 
-        /** Build the config strip: x/y column combos and the line/bar type toggle. */
+        /**
+         * Build the config strip: x/y column combos and the line/bar type
+         * toggle. `markClean()` at the end of each combo's own "change"
+         * handler keeps it (an `AbstractInput`) from leaking into the tab's
+         * automatic dirty fold: picking a chart axis is transient view
+         * configuration, not data the user could lose, the same reasoning
+         * `DiagramShell`'s Direction/Depth/prune controls
+         * (plans/implemented/app-wide-unsaved-changes-guard.md's
+         * [^diagram-and-sequence-leaks]) already apply.
+         */
         function buildStrip(): ToolBar {
             const xCombo = new ComboBox({
                 items: xCandidates(columns).map(c => ({ key: c.field, label: c.label })),
                 value: config.xField,
-                listeners: { change: value => { config = { ...config, xField: value }; rebuildChart(); } },
+                listeners: { change: value => { config = { ...config, xField: value }; rebuildChart(); xCombo.markClean(); } },
             });
             const yCombo = new ComboBox({
                 items: numericColumns(columns).map(c => c.name),
                 value: config.yField,
-                listeners: { change: value => { config = { ...config, yField: value }; rebuildChart(); } },
+                listeners: { change: value => { config = { ...config, yField: value }; rebuildChart(); yCombo.markClean(); } },
             });
 
             const lineToggle = new ToggleButton("", { selected: config.kind === "line", glyph: "chart-line" });

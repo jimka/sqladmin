@@ -236,6 +236,7 @@ class SequenceInfoPanel extends Container {
         this.addComponent(formHost, { placement: Placement.CENTER });
 
         this.seedFields(detail);
+        this.markFieldsClean();
 
         for (const widget of [
             currentValueField, startValueField, incrementField, minValueField, maxValueField, cacheSizeField,
@@ -269,6 +270,30 @@ class SequenceInfoPanel extends Container {
         this._dataTypeCombo.setValue(detail.dataType);
         this._ownerStore.loadData(ownerItems(this._deps.roles, detail.owner).map(name => ({ name })));
         this._ownerCombo.setValue(detail.owner);
+    }
+
+    /**
+     * Marks every editable widget's own `AbstractInput.isDirty()` clean
+     * against the value {@link seedFields} just wrote — called after the
+     * initial seed and after every {@link reload}. Independent of
+     * {@link syncSaveEnabled}'s `_baseline` diff, which already gates this
+     * panel's own Save button correctly: a `Checkbox`'s `setValue` (unlike a
+     * `ComboBox`'s) always dirties it, even when set programmatically to a
+     * value that differs from its construction-time default, so
+     * `seedFields`'s `_cycleBox.setValue(detail.cycle)` alone would leave a
+     * CYCLE-enabled sequence's tab reading permanently dirty from the moment
+     * it opens — tripping the app-wide unsaved-changes guards
+     * (plans/implemented/app-wide-unsaved-changes-guard.md) for a tab with
+     * no actual unsaved edit.
+     */
+    private markFieldsClean(): void {
+        for (const widget of [
+            this._currentValueField, this._startValueField, this._incrementField,
+            this._minValueField, this._maxValueField, this._cacheSizeField,
+            this._cycleBox, this._dataTypeCombo, this._ownerCombo,
+        ]) {
+            widget.markClean();
+        }
     }
 
     // Registered by reference on every widget's "change" event — an
@@ -358,6 +383,7 @@ class SequenceInfoPanel extends Container {
         this._detail = detail;
         this._baseline = detailToEditedValues(detail);
         this.seedFields(detail);
+        this.markFieldsClean();
         this.syncSaveEnabled();
     }
 }
