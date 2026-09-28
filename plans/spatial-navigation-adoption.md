@@ -5,14 +5,16 @@ touches-shared: [frontend/src/SqlAdminApp.ts, frontend/src/SqlAdminController.ts
 
 # Spatial Navigation Adoption — Implementation Plan
 
+> **Status: deferred — blocked on typescript-ui 0.11.0.** Do not implement against 0.10.0. This plan waits for typescript-ui 0.11.0 to change `SpatialNavigation`'s default region-tier chord from `Ctrl+Shift`+arrow to `Ctrl+Alt+Shift`+arrow, so SQLAdmin can call plain `SpatialNavigation.enable()` with no modifier override. It is not part of the SQLAdmin 0.10.0 release. Step 1 checks the library default and stops if it has not changed.[^deferred]
+
 ## Overview
 
-Turn on typescript-ui 0.10.0's `SpatialNavigation` service in SQLAdmin, so the keyboard can move focus between the app's major regions and between neighbouring controls. The service has two tiers, both driven by arrow keys held with modifiers:
+Turn on typescript-ui's `SpatialNavigation` service (added in 0.10.0; this plan needs 0.11.0's default chords) in SQLAdmin, so the keyboard can move focus between the app's major regions and between neighbouring controls. The service has two tiers, both driven by arrow keys held with modifiers:
 
-- **Control tier** (the library calls it `"component"`): `Ctrl+Alt`+arrow moves to the nearest focusable control in that direction. The library default is kept.
-- **Region tier** (the library calls it `"target"`): `Ctrl+Alt+Shift`+arrow moves to the nearest container marked as a *navigation target*, and focuses the control that last had focus inside it (or its first control on a first visit). SQLAdmin changes this tier's modifiers from the library default `Ctrl+Shift`, because `Ctrl+Shift+←/→` is word selection in the SQL editor and in every text field.
+- **Control tier** (the library calls it `"component"`): `Ctrl+Alt`+arrow moves to the nearest focusable control in that direction. This is the library default.
+- **Region tier** (the library calls it `"target"`): `Ctrl+Alt+Shift`+arrow moves to the nearest container marked as a *navigation target*, and focuses the control that last had focus inside it (or its first control on a first visit). This is the library default from 0.11.0. In 0.10.0 the default is `Ctrl+Shift`, which takes `Ctrl+Shift+←/→` word selection away from the SQL editor and every text field.
 
-The service is enabled in [`frontend/src/SqlAdminApp.ts`](frontend/src/SqlAdminApp.ts), right after the `await Body.init(...)` that the upgrade plan adds. SQLAdmin then marks its own regions as navigation targets: the sidebar views and their sections, the Dock, each Dock tab, the start page and the status bar. The one app keydown handler that reads arrow keys with modifiers, the query editor's history recall in [`frontend/src/dock/QueryPanel.ts:1175`](frontend/src/dock/QueryPanel.ts#L1175), gets the library's required `SpatialNavigation.claimsKey(e)` guard. The Keyboard Shortcuts dialog and the start-page legend list the two new chords. One `LIBRARY_NOTES.md` entry records a library docs gap.
+The service is enabled in [`frontend/src/SqlAdminApp.ts`](frontend/src/SqlAdminApp.ts), right after the `await Body.init(...)` that the upgrade plan adds. SQLAdmin then marks its own regions as navigation targets: the sidebar views and their sections, the Dock, each Dock tab, the start page and the status bar. The one app keydown handler that reads arrow keys with modifiers, the query editor's history recall in [`frontend/src/dock/QueryPanel.ts:1175`](frontend/src/dock/QueryPanel.ts#L1175), gets the library's required `SpatialNavigation.claimsKey(e)` guard. The Keyboard Shortcuts dialog and the start-page legend list the two new chords. One `LIBRARY_NOTES.md` entry records the library default-chord change this plan waits on.
 
 This is a step toward the TODO's "Command palette / keyboard-driven actions" item, not the whole of it.
 
@@ -22,22 +24,22 @@ This is a step toward the TODO's "Command palette / keyboard-driven actions" ite
 
 ### Enable next to the awaited `Body.init`, as the library demo does
 
-`main()` calls `SpatialNavigation.enable({ targetModifiers: FOCUS_REGION_MODIFIERS })` right after `const body = await Body.init(...)`, before `whoami()`. The precedent is the library's demo entry point, [`../typescript-ui/packages/lib/src/typescript/main.ts:45-46`](../typescript-ui/packages/lib/src/typescript/main.ts), which calls `SpatialNavigation.enable()` once at startup. The library's docs app (`packages/docs`) does not enable the service, so it gives no precedent.[^enable-early]
+`main()` calls `SpatialNavigation.enable()`, with no options, right after `const body = await Body.init(...)`, before `whoami()`. The precedent is the library's demo entry point, [`../typescript-ui/packages/lib/src/typescript/main.ts:45-46`](../typescript-ui/packages/lib/src/typescript/main.ts), which calls `SpatialNavigation.enable()` once at startup. The library's docs app (`packages/docs`) does not enable the service, so it gives no precedent.[^enable-early]
 
-### The region tier moves to `Ctrl+Alt+Shift`; the control tier keeps the default
+### Both tiers use the library defaults, which needs typescript-ui 0.11.0
 
-Only `targetModifiers` is overridden, to `{ ctrl: true, alt: true, shift: true }`. `componentModifiers` is not passed, so the control tier stays on the library default `Ctrl+Alt`.
+SQLAdmin passes no modifier options. It uses the control tier's `Ctrl+Alt` and the region tier's `Ctrl+Alt+Shift`, both library defaults from 0.11.0 (memory "Prefer library defaults").
 
-The library's own region chord takes keys the app needs. The service listens at the window, in the capture phase, and stops a chord's propagation before any widget sees it. So with the defaults, the chords would pre-empt these editing keys:
+The 0.10.0 region default cannot be used. The service listens at the window, in the capture phase, with no check for text entry, and stops a claimed chord's propagation before any widget sees it (`SpatialNavigation.ts:208-209` holds the defaults). This table shows which editing keys each default takes:
 
-| Chord (Windows/Linux) | Pre-empted binding | Where | Library default tier | After this plan |
+| Chord (Windows/Linux) | Pre-empted binding | Where | 0.10.0 default | 0.11.0 default |
 |---|---|---|---|---|
-| `Ctrl+Shift+←/→` | select word left/right (CodeMirror `selectGroupLeft/Right`; native in `<input>`) | SQL editor, definition editor, every text field | region | **kept** for editing |
-| `Ctrl+Alt+↑/↓` | add cursor above/below (CodeMirror `addCursorAbove/Below`) | SQL editor, definition editor | control | taken by the control tier |
+| `Ctrl+Shift+←/→` | select word left/right (CodeMirror `selectGroupLeft/Right`, and `selectSyntax`/`selectPage` on macOS; native in `<input>`) | SQL editor, definition editor, every text field | taken by the region tier | **free** for editing |
+| `Ctrl+Alt+↑/↓` | add cursor above/below (CodeMirror `addCursorAbove/Below`) | SQL editor, definition editor | taken by the control tier | taken by the control tier |
 
-Word selection is used constantly in a SQL editor, so it is kept. Adding a cursor by keyboard is rarely used and stays available through Alt+drag (rectangular selection), so the control tier keeps the library default.[^chords]
+Word selection is used constantly in a SQL editor, so the plan waits until the library frees it. The control tier only clashes on `↑`/`↓` with adding a cursor, which is rarely used and stays available through Alt+drag (rectangular selection). That trade is accepted.[^chords]
 
-The modifier set and both display strings live in [`frontend/src/shell/queryShortcuts.ts`](frontend/src/shell/queryShortcuts.ts), which is already the single source for the app's key strings.
+Both display strings live in [`frontend/src/shell/queryShortcuts.ts`](frontend/src/shell/queryShortcuts.ts), which is already the single source for the app's key strings.
 
 ### Which containers are navigation targets
 
@@ -91,30 +93,25 @@ The library widgets the app uses already guard their own arrow handlers: `Tree`,
 
 The display strings say `Ctrl`, not `Ctrl/Cmd`: the service matches `ctrlKey` exactly, so on macOS the chords use the Control key.
 
-### A library docs gap is recorded, not worked around
+### The default-chord change is recorded as a library request, not worked around
 
-The library's plan names the text-input word-selection clash. Its docs do not say that the default chords also take `CodeEditor`'s own bindings (the table above). A new `LIBRARY_NOTES.md` entry records the gap and the library change it needs: list the pre-empted `CodeEditor` and text-input bindings in `accessibility.md`'s "Spatial focus navigation" section and in the `CodeEditor` component page. The app's `targetModifiers` override is the library's documented configuration, not a workaround.[^not-workaround]
+A new `LIBRARY_NOTES.md` entry recommends two library changes for 0.11.0. First, change the region tier's default from `Ctrl+Shift` to `Ctrl+Alt+Shift`. Second, document the remaining trades in `accessibility.md`'s "Spatial focus navigation" section and the `CodeEditor` component page: the control tier takes `CodeEditor`'s add-cursor keys, and GNOME binds both chords to workspace actions. SQLAdmin passes no `targetModifiers` override in the meantime.[^not-workaround]
 
 ---
 
 ## Public API
 
-No exported library-facing API changes. Three new exports in `frontend/src/shell/queryShortcuts.ts`:
+No exported library-facing API changes. Two new exports in `frontend/src/shell/queryShortcuts.ts`:
 
 ```ts
-import type { SpatialNavigationModifiers } from "@jimka/typescript-ui/core";
-
 /** The control-tier chord's display string (the library default modifiers). */
 export const FOCUS_CONTROL_SHORTCUT = "Ctrl+Alt+Arrow";
 
-/** The region-tier chord's display string. */
+/** The region-tier chord's display string (the library default modifiers from 0.11.0). */
 export const FOCUS_REGION_SHORTCUT = "Ctrl+Alt+Shift+Arrow";
-
-/** The region tier's modifier set, passed to SpatialNavigation.enable as targetModifiers. */
-export const FOCUS_REGION_MODIFIERS: SpatialNavigationModifiers = { ctrl: true, alt: true, shift: true };
 ```
 
-`import type` erases at compile time, so `queryShortcuts.ts` still loads under the node vitest with no library runtime.
+`queryShortcuts.ts` gains no import, so it still loads under the node vitest with no library runtime.
 
 ---
 
@@ -125,17 +122,14 @@ export const FOCUS_REGION_MODIFIERS: SpatialNavigationModifiers = { ctrl: true, 
 ```ts
 import { Body, DOM, SpatialNavigation } from "@jimka/typescript-ui/core";
 // …
-import { FOCUS_REGION_MODIFIERS }       from "./shell/queryShortcuts";
 
     const body = await Body.init({ layoutManager: Fit(), favicon: APP_FAVICON });
 
     // Keyboard focus movement between regions (Ctrl+Alt+Shift+arrow) and
-    // controls (Ctrl+Alt+arrow). The region tier moves off the library's
-    // Ctrl+Shift default so Ctrl+Shift+←/→ stays word selection in the SQL
-    // editor and text fields (see queryShortcuts.ts). The service stands
-    // down on its own while a modal dialog or a menu is open, so enabling it
-    // before the login dialog is safe.
-    SpatialNavigation.enable({ targetModifiers: FOCUS_REGION_MODIFIERS });
+    // controls (Ctrl+Alt+arrow), both the library's default chords. The
+    // service stands down on its own while a modal dialog or a menu is open,
+    // so enabling it before the login dialog is safe.
+    SpatialNavigation.enable();
 
     const session = (await whoami()) ?? (await showLoginDialog());
 ```
@@ -174,29 +168,26 @@ import { FOCUS_REGION_MODIFIERS }       from "./shell/queryShortcuts";
 
 ### Part A — setup
 
-1. **Check the dependency.** Confirm `plans/implemented/typescript-ui-0-10-0-upgrade.md` exists and `grep -n 'await Body.init' frontend/src/SqlAdminApp.ts` prints one line. If either fails, stop and report: this plan depends on that one.
+1. **Check the dependencies.** Confirm `plans/implemented/typescript-ui-0-10-0-upgrade.md` exists and `grep -n 'await Body.init' frontend/src/SqlAdminApp.ts` prints one line. Then confirm the library's region default has moved: `grep -n 'DEFAULT_TARGET_MODIFIERS' /home/jika/typescript/typescript-ui/packages/lib/src/typescript/lib/core/SpatialNavigation.ts` must show `{ ctrl: true, alt: true, shift: true }`. If any check fails, stop and report: this plan waits on both.
 
-2. **Worktree install.** From the worktree root: `ln -s /home/jika/typescript/sqladmin/frontend/node_modules frontend/node_modules`. Then `node -p "require('./frontend/node_modules/@jimka/typescript-ui/package.json').version"` must print `0.10.0`. Do not run `npm install`.
+2. **Worktree install.** From the worktree root: `ln -s /home/jika/typescript/sqladmin/frontend/node_modules frontend/node_modules`. Then `node -p "require('./frontend/node_modules/@jimka/typescript-ui/package.json').version"` must print `0.11.0` or later. Do not run `npm install`.
 
 3. **Baseline.** `cd frontend && npm run typecheck && npm test`. Record the passing test count (call it *N*).
 
 ### Part B — shortcut constants and registry (test-first)
 
-4. **Tests first.**
-   - `frontend/tests/shell/queryShortcuts.test.ts`: import `FOCUS_REGION_MODIFIERS` and add `describe("FOCUS_REGION_MODIFIERS")` with one `it("is Ctrl+Alt+Shift, so Ctrl+Shift+←/→ stays word selection")` that asserts `expect(FOCUS_REGION_MODIFIERS).toEqual({ ctrl: true, alt: true, shift: true })`.
-   - `frontend/tests/shell/shortcutRegistry.test.ts`:
-     - import `FOCUS_REGION_SHORTCUT, FOCUS_CONTROL_SHORTCUT`;
-     - add `"focus-region", "focus-control"` to `EXPECTED_IDS`, and change the comment above it to "The 16 ids the registry must carry";
-     - rename the first test to "carries exactly the 16 expected ids with no duplicates";
-     - add `expect(byId.get("focus-region")).toBe(FOCUS_REGION_SHORTCUT);` and `expect(byId.get("focus-control")).toBe(FOCUS_CONTROL_SHORTCUT);` to the constants test;
-     - change the counts test to "groups the entries with counts 6 / 3 / 7" and `[6, 3, 7]`.
+4. **Tests first.** In `frontend/tests/shell/shortcutRegistry.test.ts`:
+   - import `FOCUS_REGION_SHORTCUT, FOCUS_CONTROL_SHORTCUT`;
+   - add `"focus-region", "focus-control"` to `EXPECTED_IDS`, and change the comment above it to "The 16 ids the registry must carry";
+   - rename the first test to "carries exactly the 16 expected ids with no duplicates";
+   - add `expect(byId.get("focus-region")).toBe(FOCUS_REGION_SHORTCUT);` and `expect(byId.get("focus-control")).toBe(FOCUS_CONTROL_SHORTCUT);` to the constants test;
+   - change the counts test to "groups the entries with counts 6 / 3 / 7" and `[6, 3, 7]`.
 
-   Run `npm test` in `frontend`: the new and changed tests fail (red).
+   Run `npm test` in `frontend`: the changed tests fail (red).
 
 5. **`frontend/src/shell/queryShortcuts.ts`.**
-   - Add `import type { SpatialNavigationModifiers } from "@jimka/typescript-ui/core";` above the first export.
-   - After `HELP_SHORTCUT` (line 41), add the three exports from [Public API](#public-api), each with its doc comment. On `FOCUS_REGION_MODIFIERS`, add a comment saying: it replaces the library's `Ctrl+Shift` default so `Ctrl+Shift+←/→` stays word selection in `CodeEditor` and in native text fields, and the control tier keeps the library default `Ctrl+Alt`, which `FOCUS_CONTROL_SHORTCUT` mirrors (`SpatialNavigation.ts`'s `DEFAULT_COMPONENT_MODIFIERS`).
-   - Append one sentence to the header comment (lines 1-16): "The spatial-navigation chords (Ctrl+Alt+arrow, Ctrl+Alt+Shift+arrow) are bound by the library's SpatialNavigation service, enabled in SqlAdminApp.ts; only their display strings and the region tier's modifier set live here."
+   - After `HELP_SHORTCUT` (line 41), add the two exports from [Public API](#public-api), each with its doc comment. Add one comment above the pair saying: both strings mirror the library's default modifiers (`SpatialNavigation.ts`'s `DEFAULT_COMPONENT_MODIFIERS` and `DEFAULT_TARGET_MODIFIERS`), so they must change if the library's defaults change.
+   - Append one sentence to the header comment (lines 1-16): "The spatial-navigation chords (Ctrl+Alt+arrow, Ctrl+Alt+Shift+arrow) are the library SpatialNavigation service's defaults, enabled in SqlAdminApp.ts; only their display strings live here."
 
 6. **`frontend/src/shell/shortcutRegistry.ts`.** Add `FOCUS_REGION_SHORTCUT, FOCUS_CONTROL_SHORTCUT` to the import. Insert two entries between `refresh` and `help`:
 
@@ -205,13 +196,13 @@ import { FOCUS_REGION_MODIFIERS }       from "./shell/queryShortcuts";
        { id: "focus-control",   keys: FOCUS_CONTROL_SHORTCUT,   label: "Focus the nearest control",     category: "navigation" },
    ```
 
-   Check: `npm test` is green (*N* + 1 tests).
+   Check: `npm test` is green (*N* tests; this plan changes existing tests and adds none).
 
 ### Part C — enable the service
 
-7. **`frontend/src/SqlAdminApp.ts`.** Apply the [Implementation](#implementation) snippet: add `SpatialNavigation` to the `core` import, add the `FOCUS_REGION_MODIFIERS` import, and insert the comment plus the `SpatialNavigation.enable(...)` call on the line after `const body = await Body.init(...)`, before `const session = …`.
+7. **`frontend/src/SqlAdminApp.ts`.** Apply the [Implementation](#implementation) snippet: add `SpatialNavigation` to the `core` import and insert the comment plus the `SpatialNavigation.enable()` call on the line after `const body = await Body.init(...)`, before `const session = …`.
 
-   Check: `grep -n 'SpatialNavigation.enable' frontend/src/SqlAdminApp.ts` → one match, on the line after `await Body.init`.
+   Check: `grep -n 'SpatialNavigation.enable()' frontend/src/SqlAdminApp.ts` → one match, on the line after `await Body.init`. `grep -rn 'targetModifiers\|componentModifiers' frontend/src` → zero matches.
 
 ### Part D — navigation targets
 
@@ -249,7 +240,7 @@ import { FOCUS_REGION_MODIFIERS }       from "./shell/queryShortcuts";
 
 ### Part G — manual verification
 
-16. Bring the stack up per `.claude/skills/verify/SKILL.md` against the symlinked 0.10.0 build and log in. Open a query tab and a table tab so the Dock has two tabs. Walk every table in [Expected Behaviour](#expected-behaviour) with the DevTools console open. A focus move that lands somewhere other than the stated place is reported, not worked around. If the cause is the library's ranking or reveal behaviour, add a `🐞🔎` entry to `LIBRARY_NOTES.md` under the one from step 14, in the existing entries' shape.
+16. Bring the stack up per `.claude/skills/verify/SKILL.md` against the linked 0.11.0 (or later) build and log in. Open a query tab and a table tab so the Dock has two tabs. Walk every table in [Expected Behaviour](#expected-behaviour) with the DevTools console open. A focus move that lands somewhere other than the stated place is reported, not worked around. If the cause is the library's ranking or reveal behaviour, add a `🐞🔎` entry to `LIBRARY_NOTES.md` under the one from step 14, in the existing entries' shape.
 
 ---
 
@@ -258,14 +249,13 @@ import { FOCUS_REGION_MODIFIERS }       from "./shell/queryShortcuts";
 | Action | File |
 |--------|------|
 | Modify | `frontend/src/SqlAdminApp.ts` (enable the service) |
-| Modify | `frontend/src/shell/queryShortcuts.ts` (three constants, header sentence) |
+| Modify | `frontend/src/shell/queryShortcuts.ts` (two constants, header sentence) |
 | Modify | `frontend/src/shell/shortcutRegistry.ts` (two entries) |
 | Modify | `frontend/src/shell/treeExplorerView.ts` (outer + two inner targets) |
 | Modify | `frontend/src/shell/QueriesView.ts` (outer + section targets) |
 | Modify | `frontend/src/shell/StartPage.ts` (target option) |
 | Modify | `frontend/src/SqlAdminController.ts` (Dock and StatusBar options; `"attach"` marker) |
 | Modify | `frontend/src/dock/QueryPanel.ts` (`claimsKey` guard; comment) |
-| Modify | `frontend/tests/shell/queryShortcuts.test.ts` (one new test) |
 | Modify | `frontend/tests/shell/shortcutRegistry.test.ts` (ids, constants, counts) |
 | Modify | `LIBRARY_NOTES.md` (new entry) |
 
@@ -277,10 +267,9 @@ import { FOCUS_REGION_MODIFIERS }       from "./shell/queryShortcuts";
 
 | # | Case | Expected |
 |---|---|---|
-| U1 | `FOCUS_REGION_MODIFIERS` | `{ ctrl: true, alt: true, shift: true }` |
-| U2 | `SHORTCUTS` ids | exactly the 14 existing ids plus `focus-region` and `focus-control`, with no duplicates |
-| U3 | `SHORTCUTS` keys | `focus-region` → `FOCUS_REGION_SHORTCUT`, `focus-control` → `FOCUS_CONTROL_SHORTCUT` |
-| U4 | `groupByCategory()` counts | `[6, 3, 7]`; Navigation order is `databases-rail, roles-rail, queries-rail, refresh, focus-region, focus-control, help` |
+| U1 | `SHORTCUTS` ids | exactly the 14 existing ids plus `focus-region` and `focus-control`, with no duplicates |
+| U2 | `SHORTCUTS` keys | `focus-region` → `FOCUS_REGION_SHORTCUT`, `focus-control` → `FOCUS_CONTROL_SHORTCUT` |
+| U3 | `groupByCategory()` counts | `[6, 3, 7]`; Navigation order is `databases-rail, roles-rail, queries-rail, refresh, focus-region, focus-control, help` |
 
 Everything below is manual-verify: focus, geometry and key dispatch run only in a browser. "Region chord" means `Ctrl+Alt+Shift`+arrow and "control chord" means `Ctrl+Alt`+arrow. After every move, the newly focused element shows a focus ring.
 
@@ -339,11 +328,11 @@ Start with the Database view open, two tabs in the Dock, and the query tab activ
 
 | # | Where | Command / action | Expect |
 |---|---|---|---|
-| 1 | worktree | `node -p "require('./frontend/node_modules/@jimka/typescript-ui/package.json').version"` | `0.10.0` |
+| 1 | worktree | `node -p "require('./frontend/node_modules/@jimka/typescript-ui/package.json').version"` | `0.11.0` or later |
 | 2 | `frontend` | `npm run typecheck` | clean |
-| 3 | `frontend` | `npm test` | *N* + 1 passing |
+| 3 | `frontend` | `npm test` | *N* passing |
 | 4 | `frontend` | `npm run build` | succeeds |
-| 5 | repo root | `grep -rn 'SpatialNavigation.enable' frontend/src` | one match, `SqlAdminApp.ts` |
+| 5 | repo root | `grep -rn 'SpatialNavigation.enable()' frontend/src` | one match, `SqlAdminApp.ts` |
 | 6 | repo root | `grep -rn 'SpatialNavigation.claimsKey' frontend/src` | one match, `QueryPanel.ts` |
 | 7 | repo root | `grep -rn 'navigationTarget: true\|setNavigationTarget(true)' frontend/src \| wc -l` | `9` |
 | 8 | repo root | `grep -c '"@jimka/typescript-ui": "\^0.9.0"' frontend/package.json` | unchanged from before this plan (no version bump here) |
@@ -354,7 +343,7 @@ Start with the Database view open, two tabs in the Dock, and the query tab activ
 ## Potential Challenges
 
 - **An OS takes the chord first.** On GNOME, `Ctrl+Alt+arrow` switches workspace and `Ctrl+Alt+Shift+arrow` moves the window to another workspace. Some Windows Intel graphics drivers bind `Ctrl+Alt+arrow` to screen rotation. If a chord never reaches the browser, record it in the plan's Implementation Notes; changing the chords is a separate decision.
-- **A stale Vite dep cache** after library rebuilds can serve 0.9.0 code with no `SpatialNavigation`. Restart `npm run dev`; if needed, `rm -rf frontend/node_modules/.vite`.
+- **A stale Vite dep cache** after library rebuilds can serve an older library build. The symptom is X1 failing: `Ctrl+Shift+←/→` moves focus instead of selecting a word (0.10.0's region default). Restart `npm run dev`; if needed, `rm -rf frontend/node_modules/.vite`.
 - **The first visit to a region lands on its first control, not its main one.** The library focuses the first focusable element in DOM order until the region has a remembered control. For the Dock that is usually a tab-strip button. This is library behaviour, and M1 only checks that focus lands inside the Dock.
 - **`M12`'s outcome depends on how `Accordion` hides a collapsed section.** Either outcome in the table is correct. Focus landing inside a section that stays collapsed is a library bug for `LIBRARY_NOTES.md`.
 
@@ -362,7 +351,7 @@ Start with the Database view open, two tabs in the Dock, and the query tab activ
 
 ## Critical Files
 
-- `../typescript-ui/packages/lib/src/typescript/lib/core/SpatialNavigation.ts` — the service: `enable`, `claimsKey`, `claimedTier` (lines 237-255), `outermostTargets` (nesting), `onKeyDown` (lines 715-727).
+- `../typescript-ui/packages/lib/src/typescript/lib/core/SpatialNavigation.ts` — the service: the default modifier sets (lines 208-209 in 0.10.0), `enable`, `claimsKey`, `claimedTier` (lines 237-255), `outermostTargets` (nesting), `onKeyDown` (lines 715-727).
 - `../typescript-ui/packages/lib/docs/concepts/accessibility.md:152-200` — the "Spatial focus navigation" section, including the guard rule.
 - `../typescript-ui/packages/lib/docs/reference/changelog/0.10.0.md:705-740` and `:822-970` — the Added and Fixed entries.
 - `../typescript-ui/packages/lib/src/typescript/main.ts:45-46` — precedent for enabling at startup.
@@ -380,43 +369,46 @@ Start with the Database view open, two tabs in the Dock, and the query tab activ
 - **The `ToolBar` text-child arrow-key bug.** The `LIBRARY_NOTES.md` entry stays open. 0.10.0 did not fix it (`ToolBar.ts:191-216` still has no text-target check), and the spatial chords are not affected, because `claimsKey` runs first.
 - **`FocusHistory`.** A separate opt-in service; not enabled here.
 - **A command palette.** The TODO bullet stays as it is.
-- **Changing the library's default chords.** The `LIBRARY_NOTES.md` entry asks for a docs change only.
+- **Changing the library's default chords from SQLAdmin.** The change belongs to typescript-ui 0.11.0; the `LIBRARY_NOTES.md` entry requests it.
+- **An app-side `targetModifiers` override.** Rejected in favour of waiting for the library default.[^not-workaround]
 - **`CHANGELOG.md`.** It is written at release time; see [Addendum: Release-note material](#addendum-release-note-material).
-- **The version bump and the registry swap.** Neither happens here.
+- **The version bump and the registry swap.** Neither happens here. Moving `frontend/package.json` to typescript-ui 0.11.0 is a manual dependency step the user runs by hand.
 
 ---
 
 ## Addendum: LIBRARY_NOTES entry
 
 ```markdown
-## ✂️🔎 `SpatialNavigation`'s default chords take `CodeEditor`'s own keys, and the docs don't say so (0.10.0)
+## ✂️🔎 `SpatialNavigation`'s default region chord takes word selection; recommend `Ctrl+Alt+Shift` for 0.11.0 (0.10.0)
 
-Found while planning `spatial-navigation-adoption`. `SpatialNavigation` listens
-at the window in the capture phase and stops a claimed chord's propagation, so
-a widget below never sees it. With the default modifiers that pre-empts, on
-Windows and Linux:
+Found while planning `spatial-navigation-adoption`. `SpatialNavigation` claims
+its chords at the window in the capture phase, with no check for text entry,
+and stops a claimed chord's propagation, so a widget below never sees it
+(defaults at `SpatialNavigation.ts:208-209`). On Windows and Linux that
+pre-empts:
 
-- `Ctrl+Shift+←/→` (region tier): word selection — CodeMirror's
-  `selectGroupLeft/Right` (`defaultKeymap`, `Mod-ArrowLeft/Right` with Shift)
-  and the native `<input>`/`<textarea>` gesture.
-- `Ctrl+Alt+↑/↓` (control tier): CodeMirror's `addCursorAbove/Below`
+- `Ctrl+Shift+←/→` (region tier default): word selection in every text input
+  and in `CodeEditor` — CodeMirror's `selectGroupLeft/Right`, and
+  `selectSyntax`/`selectPage` on macOS — plus the native
+  `<input>`/`<textarea>` gesture.
+- `Ctrl+Alt+↑/↓` (control tier default): CodeMirror's `addCursorAbove/Below`
   (`Mod-Alt-ArrowUp/Down`), live because `CodeEditor` sets
-  `EditorState.allowMultipleSelections.of(true)` (`CodeEditor.ts:2055`).
+  `EditorState.allowMultipleSelections.of(true)`. `Ctrl+Alt+←/→` clashes with
+  nothing; word selection is not affected by the control tier.
 
-The library's `spatial-focus-navigation` plan names the text-input case
-("an app that values the editing gesture more passes different
-`targetModifiers`"), but `docs/concepts/accessibility.md`'s "Spatial focus
-navigation" section and the `CodeEditor` page mention neither.
+**Library change recommended for 0.11.0:**
 
-**Library change:** list both pre-empted bindings in that section, next to the
-`configure` example, and add a one-line cross-reference on the `CodeEditor`
-component page. No behaviour change.
+1. Change the region tier's default from `Ctrl+Shift` to `Ctrl+Alt+Shift`. It
+   has no CodeMirror or browser binding, so every app with text input can use
+   the default.
+2. Document the remaining trades in `docs/concepts/accessibility.md`'s
+   "Spatial focus navigation" section and on the `CodeEditor` component page:
+   the control tier takes `CodeEditor`'s add-cursor keys (Alt+drag rectangular
+   selection still works), and GNOME binds `Ctrl+Alt+arrow` (switch workspace)
+   and `Ctrl+Alt+Shift+arrow` (move window to workspace).
 
-**In SQLAdmin:** `SqlAdminApp.ts` passes
-`targetModifiers: { ctrl: true, alt: true, shift: true }`, the documented
-option, so word selection keeps working. `Ctrl+Alt+↑/↓` stays with the
-control tier; adding a cursor by keyboard is lost in the SQL editor
-(Alt+drag rectangular selection still works).
+**In SQLAdmin:** `plans/spatial-navigation-adoption.md` waits for this change
+and then calls plain `SpatialNavigation.enable()`. Nothing is enabled until then.
 
 ---
 ```
@@ -439,7 +431,7 @@ For the release-time `CHANGELOG.md` pass, in the file's bold-lead-sentence style
 
 [^enable-early]: The demo calls `enable()` before `Body.init`; either order works, since `enable` only registers a window listener. Placing it after the await keeps all runtime setup in one place, next to the mount. The login dialog is modal, so `LayerManager.hasActiveInputLayer()` is true while it shows and the service does nothing until sign-in. The docs app (`packages/docs/src`) was searched for `SpatialNavigation`, `navigationTarget` and `claimsKey`: no matches.
 
-[^chords]: The library's defaults were the user's own choice, made knowing about the GNOME collision (`plans/implemented/spatial-focus-navigation.md:589` in typescript-ui). The same plan's Potential Challenges (line 530) names the word-selection clash and says "an app that values the editing gesture more passes different `targetModifiers`". SQLAdmin is that app: the SQL editor, the definition editor and the navigator search are all text. Two other options were rejected. Keeping both defaults loses word selection everywhere. Swapping the tiers (region on `Ctrl+Alt`, control on `Ctrl+Alt+Shift`) gives the more-used region jump two modifiers, but it changes both library defaults and contradicts the library docs' naming of `Ctrl+Alt` as the fine tier. `Ctrl+Alt+Shift+arrow` has no CodeMirror binding (the `Mod-Alt-Arrow` bindings have no Shift variant) and no browser binding. Its OS collision (GNOME's move-window-to-workspace) is the same class the library already accepted for `Ctrl+Alt`. On macOS, `ctrl` is the Control key, so neither chord touches CodeMirror's Cmd-based bindings there; VoiceOver uses Control+Option chords only while it is running.
+[^chords]: The library's 0.10.0 defaults were the user's own choice, made knowing about the GNOME collision (`plans/implemented/spatial-focus-navigation.md:589` in typescript-ui). The same plan's Potential Challenges (line 530) names the word-selection clash. SQLAdmin's SQL editor, definition editor and navigator search are all text, so the 0.10.0 region default would break word selection across the app. Swapping the tiers (region on `Ctrl+Alt`, control on `Ctrl+Alt+Shift`) was rejected: it gives the more-used region jump two modifiers, and it contradicts the library docs' naming of `Ctrl+Alt` as the fine tier. `Ctrl+Alt+Shift+arrow` has no CodeMirror binding (the `Mod-Alt-Arrow` bindings have no Shift variant) and no browser binding. Its OS collision (GNOME's move-window-to-workspace) is the same class the library already accepted for `Ctrl+Alt`. On macOS, `ctrl` is the Control key, so neither chord touches CodeMirror's Cmd-based bindings there; VoiceOver uses Control+Option chords only while it is running.
 
 [^nesting]: `outermostTargets` (`SpatialNavigation.ts:299-303`) drops an inner target whenever an outer target contains it and does not contain the focused element. `recordOrigin` (lines 275-281) records the focused element against *every* marked ancestor when a move leaves it, so both the outer and the inner target remember it. Marking only the inner sections was considered. It would let a move from the Dock land on either the tree or the inspector depending on the editor's vertical position, so "back to where I was in the sidebar" would not always hold. Marking only the outer view would lose `↑`/`↓` between tree and Properties. The two levels give both. The memory is written only when focus leaves a region by a spatial move; a mouse click elsewhere does not update it.
 
@@ -451,4 +443,6 @@ For the release-time `CHANGELOG.md` pass, in the file's bold-lead-sentence style
 
 [^legend-precedent]: `plans/implemented/shortcut-legend-home.md` created the registry as the one list both surfaces render. New chords are added there as entries with `keys` taken from `queryShortcuts.ts` constants, never literals, which the registry test checks. The longest new row, "Ctrl+Alt+Shift+Arrow" plus "Focus the next region", is about the width of the existing "Ctrl/Cmd+Shift+E" / "Explain Analyze the statement" row, so the dialog's 420px width should hold; case D5 checks it.
 
-[^not-workaround]: Per the project rule "fix in library, not workaround", a library defect goes to the library. The pre-emption is not a defect: it is the service's designed behaviour, and `configure`/`enable` options are its designed escape. What is missing is documentation, which the entry asks the library to add.
+[^not-workaround]: An earlier draft passed `targetModifiers: { ctrl: true, alt: true, shift: true }` from the app, with a `FOCUS_REGION_MODIFIERS` constant and a test for it. That override is the library's documented option, but it was dropped under the user's rule to prefer library defaults: a default that breaks word selection in every text input is wrong for any app, so the fix belongs in the library, and every consumer then gets it without configuration.
+
+[^deferred]: The user deferred this plan and `date-time-column-field-types` to typescript-ui 0.11.0. The SQLAdmin 0.10.0 release ships without spatial navigation. The `depends-on` frontmatter can only name SQLAdmin plans, so the library-version requirement is stated here and checked in step 1.
