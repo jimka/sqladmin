@@ -20,5 +20,5 @@ dist/
 .codegraph/
 
 # Helper scripts
-branches.txt
+rebase-on-main.sh
 merge.sh
