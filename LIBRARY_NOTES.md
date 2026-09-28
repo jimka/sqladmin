@@ -8,6 +8,30 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️🩹🔎 JsonWriter writes every Date as a UTC instant, and its dirty mode cannot be extended (0.10.0)
+
+Found fixing row saves on tables with a `timestamp without time zone` column.
+`JsonWriter` serializes a `Date` with `toISOString()`, the UTC instant. That loses the
+wall clock of a zone-less value the library itself read as local time: `Field` reads an
+offset-less `2026-06-28T12:04:59.500000` with `new Date(raw)`, which ECMAScript treats as
+local, so the grid shows `12:04` in every zone. Written back with `toISOString()`, a
+user in Los Angeles who types `08:00` sends `15:00Z`, and no backend rule can recover the
+`08:00` they saw. The `datetime` field type has no notion of whether its column carries a
+zone, so the writer cannot tell the two cases apart either.
+
+Separately, `JsonWriter`'s `'dirty'` mode — the changed fields plus the primary key on an
+update — cannot be combined with an app's own column stripping. `JsonWriter.dataFor` is
+`private` and `writeRecord` serializes in the same call, so a subclass or wrapper only
+ever sees the finished string. An app that must also drop server-managed columns cannot
+reuse the mode and has to re-implement its one-line rule against
+`ModelRecord.getChangedData()`.
+
+Worked around in `frontend/src/data/SqlAdminWriter.ts`: it still implements `Writer`
+itself, sends `getChangedData()` for an update, and writes each `timestamp without time
+zone` column's `Date` as its local wall clock with no offset. The library fix — a
+local-offset `Date` serialization and a `protected` `dataFor` — is planned in
+`plans/date-time-column-field-types.md`.
+
 ## 🐞🔎 A review dialog with no other focusable content traps Tab/Shift+Tab in the SQL editor (0.10.0)
 
 Found verifying `typescript-ui-0-10-0-upgrade`'s manual check table. 0.10.0 made `Dialog`
