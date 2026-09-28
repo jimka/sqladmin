@@ -44,9 +44,10 @@ export class DirtyTabMarker {
      */
     track(source: DirtySource): void {
         // A panel id is stable for its frame's lifetime, so read it once.
-        const id = source.getId();
+        const id         = source.getId();
+        const subscribed = this._listeners.has(source);
 
-        if (!this._listeners.has(source)) {
+        if (!subscribed) {
             const listener = (dirty: boolean): void => {
                 this._setModified(id, dirty);
             };
