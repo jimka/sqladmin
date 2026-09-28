@@ -119,28 +119,14 @@ class StartPage extends Panel {
 
         // The whole body is rebuilt each time the workspace toggles between
         // empty and non-empty (recent tables / saved queries need to stay
-        // current). removeAllComponents() detaches the previous body from the
-        // DOM but does not call dispose() on it — every child (theme listeners,
-        // per-instance stylesheet rules) must be disposed explicitly first, or
-        // the previous rebuild's whole subtree leaks on every toggle. This has
-        // to stay app-side: removeComponent/removeAllComponents are
-        // deliberately detach-only (Component.addComponent's own re-parent
-        // carry depends on that), so the library cannot safely dispose here
-        // for us. typescript-ui plan `dispose-all-components` adds a
-        // dispose-then-remove convenience method for exactly this case — once
-        // it ships, replace the loop below with that single call. A
+        // current). disposeAllComponents(), not removeAllComponents(): the
+        // latter only detaches, which would leak the previous body's theme
+        // listeners and per-instance stylesheet rules on every toggle. A
         // constructor-local closure captures `this` lexically, so passing
-        // `rebuild` to `controller.workspace.onWorkspaceChanged` below is safe without an
-        // arrow-function field.
+        // `rebuild` to `controller.workspace.onWorkspaceChanged` below is safe
+        // without an arrow-function field.
         const rebuild = (): void => {
-            // Manual stand-in for the library's future disposeAllComponents()
-            // (see the comment above) — dispose every current child before
-            // detaching, since removeAllComponents() alone only detaches.
-            for (const component of this.getComponents()) {
-                component.dispose();
-            }
-
-            this.removeAllComponents();
+            this.disposeAllComponents();
 
             this.addComponent(buildColumns(controller));
 

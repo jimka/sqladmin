@@ -4,8 +4,8 @@
 // numerically (not lexically) and can reveal any column. The property names are
 // the table's column headers verbatim (the library Table shows a field by its
 // name), so a row object doubles as a MemoryStore record. Imports only the
-// parsed model — no DOM, no UI-bundle code — so the app's node-only vitest can
-// red-green it (mirrors buildExplainDiagram's purity note).
+// parsed model — no DOM, no UI module — so node vitest can red-green it
+// (mirrors buildExplainDiagram's purity note).
 
 import type { ExplainPlanNode } from "./parseExplainPlan";
 

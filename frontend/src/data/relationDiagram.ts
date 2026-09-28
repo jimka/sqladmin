@@ -1,10 +1,8 @@
 // Pure graph operations over a schema's DiagramData: root-anchored traversal,
 // subgraph extraction, show/hide-with-prune, the root-selector item list
 // (rootChoices), and the two derivation steps a panel with an optional root
-// runs (rootedBase, filteredBase). No DOM, no ELK — type-only imports from the
-// diagram barrel keep this node-vitest-testable (the same purity discipline as
-// buildSchemaDiagram.ts; never import UI-bundle runtime code, which runs
-// DOM-touching module-level side effects).
+// runs (rootedBase, filteredBase). No DOM, no ELK — type-only imports
+// from the diagram barrel, per buildSchemaDiagram.ts's header.
 
 import type { DiagramData, DiagramEdgeData, DiagramNodeData } from "@jimka/typescript-ui/component/diagram";
 

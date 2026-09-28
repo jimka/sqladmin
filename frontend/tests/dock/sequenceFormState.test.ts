@@ -1,6 +1,6 @@
-// Pure tests for the sequence info form's seeding/dirty helpers. DOM-free
-// (the form itself is a DOM component — see memory "tsui DOM module side
-// effects" — and is manual-verify; this module is the pure logic it calls).
+// Pure tests for the sequence info form's seeding/dirty helpers. DOM-free (the
+// form itself is a DOM component and is manual-verify; this module is the pure
+// logic it calls).
 
 import { describe, expect, it } from "vitest";
 import {

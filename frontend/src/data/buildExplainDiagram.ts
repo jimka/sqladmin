@@ -2,9 +2,9 @@
 // per plan node (id === ExplainPlanNode.id), one edge per parent→child link,
 // each diagram node carrying the parsed plan node plus two plan-relative visual
 // intensities (heat, memShare) the ExplainNode renderer paints. No DOM, no ELK —
-// layout runs lazily inside DiagramView. Imports only the DiagramData *type* and
-// the parsed model, so the app's node-only vitest can red-green it without
-// pulling in UI-bundle side effects (mirrors buildSchemaDiagram's purity note).
+// layout runs lazily inside DiagramView. Imports only the DiagramData *type*
+// and the parsed model, per buildSchemaDiagram.ts's header, so node vitest can
+// red-green it.
 
 import type { DiagramData, DiagramNodeData, DiagramEdgeData } from "@jimka/typescript-ui/component/diagram";
 import type { ExplainPlanNode } from "./parseExplainPlan";

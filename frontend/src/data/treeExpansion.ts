@@ -1,9 +1,8 @@
 // Persists which nodes inside a Database/Roles rail tree are expanded, so a
 // page reload restores the pre-reload shape instead of throwing it away. Its
-// only imports are `import type`s — nothing else may be imported from the
-// library — so this module stays free of the DOM side effects library
-// component modules run at import scope and keeps running under the node
-// vitest environment. Consumed by NavigatorTree/RolesTree; see
+// only imports are `import type`s — nothing else may be imported from
+// the library — so it constructs no component and runs under node vitest
+// with no DOM. Consumed by NavigatorTree/RolesTree; see
 // LayoutStore.bindTreeExpansion for the storage side.
 
 import type { TreeNode }              from "@jimka/typescript-ui/component/tree";

@@ -1,10 +1,8 @@
 // Pure inference of FK cardinality (crow's-foot markers) and index-coverage
 // (a warning-tinted stroke) over an already-assembled schema DiagramData. Kept
 // separate from buildSchemaDiagram.ts so its own focused unit tests stay
-// decoupled from graph assembly. No DOM, no ELK — type-only imports from the
-// diagram barrel keep this node-vitest-testable, the same purity discipline
-// as buildSchemaDiagram.ts:16-21 (never import UI-bundle runtime code, which
-// runs DOM-touching module-level side effects on import).
+// decoupled from graph assembly. No DOM, no ELK — type-only imports from
+// the diagram barrel, per buildSchemaDiagram.ts's header.
 //
 // A folded edge (buildSchemaDiagram's collapseParallelFkEdges) carries several
 // foreign keys in FkEdgeData.fks. This module combines their individual

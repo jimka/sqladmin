@@ -1,10 +1,9 @@
 // Pure composition of an edge-hover tooltip from the diagram's hover payload
 // (every edge within the pointer's hit tolerance). No DOM, no ELK — type-only
-// imports from the diagram barrel keep this node-vitest-testable, the same
-// purity discipline as buildSchemaDiagram.ts:16-21. The library carries no
-// `tooltip` field on `DiagramEdgeData` — a model string cannot describe a
-// merged trunk carrying several different foreign keys — so the app composes
-// the text here from the hover event's edge array instead.
+// imports from the diagram barrel, per buildSchemaDiagram.ts's header. The
+// library carries no `tooltip` field on `DiagramEdgeData` — a model string
+// cannot describe a merged trunk carrying several different foreign keys — so
+// the app composes the text here from the hover event's edge array instead.
 //
 // Two independent things can put several foreign keys under one pointer: a
 // single edge can be a folded edge (collapseParallelFkEdges) carrying several

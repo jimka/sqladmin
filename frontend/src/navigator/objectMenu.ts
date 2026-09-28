@@ -5,14 +5,12 @@
 // plans/implemented/diagram-node-context-menu.md) so the two menus can never
 // drift apart.
 //
-// Kept DOM-free (see memory "tsui DOM module side effects") so the node-only
-// vitest can import it: the library imports below are `import type`, which
-// erases at compile time, and glyphs are referenced by their registered
-// string name rather than imported — `Glyph.register` stays in the modules
-// that render these menus (NavigatorTree.ts, the controller's own
-// registrations). Mirrors the ./dock/menuItems.ts idiom. `../dock/menuItems`
-// is safe to import here for the same reason: it touches `document` only
-// inside function bodies, never at import scope.
+// Kept pure so node vitest can exercise it: the library imports below are
+// `import type`, which erase at compile time, and glyphs are referenced by
+// their registered string name rather than imported — `Glyph.register`
+// stays in the modules that render these menus (NavigatorTree.ts, the
+// controller's own registrations). Mirrors the ./dock/menuItems.ts idiom;
+// `../dock/menuItems` is pure in the same way.
 
 import type { Menu }             from "@jimka/typescript-ui/overlay";
 import type { MenuItemConfig }   from "@jimka/typescript-ui/component/container";

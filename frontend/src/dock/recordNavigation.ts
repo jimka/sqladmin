@@ -1,11 +1,9 @@
-// The table work panel's pure record-lookup logic, split out so it can be
-// unit-tested without pulling in the library's DOM-backed component classes
-// (TableWorkPanel.ts's top-level imports touch `document` at module-load
-// time, which the project's node-environment test runner has no stand-in for
-// — see vitest.config.ts). Mirrors tableWriteRules.ts, which exists for the
-// same reason. Not only the record-view stepper's logic any more: also holds
-// findRecordByKey, which resolves a route's `?record=` request to a loaded
-// record by primary-key value.
+// The table work panel's pure record-lookup logic, split out so node vitest
+// can unit-test it: TableWorkPanel constructs library components, which
+// need a DOM, and this logic needs none. Mirrors tableWriteRules.ts, which
+// exists for the same reason. Not only the record-view stepper's logic any
+// more: also holds findRecordByKey, which resolves a route's `?record=`
+// request to a loaded record by primary-key value.
 //
 // `visibleRecords` and `stepIndex` are deliberately separate: `stepIndex` is
 // pure arithmetic over an index and a count, with no notion of quick search;

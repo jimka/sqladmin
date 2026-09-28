@@ -22,13 +22,14 @@
 // nothing to rebuild.
 //
 // Every failure — the initial generateSql seed and a failed execute — still
-// calls the caller's `onError` (or the default Notification) exactly as
-// before, preserving StatusBar/Notification-history side effects, but ALSO
-// shows an in-content banner (ErrorBanner, mirroring QueryPanel.ts's durable
-// error banner): a Notification's z-index (10002) sits below the Dialog band
-// (11000, see LayerManager's Z_BAND_DIALOG), so a toast fired while this
-// dialog is open — an execute failure, since the seed's own failure happens
-// before the dialog exists — would render invisibly behind the modal backdrop.
+// calls the caller's `onError` (or the default Notification) exactly as before,
+// preserving StatusBar/Notification-history side effects, but ALSO shows an
+// in-content banner (ErrorBanner, mirroring QueryPanel.ts's durable error
+// banner): a Notification's z-index (LayerManager.Band.Notification, 10500)
+// sits below the Dialog band (LayerManager.Band.Dialog, 11000), so a toast
+// fired while this dialog is open — an execute failure, since the seed's own
+// failure happens before the dialog exists — would render invisibly behind the
+// modal backdrop.
 //
 // The Dialog exposes only three result codes ("confirm" | "cancel" | "close"),
 // and every dismiss gesture (Escape, backdrop, the always-present title-bar

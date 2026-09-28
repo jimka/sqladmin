@@ -9,11 +9,10 @@ import { OBJECT_KINDS } from "../navigator/objectKinds";
 import { uniformNodeWidth } from "./uniformNodeWidth";
 import type { MeasureWidths } from "./uniformNodeWidth";
 
-// Built from the objectKinds.ts registry rather than navigator/objectGlyphs.ts's
-// own KIND_GLYPH: that module runs DOM side effects (Glyph.register) on import
-// and would crash the node vitest env, but objectKinds.ts is pure data, so this
-// stays both DOM-free and single-sourced (no hand-copied literal to keep in
-// sync). Same discipline as buildSchemaDiagram.ts's TABLE_GLYPH.
+// Built from the objectKinds.ts registry rather than
+// navigator/objectGlyphs.ts's own KIND_GLYPH: that module is UI (it calls
+// `Glyph.register` when imported), while objectKinds.ts is pure data, so this
+// stays both pure and single-sourced (no hand-copied literal to keep in sync).
 const KIND_GLYPH: Record<DbObjectKind, string> =
     Object.fromEntries(OBJECT_KINDS.map(k => [k.kind, k.glyph])) as Record<DbObjectKind, string>;
 
@@ -57,7 +56,7 @@ function addNode(nodes: Map<string, DiagramNodeData>, ref: RelationNodeRef, home
  * RelationNodeData on `data`. A node in `homeSchema` is labelled by its bare
  * name; a foreign-schema node by `schema.name`. Edges keep the input
  * orientation; duplicate (source,target) pairs are deduped by edge id.
- * Pure — type-only diagram imports, no UI-bundle runtime import.
+ * Pure — type-only diagram imports, no UI-module import.
  *
  * @param edges - The directed relation edges (dependency or inheritance).
  * @param homeSchema - The schema being viewed; gates the bare-name label.

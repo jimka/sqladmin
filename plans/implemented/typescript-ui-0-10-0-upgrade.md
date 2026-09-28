@@ -323,6 +323,38 @@ This case exercised the bug 0.10.0 fixed: in a built 0.9.0 app, a `MemoryStore` 
 
 ---
 
+## Implementation Notes
+
+- **Comment sweep rows 10 (`src/dock/diagramShellState.ts`) and 11
+  (`src/dock/depthChoices.ts`) touched one sentence more than their stated
+  line ranges.** The addendum gives row 10 as lines 4-9 and row 11 as lines
+  3-7, but in both files that range's first line was the *tail* of a sentence
+  begun in the untouched line before it ("...once the next layout pass
+  lands." / "...its hop count."), describing what the state machine tracks —
+  not part of the DOM-justification text being replaced. Replacing exactly
+  the stated range verbatim would have deleted that clause and left the
+  preceding line's sentence grammatically dangling. Instead, in both files
+  that trailing clause was kept verbatim and merged with the row's
+  replacement text into one re-wrapped paragraph — the same "keep the
+  trailing clause, re-wrap together" technique the addendum already uses
+  explicitly for rows 4, 6, 7, 9, and 13, just extended one sentence further
+  back than those rows' own stated start line. The replacement wording itself
+  is unchanged from what the addendum specifies.
+
+- **A manual-verification finding, not a plan deviation, logged in
+  `LIBRARY_NOTES.md` instead of here:** the SQL review dialog's new
+  caret-starts-in-the-editor behavior (0.10.0, intended) leaves no keyboard
+  path to Cancel/Execute, because `Tab`/`Shift+Tab` are captured by
+  `CodeEditor`'s own indent/dedent binding and `Escape` closes the whole
+  dialog (`Dialog` always treats it as the dismiss gesture) rather than
+  releasing focus. See the "A review dialog with no other focusable content
+  traps Tab/Shift+Tab in the SQL editor" entry, added newest-first at the top
+  of `LIBRARY_NOTES.md` per the plan's own `## Noted, not fixed here`
+  convention — recorded here only so the branch's commit history shows where
+  the finding came from.
+
+---
+
 ## Addendum: Comment sweep
 
 Replace each range with the given text. The text is shown without leading `// `. Re-wrap it to the file's existing comment width (about 80 columns) with `// ` on each line, or ` * ` for the JSDoc rows. Line ranges are inclusive, as of `792e4ef`.

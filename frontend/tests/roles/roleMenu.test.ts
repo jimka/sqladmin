@@ -1,8 +1,8 @@
 // Structure/dispatch tests for the roles-tree context-menu builder. Pins the
 // six-item shape RolesTree's context menu relies on, plus the export
 // submenu's two formats. DOM-free (no glyph registration or Component
-// construction happens here — see memory "tsui DOM module side effects"),
-// mirroring tests/navigator/objectMenu.test.ts's style.
+// construction happens here), mirroring tests/navigator/objectMenu.test.ts's
+// style.
 
 import { describe, expect, it, vi } from "vitest";
 import { buildRoleMenuItems } from "../../src/roles/roleMenu";

@@ -1,8 +1,8 @@
 // The controller's pure string derivations — panel ids, tab tooltips,
 // status-name elision, backend-error extraction — split out from
-// SqlAdminController.ts and kept free of library imports so the node vitest
-// can load it (mirroring startPageWelcome.ts's own header). Every function
-// here is pure: no DOM, no fetch, no controller state.
+// SqlAdminController.ts and kept free of library imports so node vitest
+// can test it without a DOM (mirroring startPageWelcome.ts's own header).
+// Every function here is pure: no DOM, no fetch, no controller state.
 
 import type { DbObjectRef } from "../contract";
 

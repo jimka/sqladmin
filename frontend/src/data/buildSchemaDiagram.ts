@@ -1,6 +1,13 @@
 // Pure assembly of a schema's entity-relationship graph for DiagramView: one
 // node per table, one edge per foreign key whose referenced table is also in
 // the schema. No DOM, no ELK — layout runs lazily inside DiagramView itself.
+//
+// Like every diagram builder under data/, this module imports only types from
+// the library and nothing from a UI module (navigator/, roles/, dock/, shell/),
+// so it stays a pure function of its inputs and unit-tests under the node
+// vitest without a DOM. Anything that needs the DOM — text measurement, glyph
+// registration — is injected by the caller (see controller/diagramPanels.ts's
+// `Util.measureTextWidths`).
 
 import type { DiagramData, DiagramEdgeData, DiagramNodeData, DiagramPortData } from "@jimka/typescript-ui/component/diagram";
 import type { ColumnMeta, ForeignKeyMeta, TableStructure } from "../contract";
@@ -46,13 +53,10 @@ const LAYOUT_OPTIONS: Record<string, string> = {
 };
 
 // The registered glyph name for a table node. Deliberately NOT imported from
-// `../navigator/objectGlyphs` (its KIND_GLYPH.table has this same value):
-// that module pulls in `@jimka/typescript-ui/component/display`, a bundled
-// chunk whose unrelated components run DOM-touching module-level side effects
-// on import (e.g. ProgressSpinner's StyleRule.ensureKeyframes), which crashes
-// under this project's DOM-less vitest "node" environment. This builder stays
-// pure and unit-testable by never importing UI-bundle code; keep this literal
-// in sync with KIND_GLYPH.table if that mapping ever changes.
+// `../navigator/objectGlyphs` (its KIND_GLYPH.table has this same value): that
+// module is UI — it calls `Glyph.register` when imported, and a data builder
+// imports no UI module (see this file's header). Keep this literal in sync with
+// KIND_GLYPH.table if that mapping ever changes.
 const TABLE_GLYPH = "table";
 
 /**

@@ -6,10 +6,12 @@ Deferred features and known issues. Implemented work lives in
 ## Backlog (no plan yet)
 
 ### Data
-- **Result pagination for query panels / large views.** Ad-hoc results render
-  into an in-memory `MemoryStore`, which hits the ~1500-row zero-render bug (see
-  `LIBRARY_NOTES.md`). The query-workspace and schema-views plans ship a
-  defensive row cap; real pagination is the proper fix.
+- **Result pagination for query panels / large views.** A query result
+  loads into an in-memory `MemoryStore`, and the backend returns at most
+  1,000 rows per request (`MAX_ROWS_PER_REQUEST`,
+  `backend/app/operations/common.py:14`), with a "result truncated" note
+  in the status bar. Paging past that cap would let a user browse a large
+  result without rewriting the query with `LIMIT`/`OFFSET`.
 - **Row-detail editing** — the Data tab's record view (shipped for tables in
   `table-record-detail-view`, and for query results in
   `query-result-record-view`) shows one row at a time as field/value rows but
@@ -68,8 +70,6 @@ Deferred features and known issues. Implemented work lives in
   (see `LIBRARY_NOTES.md`). The robust library-side fix, so no consumer needs
   `keepNames` at all, is planned in typescript-ui
   `plans/minification-safe-class-names.md` (deferred).
-- **Large `MemoryStore.loadData` renders zero rows** (~1500+ rows) — a library
-  bug, currently worked around with pagination (see `LIBRARY_NOTES.md`).
 - **A large diagram's first render blocks the main thread for tens of
   seconds.** Changing *Depth* to `2` on `hub.asset_category`'s relation
   diagram (156 cards, 1065 edges, ~10,000 components) spends 42 s in one

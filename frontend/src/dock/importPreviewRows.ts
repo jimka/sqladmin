@@ -1,9 +1,7 @@
 // Pure preview-grid row-building logic for ImportRowsDialog.ts, split out so
-// it can be unit-tested under this project's node vitest environment.
-// ImportRowsDialog.ts imports DOM-touching library components (Dialog,
-// FileDropZone, Table, ...) at module scope, which have no stand-in in a
-// node environment — the same constraint tableWriteRules.ts documents for
-// TableWorkPanel.ts, and the reason its own pure logic lives apart from it.
+// node vitest can unit-test it: the dialog constructs library components
+// (Dialog, FileDropZone, Table, …), which need a DOM, and this logic needs
+// none — the same split tableWriteRules.ts makes for TableWorkPanel.ts.
 
 import type { ImportRowResult } from "../contract";
 

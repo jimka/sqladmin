@@ -9,12 +9,10 @@ import type { MeasureWidths } from "./uniformNodeWidth";
 import { LAYERED_RIGHT } from "./diagramLayout";
 
 // The registered glyph name for a role node. Deliberately an inline literal,
-// not imported from `../roles/RolesTree` (whose `Glyph.register(user)` import
-// pulls in `@jimka/typescript-ui/component/display`, a bundled chunk whose
-// unrelated components run DOM-touching module-level side effects on import),
-// which crashes under this project's DOM-less vitest "node" environment. This
-// builder stays pure and unit-testable by never importing UI-bundle code;
-// keep this literal in sync with RolesTree.ts's `Glyph.register(user)`.
+// not imported from `../roles/RolesTree`: that is a UI module that calls
+// `Glyph.register` when imported, and a data builder imports no UI module (see
+// buildSchemaDiagram.ts's header). Keep this literal in sync with
+// RolesTree.ts's `Glyph.register(user)`.
 const ROLE_GLYPH = "user";
 
 /** Opaque metadata carried on a membership edge (admin_option on the grant). */

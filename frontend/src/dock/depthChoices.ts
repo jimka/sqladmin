@@ -1,10 +1,9 @@
 // The DOM-free depth vocabulary: the DEPTH_CHOICES a rooted diagram's Depth
 // control offers, the All sentinel, and the conversions between a choice and
-// its hop count. Kept out of diagramShell.ts (which owns the Depth control
-// itself, and imports ComboBox, Checkbox, and the library's Panel at module
-// scope — touching `document` and unloadable under the project's
-// node-environment vitest) so depthChoice/depthFromChoice can be unit-tested
-// under the node harness — mirroring recordNavigation.ts's own DOM-free split.
+// its hop count. Kept out of diagramShell.ts (which constructs the Depth
+// control and the rest of the shell's components, and so needs a DOM) so
+// depthChoice/depthFromChoice can be unit-tested under node vitest, mirroring
+// recordNavigation.ts's split.
 
 /** The `Depth` choice meaning an unbounded walk. */
 export const DEPTH_ALL = "All";

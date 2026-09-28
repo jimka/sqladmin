@@ -4,10 +4,8 @@
 // rather than buried as inline closures at four call sites — the two navigator
 // object rules deliberately differ on whether they compare `kind` (see the
 // plan's "The two object predicates stay distinct" decision). Its only import
-// is an `import type` — nothing else may be imported from the library — so,
-// like objectKinds.ts beside it, this module stays free of the DOM side effects
-// library component modules run at import scope and keeps running under the
-// node vitest harness.
+// is an `import type` — nothing else may be imported from the library —
+// so, like objectKinds.ts beside it, it runs under node vitest with no DOM.
 
 import type { DbObjectRef } from "../contract";
 

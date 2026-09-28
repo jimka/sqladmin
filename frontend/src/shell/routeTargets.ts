@@ -6,9 +6,8 @@
 // databaseDiagramPath/notesPath/queryHistoryPath/resolveAddressBarRoute —
 // sharing RELATION_KINDS/ROLE_BUCKETS/relationView/schemaView with the
 // forward one. Kept free of library imports (only type imports from
-// ../contract and ../data/queryStore) so it loads under the project's
-// node-environment vitest — mirroring recordNavigation.ts's and
-// depthChoices.ts's own DOM-free split.
+// ../contract and ../data/queryStore) so node vitest tests it without a
+// DOM — mirroring recordNavigation.ts's and depthChoices.ts's own splits.
 
 import type { DbObjectKind, DbObjectRef } from "../contract";
 import type { HistoryEntry } from "../data/queryStore";

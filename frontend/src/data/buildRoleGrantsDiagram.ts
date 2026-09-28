@@ -10,13 +10,12 @@ import type { MeasureWidths } from "./uniformNodeWidth";
 import { LAYERED_RIGHT } from "./diagramLayout";
 
 // The registered glyph names for the role and table nodes. Deliberately
-// inline literals, not imported from `../roles/RolesTree` / `../navigator/
-// objectGlyphs` (both pull in `@jimka/typescript-ui/component/display`, a
-// bundled chunk whose unrelated components run DOM-touching module-level side
-// effects on import), which crashes under this project's DOM-less vitest
-// "node" environment. This builder stays pure and unit-testable by never
-// importing UI-bundle code; keep these literals in sync with RolesTree.ts's
-// `Glyph.register(user)` and objectGlyphs.ts's `KIND_GLYPH.table`.
+// inline literals, not imported from `../roles/RolesTree` /
+// `../navigator/objectGlyphs`: both are UI modules that call `Glyph.register`
+// when imported, and a data builder imports no UI module (see
+// buildSchemaDiagram.ts's header). Keep these literals in sync with
+// RolesTree.ts's `Glyph.register(user)` and
+// objectGlyphs.ts's `KIND_GLYPH.table`.
 const ROLE_GLYPH = "user";
 const TABLE_GLYPH = "table";
 

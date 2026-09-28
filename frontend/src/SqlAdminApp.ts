@@ -23,10 +23,14 @@ import { APP_FAVICON }           from "./appIdentity";
 // bundler's module target. A boot failure (e.g. whoami rejecting for a network
 // reason, not a 401) is surfaced rather than swallowed silently.
 (async function main(): Promise<void> {
-    // Initialise the Body FIRST (empty) so the UI runtime — theme, layout, and
-    // the overlay/layer manager a Dialog mounts into — is up before the login
-    // dialog is shown. Without this the dialog is created but never renders.
-    Body.init({ layoutManager: Fit(), favicon: APP_FAVICON });
+    // Mount the Body FIRST (empty) and wait for it. The UI runtime — theme,
+    // layout, and the overlay/layer manager a Dialog mounts into — must be up
+    // before the login dialog is shown, or the dialog is created but never
+    // renders. The promise resolves once the theme's web font is active (or
+    // the library's bounded deadline passes), so the login dialog, the shell
+    // and a deep-linked tab are all measured against the real face rather
+    // than the browser's fallback.
+    const body = await Body.init({ layoutManager: Fit(), favicon: APP_FAVICON });
 
     const session = (await whoami()) ?? (await showLoginDialog());
 
@@ -42,9 +46,9 @@ import { APP_FAVICON }           from "./appIdentity";
     // Decision on why navigate() would be unsafe here.
     controller.setSyncAddressBar((path, query) => DOM.sink.replaceHistoryPath(router.getHref(path, query)));
 
-    // Now that we are authenticated, mount the shell into the already-initialised
-    // Body.
-    Body.getInstance().addComponent(SqlAdminShell(controller));
+    // Now that we are authenticated, mount the shell into the Body mounted
+    // above.
+    body.addComponent(SqlAdminShell(controller));
 
     // start() applies the current route synchronously — call after the tree is
     // built and before the first layout frame, so a routed tab is already

@@ -1,7 +1,7 @@
 // Pure spec-assembly helpers for the app's DDL flows: translate a form's
 // collected rows/fields into the wire spec the matching preview client
-// sends. Kept DOM-free (see memory "tsui DOM module side effects") so vitest
-// (node-only) can pin them. Every DDL form under dock/ is a thin collector
+// sends. Kept pure (no library value imports) so node vitest can pin them.
+// Every DDL form under dock/ is a thin collector
 // that hands its inputs to one of these; so are the two in-tab Save flows
 // (StructurePanel's Columns-grid diff, via diffColumnSpecs/
 // describeColumnSpecs below, and SequenceInfoPanel's, via diffSequenceSpecs)

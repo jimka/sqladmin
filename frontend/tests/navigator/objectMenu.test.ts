@@ -2,9 +2,8 @@
 // plans/implemented/diagram-node-context-menu.md). Pins the per-kind item
 // shape both callers (NavigatorTree and the diagram panels' controller
 // wiring) rely on, plus the node-independence and showObjectMenu-empty-guard
-// contracts. DOM-free (no glyph registration or Component construction
-// happens here — see memory "tsui DOM module side effects"), mirroring
-// tests/dock/menuItems.test.ts's style.
+// contracts. DOM-free (no glyph registration or Component construction happens
+// here), mirroring tests/dock/menuItems.test.ts's style.
 
 import { describe, expect, it, vi } from "vitest";
 import { buildObjectMenuItems, showObjectMenu } from "../../src/navigator/objectMenu";
