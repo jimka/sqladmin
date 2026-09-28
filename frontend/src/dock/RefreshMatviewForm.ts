@@ -5,7 +5,8 @@
 // `refreshMaterializedView` launcher — the preview text itself is the
 // confirmation gate, so no bespoke confirm modal is needed (see
 // plans/implemented/view-matview-ddl.md's "Drop/refresh reuse the same
-// preview+confirm dialog" decision).
+// preview+confirm dialog" decision). The form reports toggles through
+// `onFieldChange`, which SqlPreviewDialog uses to keep the preview in step.
 
 import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox }             from "@jimka/typescript-ui/layout";
@@ -46,6 +47,20 @@ class RefreshMatviewForm extends Panel {
     /** @returns whether WITH NO DATA is checked. */
     withNoData(): boolean {
         return this._withNoDataBox.getValue();
+    }
+
+    /**
+     * Register `listener` to run whenever either checkbox changes. `SqlPreviewDialog`
+     * uses it to keep the SQL preview in step with the form.
+     *
+     * @param listener - Called after each field change.
+     * @returns This form, for chaining.
+     */
+    onFieldChange(listener: () => void): this {
+        this._concurrentlyBox.on("change", listener);
+        this._withNoDataBox.on("change", listener);
+
+        return this;
     }
 }
 

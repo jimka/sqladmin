@@ -3,6 +3,8 @@
 // drop-schema, drop-sequence, drop-index, drop-constraint, drop-function and
 // drop-type — every drop launcher builds one with its own summary text and
 // embeds it as a SqlPreviewDialog's `form`. There is no drop-column flow.
+// The form reports CASCADE toggles through `onFieldChange`, which
+// SqlPreviewDialog uses to keep the preview in step.
 
 import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
@@ -34,6 +36,19 @@ class ConfirmCascadeForm extends Panel {
     /** @returns whether the CASCADE checkbox is checked. */
     readSpec(): { cascade: boolean } {
         return { cascade: this._cascadeBox.getValue() };
+    }
+
+    /**
+     * Register `listener` to run whenever the CASCADE checkbox changes. `SqlPreviewDialog`
+     * uses it to keep the SQL preview in step with the form.
+     *
+     * @param listener - Called after each field change.
+     * @returns This form, for chaining.
+     */
+    onFieldChange(listener: () => void): this {
+        this._cascadeBox.on("change", listener);
+
+        return this;
     }
 }
 

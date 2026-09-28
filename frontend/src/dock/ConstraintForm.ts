@@ -4,7 +4,9 @@
 // referenced schema/table/columns and optional referential actions on top
 // of its own local ColumnChecklist. Every kind offers an optional
 // constraint-name field. Used by the controller's addConstraint launcher,
-// embedded as a SqlPreviewDialog's `form`.
+// embedded as a SqlPreviewDialog's `form`. The form reports field edits
+// through `onFieldChange`, which SqlPreviewDialog uses to keep the preview
+// in step.
 
 import { Component, Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
@@ -138,6 +140,29 @@ class ConstraintForm extends Panel {
             onDelete:   this._fields.onDeleteCombo!.getValue() || undefined,
             constraintName,
         });
+    }
+
+    /**
+     * Register `listener` to run whenever any rendered field changes.
+     * `SqlPreviewDialog` uses it to keep the SQL preview in step with the form.
+     * Each field registers in its own statement: `TextField.on` and
+     * `ComboBox.on` are overloaded, so a call on a union value may not
+     * type-check.
+     *
+     * @param listener - Called after each field change.
+     * @returns This form, for chaining.
+     */
+    onFieldChange(listener: () => void): this {
+        this._nameField.on("change", listener);
+        this._fields.checklist?.onFieldChange(listener);
+        this._fields.expressionField?.on("change", listener);
+        this._fields.refSchemaCombo?.on("change", listener);
+        this._fields.refTableField?.on("change", listener);
+        this._fields.refColumnsField?.on("change", listener);
+        this._fields.onUpdateCombo?.on("change", listener);
+        this._fields.onDeleteCombo?.on("change", listener);
+
+        return this;
     }
 }
 

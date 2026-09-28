@@ -4,7 +4,9 @@
 // order they were checked in, since composite-key/index column order is
 // semantically significant to Postgres (see plans/implemented/table-ddl.md's
 // "Composite-key column ordering" mitigation) — which filtering `_columns`
-// directly (rather than the checked names) guarantees for free.
+// directly (rather than the checked names) guarantees for free. The
+// checklist reports ticks through `onFieldChange`, which its host form
+// forwards so SqlPreviewDialog can keep the preview in step.
 
 import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
@@ -38,6 +40,22 @@ class ColumnChecklist extends Panel {
      */
     readSelected(): string[] {
         return this._columns.filter((_, i) => this._boxes[i].getValue());
+    }
+
+    /**
+     * Register `listener` to run whenever a column is ticked or unticked. The
+     * host form forwards it so `SqlPreviewDialog` can keep the SQL preview in
+     * step with the form.
+     *
+     * @param listener - Called after each tick or untick.
+     * @returns This checklist, for chaining.
+     */
+    onFieldChange(listener: () => void): this {
+        for (const box of this._boxes) {
+            box.on("change", listener);
+        }
+
+        return this;
     }
 }
 

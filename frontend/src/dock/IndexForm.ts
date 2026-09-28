@@ -1,6 +1,8 @@
 // The "Create index" dialog form: an optional name field, a column
 // checklist, a unique checkbox, and an access-method combo. Used by the
 // controller's createIndex launcher, embedded as a SqlPreviewDialog's `form`.
+// The form reports field edits through `onFieldChange`, which
+// SqlPreviewDialog uses to keep the preview in step.
 
 import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
@@ -71,6 +73,22 @@ class IndexForm extends Panel {
             unique:  this._uniqueBox.getValue(),
             method:  this._methodCombo.getValue() || undefined,
         });
+    }
+
+    /**
+     * Register `listener` to run whenever any field changes. `SqlPreviewDialog`
+     * uses it to keep the SQL preview in step with the form.
+     *
+     * @param listener - Called after each field change.
+     * @returns This form, for chaining.
+     */
+    onFieldChange(listener: () => void): this {
+        this._nameField.on("change", listener);
+        this._checklist.onFieldChange(listener);
+        this._uniqueBox.on("change", listener);
+        this._methodCombo.on("change", listener);
+
+        return this;
     }
 }
 
