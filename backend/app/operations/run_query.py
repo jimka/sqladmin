@@ -7,8 +7,8 @@ identifiers are NOT validated — arbitrary SQL on the trusted "default"
 connection is the feature, not a hole. Exactly one statement runs per call:
 asyncpg's prepared-statement path uses the PostgreSQL extended query protocol,
 which rejects a ``;``-separated multi-statement script with a
-``PostgresSyntaxError`` (surfaced as 400 by the app's error handler) — so the
-single-statement rule needs no explicit check.
+``PostgresSyntaxError`` (surfaced as a 400 carrying the error's position, via
+``client_sql_errors``) — so the single-statement rule needs no explicit check.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from ..contract import ColumnMeta, WireType
 from ..errors import ValidationError
 from ..wire import pg_type_to_wire, rows_to_wire
 from .base import Command
-from .common import MAX_ROWS_PER_REQUEST, status_envelope
+from .common import MAX_ROWS_PER_REQUEST, client_sql_errors, status_envelope
 
 
 def _query_columns(attrs: Sequence[Any]) -> list[dict]:
@@ -130,18 +130,24 @@ class RunQueryCommand(Command):
         materializes a huge result set, and the extra row lets ``get_result``
         report truncation without a second COUNT. A non-row statement
         (INSERT/UPDATE/DDL) is executed for its status tag.
+
+        Raises:
+            BadRequest: when Postgres rejects the statement, with ``position``
+                set to the 1-based offset into the SQL when Postgres reported one.
+            ConflictError: for an integrity/unique violation, likewise positioned.
         """
-        async with self._conn.transaction():
-            stmt = await self._conn.prepare(self._sql)
-            self._attrs = stmt.get_attributes()
+        with client_sql_errors():
+            async with self._conn.transaction():
+                stmt = await self._conn.prepare(self._sql)
+                self._attrs = stmt.get_attributes()
 
-            if self._attrs:
-                cursor = await stmt.cursor()
-                self._records = await cursor.fetch(MAX_ROWS_PER_REQUEST + 1)
-            else:
-                await stmt.fetch()
+                if self._attrs:
+                    cursor = await stmt.cursor()
+                    self._records = await cursor.fetch(MAX_ROWS_PER_REQUEST + 1)
+                else:
+                    await stmt.fetch()
 
-            self._status = stmt.get_statusmsg()
+                self._status = stmt.get_statusmsg()
 
     def get_result(self) -> dict:
         """

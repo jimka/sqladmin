@@ -41,7 +41,10 @@
 // rows, so a failed re-run always leaves the last good grid in place (just not
 // necessarily the active tab). Errors funnel to onError, a 3-second toast, and
 // a durable in-panel error banner (below the editor/result pane) that stays
-// until dismissed, a new run starts, or Clear is pressed.
+// until dismissed, a new run starts, or Clear is pressed. When the backend
+// reports an error position, the banner adds "(line X, column Y)" and Run and
+// Explain select and highlight that spot, provided the editor text is unchanged
+// since the statement was sent.
 //
 // Two toolbar buttons run EXPLAIN and EXPLAIN ANALYZE on the editor's statement.
 // One Explain tab serves both — analyze only adds real timings — and its content
@@ -86,6 +89,9 @@ import { table }                                from "@jimka/typescript-ui/glyph
 import { chart_simple }                         from "@jimka/typescript-ui/glyphs/solid/chart_simple";
 import { QueryResultGrid, QueryResultChart } from "./QueryResultView";
 import { ErrorBanner }                   from "./ErrorBanner";
+import { ApiError }                      from "../data/api";
+import { formatSqlErrorMessage, locateSqlError } from "../data/sqlErrorPosition";
+import type { SqlErrorLocation }         from "../data/sqlErrorPosition";
 import { isChartable }                   from "../data/chartConfig";
 import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
@@ -119,7 +125,10 @@ const EDITOR_HEIGHT = 150;
 // in-place overlay is the same "component exists, data pending" case.
 const DATA_TAB_OVERLAY_SPINNER_SIZE = 24;
 
-/** Runs one SQL statement and resolves its result. */
+/**
+ * Runs one SQL statement and resolves its result. Rejects with an `ApiError`,
+ * whose `position` may be set to where Postgres reported the error.
+ */
 export type RunQuery = (sql: string) => Promise<QueryResult>;
 
 /** What the panel needs to compute index suggestions and act on one. */
@@ -809,13 +818,47 @@ export class QueryPanel {
             }
         }
 
+        /**
+         * The editor location a failed run/explain's error points at, or null when
+         * the backend reported no position (a runtime error, a network failure, an
+         * error inside a called function).
+         *
+         * @param error - What the run/explain rejected with.
+         * @param text - The editor text the statement was taken from.
+         */
+        function failureLocation(error: unknown, text: string): SqlErrorLocation | null {
+            if (!(error instanceof ApiError) || error.position === undefined) {
+                return null;
+            }
+
+            // run()/runExplainRun() send text.trim(), so Postgres counts from the
+            // first non-whitespace character of the editor text.
+            const sentStart = text.length - text.trimStart().length;
+
+            return locateSqlError(text, sentStart, error.position);
+        }
+
+        /**
+         * Select + highlight `location` — only while the editor still holds `text`,
+         * the text that was sent; after an edit the position would point at the
+         * wrong token.
+         */
+        function revealFailure(location: SqlErrorLocation, text: string): void {
+            const unchanged = editor.getValue() === text;
+
+            if (unchanged) {
+                editor.revealRange(location, { scrollAlign: "center" });
+            }
+        }
+
         // The per-panel history-navigation cursor for Ctrl+↑/↓. Built lazily from a
         // fresh history snapshot when the user starts a browse, and reset to null on
         // a run (running ends the browse), so each browse recalls the latest history.
         let historyCursor: HistoryCursor | null = null;
 
         async function run(): Promise<void> {
-            const sql = editor.getValue().trim();
+            const text = editor.getValue();
+            const sql  = text.trim();
 
             if (!sql) {
                 notify("Enter a SQL statement");
@@ -845,8 +888,17 @@ export class QueryPanel {
                 }
             } catch (error) {
                 if (seq === runSeq) {
+                    const location = failureLocation(error, text);
+                    const message  = error instanceof Error ? error.message : String(error);
+
                     onError(error);
-                    errorBanner.show(error);
+                    errorBanner.show(location ? formatSqlErrorMessage(message, location) : error);
+
+                    if (location) {
+                        // After the banner: its relayout resizes the editor first.
+                        revealFailure(location, text);
+                    }
+
                     onRun?.({ sql, timestamp: Date.now(), ok: false, rowCount: 0 });
                 }
             } finally {
@@ -865,7 +917,8 @@ export class QueryPanel {
          * @param analyze - True for EXPLAIN ANALYZE, false for plain EXPLAIN.
          */
         async function runExplainRun(analyze: boolean): Promise<void> {
-            const sql = editor.getValue().trim();
+            const text = editor.getValue();
+            const sql  = text.trim();
 
             if (!sql) {
                 notify("Enter a SQL statement");
@@ -897,7 +950,13 @@ export class QueryPanel {
                 }
             } catch (error) {
                 if (seq === runSeq) {
+                    const location = failureLocation(error, text);
+
                     onError(error);
+
+                    if (location) {
+                        revealFailure(location, text);
+                    }
                 }
             } finally {
                 if (seq === runSeq) {

@@ -1,9 +1,13 @@
 // Introspection data path: a plain typed fetch client that reads the backend's
-// error body ({detail}) directly and returns contract types. It does NOT go
-// through the proxy/store (that is the row-CRUD path; see stores.ts).
+// error body ({detail, position?}) directly and returns contract types. A
+// non-OK response rejects with an ApiError: its message is the detail, and its
+// position is the 1-based offset Postgres reported into a query/explain's SQL.
+// It does NOT go through the proxy/store (that is the row-CRUD path; see
+// stores.ts).
 
 import type {
     AlterCompositeTypeSpec,
+    ApiErrorBody,
     AlterSequenceSpec,
     AlterTableSpec,
     AlterTypeAddValueSpec,
@@ -98,33 +102,52 @@ export interface AppConfig {
     allowUserPresets: boolean;   // gates the user's own localStorage presets
 }
 
-/** Pull the backend's `{detail}` error message off a non-OK response. */
-async function readDetail(response: Response): Promise<string> {
+/**
+ * A non-OK API response: `message` is the backend's `detail` (or the status
+ * line when the body carried none), and `position` is the 1-based character
+ * offset into the submitted SQL where Postgres reported the error — set only by
+ * the query and explain routes, and only when Postgres reported one.
+ */
+export class ApiError extends Error {
+    constructor(message: string, readonly position?: number) {
+        super(message);
+    }
+}
+
+/** Whether `value` is a usable 1-based position (a positive integer). */
+function isValidPosition(value: unknown): value is number {
+    return typeof value === "number" && Number.isInteger(value) && value >= 1;
+}
+
+/** Build the {@link ApiError} for a non-OK response from its `{detail, position?}` body. */
+async function readError(response: Response): Promise<ApiError> {
     try {
-        const body = await response.json();
+        const body = await response.json() as Partial<ApiErrorBody> | null;
 
         if (body && typeof body.detail === "string") {
-            return body.detail;
+            const position = isValidPosition(body.position) ? body.position : undefined;
+
+            return new ApiError(body.detail, position);
         }
     } catch {
         // Body was not JSON; fall through to the status line.
     }
 
-    return `${response.status} ${response.statusText}`;
+    return new ApiError(`${response.status} ${response.statusText}`);
 }
 
-/** Fetch JSON from `url`, throwing the backend's detail message on failure. */
+/** Fetch JSON from `url`, throwing an {@link ApiError} on failure. */
 async function getJson<T>(url: string): Promise<T> {
     const response = await fetch(url);
 
     if (!response.ok) {
-        throw new Error(await readDetail(response));
+        throw await readError(response);
     }
 
     return (await response.json()) as T;
 }
 
-/** POST `body` as JSON to `url`, throwing the backend's detail on failure. */
+/** POST `body` as JSON to `url`, throwing an {@link ApiError} on failure. */
 async function postJson<T>(url: string, body: unknown): Promise<T> {
     const response = await fetch(url, {
         method : "POST",
@@ -133,7 +156,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     });
 
     if (!response.ok) {
-        throw new Error(await readDetail(response));
+        throw await readError(response);
     }
 
     return (await response.json()) as T;
@@ -180,7 +203,7 @@ export async function whoami(): Promise<Session | null> {
     }
 
     if (!response.ok) {
-        throw new Error(await readDetail(response));
+        throw await readError(response);
     }
 
     return (await response.json()) as Session;

@@ -10,6 +10,8 @@ ANALYZE path runs inside an explicitly rolled-back transaction — the plan is
 captured, then a sentinel exception forces asyncpg to roll the transaction back,
 discarding any DML/DDL side-effect even if the frontend read-only guard is
 bypassed. Plain EXPLAIN only plans and never executes, so it needs no rollback.
+A Postgres error's position is shifted back past the ``EXPLAIN (…) `` prefix, so
+it counts from the start of the user's SQL (see ``client_sql_errors``).
 
 The ``verbose`` flag adds ``VERBOSE`` to the option list, which makes Postgres
 report each scanned relation's schema and alias-qualify every predicate column —
@@ -27,6 +29,7 @@ import asyncpg
 
 from ..errors import ValidationError
 from .base import Command
+from .common import client_sql_errors
 
 # The EXPLAIN output formats this operation accepts. TEXT is the human-readable
 # indented plan (the first cut); JSON is the structured tree the follow-on
@@ -113,24 +116,32 @@ class ExplainQueryCommand(Command):
         plan, then raises ``_ExplainDone`` so asyncpg rolls the transaction back —
         the plan survives on ``self._plan`` but any write is discarded. Plain
         EXPLAIN only plans, so it runs directly with no rollback dance.
+
+        Raises:
+            BadRequest: when Postgres rejects the statement, with ``position``
+                set to the 1-based offset into the user's SQL (past the
+                ``EXPLAIN (…) `` prefix) when Postgres reported one inside it.
+            ConflictError: for an integrity/unique violation, likewise positioned.
         """
         options = _explain_options(self._analyze, self._verbose, self._fmt)
-        stmt    = f"EXPLAIN ({options}) {self._sql}"
+        prefix  = f"EXPLAIN ({options}) "
+        stmt    = prefix + self._sql
 
-        if self._analyze:
-            # ANALYZE executes the statement — capture the plan, then force a
-            # rollback so any DML/DDL side-effect is discarded (safety net even if
-            # the frontend read-only guard is bypassed).
-            try:
-                async with self._conn.transaction():
-                    self._plan = await self._conn.fetch(stmt)
+        with client_sql_errors(len(prefix)):
+            if self._analyze:
+                # ANALYZE executes the statement — capture the plan, then force a
+                # rollback so any DML/DDL side-effect is discarded (safety net even
+                # if the frontend read-only guard is bypassed).
+                try:
+                    async with self._conn.transaction():
+                        self._plan = await self._conn.fetch(stmt)
 
-                    raise _ExplainDone()
-            except _ExplainDone:
-                pass
-        else:
-            # Plain EXPLAIN only plans — no execution, no side-effect, no rollback.
-            self._plan = await self._conn.fetch(stmt)
+                        raise _ExplainDone()
+                except _ExplainDone:
+                    pass
+            else:
+                # Plain EXPLAIN only plans — no execution, no side-effect, no rollback.
+                self._plan = await self._conn.fetch(stmt)
 
         if self._fmt == "json" and self._plan:
             # asyncpg returns EXPLAIN (FORMAT JSON) as a single JSON-text cell (the

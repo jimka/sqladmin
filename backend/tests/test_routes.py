@@ -3,8 +3,9 @@ Tests for the app's route table: every route resolves to exactly the
 ``EXPECTED_ROUTES`` triples (no extras, no omissions), no two routes sharing
 an HTTP method can match the same concrete URL, the DDL preview registry
 stays in sync with the ``DdlPreview`` subclasses ``app.operations`` exports,
-and the driver-error handler translates a Postgres error into the typed
-taxonomy's status/body.
+the driver-error handler translates a Postgres error into the typed
+taxonomy's status/body, and the domain-error handler adds ``position`` to the
+body only when the error carries one.
 
 Route *resolution* (which route wins for a concrete URL) is tested through
 Starlette's own ``Route.matches`` rather than an end-to-end request, so these
@@ -24,7 +25,8 @@ from starlette.routing import Match
 
 from app import operations
 from app.endpoints.ddl import PREVIEW_OPS, preview_docs
-from app.main import _pg_error_handler, app
+from app.errors import BadRequest
+from app.main import _domain_error_handler, _pg_error_handler, app
 from app.operations import DdlPreview
 
 # --- the fixed route table (## Route inventory, C/D expanded) --------------
@@ -318,3 +320,22 @@ async def test_syntax_error_becomes_400_bad_request() -> None:
 
     assert response.status_code == 400
     assert json.loads(bytes(response.body)) == {"detail": "bad"}
+
+
+async def test_driver_error_position_is_never_emitted_by_the_global_handler() -> None:
+    # The route-agnostic handler serves server-generated SQL too, so a driver
+    # error's position must not leak into its body (see client_sql_errors).
+    error = asyncpg.PostgresSyntaxError("bad")
+    setattr(error, "position", "8")  # a runtime-filled asyncpg field
+
+    response = await _pg_error_handler(_request(), error)
+
+    assert response.status_code == 400
+    assert json.loads(bytes(response.body)) == {"detail": "bad"}
+
+
+async def test_domain_error_position_is_added_to_the_body() -> None:
+    response = await _domain_error_handler(_request(), BadRequest("bad", position=8))
+
+    assert response.status_code == 400
+    assert json.loads(bytes(response.body)) == {"detail": "bad", "position": 8}

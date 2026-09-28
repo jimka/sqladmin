@@ -36,7 +36,9 @@ async def run_query(
         statement that returned a result set (``truncated`` is ``True`` when the
         result was capped at ``MAX_ROWS_PER_REQUEST``), or
         ``{"kind": "status", "command", "rowCount"}`` for one that did not
-        (INSERT/UPDATE/DDL).
+        (INSERT/UPDATE/DDL). A Postgres error instead returns
+        ``{"detail", "position"?}``, where ``position`` is the 1-based character
+        offset Postgres reported, counted from the start of the submitted ``sql``.
     """
     async with session_pool_for(session, connection_id).acquire() as c:
         op = RunQueryCommand(c, body.get("sql", ""))
@@ -64,7 +66,10 @@ async def explain_query(
 
     Returns:
         ``{"kind": "explain", "format", "analyze", "plan"}`` — the joined plan
-        text for FORMAT TEXT, plus a ``planJson`` tree for FORMAT JSON.
+        text for FORMAT TEXT, plus a ``planJson`` tree for FORMAT JSON. A
+        Postgres error instead returns ``{"detail", "position"?}``, where
+        ``position`` counts from the start of the submitted ``sql`` (the
+        server-added ``EXPLAIN (…)`` prefix is not counted).
     """
     async with session_pool_for(session, connection_id).acquire() as c:
         op = ExplainQueryCommand(

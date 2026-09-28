@@ -1,11 +1,17 @@
 """
-Helpers shared across the row and result-shaping operations.
+Helpers shared across the operations: row and result shaping, and translating a
+driver error raised by the client's own SQL into a positioned domain error.
 """
 
 from __future__ import annotations
 
+import contextlib
+from typing import Iterator
+
+import asyncpg
+
 from ..contract import ColumnMeta, TableRef
-from ..errors import ValidationError
+from ..errors import ValidationError, from_postgres_error
 from ..sql.ddl import qualify
 
 # The app's one row-budget policy: the ad-hoc query result cap, the list-rows
@@ -88,3 +94,58 @@ def is_required_column(column: ColumnMeta) -> bool:
     edit or an imported row.
     """
     return not column.nullable and not column.is_generated and not column.has_default
+
+
+def client_sql_position(exc: asyncpg.PostgresError, prefix_length: int = 0) -> int | None:
+    """
+    Read Postgres's error position off a driver error, relative to the client's SQL.
+
+    Postgres counts from the start of the text it parsed, so a statement the
+    operation prefixed (e.g. ``EXPLAIN (…) ``) is shifted back by the prefix.
+
+    Args:
+        exc: the error asyncpg raised.
+        prefix_length: how many characters the operation prepended to the
+            client's SQL before sending it.
+
+    Returns:
+        The 1-based character offset into the client's SQL, or None when the
+        error has no position, it is not an integer, or it points into the prefix
+        (text the client never wrote).
+    """
+    # asyncpg stores the protocol's 'P' field as a string.
+    raw = getattr(exc, "position", None)
+
+    if raw is None:
+        return None
+
+    try:
+        shifted = int(raw) - prefix_length
+    except (TypeError, ValueError):
+        return None
+
+    return shifted if shifted >= 1 else None
+
+
+@contextlib.contextmanager
+def client_sql_errors(prefix_length: int = 0) -> Iterator[None]:
+    """
+    Translate a driver error raised by the client's own SQL into the typed
+    taxonomy, carrying the position Postgres reported.
+
+    Wrap it around (outside) the operation's transaction, so the transaction
+    rolls back on the original driver error before it is translated. Only
+    ``asyncpg.PostgresError`` is caught; anything else propagates untouched.
+
+    Args:
+        prefix_length: how many characters the operation prepended to the
+            client's SQL (see ``client_sql_position``).
+
+    Raises:
+        BadRequest: for a non-integrity driver error, chained from it.
+        ConflictError: for an integrity/unique violation, chained from it.
+    """
+    try:
+        yield
+    except asyncpg.PostgresError as exc:
+        raise from_postgres_error(exc, client_sql_position(exc, prefix_length)) from exc
