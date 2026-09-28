@@ -4,6 +4,107 @@ All notable changes to SQLAdmin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-09-28
+
+### Added
+- **Tabs with unsaved changes now show a small dot on their icon.** It covers
+  unsaved query text, edited table cells, and definition, sequence, type, and
+  DDL-form edits. The dot appears as soon as there is something to lose and
+  clears on Save, on Refresh, or when you undo back to the original. It stays
+  with the tab when you float, re-dock, or split it, and it always matches
+  whether closing the tab will ask first. As before, "Save…" on a query tab
+  stores a copy and doesn't clear the dot. The dot isn't exposed to screen
+  readers yet.
+- **When a query fails, the query editor now jumps to the spot PostgreSQL
+  reported and highlights it.** A failed Run (button or Ctrl+Enter) selects
+  the offending token, so typing replaces it, scrolls a long query to centre
+  it, and adds `(line X, column Y)` to the error banner. Explain and Explain
+  Analyze highlight the same way but keep their toast-only errors. Errors
+  without a reported position, such as `division by zero`, behave as before,
+  and the DDL preview dialog and the definition editors don't reveal errors
+  yet.
+- **The status bar now shows the query editor's caret position and selection
+  size**, next to your user badge — `Ln 12, Col 4`, or
+  `Ln 14, Col 3 (15 chars, 2 lines selected)` while text is selected. It
+  follows the active query tab, floating windows included, and hides on other
+  tabs. If a query tab is left alone in a floating window after every docked
+  tab is closed, the readout stays hidden until you click that tab's label.
+- **Closing a floating window from its own title-bar ✕ now asks before
+  discarding unsaved changes**, closing the gap left in 0.9.0. Confirming
+  closes the window and every tab in it; cancelling keeps them all. A window
+  with no unsaved tabs still closes straight away.
+
+### Changed
+- **Closing several tabs with unsaved changes now asks once instead of once
+  per tab.** A floating window's ✕ and the tab menu's Close all / Close
+  others / Close all to the left or right show one combined prompt ("2 of
+  the 3 tabs being closed have unsaved changes"). Clean tabs in a bulk close
+  still close immediately.
+- **Creating, dropping, or renaming an object no longer resets the whole
+  navigator tree.** Only the schemas the change could affect are re-read and
+  merged in, so other schemas' expansion, the current selection, and the
+  scroll position are kept. A table drop also removes its index and
+  owned-sequence entries, and a rename relabels its indexes in place. A
+  CASCADE drop or hand-edited preview SQL re-reads every expanded schema.
+  The Refresh tool and Alt+R still do a full reload.
+- **The SQL review dialog now opens with the cursor in the SQL editor**, for
+  create forms' "Review SQL…" and the Structure, sequence, and type tabs'
+  Save review. Pressing Enter adds a line instead of running the statement;
+  run it with the Execute button.
+- **Date and time cells accept only the format they display** —
+  `YYYY-MM-DD H:MM[:SS]`, without a `T`, a time-zone suffix, or fractional
+  seconds; anything else reverts. A bare date typed into a `date` column
+  also reverts until a later release gives date columns their own editor.
+- **`interval` and `time with time zone` columns are now text columns.** They
+  show PostgreSQL's own text (`1 mon 2 days 03:04:05`, `09:30:00+02`), their
+  header filter compares text, and a `timetz` column is no longer offered as
+  a chart time axis.
+- **Keyboard focus is easier to follow.** Toolbars and the menu bar show a
+  focus ring when reached with the keyboard, and each toolbar is a single
+  Tab stop whose buttons are reached with the arrow keys.
+
+### Fixed
+- **Rows of a table with a `timestamp` (without time zone) column can be
+  saved again.** Any edit to any row of such a table failed with a
+  "can't subtract offset-naive and offset-aware datetimes" error. An edited
+  `timestamp` is now stored as the date and time the grid showed, in any
+  browser time zone.
+- **Saving a row no longer rewrites the cells you didn't edit.** An update
+  sends only the changed cells, so an untouched `timestamp` or `timestamptz`
+  value keeps its microseconds instead of being cut to milliseconds.
+- **`interval` and `time with time zone` values show and save correctly.** An
+  interval used to display as a day count (`32 days, 3:04:05`) and any save
+  that included one failed; a `timetz` cell was blank. An invalid interval now
+  gets an error banner and leaves the row unsaved.
+- **SQL preview dialogs now update their SQL as you edit the form.** Since
+  0.9.0, Drop (CASCADE), Rename table or schema, Create index, Add
+  constraint, and Refresh materialized view generated their SQL once and
+  ignored later edits, so ticking CASCADE still ran a plain `DROP`, a rename
+  ran with the old name, and Create index was stuck on "requires at least one
+  column". The preview now follows the form, and Execute always runs the SQL
+  for the form's current state. Once you edit the SQL by hand, form changes
+  leave it alone; the restored **Regenerate SQL** button discards your edits
+  and regenerates it.
+- **Query results that reach the 1,000-row cap render again.** In the built
+  app, a truncated result showed an empty grid.
+- **The navigator's Indexes category now updates after adding or dropping an
+  index or constraint** from a table's Structure tab or the index advisor's
+  "Create index…". It used to stay stale until a manual Refresh.
+
+### Internal
+- Migrated to `@jimka/typescript-ui` 0.10.0. The app now awaits the
+  library's startup before building any UI, so the first screen is laid out
+  in the app's own font.
+- The unsaved-changes guard listens to the library's Dock-level
+  `beforeclose` event instead of wiring each tab region by hand.
+- `POST /query` and `POST /explain` error bodies can carry an optional
+  `position`; every other route's error body is unchanged.
+- Moved navigator refresh scoping, SQL error location, DDL preview
+  regeneration, close-request batching, and dirty-tab tracking into DOM-free
+  modules with unit tests.
+- Recorded the library issues found during this release in
+  `LIBRARY_NOTES.md`.
+
 ## [0.9.0] — 2026-09-08
 
 ### Added
@@ -426,6 +527,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 First public release: browse schemas and roles, edit rows, run and EXPLAIN SQL,
 and visualize schema and role relationships as diagrams.
 
+[0.10.0]: https://github.com/jimka/sqladmin/releases/tag/v0.10.0
 [0.9.0]: https://github.com/jimka/sqladmin/releases/tag/v0.9.0
 [0.8.0]: https://github.com/jimka/sqladmin/releases/tag/v0.8.0
 [0.7.0]: https://github.com/jimka/sqladmin/releases/tag/v0.7.0
