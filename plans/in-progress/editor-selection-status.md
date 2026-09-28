@@ -366,3 +366,29 @@ No library or exported-API docs. In-repo only: the README "SQL workspace" bullet
 [^scope]: The definition editors and `SqlPreviewDialog` would each need their own id plumbing to the controller (the preview is a modal, not a dock tab, so the active-tab rule does not even apply). `DocumentationPanel` uses `MarkdownEditor`, which is Lexical-based and exposes no caret-position API. The Explain viewer is read-only and lives inside the query tab, where two readouts would compete for one slot. None of these falls out of the query-panel wiring for free, so they are left out. The controller side (`setCaretReadout(id, …)`) is generic, so a later surface only needs its own `on("cursorchange")`/`on("selectionchange")` wiring and an id.
 
 [^order]: The conflict is textual, not functional. `query-error-position-reveal` edits `run()`, `runExplainRun()`, the header's "Errors funnel…" paragraph, the `RunQuery` JSDoc, and adds helpers after `setBusy`. This plan adds an option, a destructuring entry, an import, a new header paragraph, and a block after the `"change"` listener. Line numbers cited here are from before that plan lands; the implementer should find each site by the symbol or comment named, not by the number alone.
+
+---
+
+## Implementation Notes
+
+**Deviations.** None in substance. Two small placement choices: the caret-readout `Text` is built right after `this.rolesProperties = …` rather than directly after `this.statusBar = new StatusBar();`, so the aligned four-line field-assignment block stays intact; and the README sentence was inserted after the error-reveal sentence, reflowing the rest of the bullet's paragraph to the 80-column wrap.
+
+**Automated checks.** `npm run typecheck` clean; `npm test` 72 files / 1097 tests green, including U1–U7 in `tests/textFormat.test.ts` (written first and seen failing on the missing export). `npx vite build` succeeds (only the existing chunk-size warning). `frontend/package.json` untouched; the worktree's `frontend/node_modules` is an untracked symlink to the main tree's, whose `@jimka/typescript-ui` resolves to the local 0.10.0 checkout.
+
+**Manual verification — all through the running app UI** (worktree backend on :8000 and Vite on :5173, driven with chrome-devtools, readout read from the DOM and a MutationObserver log of its text):
+
+- M1: a new query tab shows `Ln 1, Col 1` left of the user badge.
+- M2: typing `SELECT 1` updates per keystroke, ending at `Ln 1, Col 9`; typing a second line also logged one update per key.
+- M3: Shift+Home → `Ln 1, Col 1 (8 chars selected)`.
+- M4: with the caret at the end of a two-line document, Ctrl+A → `Ln 2, Col 4 (12 chars, 2 lines selected)` (caret unchanged, only `"selectionchange"` fired).
+- M5: opened via the Queries rail's **Recent** list → *Open* (the Saved list was empty; both seed `initialSql` the same way): the new tab showed `Ln 1, Col 8` for seeded `SELEC 1`, the caret at the end of the text, not `Ln 1, Col 1`.
+- M6: a table Data tab hides the readout, and the badge sits at exactly the same x as with no tab open (spacer end 2430px, badge 2434px) — no gap, so no `StatusBar`/`HBox` defect to log. Back on the query tab it shows that tab's last position.
+- M7: two query tabs at `Ln 1, Col 7` and `Ln 1, Col 14`; switching shows each tab's own position.
+- M8: closing the active query tab with another query tab surviving switched the readout to the survivor's position; closing a table tab whose survivor was a query tab did the same; closing the active query tab when the survivor was a table tab hid it; *Close all* hid it.
+- M9: a query tab torn out into a float (dragging its tab over the Properties pane) — clicking into the float's editor and typing updated the readout. See the finding below for the one case where it does not.
+- M10: running `SELEC 1` selected `SELEC` and the readout showed `Ln 1, Col 6 (5 chars selected)`; typing then cleared it to a plain caret position.
+- Accessibility: checked in the DOM only (no screen reader): the readout `<span>` carries `aria-live="off"` inside the status bar's `aria-live="polite"` strip.
+
+No new console errors (only the pre-login 401 and the 400 from the deliberate `SELEC` error).
+
+**Finding — logged in `LIBRARY_NOTES.md`, not worked around.** With a query tab in a float and every tiled tab then closed, the Dock emits `focus(null)` even though the float's panel is still open, and clicking into its editor does not re-emit `"focus"` (the float is already frontmost and its tab already active). The readout therefore stays hidden while typing there until the float's tab label is clicked, at which point it shows the correct, already-stored position (confirming the store-while-inactive path of `setCaretReadout`). The same gap affects every feature keyed on the Dock's focused panel, so the fix belongs in the library's `recomputeFocusAfterClose`.
