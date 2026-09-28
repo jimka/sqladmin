@@ -10,7 +10,9 @@ nothing here dials a real Postgres.
 from __future__ import annotations
 
 import json
+from typing import cast
 
+import asyncpg
 import pytest
 
 from app import connections
@@ -229,7 +231,7 @@ class _CodecRecordingConn:
 async def test_init_connection_registers_json_and_text_codecs() -> None:
     conn = _CodecRecordingConn()
 
-    await connections._init_connection(conn)
+    await connections._init_connection(cast(asyncpg.Connection, conn))
 
     json_codec = {"encoder": json.dumps, "decoder": json.loads, "schema": "pg_catalog"}
     text_codec = {"encoder": str, "decoder": str, "schema": "pg_catalog", "format": "text"}
