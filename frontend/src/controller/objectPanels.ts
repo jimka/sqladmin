@@ -307,7 +307,7 @@ export class ObjectPanels {
                     return;
                 }
 
-                this.reveal.refreshNavigator();
+                this.reveal.refreshNavigatorAfter({ action: "alter", kind: ref.kind, schema: ref.schema });
 
                 try {
                     const [reloadedDefinition, reloadedColumns] = await this.fetchDefinitionAndColumns(ref);
@@ -584,7 +584,7 @@ export class ObjectPanels {
                     return;
                 }
 
-                this.reveal.refreshNavigator();
+                this.reveal.refreshNavigatorAfter({ action: "alter", kind: "function", schema: ref.schema, sqlEdited: true });
 
                 try {
                     const reloaded = await getFunctionDefinition(ref, signature);

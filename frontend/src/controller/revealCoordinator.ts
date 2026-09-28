@@ -1,16 +1,19 @@
 // Owns the two sidebar trees' reveal/select wiring — the "find this node, bring
 // its tree's view forward, select it" tail repeated across seven call sites in
 // SqlAdminController.ts before this split. No library value import:
-// `ExplorerTree`/`TreeNode` are type-only and
+// `ExplorerTree`/`TreeNode` are type-only,
 // `matchesObject`/`matchesRole`/`matchesRoleSection` come from the pure
-// navigator/revealMatch.ts, so this module needs no DOM under node vitest —
-// mirroring startPageWelcome.ts's own header.
+// navigator/revealMatch.ts, and `navigatorScopeFor` from the equally pure
+// navigator/navigatorRefresh.ts, so this module needs no DOM under node
+// vitest — mirroring startPageWelcome.ts's own header.
 
 import type { TreeNode } from "@jimka/typescript-ui/component/tree";
 import type { ExplorerTree } from "../shell/explorerTree";
 import type { DbObjectRef } from "../contract";
 import type { NodeMatch } from "../navigator/revealMatch";
 import { matchesObject, matchesRole, matchesRoleSection } from "../navigator/revealMatch";
+import type { DdlChange, NavigatorExplorerTree } from "../navigator/navigatorRefresh";
+import { navigatorScopeFor } from "../navigator/navigatorRefresh";
 
 /** What a reveal does once its node is found. */
 export interface RevealOptions {
@@ -33,7 +36,7 @@ export class RevealCoordinator {
     private readonly connectionId: string;
     private readonly database: string | undefined;
 
-    private _navigator: ExplorerTree | null = null;
+    private _navigator: NavigatorExplorerTree | null = null;
     // The Roles rail's tree, registered the same way the navigator is, so a role
     // opened from a route or a link can drive its selection too.
     private _rolesTree: ExplorerTree | null = null;
@@ -57,9 +60,9 @@ export class RevealCoordinator {
 
     /**
      * Register the navigator tree so the focused tab can drive its
-     * selection and table-DDL launchers can trigger its top-level `refresh`.
+     * selection and DDL flows can trigger its targeted refresh.
      */
-    setNavigator(tree: ExplorerTree): void {
+    setNavigator(tree: NavigatorExplorerTree): void {
         this._navigator = tree;
     }
 
@@ -91,9 +94,9 @@ export class RevealCoordinator {
         this._showRolesView = select;
     }
 
-    /** Refresh the navigator's top level (every DDL flow's success path). */
-    refreshNavigator(): void {
-        this._navigator?.refresh?.();
+    /** Bring the navigator in step with one successful DDL, re-reading only what `change` can have affected. */
+    refreshNavigatorAfter(change: DdlChange): void {
+        void this._navigator?.refreshScope(navigatorScopeFor(change));
     }
 
     /** Select `node` in the navigator (the focus-driven sidebar sync). */

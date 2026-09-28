@@ -11,7 +11,11 @@
 // collapse/re-expand does not refetch. The load lifecycle itself (arm/fetch/
 // map/restore/default-expand/settle) is owned by shell/explorerTree.ts's
 // ExplorerTreeBase — this class supplies only its own load/toNodes/
-// applyDefaultExpansion.
+// applyDefaultExpansion. That full reset runs only for the initial load and
+// the Refresh tool: a DDL change goes through refreshScope instead, which
+// re-reads just the schema list and/or the affected schemas and merges them
+// into the existing nodes (navigatorRefresh.ts), so expansion, selection and
+// scroll survive.
 
 import { callable } from "@jimka/typescript-ui/core";
 import { IconLabelTreeNodeRenderer }            from "@jimka/typescript-ui/component/tree";
@@ -29,8 +33,9 @@ import { circle_nodes }                         from "@jimka/typescript-ui/glyph
 import type { DbObjectKind, DbObjectRef }       from "../contract";
 import { getFunctions, getIndexes, getObjects, getSchemas, getTypes } from "../data/api";
 import { ExplorerTreeBase }                     from "../shell/explorerTree";
-import type { ExplorerTree }                    from "../shell/explorerTree";
 import { KIND_GLYPH }                           from "./objectGlyphs";
+import { loadedSchemaNames, reconcileNodes }    from "./navigatorRefresh";
+import type { NavigatorExplorerTree, NavigatorScope } from "./navigatorRefresh";
 import { isRelationKind, objectCategories }     from "./objectKinds";
 import { showObjectMenu }                       from "./objectMenu";
 import type { SqlAdminController }              from "../SqlAdminController";
@@ -103,12 +108,19 @@ function nodeGlyph(node: TreeNode): string {
 }
 
 /** Build the navigator Tree, wired to open tables and report load errors. */
-class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements ExplorerTree {
+class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements NavigatorExplorerTree {
     private readonly conn:       string;
     // The logged-in database, whose schemas are the tree's top level. `?? ""`
     // covers only DOM-less callers that omit it; in-app it is always set.
     private readonly database:   string;
     private readonly contextMenu = Menu();
+
+    // Staleness guards for refreshScope's fetches, mirroring QueryPanel's
+    // runSeq: a fetch applies its result only if its counter still holds the
+    // value it recorded, so an older fetch resolving after a newer one is
+    // dropped. One counter for the schema list, one per schema name.
+    private _schemaListSeq = 0;
+    private readonly _schemaSeq = new Map<string, number>();
 
     constructor(controller: SqlAdminController) {
         super(controller, controller.layout.bindTreeExpansion("database"));
@@ -214,6 +226,30 @@ class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements Expl
         return schemas.map(s => schemaNode(this.conn, this.database, s.name));
     }
 
+    /**
+     * Bring the tree in step with a DDL change without resetting it: re-read
+     * the schema list and/or the named schemas' object lists, and merge the
+     * fresh nodes into the existing ones by identity, so every surviving
+     * node keeps its expansion and selection. Waits for any running full
+     * load first, and saves the expansion afterwards, since a merge can drop
+     * an expanded node.
+     *
+     * @param scope - What to re-read (see navigatorScopeFor).
+     */
+    async refreshScope(scope: NavigatorScope): Promise<void> {
+        await this.whenLoaded();
+
+        if (scope.schemaList) {
+            await this.reconcileSchemaList();
+        }
+
+        const names = scope.schemas === "allLoaded" ? loadedSchemaNames(this.getNodes()) : scope.schemas;
+
+        await Promise.all(names.map(name => this.reconcileSchema(name)));
+
+        this.saveExpansion();
+    }
+
     // A single-schema database: expand that lone schema immediately so its
     // category folders show without an extra click. nodes[0] IS that schema's
     // own TreeNode (see schemaNode below); expandNode loads its children via
@@ -222,6 +258,96 @@ class NavigatorTree extends ExplorerTreeBase<{ name: string }[]> implements Expl
         if (nodes.length === 1) {
             this.expandNode(nodes[0]);
         }
+    }
+
+    /** Re-read the schema list and merge it into the root level, keeping every surviving schema node. */
+    private async reconcileSchemaList(): Promise<void> {
+        const seq = ++this._schemaListSeq;
+
+        try {
+            const fresh = this.toNodes(await this.load());
+
+            if (seq !== this._schemaListSeq) {
+                return;
+            }
+
+            const merged = reconcileNodes(this.getNodes(), fresh);
+
+            this.setChildren(null, merged.children);
+            merged.changed.forEach(node => this.notifyNodeChanged(node));
+        } catch (error) {
+            this.controller.notifyError(error);
+        }
+    }
+
+    /**
+     * Re-read one loaded schema's object list and merge it into that schema's
+     * categories and leaves. An unloaded schema is skipped without a fetch:
+     * its next expand loads fresh data anyway.
+     *
+     * @param name - The schema to re-read.
+     */
+    private async reconcileSchema(name: string): Promise<void> {
+        if (!this.isSchemaLoaded(name)) {
+            return;
+        }
+
+        const seq = (this._schemaSeq.get(name) ?? 0) + 1;
+
+        this._schemaSeq.set(name, seq);
+
+        try {
+            const fresh = await loadObjects(this.conn, this.database, name);
+
+            if (seq !== this._schemaSeq.get(name)) {
+                return;
+            }
+
+            // Looked up after the fetch: a full refresh or a schema-list merge may have replaced it meanwhile.
+            const schemaNode = this.getNodes().find(node => node.label === name);
+
+            if (schemaNode === undefined || schemaNode.children === undefined) {
+                return;
+            }
+
+            this.mergeSchemaChildren(schemaNode, fresh);
+        } catch (error) {
+            this.controller.notifyError(error);
+        }
+    }
+
+    /**
+     * Merge a schema's fresh category nodes into its existing ones, then each
+     * surviving category's fresh leaves into its existing leaves, and repaint
+     * every kept node whose label or data changed — last, once the merged
+     * lists are committed.
+     *
+     * @param schemaNode - The loaded schema node to update.
+     * @param fresh - The schema's freshly fetched category nodes.
+     */
+    private mergeSchemaChildren(schemaNode: TreeNode, fresh: TreeNode[]): void {
+        const categories = reconcileNodes(schemaNode.children ?? [], fresh);
+        const changedLeaves: TreeNode[] = [];
+
+        for (const { existing, fresh: freshCategory } of categories.kept) {
+            const leaves = reconcileNodes(existing.children ?? [], freshCategory.children ?? []);
+
+            this.setChildren(existing, leaves.children);
+            changedLeaves.push(...leaves.changed);
+        }
+
+        this.setChildren(schemaNode, categories.children);
+        changedLeaves.forEach(node => this.notifyNodeChanged(node));
+        categories.changed.forEach(node => this.notifyNodeChanged(node));
+    }
+
+    /**
+     * @param name - A schema's name.
+     *
+     * @returns True when that schema's node is in the tree with its children loaded.
+     */
+    private isSchemaLoaded(name: string): boolean {
+        return this.getNodes().find(node => node.label === name)?.children !== undefined;
     }
 }
 

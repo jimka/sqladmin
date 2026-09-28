@@ -38,8 +38,8 @@ export interface DdlDraft {
 export interface DdlFormPanelOptions extends DdlExecuteDeps, DdlDraft {
     /** Title of the SQL review dialog the panel's `Review SQL…` tool opens. */
     reviewTitle: string;
-    /** Run after a successful execute. */
-    onSuccess: (result: QueryStatusResult) => void;
+    /** Run after a successful execute; `sqlEdited` is true when the executed SQL differs from the seeded preview. */
+    onSuccess: (result: QueryStatusResult, sqlEdited: boolean) => void;
 }
 
 /**
