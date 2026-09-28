@@ -1,6 +1,6 @@
 ---
 depends-on: [typescript-ui-0-10-0-upgrade]
-touches-shared: [frontend/src/SqlAdminController.ts, frontend/src/controller/controllerText.ts]
+touches-shared: [frontend/src/SqlAdminController.ts, frontend/src/controller/controllerText.ts, LIBRARY_NOTES.md]
 ---
 
 # Dock `beforeclose` Unsaved-Changes Guard — Implementation Plan
@@ -350,7 +350,7 @@ body runs.
    "SqlAdminController's beforetabclose veto" with "SqlAdminController's Dock
    "beforeclose" veto". Check: `grep -rn beforetabclose frontend/src` → zero matches.
 8. **Add a `LIBRARY_NOTES.md` entry** at the top (newest first), titled
-   `` ## ✂️🔎 `Dock.on("beforeclose")` types a window close's controller as `TabCloseController` (0.10.0, symlinked) ``.
+   `` ## ✂️🔎 `Dock.on("beforeclose")` types a window close's controller as `TabCloseController` (0.10.0) ``.
    Say: `Dock.ts:2275` (and the `DockOptions.listeners.beforeclose` entry at `:108`)
    types the listener's controller as `TabCloseController`, while `emit` (`:2365`)
    and `onFloatBeforeClose` (`:1730`) pass a `WindowCloseController` for a window

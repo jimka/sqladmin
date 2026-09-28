@@ -115,13 +115,23 @@ clean again if the text goes back to that. "Save…" stores a copy and does not 
 tab clean. That is the meaning the close guard already uses, so the dot follows it
 unchanged.[^query-dirty]
 
-### One library papercut is logged
+### One library defect is logged; the app adds no workaround
 
-The 0.10.0 changelog's `TabBar`/`TabButton` entry describes the dot as "trailing a
-tab's label … a real content-row child". The code places it over the leading glyph's
-upper-left corner as a raw overlay, and hides it on a tab with no glyph. The code works
-as its own doc comments say, so only the changelog is wrong. A `LIBRARY_NOTES.md` entry
-records the mismatch and the glyph-less-tab gap. No workaround is needed.
+The corner badge over the leading glyph is the library's intended design.[^badge-intended]
+Three things around it are wrong in the library:
+
+- **A tab with no glyph shows no dot.** `TabButton.ts:554` computes
+  `shown = this._modified && glyph !== null`, so a glyph-less tab marked modified
+  shows nothing. This is a code defect; the library's own `TabDemoPanel` reproduces it.
+- **The modified state has no accessible exposure.** The dot is visual only: no ARIA
+  attribute, no label text. A screen-reader user gets no cue that a tab is dirty.
+- **The docs describe the old placement.** They still say the dot trails the label.
+
+A `LIBRARY_NOTES.md` entry records all three and recommends a 0.10.x patch release:
+a trailing-dot fallback for glyph-less tabs, an accessible cue, and the doc
+corrections. SQLAdmin's dot renders correctly, because every tab has a glyph. Until
+the patch ships, SQLAdmin's dirty tabs have no screen-reader cue. The app adds no
+workaround (memory "Fix in library, not workaround").
 
 ---
 
@@ -328,16 +338,25 @@ reads it only when called.
      `grep -n "_dirtyTabs" frontend/src/SqlAdminController.ts` → 4 matches (field,
      construction, `track`, `untrack`); `npm run typecheck` → clean.
 6. **Add a `LIBRARY_NOTES.md` entry** at the top (newest first), titled
-   `` ## ✂️🔎 0.10.0 changelog misdescribes where the tab modified dot renders (0.10.0, symlinked) ``.
-   Say: the changelog's `TabBar.setEntryModified` / `TabButton.setModified` entry
-   (`docs/reference/changelog/0.10.0.md:599-603`) calls the dot "trailing a tab's
-   label … a real content-row child". `TabButton.setModified` (`TabButton.ts:470`)
-   actually raw-appends it over the leading glyph's upper-left corner, and
-   `positionModifiedBadge` (`TabButton.ts:546`) hides it when the tab has no leading
-   glyph, so a glyph-less tab marked modified shows nothing. SQLAdmin is unaffected
-   (every tab has a glyph). A fix would correct the changelog text, and either document
-   the glyph requirement on `Tab.setTabModified`/`Dock.setPanelModified` or fall back to
-   a label-side dot for glyph-less tabs.
+   `` ## 🐞🔎 Tab modified dot: glyph-less tabs show nothing, no accessible cue, docs describe the old placement (0.10.0) ``.
+   Say, with paths under `typescript-ui/packages/lib`:
+   - **Design is fine.** The dot is a badge over the leading glyph's upper-left
+     corner (`TabButton.setModified`, `TabButton.ts:470`). typescript-ui commit
+     `df98c1f6` moved it there from trailing the label on purpose.
+   - **Code defect.** `positionModifiedBadge` computes
+     `shown = this._modified && glyph !== null` (`TabButton.ts:554`), so a tab with
+     no glyph marked modified shows no dot at all. The library's `TabDemoPanel`
+     reproduces it.
+   - **Accessibility gap.** The modified state has no ARIA or other accessible
+     exposure, so assistive technology cannot tell a dirty tab from a clean one.
+   - **Wrong docs.** These still describe the old trailing-the-label placement:
+     `docs/reference/changelog/0.10.0.md:599-603`, `docs/components/TabButton.md:26-37`,
+     `docs/layouts/Tab.md:107`, `docs/components/TabBar.md:64`, and the comment at
+     `TabButton.ts:21`.
+   - **Recommended fix, as a 0.10.x patch:** a trailing-dot fallback for glyph-less
+     tabs, an accessible cue for the modified state, and the doc corrections above.
+   - **SQLAdmin impact.** The dot renders (every tab has a glyph), but dirty tabs get
+     no screen-reader cue until the patch ships. No app workaround.
 7. **Run the checks** in `## Verification`, then the manual pass M1-M12.
 
 ---
@@ -483,7 +502,11 @@ Run in the worktree's `frontend/`:
   own set; merging the two is an unrelated refactor.
 - **Version bump or dependency-range change** — owned by `typescript-ui-0-10-0-upgrade`
   and the manual release steps.
-- **Fixing the changelog in the library** — logged in `LIBRARY_NOTES.md` only.
+- **Fixing the tab-dot defects in the library** (glyph-less tabs, accessible cue,
+  docs) — logged in `LIBRARY_NOTES.md` only, as a recommended 0.10.x patch.
+- **An app-side accessible cue for dirty tabs** (e.g. an `aria-label` suffix set by
+  the controller) — it belongs in the library's tab button (memory "Fix in library,
+  not workaround").
 
 ---
 
@@ -530,6 +553,11 @@ Run in the worktree's `frontend/`:
     (`TabBar.ts:1873-1875`). `LayoutSerialization.ts:330` and `:540` save and restore
     the same field for `getLayoutState`/`setLayoutState`. This matches the 0.10.0
     changelog's `Dock` and `Tab.setTabModified` entries.
+
+[^badge-intended]: typescript-ui commit `df98c1f6` moved the dot from trailing the
+    label to a badge over the glyph's corner on purpose, so the placement SQLAdmin gets
+    is the current design, not a regression. The changelog, component pages and the
+    `TabButton.ts:21` comment were not updated with that move.
 
 [^query-dirty]: `QueryPanel` builds its editor as `new CodeEditor(initialSql, …)`
     (`QueryPanel.ts:245`), so the opening text is the clean baseline, and `CodeEditor`

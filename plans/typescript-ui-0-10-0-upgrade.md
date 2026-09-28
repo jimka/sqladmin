@@ -6,11 +6,11 @@ touches-shared: [TODO.md, LIBRARY_NOTES.md, frontend/src/SqlAdminApp.ts, fronten
 
 ## Overview
 
-Adopt `@jimka/typescript-ui` 0.10.0 in SQLAdmin. The work is developed and checked against the local 0.10.0 build, which `frontend/node_modules/@jimka/typescript-ui` already symlinks to. [`frontend/package.json:20`](frontend/package.json#L20) keeps naming `^0.9.0` for the whole plan. `npm run typecheck` and all 1023 vitest tests already pass against the symlink, so none of 0.10.0's removed APIs (`Event.init`, `BodyOptions.components`, `Slider.showTicks`, `WindowBorder.setDirection`) is called from this app.
+Adopt `@jimka/typescript-ui` 0.10.0 in SQLAdmin. 0.10.0 is released (tag `v0.10.0`, on npm). The work is developed and checked against the local library checkout, which `frontend/node_modules/@jimka/typescript-ui` symlinks to and which serves the same code as the published package.[^symlink-target] [`frontend/package.json:20`](frontend/package.json#L20) keeps naming `^0.9.0` for the whole plan. `npm run typecheck` and all 1023 vitest tests already pass against the symlink, so none of 0.10.0's removed APIs (`Event.init`, `BodyOptions.components`, `Slider.showTicks`, `WindowBorder.setDirection`) is called from this app.
 
 One change is required. 0.10.0 made `Body.init` return `Promise<Body>` and removed the startup layout gate that used to hold the first layout until the web font was active. [`frontend/src/SqlAdminApp.ts:29`](frontend/src/SqlAdminApp.ts#L29) calls `Body.init` without awaiting it, so the login dialog, the shell and a deep-linked tab can now be measured against the browser's fallback font. Two cleanups follow from the release: [`frontend/src/shell/StartPage.ts:120-148`](frontend/src/shell/StartPage.ts#L120) replaces a hand-written dispose loop with `Component.disposeAllComponents()`, and about 40 source comments stop claiming that importing the library touches the DOM. The rest is bookkeeping in [`TODO.md`](TODO.md) and [`LIBRARY_NOTES.md`](LIBRARY_NOTES.md), one measurement, and a manual check of four behaviour changes the app gets for free.
 
-No step installs, bumps a version, or commits a release. The swap to the published package is a separate follow-up the user runs by hand (see [Addendum: Post-release swap](#addendum-post-release-swap-run-by-hand)).
+No step installs, bumps a version, or commits a release. The swap to the published package can be run now, but it is a manual step the user runs by hand, outside this plan (see [Addendum: Post-release swap](#addendum-post-release-swap-run-by-hand)).
 
 ---
 
@@ -268,7 +268,7 @@ This case exercised the bug 0.10.0 fixed: in a built 0.9.0 app, a `MemoryStore` 
 
 ### Noted, not fixed here
 
-- **Date cells are stricter.** The table's date-time cell editor now rejects a `T` separator, a `Z` or offset suffix, and fractional seconds. A bare `2026-09-01` typed into a `date` column reverts, because SQLAdmin models `date` as the library's `datetime` field type ([`frontend/src/data/buildModel.ts:14`](frontend/src/data/buildModel.ts#L14)). A separate plan, `date-time-column-field-types.md`, maps those types; this plan only records the behaviour in the release notes.
+- **Date cells are stricter.** The table's date-time cell editor now rejects a `T` separator, a `Z` or offset suffix, and fractional seconds. A bare `2026-09-01` typed into a `date` column reverts, because SQLAdmin models `date` as the library's `datetime` field type ([`frontend/src/data/buildModel.ts:14`](frontend/src/data/buildModel.ts#L14)). A separate plan, `date-time-column-field-types.md`, maps those types, but it waits for typescript-ui 0.11.0 and is not part of SQLAdmin 0.10.0. This plan only records the behaviour in the release notes.
 
 ---
 
@@ -313,7 +313,7 @@ This case exercised the bug 0.10.0 fixed: in a built 0.9.0 app, a `MemoryStore` 
 
 ## Non-Goals
 
-- **The dependency swap and any version bump.** `frontend/package.json` stays `^0.9.0`, and the lockfile and `THIRD-PARTY-NOTICES.md` are untouched. The swap waits for the library release, which itself waits on this verification, so it cannot be a step here. See [Addendum: Post-release swap](#addendum-post-release-swap-run-by-hand).
+- **The dependency swap and any version bump.** `frontend/package.json` stays `^0.9.0`, and the lockfile and `THIRD-PARTY-NOTICES.md` are untouched. The swap is actionable now that 0.10.0 is on npm, but version bumps are not plan work: the user runs it by hand. See [Addendum: Post-release swap](#addendum-post-release-swap-run-by-hand).
 - **`CHANGELOG.md`.** It is written at release time (see Architecture Decisions).
 - **New features 0.10.0 makes possible.** These are covered by separate plans: the Dock `beforeclose` guard, a dirty-tab indicator, query error reveal, navigator targeted refresh, `SpatialNavigation`, a selection status readout, and date/time column mapping.
 - **`resizeMode: 'outline'`.** The user decided not to adopt it.
@@ -424,9 +424,9 @@ For the release-time `CHANGELOG.md` pass. Place these under the next release's h
 
 ## Addendum: Post-release swap (run by hand)
 
-Not a step of this plan. Once `@jimka/typescript-ui` 0.10.0 is on the registry, the user runs:
+Not a step of this plan. `@jimka/typescript-ui` 0.10.0 is on the registry, so the swap can be run at any time; the user runs it by hand:
 
-1. `cd frontend && npm install @jimka/typescript-ui@^0.10.0`. This replaces the symlink with the registry copy and rewrites the range and the lockfile.
+1. `cd frontend && npm install @jimka/typescript-ui@^0.10.0`. This replaces the symlink with the registry copy and rewrites the range to `^0.10.0` and the lockfile.
 2. `ls -ld node_modules/@jimka/typescript-ui` → a real directory, not a symlink. `node -p "require('./node_modules/@jimka/typescript-ui/package.json').version"` → `0.10.0`.
 3. `rm -rf node_modules/.vite && npm run typecheck && npm test && npm run build`.
 4. Regenerate `THIRD-PARTY-NOTICES.md` per `release-steps.md`'s "Third-party notices" section.
@@ -447,7 +447,7 @@ Not a step of this plan. Once `@jimka/typescript-ui` 0.10.0 is on the registry, 
 
 [^changelog-at-release]: `plans/implemented/backend-security-config-hardening.md:389` ("`CHANGELOG.md` gains no entry — changelog text is written at release time, not in feature work") and `diagram-edge-merge-junctions.md:478` state this convention. The user's own flow (memory "Changelog via parallel plan research") builds each release entry by reading `plans/implemented/*.md`, so bullets carried in an implemented plan reach the changelog without an interim section in the file.
 
-[^symlink-target]: `frontend/node_modules` in the main tree already holds `@jimka/typescript-ui → /home/jika/typescript/typescript-ui/packages/lib`, whose `package.json` reads `0.10.0` (tag `v0.10.0`). The worktree borrows that install through the symlink. `npm install` inside the worktree would write through the symlink into the main tree and replace the library link with the registry's 0.9.0.
+[^symlink-target]: `frontend/node_modules` in the main tree already holds `@jimka/typescript-ui → /home/jika/typescript/typescript-ui/packages/lib`, whose `package.json` reads `0.10.0` (HEAD is tag `v0.10.0` plus two doc-only commits, so its code matches the published 0.10.0). The worktree borrows that install through the symlink. `npm install` inside the worktree would write through the symlink into the main tree and replace the library link with the registry's 0.9.0.
 
 [^memorystore-fixed]: 0.10.0 changelog, Fixed → Data: "A store holding 1,000 records or more now builds its view." `AbstractStore.ts:16` sets `WORKER_THRESHOLD = 1000`, compared with `>=` at line 1938. `backend/app/operations/common.py:14` sets `MAX_ROWS_PER_REQUEST = 1000`. So every truncated query result sat exactly on the threshold, and in a built 0.9.0 bundle the worker script's absolute URL did not resolve, which left the grid empty. The TODO bullet's "see `LIBRARY_NOTES.md`" pointer is dangling too: no such entry remains in that file. SQLAdmin serves no Content-Security-Policy (none in `backend/app`, `Dockerfile` or `docker-compose.yml`), so the new `worker-src blob:` requirement does not apply.
 

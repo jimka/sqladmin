@@ -475,7 +475,7 @@ private async reconcileSchema(name: string): Promise<void> {
 
 ## Potential Challenges
 
-- **The linked library, not the manifest, provides the new Tree methods.** `package.json` still says `^0.9.0`; typecheck and tests must run with `node_modules` symlinked as in step 0, and the range bump belongs to the coordinated release, not this branch.
+- **The linked library, not the manifest, provides the new Tree methods.** `package.json` still says `^0.9.0`; typecheck and tests must run with `node_modules` symlinked as in step 0, and the range bump belongs to the manual dependency swap the user runs by hand (see `typescript-ui-0-10-0-upgrade.md`, Addendum: Post-release swap), not this branch.
 - **`removePanel` disposes the draft form.** Build the `DdlChange` (which may call `form.readSpec()`) before `this.host.dock.removePanel(id)` in `openDdlPanel`.
 - **A schema load already in flight when the DDL succeeds.** Such a schema has `children === undefined`, so `refreshScope` skips it and its pending load commits whatever it read, which may predate the DDL. The window is one round trip; the Refresh tool corrects it, and no guard is added.
 - **A selected leaf that the merge removes.** `setChildren` drops it from the selection without a `"selection"` event, so the Properties inspector keeps showing the removed object — the same as today's `setNodes` reset.
@@ -506,7 +506,7 @@ private async reconcileSchema(name: string): Promise<void> {
 - **DDL typed into a query tab.** The query workspace never refreshed the navigator and still does not.
 - **Keeping a renamed schema expanded, or selecting a renamed/created object.** A renamed object is a new node and starts collapsed and unselected, as it does after today's reset.
 - **Clearing the Properties inspector when its selected object is dropped.** Unchanged from today.
-- **Bumping `@jimka/typescript-ui` in `package.json`.** Done at release time.
+- **Bumping `@jimka/typescript-ui` in `package.json`.** Done in the manual dependency swap the user runs by hand (see `typescript-ui-0-10-0-upgrade.md`, Addendum: Post-release swap).
 
 ---
 

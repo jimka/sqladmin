@@ -6,6 +6,7 @@ touches-shared:
   - frontend/src/data/api.ts
   - frontend/src/contract.ts
   - frontend/src/dock/QueryPanel.ts
+  - README.md
 ---
 
 # Query Error Position Reveal — Implementation Plan
@@ -16,7 +17,7 @@ When an ad-hoc statement fails in the query panel, jump the editor to the spot P
 
 The backend already receives the location: every asyncpg `PostgresError` carries `position`, a 1-based character offset into the query string the server parsed. Today [`_pg_error_handler` (main.py:109)](backend/app/main.py#L109) keeps only `str(exc)`. This plan adds an optional `position` field to the error body, emitted only by the two routes whose SQL is the user's own text: `POST /query` ([RunQueryCommand](backend/app/operations/run_query.py#L123)) and `POST /explain` ([ExplainQueryCommand](backend/app/operations/explain_query.py#L108)). On the frontend, [api.ts](frontend/src/data/api.ts#L101) throws a typed `ApiError` carrying that position. A new pure module converts it to an editor line/column. [QueryPanel.ts](frontend/src/dock/QueryPanel.ts#L817) reveals it on a failed Run or Explain.
 
-The main tree's `frontend/node_modules/@jimka/typescript-ui` is already a symlink to the local 0.10.0 build, and the app typechecks against it unchanged. `package.json` still names `^0.9.0`. That mismatch is expected and is not touched here.
+`revealRange` is new in typescript-ui 0.10.0, which is released. The main tree's `frontend/node_modules/@jimka/typescript-ui` is a symlink to the local library checkout, which serves the same 0.10.0 code, and the app typechecks against it unchanged. `package.json` still names `^0.9.0`. That mismatch is expected and is not touched here; the range moves in the manual dependency swap the user runs by hand (see `typescript-ui-0-10-0-upgrade.md`, Addendum: Post-release swap).
 
 ---
 
@@ -492,7 +493,7 @@ No library-facing or exported-API docs. In-repo only:
 
 ## Potential Challenges
 
-- **`revealRange` exists only in the linked 0.10.0 build.** Against a registry `^0.9.0` install, typecheck fails on `editor.revealRange`. Confirm the symlink (step 1) before debugging anything else; do not bump `package.json`.
+- **`revealRange` exists only in 0.10.0.** Against a registry `^0.9.0` install, typecheck fails on `editor.revealRange`. Confirm the symlink (step 1) before debugging anything else; do not bump `package.json`.
 - **An `SQL_ASCII` database.** Postgres counts bytes, not characters, there, so a non-ASCII character before the error shifts the highlight right. `revealRange` clamps, so nothing throws. This is accepted, not fixed (see Non-Goals).
 - **Stale highlight after a successful re-run without touching the editor.** For example: fix the schema in another tab, come back, click Run. The old highlight stays until the next caret move or edit, because the library has no "clear highlight" call that leaves the caret alone. If this bothers you during M-checks, log it as a `LIBRARY_NOTES.md` papercut rather than working around it in the app.
 - **Two markers for one mistake.** The live lint underline (a separate decoration from `lint: true`) and the reveal highlight can point at different places. For `SELECT count(* FROM t`, lint marks the `;`/end while Postgres reports `FROM`. Both are expected. See [LIBRARY_NOTES.md](LIBRARY_NOTES.md)'s top entry on unclosed-paren diagnostics; do not try to merge them.
@@ -522,7 +523,7 @@ No library-facing or exported-API docs. In-repo only:
 - **An Explain error banner.** Explain keeps its toast-only error reporting.
 - **Run-selection or statement splitting.** Neither exists today. `locateSqlError`'s `sentStart` parameter is the place a future run-selection feature passes the selection start.
 - **Byte-counting `SQL_ASCII` databases.** Not corrected (see Potential Challenges).
-- **Any library change or version bump.** `package.json` keeps `^0.9.0` until the separate 0.10.0 release/upgrade step.
+- **Any library change or version bump.** `package.json` keeps `^0.9.0` until the manual dependency swap the user runs by hand (see `typescript-ui-0-10-0-upgrade.md`, Addendum: Post-release swap).
 - **Emitting `position` from routes that run server-generated SQL.** Row CRUD, catalog reads, and DDL previews do not emit it; the position would point into text the client never saw.
 
 ---
