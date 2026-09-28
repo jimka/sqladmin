@@ -8,6 +8,28 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎 `Dialog` restores focus to a disposed opener, throws, and never resolves `show()` (0.9.0, 0.10.0)
+
+Found while verifying the navigator refresh after DDL. After Create schema (or table, view)
+→ *Review SQL…* → *Execute*, the console shows `DOM handle <n> is not registered`. It
+reproduces identically on 0.9.0 and 0.10.0, so it is not an upgrade regression. Paths below
+are under `typescript-ui/packages/lib/src/typescript/lib`.
+
+`Dialog.show` stores the opener's focus as a handle (`overlay/Dialog.ts:922`,
+`_previousFocus = DOM.source.getActiveElement()`), here the create tab's *Review SQL…*
+button. Execute's success path closes that tab (`dock.removePanel`), disposing the button and
+releasing its handle. `Dialog.hide`'s finalize then calls `DOM.sink.focus(this._previousFocus)`
+unguarded (`Dialog.ts:1285-1286`), and `HandleRegistry.resolve` throws.
+
+The throw lands before `this._resolvePromise(result)` (`Dialog.ts:1289-1292`), so the
+`show()` promise never resolves. In SQLAdmin that skips `SqlPreviewDialog`'s
+`finally { errorBanner.dispose() }`, leaking one error banner per successful create-tab
+Execute. The DDL itself has already run, so no data is affected.
+
+Recommended fix: guard the restore the way `overlay/Tooltip.ts:132` already does
+(`DOM.source.isRegistered(...) && DOM.source.isConnected(...)`), and resolve the promise
+even if restoring focus fails. SQLAdmin does not work around it.
+
 ## 🐞🔎 Tab modified dot: glyph-less tabs show nothing, no accessible cue, docs describe the old placement (0.10.0)
 
 Found wiring SQLAdmin's dirty-tab indicator to `Dock.setPanelModified`. Paths below are
