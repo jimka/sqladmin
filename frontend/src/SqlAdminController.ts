@@ -53,6 +53,7 @@ import { QueryWorkspace } from "./controller/queryWorkspace";
 import { ObjectPanels } from "./controller/objectPanels";
 import { DiagramPanels } from "./controller/diagramPanels";
 import { RoleActions } from "./controller/roleActions";
+import { DirtyTabMarker } from "./controller/dirtyTabMarker";
 
 // The non-relation dock-tab glyphs (query / structure / definition / grants /
 // notes) plus the distinct diagram-tab glyphs: `diagram-project` is the FK
@@ -181,6 +182,10 @@ export class SqlAdminController implements PanelHost {
     // "beforeclose" subscription in the constructor).
     private readonly _closeBatcher: CloseRequestBatcher;
 
+    // Mirrors each open tab's isDirty() onto its tab's modified dot — see the
+    // "attach"/"close" subscriptions in the constructor.
+    private readonly _dirtyTabs: DirtyTabMarker;
+
     /**
      * Wire the Dock, StatusBar, and Properties inspector, and subscribe to the
      * Dock's panel-close and focus events.
@@ -229,11 +234,14 @@ export class SqlAdminController implements PanelHost {
         this.diagrams  = new DiagramPanels(this, this.panels, contextMenu);
         this.roles     = new RoleActions(this, this.reveal, this.panels, contextMenu);
 
+        this._dirtyTabs = new DirtyTabMarker(this.markPanelModified);
+
         // The dock disposes a closed tab's content itself (destroying every
         // registered child in its subtree) and fires "close" only on genuine
         // destruction (a tear-off fires "detach" and the panel survives). This
         // handler drops only the app's own per-panel bookkeeping: the closed
-        // query panel's held result, so it can't be exported.
+        // query panel's held result, so it can't be exported, and stops
+        // mirroring its dirty state onto the tab.
         this.dock.on("close", (e: DockPanelEvent) => {
             this.disposePanel(e.id);
             this._activeQueryResult.delete(e.id);
@@ -242,6 +250,7 @@ export class SqlAdminController implements PanelHost {
             this._queryPanelRuns.delete(e.id);
             this._caretReadouts.delete(e.id);
             this._openContents.delete(e.content);
+            this._dirtyTabs.untrack(e.content);
             this.syncCaretReadout();
         });
 
@@ -251,9 +260,13 @@ export class SqlAdminController implements PanelHost {
         // new float) — a re-attach of already-tracked content is a Set no-op,
         // and "close" (above) is the only event the Dock fires on genuine
         // content destruction, so this Set exactly mirrors what is actually
-        // open, independent of which host currently displays it.
+        // open, independent of which host currently displays it. The same
+        // first-appearance hook starts mirroring the content's isDirty() onto
+        // its tab's modified dot (DirtyTabMarker subscribes once per frame and
+        // re-syncs the dot on every attach).
         this.dock.on("attach", (e: DockPanelEvent) => {
             this._openContents.add(e.content);
+            this._dirtyTabs.track(e.content);
         });
 
         // A deferred panel whose fetch rejected: the Dock has already closed the tab,
@@ -688,6 +701,18 @@ export class SqlAdminController implements PanelHost {
                 this.dock.removePanel(id);
             }
         });
+    };
+
+    /**
+     * Show or hide panel `id`'s unsaved-changes dot. The result is ignored: it is
+     * false only for an id the Dock no longer knows, and then there is no tab to
+     * mark. Arrow field: handed to DirtyTabMarker by reference.
+     *
+     * @param id - The panel's Dock id.
+     * @param modified - Whether the panel has unsaved changes.
+     */
+    private markPanelModified = (id: string, modified: boolean): void => {
+        this.dock.setPanelModified(id, modified);
     };
 
     /**
