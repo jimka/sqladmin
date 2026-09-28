@@ -1,8 +1,8 @@
 """
 FastAPI app assembly: lifespan (start/stop the idle-session sweep), the two
 exception handlers mapping the typed taxonomy (and driver errors) to
-``(status, {detail})``, the four auth/config routes, the router includes, and
-the static mount.
+``(status, {detail, position?})``, the four auth/config routes, the router
+includes, and the static mount.
 
 Authenticated routes are namespaced ``/api/{connection_id}/...``, and every
 database-scoped route sits under ``/api/{connection_id}/db/{database}/...`` so
@@ -35,7 +35,7 @@ from .auth import log_dial_policy, login, logout, whoami
 from .config import app_config, enable_docs
 from .connections import SWEEP_INTERVAL_SECONDS, close_all_sessions, sweep_idle_sessions
 from .endpoints import ROUTERS
-from .errors import BadRequest, ConflictError, DomainError
+from .errors import DomainError, from_postgres_error
 from .static import mount_static
 
 
@@ -99,27 +99,28 @@ app.get("/api/config")(app_config)
 @app.exception_handler(DomainError)
 async def _domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """
-    Map a typed domain error to its HTTP status with a ``{detail}`` body.
+    Map a typed domain error to its HTTP status with a ``{detail}`` body, plus
+    ``position`` only when the error carries one — so every other error body
+    stays exactly ``{detail}``.
     """
-    return JSONResponse(
-        status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers
-    )
+    content: dict = {"detail": exc.detail}
+
+    if exc.position is not None:
+        content["position"] = exc.position
+
+    return JSONResponse(status_code=exc.status_code, content=content, headers=exc.headers)
 
 
 @app.exception_handler(asyncpg.PostgresError)
 async def _pg_error_handler(request: Request, exc: asyncpg.PostgresError) -> JSONResponse:
     """
     Translate a driver error into the typed taxonomy, then render it through the
-    one domain-error handler — so ``errors.py`` stays the single place a status
-    is chosen. An integrity/unique violation is a conflict; anything else the
-    server rejected is a bad request.
+    one domain-error handler — so ``errors.py``'s ``from_postgres_error`` stays
+    the single place a status is chosen. This route-agnostic path never carries
+    a ``position``: it serves server-generated SQL the client never saw, so only
+    an operation running the client's own SQL opts in (``client_sql_errors``).
     """
-    if isinstance(exc, asyncpg.exceptions.IntegrityConstraintViolationError):
-        domain: DomainError = ConflictError(str(exc))
-    else:
-        domain = BadRequest(str(exc))
-
-    return await _domain_error_handler(request, domain)
+    return await _domain_error_handler(request, from_postgres_error(exc))
 
 
 # Registration order decides nothing: no two routes can claim the same concrete

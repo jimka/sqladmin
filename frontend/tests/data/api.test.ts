@@ -2,9 +2,42 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
     getViewDefinition, getStructure, getSchemaGraph, getDatabaseGraph, runExplain, runQuery, tableExportUrl,
     setCsrfToken, csrfHeader, executeDdl, apiPath, tableRowsUrl, getObjects, previewDropTable, previewImportRows,
-    getRoleDetail, getSchemas, previewCreateTable, getDatabases, getRoles,
+    getRoleDetail, getSchemas, previewCreateTable, getDatabases, getRoles, ApiError,
 } from "../../src/data/api";
 import type { DbObjectRef } from "../../src/contract";
+
+// Sentinel body for stubFailure: a response whose body does not parse as JSON.
+const NOT_JSON = Symbol("not json");
+
+/**
+ * Stub `fetch` to answer every request with a non-OK response whose JSON body
+ * is `body` (or whose body is not JSON at all, when `body` is `NOT_JSON`).
+ */
+function stubFailure(status: number, statusText: string, body: unknown): void {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+        ok  : false,
+        status,
+        statusText,
+        json: async () => {
+            if (body === NOT_JSON) {
+                throw new SyntaxError("Unexpected token < in JSON");
+            }
+
+            return body;
+        },
+    }));
+}
+
+/** Await `promise`'s rejection and return the error it rejected with. */
+async function rejection(promise: Promise<unknown>): Promise<unknown> {
+    try {
+        await promise;
+    } catch (error) {
+        return error;
+    }
+
+    throw new Error("expected the promise to reject");
+}
 
 afterEach(() => {
     vi.restoreAllMocks();
@@ -356,6 +389,45 @@ describe("runQuery", () => {
 
         await expect(runQuery("default", "slect 1")).rejects.toThrow('syntax error at or near "slect"');
     });
+
+    it("F14: rejects with an ApiError carrying the backend's position", async () => {
+        stubFailure(400, "Bad Request", { detail: "bad", position: 8 });
+
+        const error = await rejection(runQuery("default", "select 1 x"));
+
+        expect(error).toBeInstanceOf(ApiError);
+        expect(error).toBeInstanceOf(Error);
+        expect((error as ApiError).message).toBe("bad");
+        expect((error as ApiError).position).toBe(8);
+    });
+
+    it("F15: an ApiError without a position when the body has none", async () => {
+        stubFailure(400, "Bad Request", { detail: "bad" });
+
+        const error = await rejection(runQuery("default", "select 1"));
+
+        expect(error).toBeInstanceOf(ApiError);
+        expect((error as ApiError).position).toBeUndefined();
+    });
+
+    it.each([0, -3, 2.5, "8"])("F16: drops an invalid position (%s)", async (position) => {
+        stubFailure(400, "Bad Request", { detail: "bad", position });
+
+        const error = await rejection(runQuery("default", "select 1"));
+
+        expect((error as ApiError).message).toBe("bad");
+        expect((error as ApiError).position).toBeUndefined();
+    });
+
+    it("F17: a non-JSON body becomes an ApiError with the status line", async () => {
+        stubFailure(502, "Bad Gateway", NOT_JSON);
+
+        const error = await rejection(runQuery("default", "select 1"));
+
+        expect(error).toBeInstanceOf(ApiError);
+        expect((error as ApiError).message).toBe("502 Bad Gateway");
+        expect((error as ApiError).position).toBeUndefined();
+    });
 });
 
 describe("runExplain", () => {
@@ -403,6 +475,15 @@ describe("runExplain", () => {
 
         await expect(runExplain("default", "slect 1", { analyze: true, format: "text" }))
             .rejects.toThrow("syntax error");
+    });
+
+    it("F14: rejects with an ApiError carrying the backend's position", async () => {
+        stubFailure(400, "Bad Request", { detail: "bad", position: 1 });
+
+        const error = await rejection(runExplain("default", "slect 1", { analyze: false, format: "text" }));
+
+        expect(error).toBeInstanceOf(ApiError);
+        expect((error as ApiError).position).toBe(1);
     });
 });
 

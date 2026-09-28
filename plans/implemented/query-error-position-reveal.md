@@ -545,3 +545,32 @@ No library-facing or exported-API docs. In-repo only:
 [^explain-scope]: Explain runs the same editor text through the same backend error path, and a typo caught by Ctrl+E is as common as one caught by Run. The backend already has to know its prefix length, and the frontend change is one call in the catch. Adding a banner to Explain would change its established error UX, which is out of this plan's scope.
 
 [^ddl-out]: `SqlPreviewDialog` has an editable `CodeEditor` and an `ErrorBanner` too, so it is the natural follow-up. It is left out to keep this change inside the query panel. The dialog is also still function-based (see COMPONENT_CONVENTIONS.md (g)). The definition editors send SQL wrapped in generated `CREATE OR REPLACE …` text, so their positions would need a per-surface prefix mapping. Adding `/ddl/execute` later is one `with client_sql_errors():` in `ExecuteDdlCommand.apply` plus the same frontend helpers.
+
+---
+
+## Implementation Notes
+
+### Deviations
+
+- **Test fixtures set `position` with `setattr`.** The plan's `exc.position = "8"` works at runtime, but pyright (the backend's configured checker, `typeCheckingMode = "standard"`) rejects it: asyncpg fills its error fields from the server message at runtime, so `position` is not a declared attribute. The backend tests use `setattr(exc, "position", ...)` with a comment instead. Behaviour is identical. Pyright over `app` and `tests` reports only one error, and it is outside this change (`tests/test_connections.py:232`, `_CodecRecordingConn`).
+- **M9 used a 60-line query as well as the 40-line one.** In a 40-line query, line 35 is too close to the end to sit mid-viewport. CodeMirror clamps the scroll at its maximum (`scrollTop` 419 of max 419), and the error line is in view and highlighted. That is correct, but it does not show that `"center"` centres the line. So the check was repeated with 20 more lines appended. Line 35's highlight then landed at the viewport's vertical midpoint (289.2px vs 289.5px).
+
+### Manual verification
+
+Run against the worktree's code: backend natively on :8011 (`SQLADMIN_ALLOWED_HOSTS=localhost:5432`), Vite on :5181 proxying to it, and typescript-ui 0.10.0 through the main tree's `node_modules` symlink. Driven with the chrome-devtools MCP. Statements were entered by real keystrokes, and Run/Explain were triggered with the toolbar button or the keyboard chords. The editor state (selection text, `.ts-ui-cm-reveal` highlight, caret offset, focus, scroll, banner/toast text) was read back with `evaluate_script`.
+
+Checked through the UI:
+
+- **M1**: `SELEC 1`, Run button. Toast/status: `syntax error at or near "SELEC"`. Banner ends `(line 1, column 1)`. `SELEC` is selected and highlighted, and focus is in the editor. Typing replaced `SELEC` (seen in M6).
+- **M2**: F2 text, Ctrl+Enter. Banner: `relation "nosuch_table" does not exist (line 3, column 8)`, with `nosuch_table` highlighted.
+- **M3**: `SELECT '😀', nosuch FROM (SELECT 1) s`. Only `nosuch` is highlighted, and the banner shows column 14.
+- **M4**: `SELECT (1` with the caret at line start. Banner ends `(line 1, column 10)`. The caret moved to offset 9 (end), with no highlight or selection.
+- **M5**: `SELECT 1/0` with the caret at line start. Banner shows `division by zero` with no suffix. The caret stays at 0, with no selection or highlight.
+- **M6**: after M1, typing replaced the selected token. The highlight cleared at once and the banner stayed.
+- **M7**: after M1, clicking in the editor cleared the highlight. The banner stayed.
+- **M8**: `SELEC 1` + Ctrl+E highlighted `SELEC`. `SELECT nosuch FROM (SELECT 1) s` + Ctrl+Shift+E highlighted `nosuch`. Both showed a toast only, with no banner (the banner was dismissed before the check).
+- **M9**: see Deviations. The 40-line query scrolled to show line 35, highlighted, with scroll clamped at max. The 60-line query centred it.
+- **M10**: Slow 3G network emulation. `SELEC 1`, Ctrl+Enter, then typed `x` before the response. Banner: `… (line 1, column 1)`. The editor was not moved or highlighted (caret stayed at the end of `SELEC 1x`).
+- **DDL regression**: Drop preview on a scratch table `public.qerr_scratch`, SQL edited to `DROP TABLEX foo`, then Execute. The dialog banner and toast show plain `syntax error at or near "TABLEX"`, with no suffix, highlight or selection. The scratch table was dropped afterwards.
+
+Checked only through automated tests, not through the UI or a raw API call: the exact JSON bodies. These are `{detail, position}` from `/query` and `/explain`, `{detail}` alone from the global driver-error handler and `/ddl/execute`, and 409 for an integrity violation raised inside `client_sql_errors` (B6–B11, F14–F17). The UI checks above only exercise these indirectly, through the rendered suffix and reveal.

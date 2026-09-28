@@ -1,23 +1,63 @@
 """
 RunQueryCommand: constructor validation, get_result() classification + transform,
-column-name dedup, short-name type mapping, affected-count parsing, temporal guard.
+column-name dedup, short-name type mapping, affected-count parsing, temporal guard,
+and apply()'s translation of a driver error into a positioned BadRequest.
 
 All pure-logic (no database): the constructor validates and get_result() purely
 transforms hand-set raw results, mirroring the NO_CONN style of the other
-operation tests.
+operation tests; the apply() case runs against a fake connection that fails.
 """
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import decimal
 from types import SimpleNamespace
 
+import asyncpg
 import pytest
 
-from app.errors import ValidationError
+from app.errors import BadRequest, ValidationError
 from app.operations import RunQueryCommand
 from tests.conftest import NO_CONN
+
+
+class _FailingConn:
+    """
+    Records the SQL each call executes and raises the seeded driver error from
+    it — mirrors test_type_definition.py's _FakeConn, but every query fails.
+    """
+
+    def __init__(self, error: asyncpg.PostgresError) -> None:
+        self._error: asyncpg.PostgresError = error
+        self.queries: list[str] = []
+
+    def transaction(self) -> contextlib.nullcontext:
+        """
+        A no-op stand-in for asyncpg's transaction context manager.
+        """
+        return contextlib.nullcontext()
+
+    async def prepare(self, sql: str, *args: object) -> object:
+        """
+        Record the SQL, then raise the seeded error.
+        """
+        self.queries.append(sql)
+
+        raise self._error
+
+
+def _syntax_error(position: str) -> asyncpg.PostgresSyntaxError:
+    """
+    A driver syntax error carrying ``position`` the way asyncpg stores it.
+    """
+    exc = asyncpg.PostgresSyntaxError("msg")
+    # asyncpg fills its error fields from the server message at runtime, so the
+    # type checker does not see `position` as a declared attribute.
+    setattr(exc, "position", position)
+
+    return exc
 
 
 def _attr(name: str, type_name: str) -> SimpleNamespace:
@@ -171,3 +211,14 @@ def test_affected_count_parsing(status: str, expected: int) -> None:
     op._status = status
 
     assert op.get_result()["rowCount"] == expected
+
+
+async def test_apply_attaches_the_postgres_position_to_the_bad_request() -> None:
+    conn = _FailingConn(_syntax_error("1"))
+    op = RunQueryCommand(conn, "SELEC 1")  # type: ignore[arg-type]
+
+    with pytest.raises(BadRequest) as caught:
+        await op.apply()
+
+    assert caught.value.position == 1
+    assert conn.queries == ["SELEC 1"]

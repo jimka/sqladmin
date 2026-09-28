@@ -25,6 +25,13 @@ export interface DbObjectRef {
     table?: string;
 }
 
+/** The body of every non-OK response the app's own error handlers render. */
+export interface ApiErrorBody {
+    detail: string;
+    /** 1-based character offset into the SQL the request sent; only from POST /query and /explain. */
+    position?: number;
+}
+
 /**
  * The fixed contract scalar set the backend emits (never raw Postgres types).
  * The frontend Model/Field types mirror this set.
