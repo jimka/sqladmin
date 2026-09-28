@@ -15,9 +15,18 @@ import { SqlAdminWriter }               from "./SqlAdminWriter";
 /** Rows per page for the paginated data grids (row-CRUD tables and role grants). */
 export const PAGE_SIZE = 100;
 
+// The Postgres type name information_schema reports for a zone-less timestamp.
+// Mirrors backend/app/wire.py: that column arrives as offset-less ISO text, so
+// SqlAdminWriter writes it back the same way (see SqlAdminWriter.ts).
+const ZONELESS_TIMESTAMP_TYPE = "timestamp without time zone";
+
 /** Build the AjaxStore for a table: JsonReader envelope + SqlAdminWriter. */
 export function buildStore(ref: DbObjectRef, model: Model, columns: ColumnMeta[]): AjaxStore {
     const generated = new Set(columns.filter(c => c.isGenerated).map(c => c.name));
+
+    const zoneless = new Set(
+        columns.filter(c => c.wireType === "isoString" && c.dataType === ZONELESS_TIMESTAMP_TYPE).map(c => c.name),
+    );
 
     return new AjaxStore({
         model,
@@ -28,7 +37,7 @@ export function buildStore(ref: DbObjectRef, model: Model, columns: ColumnMeta[]
             // it and read routes ignore it.
             headers: csrfHeader(),
             reader: new JsonReader({ rootProperty: "rows", totalProperty: "totalCount", mode: "envelope" }),
-            writer: new SqlAdminWriter(generated),
+            writer: new SqlAdminWriter(generated, zoneless),
             // The backend exposes per-record write endpoints (POST /rows with a
             // single object, PUT/DELETE /rows/{id}), so opt out of batch writes.
             batch: false,

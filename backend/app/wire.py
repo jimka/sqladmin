@@ -179,6 +179,8 @@ def from_wire_value(value: Any, column: ColumnMeta) -> Any:
     string becomes a ``datetime``/``date``/``time``, a numeric string becomes a
     ``Decimal``, base64 becomes ``bytes``). Values that asyncpg already binds
     directly (numbers, booleans, plain text, arrays) pass through unchanged.
+    A ``timestamp without time zone`` value always binds as a naive
+    ``datetime``.
 
     Args:
         value: the wire scalar from the decoded JSON payload.
@@ -200,7 +202,16 @@ def from_wire_value(value: Any, column: ColumnMeta) -> Any:
         if data_type in _TIME_TYPES:
             return datetime.time.fromisoformat(value)
 
-        return _parse_iso_datetime(value)
+        moment = _parse_iso_datetime(value)
+
+        if data_type in _TIMESTAMPTZ_TYPES:
+            return moment
+
+        # A zone-less timestamp: asyncpg rejects an aware datetime for it. An
+        # offset-less string (what SqlAdminWriter and the export write) keeps its wall
+        # clock; one with an offset keeps its UTC wall clock, as
+        # from_wire_filter_operand reads the same column.
+        return _to_utc(moment).replace(tzinfo=None)
 
     if wire_type is WireType.STRING:
         if data_type in _NUMERIC_AS_STRING:

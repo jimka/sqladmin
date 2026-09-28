@@ -36,6 +36,7 @@ from tests.conftest import col
         ("uuid", WireType.STRING),
         ("boolean", WireType.BOOLEAN),
         ("timestamp with time zone", WireType.ISO_STRING),
+        ("timestamp without time zone", WireType.ISO_STRING),
         ("date", WireType.ISO_STRING),
         ("json", WireType.JSON),
         ("jsonb", WireType.JSON),
@@ -147,6 +148,25 @@ def test_from_wire_timestamp_without_tz() -> None:
     )
 
     assert result == datetime.datetime(2026, 6, 28, 12, 4, 59)
+
+
+@pytest.mark.parametrize(
+    "wire_value,expected",
+    [
+        ("2026-06-28T08:00:00.000", datetime.datetime(2026, 6, 28, 8, 0)),
+        ("2026-06-28T12:04:59.500000", datetime.datetime(2026, 6, 28, 12, 4, 59, 500000)),
+        ("2026-06-28T12:04:00.000Z", datetime.datetime(2026, 6, 28, 12, 4)),
+        ("2026-06-28T14:04:00+02:00", datetime.datetime(2026, 6, 28, 12, 4)),
+    ],
+)
+def test_from_wire_timestamp_without_tz_binds_naive(wire_value: str, expected: datetime.datetime) -> None:
+    # asyncpg rejects an aware datetime for a zone-less timestamp parameter: an
+    # offset-less value keeps its wall clock, one with an offset its UTC wall
+    # clock.
+    result = from_wire_value(wire_value, col("ts", WireType.ISO_STRING, data_type="timestamp without time zone"))
+
+    assert result == expected
+    assert result.tzinfo is None
 
 
 def test_from_wire_date_and_time() -> None:
