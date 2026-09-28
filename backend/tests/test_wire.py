@@ -38,6 +38,9 @@ from tests.conftest import col
         ("timestamp with time zone", WireType.ISO_STRING),
         ("timestamp without time zone", WireType.ISO_STRING),
         ("date", WireType.ISO_STRING),
+        ("time with time zone", WireType.STRING),
+        ("timetz", WireType.STRING),
+        ("interval", WireType.STRING),
         ("json", WireType.JSON),
         ("jsonb", WireType.JSON),
         ("bytea", WireType.BASE64),
@@ -169,6 +172,13 @@ def test_from_wire_timestamp_without_tz_binds_naive(wire_value: str, expected: d
     assert result.tzinfo is None
 
 
+@pytest.mark.parametrize("data_type,value", [("interval", "1 mon"), ("time with time zone", "09:30+02")])
+def test_from_wire_text_decoded_types_pass_through(data_type: str, value: str) -> None:
+    # connections._init_connection registers a text codec for both, so the
+    # Postgres text binds as-is.
+    assert from_wire_value(value, col("x", WireType.STRING, data_type=data_type)) == value
+
+
 def test_from_wire_date_and_time() -> None:
     assert from_wire_value(
         "2026-06-28", col("d", WireType.ISO_STRING, data_type="date")
@@ -206,7 +216,6 @@ UTC = datetime.timezone.utc
         ("timestamp without time zone", "2026-06-28T12:04:00.000Z", datetime.datetime(2026, 6, 28, 12, 4)),
         ("date", "2026-06-28T00:00:00.000Z", datetime.datetime(2026, 6, 28, 0, 0)),
         ("time without time zone", "1970-01-01T09:30:00.000Z", datetime.time(9, 30)),
-        ("time with time zone", "1970-01-01T09:30:00.000Z", datetime.time(9, 30, tzinfo=UTC)),
     ],
 )
 def test_from_wire_filter_operand_temporal_types(data_type: str, wire_value: str, expected: object) -> None:
@@ -242,14 +251,6 @@ def test_from_wire_filter_operand_time_without_tz_is_naive() -> None:
     assert result.tzinfo is None
 
 
-def test_from_wire_filter_operand_time_with_tz_is_aware() -> None:
-    result = from_wire_filter_operand(
-        "1970-01-01T09:30:00.000Z", col("opens_at", WireType.ISO_STRING, data_type="time with time zone")
-    )
-
-    assert result == datetime.time(9, 30, tzinfo=UTC)
-
-
 @pytest.mark.parametrize(
     "wire_type,data_type,value",
     [
@@ -258,6 +259,8 @@ def test_from_wire_filter_operand_time_with_tz_is_aware() -> None:
         (WireType.STRING, "text", "ada"),
         (WireType.STRING, "uuid", "1234"),
         (WireType.STRING, "numeric", "10"),
+        (WireType.STRING, "time with time zone", "09:30"),
+        (WireType.STRING, "interval", "1 day"),
     ],
 )
 def test_from_wire_filter_operand_passes_non_temporal_columns_through(

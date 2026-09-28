@@ -74,17 +74,31 @@ class Session:
 # Module-global registry: cookie token -> Session.
 _sessions: dict[str, Session] = {}
 
+# asyncpg decodes these to Python values that lose information or have no
+# frontend field type: `interval` becomes a timedelta (a month becomes 30 days,
+# and str() of it is text Postgres cannot parse back), `timetz` a time whose
+# offset nothing in the grid can show or edit. Both are read and written as
+# Postgres's own text instead; wire.pg_type_to_wire maps them to
+# WireType.STRING to match.
+_TEXT_DECODED_TYPES = ("interval", "timetz")
+
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
     """
     Per-connection setup: decode json/jsonb to Python objects.
 
     asyncpg returns json/jsonb as raw text otherwise, so registering this codec
-    lets ``WireType.JSON`` values pass through already-parsed.
+    lets ``WireType.JSON`` values pass through already-parsed. ``interval`` and
+    ``timetz`` get a text codec, so both are read and written as Postgres text.
     """
     for typename in ("json", "jsonb"):
         await conn.set_type_codec(
             typename, encoder=json.dumps, decoder=json.loads, schema="pg_catalog"
+        )
+
+    for typename in _TEXT_DECODED_TYPES:
+        await conn.set_type_codec(
+            typename, encoder=str, decoder=str, schema="pg_catalog", format="text"
         )
 
 

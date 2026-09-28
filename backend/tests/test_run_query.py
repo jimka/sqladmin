@@ -131,6 +131,21 @@ def test_short_name_type_mapping() -> None:
     assert by_name == {"a": "number", "b": "boolean", "c": "isoString"}
 
 
+def test_short_name_text_decoded_types() -> None:
+    # connections._init_connection decodes interval/timetz as Postgres text, so
+    # both result columns are strings that keep that text.
+    op = RunQueryCommand(NO_CONN, "select iv, ttz")
+    op._attrs = [_attr("iv", "interval"), _attr("ttz", "timetz")]
+    op._records = [("1 mon", "09:30:00+02")]
+    op._status = "SELECT 1"
+
+    result = op.get_result()
+    by_name = {c["name"]: c["wireType"] for c in result["columns"]}
+
+    assert by_name == {"iv": "string", "ttz": "string"}
+    assert result["rows"] == [{"iv": "1 mon", "ttz": "09:30:00+02"}]
+
+
 def test_status_result_classifies_non_row_statement() -> None:
     op = RunQueryCommand(NO_CONN, "update t set x = 1")
     op._attrs = []

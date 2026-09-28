@@ -9,6 +9,8 @@ nothing here dials a real Postgres.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app import connections
@@ -209,3 +211,32 @@ async def test_close_all_sessions_closes_every_pool_and_clears_registry(monkeypa
     assert len(pools) == 2
     assert all(pool.closed is True for pool in pools)
     assert connections._sessions == {}
+
+
+# --- _init_connection ------------------------------------------------
+
+
+class _CodecRecordingConn:
+    """A stand-in connection recording each ``set_type_codec`` registration."""
+
+    def __init__(self) -> None:
+        self.codecs: list[tuple[str, dict[str, object]]] = []
+
+    async def set_type_codec(self, typename: str, **kwargs: object) -> None:
+        self.codecs.append((typename, kwargs))
+
+
+async def test_init_connection_registers_json_and_text_codecs() -> None:
+    conn = _CodecRecordingConn()
+
+    await connections._init_connection(conn)
+
+    json_codec = {"encoder": json.dumps, "decoder": json.loads, "schema": "pg_catalog"}
+    text_codec = {"encoder": str, "decoder": str, "schema": "pg_catalog", "format": "text"}
+
+    assert conn.codecs == [
+        ("json", json_codec),
+        ("jsonb", json_codec),
+        ("interval", text_codec),
+        ("timetz", text_codec),
+    ]
