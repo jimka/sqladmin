@@ -527,3 +527,29 @@ private async reconcileSchema(name: string): Promise<void> {
 [^no-arm]: Arming the signal would make a reveal issued meanwhile wait for the targeted refresh. That is not needed: typescript-ui 0.10.0's `revealByPredicate` follows `setChildren` calls made while it runs (it finds nodes added meanwhile and never returns a node the tree dropped), and an expand and a reveal share one `loadChildren` call. Waiting on `whenLoaded()` at the start is still needed, because merging into roots that `setNodes` is about to replace would be wasted work, and the expansion restore must finish before `saveExpansion` writes.
 
 [^pure-module]: `NavigatorTree.ts` imports library component modules that touch `document` at import scope, so it cannot load under the node vitest environment. Putting the scope mapping and the merge in a module with only `import type` imports keeps them unit-testable, the same split `treeExpansion.ts` (`TreeExpansionPersistence` tested against a plain `TreeExpansionHost`) and `revealMatch.ts` already use. `reconcileNodes` works on plain `TreeNode` objects, so its tests need no Tree at all.
+
+---
+
+## Implementation Notes
+
+**No deviations from the plan's design.** Every file, signature and call site landed as specified; `grep -rn 'refreshNavigatorAfter(' frontend/src/controller | wc -l` is 17 and `refreshNavigator()` has no remaining matches. `npm run typecheck`, `npm test` (1054 tests, U1–U17 included) and `vite build` pass.
+
+**Manual verification (2026-09-28).** Run against the worktree's Vite dev server and backend, with `frontend/node_modules` symlinked to the main tree (typescript-ui 0.10.0 via the local checkout), on scratch schemas `ntr_a`/`ntr_b` (tables, a `serial` PK, a secondary index, a cross-schema view), all dropped afterwards. Requests were recorded by wrapping `window.fetch` in the page. Every case below was driven **through the UI** (context menus, DDL tabs, preview dialogs, Structure-tab toolbar); none were checked through the API only.
+
+- **M1** — create table `beta2` in `ntr_a` (DDL tab, unedited SQL): leaf appeared in sorted position; expansions, selection (`alpha`) and the tree's scroll position unchanged; only `ntr_a`'s `/objects`, `/functions`, `/types`, `/indexes` fetched, no `/schemas`.
+- **M2** — dropping `dep_src` (serial PK) removed its table leaf, its `dep_src_pkey` index leaf and its owned `dep_src_id_seq` leaf.
+- **M3** — rename `alpha` → `alpha_r`: new table leaf, collapsed and unselected; `alpha_pkey (on alpha)` relabelled to `(on alpha_r)` in place (its open info tab then re-selected that same node).
+- **M4 + M8** — the `dep_src` drop above was run with `CASCADE` typed into the preview: `ntr_b`'s view disappeared and its Views category was removed; `/schemas` plus both loaded schemas' four endpoints were fetched; state kept.
+- **M5** — create schema `ntr_c` (DDL tab, unedited): appeared in sorted position, collapsed, only `/schemas` fetched. Rename `ntr_b` → `ntr_b2` (SQL edited): old node gone, new node collapsed. Drop `ntr_b2` (non-empty, `CASCADE` typed in): node gone. The unedited non-cascading drop of an *empty* schema was not run through the UI; its scope (`{ schemaList: true, schemas: [] }`) is pinned by U6.
+- **M6** — create view from `ntr_a`'s menu with the schema combo set to `ntr_c` (the plan's case with the roles swapped, both schemas loaded): only `ntr_c`'s endpoints fetched, its new Views category appeared, `ntr_a` not fetched.
+- **M7** — create table in never-expanded `ntr_c`: no object fetch; expanding it afterwards showed the table.
+- **M9** — Structure tab of `gamma`: drop index (unedited) removed the leaf with only `ntr_a` re-read; create index (SQL typed in, see below) added the leaf. The add-primary-key-constraint variant was not run.
+- **M10** — **not checked through the UI.** The function-definition save's scope (`sqlEdited: true` → everything loaded) is covered by U7/U8 and typecheck only.
+- **M11** — switching between the `alpha_pkey` and `alpha` tabs after the targeted refreshes selected each tab's node.
+- **M12** — the rail's Refresh tool still re-fetched `/schemas` and every expanded schema and restored the saved expansion.
+- **M13** — reload after the above restored the same expansion; stored expansion no longer listed the renamed/dropped `ntr_b` paths (the post-merge `saveExpansion` write).
+
+**Pre-existing behaviour observed, not changed by this branch.**
+
+- *Dialog-hosted forms do not re-seed the preview.* In the rename-table, rename-schema, drop-* and create-index dialogs, the SQL preview is seeded once on open and never follows later form edits (the new-name field, the CASCADE checkbox, the index column checkboxes) — the documented "form is a static summary" design in `SqlPreviewDialog.ts`'s header, but those forms are editable. The create-index dialog therefore always seeds an error ("requires at least one column"). To drive M3, M4, M5 and M9 the SQL was edited in the preview, which exercised the `sqlEdited` widening. For the drop dialogs this also means `form.readSpec().cascade` can disagree with the executed SQL; the mismatch only ever widens the navigator scope, never narrows it.
+- *`Dialog` focus restore throws after a DDL tab closes.* `Uncaught Error: DOM handle … is not registered` from `Dialog.ts`'s post-close focus restore (`DOM.focus`) fires when a DDL tab's `Review SQL…` flow succeeds and `removePanel` has destroyed the element focus returns to. Reproduced identically with this branch's changes stashed (create-schema flow), so it predates the targeted refresh; it is a library-side issue.
