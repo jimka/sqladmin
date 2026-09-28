@@ -565,3 +565,72 @@ Run in the worktree's `frontend/`:
     `app-wide-unsaved-changes-guard.md` decided that a query tab has no server-side
     copy, so "Save…" (which writes a named copy) does not mark it clean. Changing that
     would change the close prompt too, so it belongs in its own plan.
+
+---
+
+## Implementation Notes
+
+### Deviations
+
+- **`LIBRARY_NOTES.md` got its own documentation commit**, not a place in the code
+  commit. The entry logs a library defect and is not something the code needs, and
+  the repo's precedent (the Dock-focus entry on `feature/editor-selection-status`)
+  commits such entries on their own.
+- **The `new DirtyTabMarker(...)` line sits above the `"close"` handler's comment**,
+  not between the comment and `this.dock.on("close", …)`, so that comment stays
+  attached to the handler it describes. It still runs before either listener is
+  registered.
+- **No README or CHANGELOG change.** The plan's file table lists neither; the
+  CHANGELOG is written at release time.
+
+### Verification
+
+Automated: `npm run typecheck` clean; `npm test` 73 files / 1106 tests green, including
+D1-D9 in `tests/controller/dirtyTabMarker.test.ts` (written first and seen failing on the
+missing module). The Verification greps match: no `typescript-ui` import in the marker, one
+`dock.on("attach"`, one `setPanelModified` call.
+
+Manual, in Chrome against the worktree's Vite server (it served the worktree's
+`src/controller/dirtyTabMarker.ts`) and the symlinked 0.10.0 library, signed in to the
+local `sqladmin` database. The dot state was read from each tab button's badge element
+through `evaluate_script`, and once from a screenshot (M1), which showed the blue dot
+on the upper-left corner of the query glyph.
+
+- **M1** checked through the UI: no dot on open, dot after typing, gone after
+  clearing, back after typing again.
+- **M2** checked through the UI on `public.active_customers`'s definition tab:
+  edit gave a dot, and undoing to the original text removed it. Edit then Save
+  removed it; the status bar said "definition saved". The SQL-preview confirm
+  step was not seen in the tool output, so it is not recorded as checked.
+- **M3** checked through the UI on `public.customers`: cell edit gave a dot,
+  Refresh cleared it, and edit plus Save cleared it too. The saved change was then
+  put back with SQL.
+- **M4**: on a sequence info tab (`audit_event_seq`), toggling Cycle gave a dot
+  and toggling it back removed it. Save was not exercised, to leave the
+  sequence as it was. A *Create table* DDL tab got a dot after a name was typed.
+- **M5**, sampled only: a table data tab, a view definition tab, a sequence
+  info tab, and the database diagram (Zoom in, Fit to view) all opened with no
+  dot. Structure, function, index, type, role grants, Notes, the other diagram
+  kinds, and chart and record-view controls were not checked. No false dot was
+  seen.
+- **M6** was not checked as its own step. Every lazy tab above opened with no
+  dot, but the spinner phase was not watched.
+- **M7** checked through the UI: a dirty query tab dragged into a strip float
+  (`TabWindow`) kept its dot, and it followed clear/type inside the float.
+- **M8**: a Shift-drag was simulated with synthetic pointer events carrying
+  `shiftKey`. It produced a bare `Window` float whose tab showed the dot, and the
+  dot followed clear/type inside it.
+- **M9**: dragging the float tab back onto the tiled tab bar kept the dot, and
+  it followed edits. A split was made with synthetic pointer events to the
+  work area's right edge, which gave a new right-hand region; the dot moved with
+  the tab and kept following edits.
+- **M10** checked through the UI: a dirty table tab closed with ✕, the prompt
+  confirmed, and the reopened table had no dot. The bare float was closed by its
+  chrome ✕ (clicked through `evaluate_script`) and the prompt confirmed. Neither
+  case logged a console error; the only one in the log is the 401 from before
+  sign-in.
+- **M11**: the dirty table tab's ✕, the dirty DDL tab's ✕, and the dirty bare
+  float's ✕ each prompted. A clean table tab's ✕ closed with no prompt. This
+  was not repeated for every tab kind.
+- **M12**: the grep finds no `setLayoutState`/`getLayoutState`. After a hard
+  reload, M1 still worked.

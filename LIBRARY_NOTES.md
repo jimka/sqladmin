@@ -8,6 +8,32 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎 Tab modified dot: glyph-less tabs show nothing, no accessible cue, docs describe the old placement (0.10.0)
+
+Found wiring SQLAdmin's dirty-tab indicator to `Dock.setPanelModified`. Paths below are
+under `typescript-ui/packages/lib`.
+
+The design is fine: the dot is a badge over the upper-left corner of the tab's leading
+glyph (`TabButton.setModified`, `src/typescript/lib/component/button/TabButton.ts:470`),
+and typescript-ui commit `df98c1f6` moved it there from trailing the label on purpose.
+Three things around it are wrong:
+
+- **Code defect.** `positionModifiedBadge` computes
+  `shown = this._modified && glyph !== null` (`TabButton.ts:554`), so a tab with no glyph
+  that is marked modified shows no dot at all. The library's own `TabDemoPanel`
+  reproduces it: *Toggle Modified* on any tab but the glyph-bearing "Alpha" shows nothing.
+- **Accessibility gap.** The modified state has no ARIA or other accessible exposure, so
+  assistive technology cannot tell a dirty tab from a clean one.
+- **Wrong docs.** These still describe the old trailing-the-label placement:
+  `docs/reference/changelog/0.10.0.md:599-603`, `docs/components/TabButton.md:26-37`,
+  `docs/layouts/Tab.md:107`, `docs/components/TabBar.md:64`, and the `MODIFIED_GLYPH`
+  comment at `TabButton.ts:21`.
+
+Recommended fix, as a 0.10.x patch: a trailing-dot fallback for glyph-less tabs, an
+accessible cue for the modified state, and the doc corrections above. SQLAdmin impact: the
+dot renders, because every SQLAdmin tab has a glyph, but dirty tabs get no screen-reader
+cue until the patch ships. SQLAdmin does not work around it.
+
 ## 🐞🔎 `Dock` drops focus to `null` when the tiled area empties while a float still holds a panel (0.10.0)
 
 Found wiring SQLAdmin's status-bar caret readout to the Dock's `"focus"` event. With one
