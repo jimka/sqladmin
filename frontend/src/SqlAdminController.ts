@@ -11,7 +11,7 @@
 import { Dialog, Dock, Menu, Notification, NotificationHistoryButton, Tooltip }                                                                                                                    from "@jimka/typescript-ui/overlay";
 import type { DockPanelEvent, DockExceptionEvent }                                                                                                                                                 from "@jimka/typescript-ui/overlay";
 import { Component }                                                                                                                                                                               from "@jimka/typescript-ui/core";
-import { HBox, Tab }                                                                                                                                                                               from "@jimka/typescript-ui/layout";
+import { HBox }                                                                                                                                                                                    from "@jimka/typescript-ui/layout";
 import { StatusBar }                                                                                                                                                                               from "@jimka/typescript-ui/component/container";
 import { Text }                                                                                                                                                                                    from "@jimka/typescript-ui/component/input";
 import { Glyph }                                                                                                                                                                                   from "@jimka/typescript-ui/component/display";
@@ -40,8 +40,10 @@ import { kindDisplayLabel }                                                     
 import { LayoutStore }                                                                                                                                                                             from "./data/layoutStore";
 import {
     panelId, structurePanelId,
-    panelTooltip as buildPanelTooltip, errorMessage, panelIdsFor, tableExportFilename,
+    panelTooltip as buildPanelTooltip, errorMessage, panelIdsFor, tableExportFilename, closeGuardPrompt,
 } from "./controller/controllerText";
+import { CloseRequestBatcher } from "./controller/closeRequestBatcher";
+import type { VetoedClose } from "./controller/closeRequestBatcher";
 import { downloadUrl } from "./data/download";
 import { PanelLoadError } from "./controller/panelHost";
 import type { PanelHost, OpenPanel, RoleGrants, AsyncPanelSpec, ShowObjectContextMenu } from "./controller/panelHost";
@@ -170,6 +172,10 @@ export class SqlAdminController implements PanelHost {
     // hasUnsavedWork() below.
     private readonly _openContents = new Set<Component>();
 
+    // Groups one gesture's "beforeclose" events into one confirm (see the
+    // "beforeclose" subscription in the constructor).
+    private readonly _closeBatcher: CloseRequestBatcher;
+
     /**
      * Wire the Dock, StatusBar, and Properties inspector, and subscribe to the
      * Dock's panel-close and focus events.
@@ -269,48 +275,17 @@ export class SqlAdminController implements PanelHost {
             this.syncAddressBarFor(e ? e.id : null);
         });
 
-        // Dirty-tab close guard. Wired once per Tab region — the region a tab
-        // lives in when the Dock is split or a tab is torn into a float, not
-        // just the region present at construction. "attach" and "move" are
-        // the only two Dock events that can introduce a region this
-        // controller has not wired yet; a WeakSet dedupes so each Tab
-        // instance gets exactly one listener.
-        const wiredTabRegions = new WeakSet<Tab>();
+        // Dirty-tab close guard. The Dock's "beforeclose" covers a tab's ✕ (tiled or
+        // floated), the tab menu's close rows, and a float window's chrome ✕. Every
+        // event of one gesture joins one batch, so a float holding several dirty tabs
+        // asks once — see controller/closeRequestBatcher.ts.
+        this._closeBatcher = new CloseRequestBatcher(this.confirmVetoedClose);
 
-        const wireBeforeTabClose = (e: DockPanelEvent): void => {
-            const region = e.content.getParentComponent();
-            const tab    = region?.getLayoutManager();
+        this.dock.on("beforeclose", (e: DockPanelEvent, closeController) => {
+            const dirty = e.content.isDirty();
 
-            if (!(tab instanceof Tab) || wiredTabRegions.has(tab)) {
-                return;
-            }
-
-            wiredTabRegions.add(tab);
-            tab.on("beforetabclose", (content, closeController) => {
-                if (!content.isDirty()) {
-                    return;
-                }
-
-                // The veto must happen synchronously; Dialog.confirm is
-                // async, so veto now and close the tab ourselves once the
-                // user answers. dock.removePanel is the programmatic path
-                // "beforetabclose" does not guard, so this cannot re-trigger
-                // the same prompt.
-                closeController.preventDefault();
-
-                void Dialog.confirm(
-                    "Close tab",
-                    "This tab has unsaved changes. Are you sure that you want to close it?",
-                ).then(confirmed => {
-                    if (confirmed) {
-                        this.dock.removePanel(content.getId());
-                    }
-                });
-            });
-        };
-
-        this.dock.on("attach", wireBeforeTabClose);
-        this.dock.on("move",   wireBeforeTabClose);
+            this._closeBatcher.add(e.id, dirty, closeController);
+        });
 
         // Show the connected database in the status bar's left zone.
         this.statusBar.setMessage(`Database: ${this._statusScope}`);
@@ -674,6 +649,27 @@ export class SqlAdminController implements PanelHost {
 
         return false;
     }
+
+    /**
+     * Ask once about a gesture's vetoed closes, and close every vetoed panel on
+     * "yes". dock.removePanel is the unguarded programmatic path, so this cannot
+     * re-trigger the prompt. Arrow field: handed to CloseRequestBatcher by reference.
+     *
+     * @param close - The batch's vetoed panel ids and dirty count.
+     */
+    private confirmVetoedClose = (close: VetoedClose): void => {
+        const prompt = closeGuardPrompt(close.ids.length, close.dirtyCount);
+
+        void Dialog.confirm(prompt.title, prompt.message).then(confirmed => {
+            if (!confirmed) {
+                return;
+            }
+
+            for (const id of close.ids) {
+                this.dock.removePanel(id);
+            }
+        });
+    };
 
     /**
      * Record a query panel's latest run for the address-bar sync, and

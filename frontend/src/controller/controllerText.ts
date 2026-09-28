@@ -219,6 +219,43 @@ export function tableExportFilename(ref: DbObjectRef, format: "csv" | "json"): s
     return `${[ref.schema, ref.name].filter(Boolean).join(".") || "export"}.${format}`;
 }
 
+/** Title and message for the unsaved-changes close confirm. */
+export interface CloseGuardPrompt {
+    readonly title  : string;
+    readonly message: string;
+}
+
+/**
+ * The unsaved-changes confirm for one gesture's vetoed closes. One closing tab
+ * keeps the single-tab text; several say how many are dirty, and — when some
+ * are clean (a float window's ✕ over mixed tabs) — out of how many.
+ *
+ * @param closingCount - How many tabs close on "yes".
+ * @param dirtyCount - How many of those have unsaved changes; at least 1.
+ * @returns The confirm dialog's title and message.
+ */
+export function closeGuardPrompt(closingCount: number, dirtyCount: number): CloseGuardPrompt {
+    if (closingCount === 1) {
+        return {
+            title  : "Close tab",
+            message: "This tab has unsaved changes. Are you sure that you want to close it?",
+        };
+    }
+
+    const question = "Are you sure that you want to close them?";
+
+    if (dirtyCount === closingCount) {
+        return { title: "Close tabs", message: `${dirtyCount} tabs have unsaved changes. ${question}` };
+    }
+
+    const verb = dirtyCount === 1 ? "has" : "have";
+
+    return {
+        title  : "Close tabs",
+        message: `${dirtyCount} of the ${closingCount} tabs being closed ${verb} unsaved changes. ${question}`,
+    };
+}
+
 /** Prefer an AjaxError's parsed {detail}; fall back to a message or string. */
 export function errorMessage(error: unknown): string {
     const e = error as { body?: unknown; message?: unknown };

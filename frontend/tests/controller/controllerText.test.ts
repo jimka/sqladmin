@@ -2,7 +2,8 @@
 // panelTooltip, elideName, errorMessage, detailOf — against the plan's
 // `## Expected Behaviour` cases 1-14 (plans/implemented/sqladmin-controller-split.md).
 // tableExportFilename is a later addition (see the plan's `## Implementation
-// Notes`), pinned in its own describe block below.
+// Notes`), pinned in its own describe block below. closeGuardPrompt is pinned
+// against cases P1-P5 of plans/implemented/dock-beforeclose-unsaved-guard.md.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -11,7 +12,7 @@ import {
     relationDependencyPanelId, relationInheritancePanelId, dependencyPanelId, inheritancePanelId,
     databaseDiagramPanelId, ddlPanelId, notesPanelId, roleGrantsPanelId, roleGrantsDiagramPanelId,
     roleMembershipDiagramPanelId, panelIdsFor, panelTooltip, elideName, errorMessage, detailOf,
-    tableExportFilename,
+    tableExportFilename, closeGuardPrompt,
 } from "../../src/controller/controllerText";
 import type { DbObjectRef } from "../../src/contract";
 
@@ -164,5 +165,42 @@ describe("tableExportFilename", () => {
         const dbRef: DbObjectRef = { connectionId: "default", database: "sqladmin", kind: "database" };
 
         expect(tableExportFilename(dbRef, "csv")).toBe("export.csv");
+    });
+});
+
+describe("closeGuardPrompt (cases P1-P5)", () => {
+    it("P1: one dirty tab keeps the single-tab text", () => {
+        expect(closeGuardPrompt(1, 1)).toEqual({
+            title  : "Close tab",
+            message: "This tab has unsaved changes. Are you sure that you want to close it?",
+        });
+    });
+
+    it("P2: three tabs, all dirty", () => {
+        expect(closeGuardPrompt(3, 3)).toEqual({
+            title  : "Close tabs",
+            message: "3 tabs have unsaved changes. Are you sure that you want to close them?",
+        });
+    });
+
+    it("P3: one dirty of three uses the singular verb", () => {
+        expect(closeGuardPrompt(3, 1)).toEqual({
+            title  : "Close tabs",
+            message: "1 of the 3 tabs being closed has unsaved changes. Are you sure that you want to close them?",
+        });
+    });
+
+    it("P4: two dirty of four uses the plural verb", () => {
+        expect(closeGuardPrompt(4, 2)).toEqual({
+            title  : "Close tabs",
+            message: "2 of the 4 tabs being closed have unsaved changes. Are you sure that you want to close them?",
+        });
+    });
+
+    it("P5: two tabs, both dirty", () => {
+        expect(closeGuardPrompt(2, 2)).toEqual({
+            title  : "Close tabs",
+            message: "2 tabs have unsaved changes. Are you sure that you want to close them?",
+        });
     });
 });
