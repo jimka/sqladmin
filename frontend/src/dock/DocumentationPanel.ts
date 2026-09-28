@@ -29,7 +29,7 @@ class DocumentationPanel extends MarkdownDocumentPanel {
         // markClean() right after onChange (NotesStore.save persists
         // synchronously, no network round trip) keeps isDirty() reporting the
         // truth for the app-wide unsaved-changes guards (SqlAdminController's
-        // beforetabclose veto, SqlAdminShell's beforeunload guard): text that
+        // Dock "beforeclose" veto, SqlAdminShell's beforeunload guard): text that
         // is already durably saved must never read as unsaved.
         this.on("change", ({ value }) => {
             onChange(value);

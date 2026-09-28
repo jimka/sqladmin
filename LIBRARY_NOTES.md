@@ -8,6 +8,24 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️🔎 `Dock.on("beforeclose")` types a window close's controller as `TabCloseController` (0.10.0)
+
+Found moving SQLAdmin's dirty-tab close guard onto the Dock-level `"beforeclose"` event.
+`Dock.on("beforeclose")` (`Dock.ts:2275`) and the `DockOptions.listeners.beforeclose`
+entry (`:108`) type the listener's controller as `TabCloseController`. But the Dock also
+forwards a float window's chrome ✕ through the same event: `onFloatBeforeClose` (`:1730`)
+passes the window's `WindowCloseController`, and `emit` (`:2365`) is typed
+`TabCloseController | WindowCloseController`. The two interfaces have the same shape, so
+the app compiles and `preventDefault()` works on either; the listener's declared type is
+simply narrower than what it receives. A fix would type the parameter as
+`TabCloseController | WindowCloseController`, or as one shared `CloseController`.
+
+Related: a listener cannot tell a tab ✕ from a window ✕ by the payload, since `window`
+names the float in both cases. SQLAdmin does not need to — it groups the events one
+gesture raises by synchronous turn (`frontend/src/controller/closeRequestBatcher.ts`),
+which also gives the tab menu's *Close all* rows one prompt — so this is noted, not
+worked around.
+
 ## ✂️🩹🔎 JsonWriter writes every Date as a UTC instant, and its dirty mode cannot be extended (0.10.0)
 
 Found fixing row saves on tables with a `timestamp without time zone` column.

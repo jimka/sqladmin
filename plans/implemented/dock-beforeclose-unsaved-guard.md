@@ -541,3 +541,63 @@ Run in the worktree's `frontend/`:
     "fix in library, not workaround" applies to defects; grouping several close events
     into one prompt is app policy built on the library's documented guarantees, not a
     workaround for a defect.
+
+---
+
+## Implementation Notes
+
+### Deviation: the batcher calls its scheduler through a local
+
+`## Implementation` has `add()` call `this._schedule(this.flush)`. With the default
+scheduler that invokes the browser's `queueMicrotask` as a method of the batcher, and
+Chrome throws `TypeError: Illegal invocation`: the first live tab ✕ vetoed the close
+but never showed a prompt. Node's `queueMicrotask` does not check its receiver, so
+B1-B9 (which inject a manual scheduler) could not catch it. `add()` now copies
+`this._schedule` into a local and calls that, so it runs unbound. An extra test in
+`closeRequestBatcher.test.ts`, *CloseRequestBatcher default scheduler*, stubs
+`queueMicrotask` with a browser-like receiver check. It was written first, failed
+with `Illegal invocation`, and passes after the fix.
+
+### Shared file kept minimal
+
+`controllerText.ts` gets only the new `CloseGuardPrompt`/`closeGuardPrompt` block after
+`tableExportFilename`. Its header comment, which lists what the module holds, was left
+as it was, to keep the diff to this `touches-shared` file small.
+
+### Manual verification
+
+Driven through the real UI in Chrome (chrome-devtools MCP), with the backend and Vite
+running from this worktree, signed in to the local Postgres (`localhost`, `sqladmin`).
+The served library chunks came from
+`/home/jika/typescript/typescript-ui/packages/lib/dist/lib` (0.10.0), whose
+`overlay.es.js` contains `onFloatBeforeClose`. Dirty tabs were scratch query tabs with
+typed SQL. Tabs were torn into floats and merged by dragging a tab. Every ✕,
+window-control ✕, menu row, Cancel and Confirm was a real click. `evaluate_script` was
+used only to read tab and float state, to open the tab context menu (right-click
+dispatch), and once to click a tab ✕ during the first M1 attempt; M1 was then
+repeated with a real click.
+
+- **M1** — tiled dirty tab ✕ → `Close tab` prompt; Cancel kept it, Confirm closed it.
+- **M2** — tiled clean tab ✕ → closed, no prompt.
+- **M3** — dirty tab alone in a float, its own ✕ → `Close tab`; Confirm closed the tab
+  and the emptied float with no second prompt.
+- **M4** — float holding two clean tabs, chrome ✕ → window and both tabs closed, no prompt.
+- **M5** — float with one dirty and one clean tab, chrome ✕ → one prompt
+  `1 of the 2 tabs being closed has unsaved changes…`; Cancel kept both, Confirm closed
+  both and the window.
+- **M6** — float with two dirty tabs, chrome ✕ → exactly one prompt
+  `2 tabs have unsaved changes…`; Confirm closed both and the window.
+- **M7** — float holding one dirty tab, chrome ✕ → `Close tab`; Cancel kept it, Confirm
+  closed the tab and the window.
+- **M8** — context menu *Close all* over two dirty tabs and one clean tab → the clean
+  tab closed at once, one prompt `2 tabs have unsaved changes…`; Confirm closed both.
+- **M9** — a dirty tab in a new tiled region (a drag split the dock) → `Close tab`
+  prompt. A dirty tab dragged from a float back into the tiled strip → `Close tab`
+  prompt; Confirm closed it.
+- **M10** — after a page reload: a dirty tiled tab ✕ prompted (M1), and a float with
+  two dirty tabs prompted once (M6); Confirm closed both.
+- **M11** — reload with a dirty tiled tab showed the browser's `beforeunload` dialog.
+  So did a reload where the only dirty tab sat in a float; that dialog was dismissed
+  and the page stayed.
+
+After the fix, the console showed no errors or warnings.
