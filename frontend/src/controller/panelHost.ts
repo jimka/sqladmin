@@ -116,6 +116,8 @@ export interface PanelHost {
     recordQueryRun(id: string, timestamp: number): void;
     /** Mirror a query panel's latest exportable result. */
     setActiveExport(id: string, active: ActiveExport | null): void;
+    /** Record a query panel's caret readout, shown in the status bar while it is the active panel. */
+    setCaretReadout(id: string, readout: string): void;
     /** Track a grants tab's full grant set for the active-tab export. */
     setActiveRoleGrants(id: string, grants: RoleGrants): void;
 }

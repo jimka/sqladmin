@@ -52,10 +52,11 @@ It is not hardened for exposure to the public internet:
   field/value view and step through the loaded rows with Previous/Next.
 - **SQL workspace** — run ad-hoc queries, `EXPLAIN` a statement, and save
   queries for reuse. A failed query or `EXPLAIN` jumps the editor to the
-  position Postgres reported and highlights it. Export query and table results
-  to CSV or JSON. Flip a query's results into the same one-record-at-a-time
-  field/value view as the data grid, with Previous/Next to step through the
-  returned rows. After
+  position Postgres reported and highlights it. The status bar shows the
+  query editor's line and column, and the size of the current selection.
+  Export query and table results to CSV or JSON. Flip a query's results into
+  the same one-record-at-a-time field/value view as the data grid, with
+  Previous/Next to step through the returned rows. After
   `EXPLAIN`, the plan diagram carries a heuristic index advisor that reads
   the plan for sequential scans with selective filters, sorts an index could
   serve, and join columns with no index, then offers the matching

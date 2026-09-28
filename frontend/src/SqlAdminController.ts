@@ -167,6 +167,11 @@ export class SqlAdminController implements PanelHost {
     // DbObjectRef, so they are not in _openPanels).
     private readonly _activeRoleGrants: Map<string, RoleGrants> = new Map();
     private _activePanelId: string | null = null;
+    // Each query panel's latest caret readout, keyed by panel id — shown by
+    // syncCaretReadout while that panel is the active one.
+    private readonly _caretReadouts: Map<string, string> = new Map();
+    // The status bar's right-zone caret readout; hidden while the active panel has none.
+    private readonly _caretReadoutText: Text;
 
     // Every currently open tab's content, tiled or torn into a float — see
     // hasUnsavedWork() below.
@@ -197,6 +202,12 @@ export class SqlAdminController implements PanelHost {
         this.statusBar       = new StatusBar();
         this.properties      = new PropertiesPanel();
         this.rolesProperties = new RolesPropertiesPanel();
+
+        this._caretReadoutText = new Text("");
+        this._caretReadoutText.setDisplayed(false);
+        // The status bar is one polite live region; the caret readout changes on
+        // every keystroke, so it opts out rather than flooding a screen reader.
+        this._caretReadoutText.getAria().setLive("off");
 
         // Fall back to "default" when the username is absent (a bare test
         // construction), keeping localStorage keys well-formed.
@@ -229,7 +240,9 @@ export class SqlAdminController implements PanelHost {
             this._activeRoleGrants.delete(e.id);
             this._panelRoutes.delete(e.id);
             this._queryPanelRuns.delete(e.id);
+            this._caretReadouts.delete(e.id);
             this._openContents.delete(e.content);
+            this.syncCaretReadout();
         });
 
         // Tracks every currently open tab's content, tiled or torn into a
@@ -259,7 +272,8 @@ export class SqlAdminController implements PanelHost {
         });
 
         // Switching tabs syncs the navigator selection and the status bar to the
-        // now-active panel, and records the active panel id so the Query-menu
+        // now-active panel — the caret readout follows too, shown only for a
+        // query panel — and records the active panel id so the Query-menu
         // export targets it. A null payload means no panel is focused — the
         // library emits it only from recomputeFocusAfterClose, when no frame
         // remains — so clearing `_activePanelId` here also keeps a
@@ -273,6 +287,7 @@ export class SqlAdminController implements PanelHost {
             }
 
             this.syncAddressBarFor(e ? e.id : null);
+            this.syncCaretReadout();
         });
 
         // Dirty-tab close guard. The Dock's "beforeclose" covers a tab's ✕ (tiled or
@@ -289,6 +304,10 @@ export class SqlAdminController implements PanelHost {
 
         // Show the connected database in the status bar's left zone.
         this.statusBar.setMessage(`Database: ${this._statusScope}`);
+
+        // The active query panel's caret readout sits first in the right zone, left
+        // of the identity badge (the zone's HBox lays out left-to-right).
+        this.statusBar.addRight(this._caretReadoutText);
 
         // Pin the signed-in identity to the status bar's RIGHT zone. The left
         // zone shows transient per-operation messages (setMessage), so identity
@@ -688,6 +707,31 @@ export class SqlAdminController implements PanelHost {
     /** Mirror a query panel's latest exportable result (PanelHost). */
     setActiveExport(id: string, active: ActiveExport | null): void {
         this._activeQueryResult.set(id, active);
+    }
+
+    /**
+     * Record a query panel's caret readout, and show it at once when `id` is
+     * the active panel — the caret moves while its tab stays focused, so no
+     * "focus" event follows (PanelHost).
+     */
+    setCaretReadout(id: string, readout: string): void {
+        this._caretReadouts.set(id, readout);
+
+        if (id === this._activePanelId) {
+            this.syncCaretReadout();
+        }
+    }
+
+    /**
+     * Show the active panel's caret readout in the status bar's right zone, or
+     * hide the widget when the active panel has none (a non-query tab, or no tab).
+     */
+    private syncCaretReadout(): void {
+        const id      = this._activePanelId;
+        const readout = id === null ? undefined : this._caretReadouts.get(id);
+
+        this._caretReadoutText.setText(readout ?? "");
+        this._caretReadoutText.setDisplayed(readout !== undefined);
     }
 
     /** Track a grants tab's full grant set for the active-tab export (PanelHost). */

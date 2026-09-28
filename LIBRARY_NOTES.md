@@ -8,6 +8,23 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎 `Dock` drops focus to `null` when the tiled area empties while a float still holds a panel (0.10.0)
+
+Found wiring SQLAdmin's status-bar caret readout to the Dock's `"focus"` event. With one
+query tab torn into a float and the tiled tabs then closed (tab menu *Close all*), the
+Dock emits `focus(null)` although the float's panel is still open and on screen.
+`recomputeFocusAfterClose` (`Dock.ts:1851`) only looks for a survivor in the region the
+closed frame came from; when that region is empty it calls `setFocus(null)` even though
+`_frames` is non-empty. Clicking into the float's editor afterwards does not repair it: the
+float is already frontmost, so its window `"activate"` does not fire, and its tab is already
+the active one. Focus comes back only on a click on the float's tab strip or a raise from
+behind another window. Until then every app feature keyed on the focused panel is off — in
+SQLAdmin the caret readout stays hidden while typing in the float, and the address bar and
+the Query-menu export no longer follow it either. Reproduced live: tear a query tab into a
+float, close all tiled tabs, click into the float's editor and type — the readout stays
+hidden until the float's tab label is clicked. A fix would fall back to the frontmost float's
+active panel when the closed frame's region is empty. SQLAdmin does not work around it.
+
 ## ✂️🔎 `Dock.on("beforeclose")` types a window close's controller as `TabCloseController` (0.10.0)
 
 Found moving SQLAdmin's dirty-tab close guard onto the Dock-level `"beforeclose"` event.
