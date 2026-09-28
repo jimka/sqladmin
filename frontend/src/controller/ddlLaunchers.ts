@@ -9,7 +9,7 @@
 // Decisions).
 
 import type { TreeNode } from "@jimka/typescript-ui/component/tree";
-import type { ColumnMeta, ConstraintKind, DbObjectRef } from "../contract";
+import type { ColumnMeta, ConstraintKind, DbObjectKind, DbObjectRef } from "../contract";
 import { executeDdl, getColumns, getSchemas, previewAlterTable, previewConstraint, previewCreateCompositeType, previewCreateEnumType, previewCreateFunction, previewCreateMatview, previewCreateSchema, previewCreateSequence, previewCreateTable, previewCreateView, previewDropFunction, previewDropMatview, previewDropSchema, previewDropSequence, previewDropTable, previewDropType, previewDropView, previewIndex, previewRefreshMatview, previewRenameSchema } from "../data/api";
 import { openSqlPreviewDialog } from "../dock/SqlPreviewDialog";
 import { DdlFormPanel } from "../dock/DdlFormPanel";
@@ -29,9 +29,15 @@ import { FunctionForm } from "../dock/FunctionForm";
 import { EnumTypeForm } from "../dock/EnumTypeForm";
 import { CompositeTypeForm } from "../dock/CompositeTypeForm";
 import { KIND_GLYPH } from "../navigator/objectGlyphs";
+import type { DdlChange } from "../navigator/navigatorRefresh";
 import { structurePanelId, ddlPanelId } from "./controllerText";
 import type { PanelHost } from "./panelHost";
 import type { RevealCoordinator } from "./revealCoordinator";
+
+/** A DDL draft plus the schema the new object lands in, read at success time. */
+interface LaunchedDraft extends DdlDraft {
+    targetSchema: () => string | undefined;
+}
 
 export class DdlLaunchers {
     private readonly host: PanelHost;
@@ -51,13 +57,18 @@ export class DdlLaunchers {
         this.openDdlPanel({
             ref,
             slug:        "table",
+            kind:        "table",
             title:       `New table (${ref.schema})`,
             glyph:       KIND_GLYPH.table,
             reviewTitle: "Create table",
             build:       () => {
                 const form = new CreateTableForm(ref.schema!);
 
-                return { form, generateSql: async () => (await previewCreateTable(ref, form.readSpec())).sql };
+                return {
+                    form,
+                    generateSql:  async () => (await previewCreateTable(ref, form.readSpec())).sql,
+                    targetSchema: () => ref.schema,
+                };
             },
         });
     }
@@ -95,13 +106,18 @@ export class DdlLaunchers {
         this.openDdlPanel({
             ref:         target,
             slug:        "schema",
+            kind:        "schema",
             title:       `New schema (${ref.database})`,
             glyph:       KIND_GLYPH.schema,
             reviewTitle: "Create schema",
             build:       () => {
                 const form = new CreateSchemaForm();
 
-                return { form, generateSql: async () => (await previewCreateSchema(target, form.readSpec())).sql };
+                return {
+                    form,
+                    generateSql:  async () => (await previewCreateSchema(target, form.readSpec())).sql,
+                    targetSchema: () => undefined,
+                };
             },
         });
     }
@@ -111,13 +127,18 @@ export class DdlLaunchers {
         this.openDdlPanel({
             ref,
             slug:        "sequence",
+            kind:        "sequence",
             title:       `New sequence (${ref.schema})`,
             glyph:       KIND_GLYPH.sequence,
             reviewTitle: "Create sequence",
             build:       () => {
                 const form = new CreateSequenceForm(ref.schema!);
 
-                return { form, generateSql: async () => (await previewCreateSequence(ref, form.readSpec())).sql };
+                return {
+                    form,
+                    generateSql:  async () => (await previewCreateSequence(ref, form.readSpec())).sql,
+                    targetSchema: () => ref.schema,
+                };
             },
         });
     }
@@ -127,13 +148,18 @@ export class DdlLaunchers {
         this.openDdlPanel({
             ref,
             slug:        "function",
+            kind:        "function",
             title:       `New function (${ref.schema})`,
             glyph:       KIND_GLYPH.function,
             reviewTitle: "Create function",
             build:       () => {
                 const form = new FunctionForm({ schema: ref.schema! });
 
-                return { form, generateSql: async () => (await previewCreateFunction(ref, form.readSpec())).sql };
+                return {
+                    form,
+                    generateSql:  async () => (await previewCreateFunction(ref, form.readSpec())).sql,
+                    targetSchema: () => ref.schema,
+                };
             },
         });
     }
@@ -151,13 +177,18 @@ export class DdlLaunchers {
             this.openDdlPanel({
                 ref,
                 slug:        "enum-type",
+                kind:        "type",
                 title:       `New enum type (${ref.schema})`,
                 glyph:       KIND_GLYPH.type,
                 reviewTitle: "Create enum type",
                 build:       () => {
                     const form = new EnumTypeForm({ schema: ref.schema! });
 
-                    return { form, generateSql: async () => (await previewCreateEnumType(ref, form.readSpec())).sql };
+                    return {
+                        form,
+                        generateSql:  async () => (await previewCreateEnumType(ref, form.readSpec())).sql,
+                        targetSchema: () => ref.schema,
+                    };
                 },
             });
 
@@ -167,6 +198,7 @@ export class DdlLaunchers {
         this.openDdlPanel({
             ref,
             slug:        "composite-type",
+            kind:        "type",
             title:       `New composite type (${ref.schema})`,
             glyph:       KIND_GLYPH.type,
             reviewTitle: "Create composite type",
@@ -175,7 +207,8 @@ export class DdlLaunchers {
 
                 return {
                     form,
-                    generateSql: async () => (await previewCreateCompositeType(ref, form.readSpec())).sql,
+                    generateSql:  async () => (await previewCreateCompositeType(ref, form.readSpec())).sql,
+                    targetSchema: () => ref.schema,
                 };
             },
         });
@@ -197,8 +230,8 @@ export class DdlLaunchers {
             title:       "Rename table",
             form,
             generateSql: async () => (await previewAlterTable(ref, form.readSpec())).sql,
-            onSuccess:   () => {
-                this.reveal.refreshNavigator();
+            onSuccess:   (_result, sqlEdited) => {
+                this.reveal.refreshNavigatorAfter({ action: "rename", kind: "table", schema: ref.schema, sqlEdited });
                 this.host.closeTabsFor(ref);
             },
             ...this.ddlDefaults(ref),
@@ -214,7 +247,8 @@ export class DdlLaunchers {
             form,
             generateSql: async () =>
                 (await previewRenameSchema(ref, buildRenameSchemaSpec(ref.schema!, form.newName()))).sql,
-            onSuccess: () => this.reveal.refreshNavigator(),
+            onSuccess: (_result, sqlEdited) =>
+                this.reveal.refreshNavigatorAfter({ action: "rename", kind: "schema", schema: ref.schema, sqlEdited }),
             ...this.ddlDefaults(ref),
         });
     }
@@ -260,8 +294,11 @@ export class DdlLaunchers {
             form,
             generateSql: async () =>
                 (await previewDropTable(ref, { schema: ref.schema!, name: ref.name!, ...form.readSpec() })).sql,
-            onSuccess: () => {
-                this.reveal.refreshNavigator();
+            onSuccess: (_result, sqlEdited) => {
+                this.reveal.refreshNavigatorAfter({
+                    action: "drop", kind: "table", schema: ref.schema, cascade: form.readSpec().cascade, sqlEdited,
+                });
+
                 this.host.closeTabsFor(ref);
             },
             ...this.ddlDefaults(ref),
@@ -284,8 +321,11 @@ export class DdlLaunchers {
                 name:    ref.name!,
                 cascade: form.readSpec().cascade,
             })).sql,
-            onSuccess: () => {
-                this.reveal.refreshNavigator();
+            onSuccess: (_result, sqlEdited) => {
+                this.reveal.refreshNavigatorAfter({
+                    action: "drop", kind: ref.kind, schema: ref.schema, cascade: form.readSpec().cascade, sqlEdited,
+                });
+
                 this.host.closeTabsFor(ref);
             },
             ...this.ddlDefaults(ref),
@@ -305,8 +345,11 @@ export class DdlLaunchers {
             form,
             generateSql: async () =>
                 (await previewDropSchema(ref, buildDropSchemaSpec(ref.schema!, form.readSpec().cascade))).sql,
-            onSuccess: () => {
-                this.reveal.refreshNavigator();
+            onSuccess: (_result, sqlEdited) => {
+                this.reveal.refreshNavigatorAfter({
+                    action: "drop", kind: "schema", schema: ref.schema, cascade: form.readSpec().cascade, sqlEdited,
+                });
+
                 this.host.closeTabsFor(ref);
             },
             ...this.ddlDefaults(ref),
@@ -322,7 +365,9 @@ export class DdlLaunchers {
             form,
             generateSql: async () =>
                 (await previewDropSequence(ref, buildDropSequenceSpec(ref.schema!, ref.name!, form.readSpec().cascade))).sql,
-            onSuccess: () => this.reveal.refreshNavigator(),
+            onSuccess: (_result, sqlEdited) => this.reveal.refreshNavigatorAfter({
+                action: "drop", kind: "sequence", schema: ref.schema, cascade: form.readSpec().cascade, sqlEdited,
+            }),
             ...this.ddlDefaults(ref),
         });
     }
@@ -346,8 +391,11 @@ export class DdlLaunchers {
             generateSql: async () => (await previewDropFunction(ref, buildDropFunctionSpec(
                 ref.schema!, ref.name!, kind, ref.signature ?? "", form.readSpec().cascade,
             ))).sql,
-            onSuccess: () => {
-                this.reveal.refreshNavigator();
+            onSuccess: (_result, sqlEdited) => {
+                this.reveal.refreshNavigatorAfter({
+                    action: "drop", kind: "function", schema: ref.schema, cascade: form.readSpec().cascade, sqlEdited,
+                });
+
                 this.host.closeTabsFor(ref);
             },
             ...this.ddlDefaults(ref),
@@ -363,7 +411,9 @@ export class DdlLaunchers {
             form,
             generateSql: async () =>
                 (await previewDropType(ref, buildDropTypeSpec(ref.schema!, ref.name!, form.readSpec().cascade))).sql,
-            onSuccess: () => this.reveal.refreshNavigator(),
+            onSuccess: (_result, sqlEdited) => this.reveal.refreshNavigatorAfter({
+                action: "drop", kind: "type", schema: ref.schema, cascade: form.readSpec().cascade, sqlEdited,
+            }),
             ...this.ddlDefaults(ref),
         });
     }
@@ -372,7 +422,8 @@ export class DdlLaunchers {
      * Open the "Add constraint" dialog for one kind (the Constraints section
      * toolbar). A foreign key's form needs the connection's schema list for
      * its referenced-schema combo, fetched up front; the other kinds need no
-     * extra fetch. Success rebuilds the structure tab only — a constraint
+     * extra fetch. Success rebuilds the structure tab and re-reads the
+     * table's schema in the navigator (its Indexes category) — a constraint
      * doesn't change the data tab's column set.
      */
     async addConstraint(ref: DbObjectRef, kind: ConstraintKind): Promise<void> {
@@ -395,7 +446,10 @@ export class DdlLaunchers {
             title:       "Add constraint",
             form,
             generateSql: async () => (await previewConstraint(ref, form.readSpec())).sql,
-            onSuccess:   () => this.refreshStructure(ref),
+            onSuccess:   (_result, sqlEdited) => {
+                this.refreshStructure(ref);
+                this.reveal.refreshNavigatorAfter({ action: "alter", kind: "table", schema: ref.schema, sqlEdited });
+            },
             ...this.ddlDefaults(ref),
         });
     }
@@ -403,7 +457,9 @@ export class DdlLaunchers {
     /**
      * Open the DROP CONSTRAINT dialog for a named constraint — primary key,
      * unique, check, or foreign key alike, dropped uniformly by name (the
-     * Constraints and Foreign Keys section toolbars).
+     * Constraints and Foreign Keys section toolbars). Success rebuilds the
+     * structure tab and re-reads the table's schema in the navigator (its
+     * Indexes category).
      */
     dropConstraint(ref: DbObjectRef, constraintName: string): void {
         const form = new ConfirmCascadeForm(`Drop constraint "${constraintName}" on "${ref.schema}"."${ref.name}"?`);
@@ -415,12 +471,19 @@ export class DdlLaunchers {
                 (await previewConstraint(ref, buildConstraintSpec(ref.schema!, ref.name!, "drop", {
                     constraintName, cascade: form.readSpec().cascade,
                 }))).sql,
-            onSuccess: () => this.refreshStructure(ref),
+            onSuccess: (_result, sqlEdited) => {
+                this.refreshStructure(ref);
+                this.reveal.refreshNavigatorAfter({ action: "alter", kind: "table", schema: ref.schema, sqlEdited });
+            },
             ...this.ddlDefaults(ref),
         });
     }
 
-    /** Open the CREATE INDEX dialog for a table (the Indexes section toolbar). Success rebuilds the structure tab only. */
+    /**
+     * Open the CREATE INDEX dialog for a table (the Indexes section toolbar).
+     * Success rebuilds the structure tab and re-reads the table's schema in
+     * the navigator (its Indexes category).
+     */
     createIndex(ref: DbObjectRef): void {
         const columns = this.structureColumns(ref).map(c => c.name);
         const form    = new IndexForm(ref.schema!, ref.name!, columns);
@@ -429,14 +492,18 @@ export class DdlLaunchers {
             title:       "Create index",
             form,
             generateSql: async () => (await previewIndex(ref, form.readSpec())).sql,
-            onSuccess:   () => this.refreshStructure(ref),
+            onSuccess:   (_result, sqlEdited) => {
+                this.refreshStructure(ref);
+                this.reveal.refreshNavigatorAfter({ action: "create", kind: "index", schema: ref.schema, sqlEdited });
+            },
             ...this.ddlDefaults(ref),
         });
     }
 
     /**
      * Open the DROP INDEX dialog for a named index (the Indexes section
-     * toolbar). Success rebuilds the structure tab only.
+     * toolbar). Success rebuilds the structure tab and re-reads the table's
+     * schema in the navigator (its Indexes category).
      */
     dropIndex(ref: DbObjectRef, indexName: string): void {
         const form = new ConfirmCascadeForm(`Drop index "${indexName}"?`);
@@ -448,7 +515,13 @@ export class DdlLaunchers {
                 (await previewIndex(ref, buildIndexSpec(ref.schema!, "drop", {
                     indexName, cascade: form.readSpec().cascade,
                 }))).sql,
-            onSuccess: () => this.refreshStructure(ref),
+            onSuccess: (_result, sqlEdited) => {
+                this.refreshStructure(ref);
+
+                this.reveal.refreshNavigatorAfter({
+                    action: "drop", kind: "index", schema: ref.schema, cascade: form.readSpec().cascade, sqlEdited,
+                });
+            },
             ...this.ddlDefaults(ref),
         });
     }
@@ -460,6 +533,8 @@ export class DdlLaunchers {
      * {@link createIndex}, but fetches the table's full column list with
      * `getColumns(ref)` rather than reading the cached `structureColumns`,
      * since a suggestion's table need not have its Structure tab open.
+     * Success rebuilds the structure tab and re-reads the table's schema in
+     * the navigator (its Indexes category).
      *
      * @param columns - The advisor's suggested columns, pre-checked in the form.
      */
@@ -484,7 +559,10 @@ export class DdlLaunchers {
             title:       "Create index",
             form,
             generateSql: async () => (await previewIndex(ref, form.readSpec())).sql,
-            onSuccess:   () => this.refreshStructure(ref),
+            onSuccess:   (_result, sqlEdited) => {
+                this.refreshStructure(ref);
+                this.reveal.refreshNavigatorAfter({ action: "create", kind: "index", schema, sqlEdited });
+            },
             ...this.ddlDefaults(ref),
         });
     }
@@ -505,11 +583,12 @@ export class DdlLaunchers {
      * Open (or focus) a DDL draft tab: a `DdlFormPanel` hosting `spec.build()`'s
      * form, deduped by `ddlPanelId`. `build` is a factory so nothing is
      * constructed on the dedup (already-open) path. A successful execute
-     * closes the tab and refreshes the navigator.
+     * closes the tab and re-reads the new object's schema in the navigator
+     * (`spec.kind` and the draft's `targetSchema` describe the change).
      */
     private openDdlPanel(spec: {
-        ref: DbObjectRef; slug: string; title: string; glyph: string;
-        reviewTitle: string; build: () => DdlDraft;
+        ref: DbObjectRef; slug: string; kind: DbObjectKind; title: string; glyph: string;
+        reviewTitle: string; build: () => LaunchedDraft;
     }): void {
         const id = ddlPanelId(spec.ref, spec.slug);
 
@@ -522,9 +601,12 @@ export class DdlLaunchers {
             reviewTitle: spec.reviewTitle,
             form:        draft.form,
             generateSql: draft.generateSql,
-            onSuccess:   () => {
+            onSuccess:   (_result, sqlEdited) => {
+                // Built before removePanel, which disposes the form targetSchema may read.
+                const change: DdlChange = { action: "create", kind: spec.kind, schema: draft.targetSchema(), sqlEdited };
+
                 this.host.dock.removePanel(id);
-                this.reveal.refreshNavigator();
+                this.reveal.refreshNavigatorAfter(change);
             },
             ...this.ddlDefaults(spec.ref),
         });
@@ -568,13 +650,18 @@ export class DdlLaunchers {
             this.openDdlPanel({
                 ref,
                 slug:        "view",
+                kind:        "view",
                 title:       `New view (${ref.schema})`,
                 glyph:       KIND_GLYPH.view,
                 reviewTitle: "Create view",
                 build:       () => {
                     const form = new ViewForm(ref, schemas);
 
-                    return { form, generateSql: async () => (await previewCreateView(ref, form.readSpec())).sql };
+                    return {
+                        form,
+                        generateSql:  async () => (await previewCreateView(ref, form.readSpec())).sql,
+                        targetSchema: () => form.readSpec().schema,
+                    };
                 },
             });
 
@@ -584,13 +671,18 @@ export class DdlLaunchers {
         this.openDdlPanel({
             ref,
             slug:        "matview",
+            kind:        "materializedView",
             title:       `New materialized view (${ref.schema})`,
             glyph:       KIND_GLYPH.materializedView,
             reviewTitle: "Create materialized view",
             build:       () => {
                 const form = new MaterializedViewForm(ref, schemas);
 
-                return { form, generateSql: async () => (await previewCreateMatview(ref, form.readSpec())).sql };
+                return {
+                    form,
+                    generateSql:  async () => (await previewCreateMatview(ref, form.readSpec())).sql,
+                    targetSchema: () => form.readSpec().schema,
+                };
             },
         });
     }

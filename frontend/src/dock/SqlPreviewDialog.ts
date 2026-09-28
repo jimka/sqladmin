@@ -5,7 +5,9 @@
 // (possibly edited) SQL, never a spec re-compiled at confirm time — the
 // previewed text is authoritative at execute (see
 // plans/implemented/ddl-infrastructure.md's "editable preview is
-// authoritative" decision). generateSql() only ever seeds once, on open —
+// authoritative" decision) -> onSuccess learns whether that text differs
+// from the seed, since the form's values then no longer describe what ran
+// (plans/implemented/navigator-targeted-refresh.md). generateSql() only ever seeds once, on open —
 // there is no "Regenerate SQL" action: the form (when present) is a static
 // summary, not an interactive input the user could change while this modal
 // is open, so regenerating from it would only ever reproduce the same seed.
@@ -86,8 +88,12 @@ export interface SqlPreviewDialogOptions {
     /** Execute the (possibly edited) SQL from the editor. Resolves the status. */
     execute: (sql: string) => Promise<QueryStatusResult>;
 
-    /** Called after a successful execute so the caller can refresh + report. */
-    onSuccess: (result: QueryStatusResult) => void;
+    /**
+     * Called after a successful execute so the caller can refresh + report.
+     * `sqlEdited` is true when the executed SQL differs from the text
+     * `generateSql` seeded — the form's values then no longer describe what ran.
+     */
+    onSuccess: (result: QueryStatusResult, sqlEdited: boolean) => void;
 
     /** Report an execute/preview error. Defaults to a Notification if omitted. */
     onError?: (message: string) => void;
@@ -139,6 +145,10 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
 
     const errorBanner = new ErrorBanner({ host: content, onChange: () => dialog.resizeToContent() });
 
+    // The text generateSql seeded, compared at execute to tell an edited
+    // preview from an untouched one. Stays "" when the seed fails.
+    let seededSql = "";
+
     /**
      * Seed the preview SQL from the form's current state and load it into
      * the editor. A rejection is reported and shown in the banner, leaving
@@ -148,7 +158,8 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
         errorBanner.hide();
 
         try {
-            editor.setValue(await options.generateSql());
+            seededSql = await options.generateSql();
+            editor.setValue(seededSql);
         } catch (err) {
             reportError(err, options.onError);
             errorBanner.show(err);
@@ -165,9 +176,10 @@ async function runSqlPreviewDialog(options: SqlPreviewDialogOptions): Promise<vo
         errorBanner.hide();
 
         try {
-            const status = await options.execute(editor.getValue());
+            const sql    = editor.getValue();
+            const status = await options.execute(sql);
 
-            options.onSuccess(status);
+            options.onSuccess(status, sql !== seededSql);
 
             return true;
         } catch (err) {

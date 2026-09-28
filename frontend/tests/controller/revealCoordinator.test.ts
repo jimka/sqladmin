@@ -1,14 +1,15 @@
 // Pins RevealCoordinator's reveal/select wiring against the plan's
 // `## Expected Behaviour` cases 15-23
-// (plans/implemented/sqladmin-controller-split.md). Drives the coordinator
-// with a stub ExplorerTree recording its calls — the `as unknown as
-// ExplorerTree` technique tests/navigator/objectMenu.test.ts already uses for
-// ObjectMenuActions.
+// (plans/implemented/sqladmin-controller-split.md), with case 22 rewritten for
+// the targeted refresh (plans/implemented/navigator-targeted-refresh.md, U17).
+// Drives the coordinator with a stub NavigatorExplorerTree recording its
+// calls — the `as unknown as` technique tests/navigator/objectMenu.test.ts
+// already uses for ObjectMenuActions.
 
 import { describe, expect, it, vi } from "vitest";
 import { RevealCoordinator } from "../../src/controller/revealCoordinator";
 import type { NodeMatch } from "../../src/navigator/revealMatch";
-import type { ExplorerTree } from "../../src/shell/explorerTree";
+import type { NavigatorExplorerTree } from "../../src/navigator/navigatorRefresh";
 import type { TreeNode } from "@jimka/typescript-ui/component/tree";
 import type { DbObjectRef } from "../../src/contract";
 
@@ -20,15 +21,19 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
     return { promise, resolve };
 }
 
-/** A minimal ExplorerTree stub recording every call the coordinator makes on it. */
-function stubTree(revealed: TreeNode | undefined, whenLoaded: Promise<void> = Promise.resolve()): ExplorerTree {
+/**
+ * A minimal navigator-tree stub recording every call the coordinator makes on
+ * it; it also serves as the roles tree, which needs only the ExplorerTree half.
+ */
+function stubTree(revealed: TreeNode | undefined, whenLoaded: Promise<void> = Promise.resolve()): NavigatorExplorerTree {
     return {
         whenLoaded: vi.fn(() => whenLoaded),
         revealByPredicate: vi.fn(() => Promise.resolve(revealed)),
         selectNode: vi.fn(),
         expandNode: vi.fn(),
         refresh: vi.fn(),
-    } as unknown as ExplorerTree;
+        refreshScope: vi.fn(() => Promise.resolve()),
+    } as unknown as NavigatorExplorerTree;
 }
 
 const NODE: TreeNode = { label: "orders" } as TreeNode;
@@ -175,20 +180,22 @@ describe("RevealCoordinator.selectObject (case 21)", () => {
     });
 });
 
-describe("RevealCoordinator.refreshNavigator / selectNavigatorNode (case 22)", () => {
-    it("delegate to the navigator when registered, and no-op silently otherwise", () => {
+describe("RevealCoordinator.refreshNavigatorAfter / selectNavigatorNode (case 22)", () => {
+    it("map the change to a targeted scope and delegate to the navigator when registered, and no-op silently otherwise", () => {
         const coordinator = new RevealCoordinator("default", "sqladmin");
 
-        expect(() => coordinator.refreshNavigator()).not.toThrow();
+        expect(() => coordinator.refreshNavigatorAfter({ action: "create", kind: "table", schema: "public" })).not.toThrow();
         expect(() => coordinator.selectNavigatorNode(NODE)).not.toThrow();
 
         const tree = stubTree(NODE);
         coordinator.setNavigator(tree);
 
-        coordinator.refreshNavigator();
+        coordinator.refreshNavigatorAfter({ action: "create", kind: "table", schema: "public" });
         coordinator.selectNavigatorNode(NODE);
 
-        expect(tree.refresh).toHaveBeenCalledTimes(1);
+        expect(tree.refreshScope).toHaveBeenCalledTimes(1);
+        expect(tree.refreshScope).toHaveBeenCalledWith({ schemaList: false, schemas: ["public"] });
+        expect(tree.refresh).not.toHaveBeenCalled();
         expect(tree.selectNode).toHaveBeenCalledWith(NODE);
     });
 });

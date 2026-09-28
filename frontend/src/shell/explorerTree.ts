@@ -92,6 +92,11 @@ export abstract class ExplorerTreeBase<TData> extends Tree implements ExplorerTr
         return this._loaded.whenSettled();
     }
 
+    /** Write the tree's current expanded set to storage (the same write an expand/collapse makes). */
+    protected saveExpansion(): void {
+        this._expansion.save();
+    }
+
     /** Fetch this rail's top-level payload. */
     protected abstract load(): Promise<TData>;
 
