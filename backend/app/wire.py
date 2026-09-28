@@ -37,10 +37,8 @@ _DATETIME_TYPES = frozenset(
         "timestamp",
         "timestamptz",
         "date",
-        "time with time zone",
         "time without time zone",
         "time",
-        "timetz",
     }
 )
 _STRING_TYPES = frozenset(
@@ -55,11 +53,11 @@ _FALSE_TEXT = frozenset({"false", "f", "0", "no", "n"})
 # Subsets of the datetime family, used by from_wire_value to pick the Python
 # temporal type (date / time / datetime) an ISO string is parsed into.
 _DATE_TYPES = frozenset({"date"})
-_TIME_TYPES = frozenset({"time", "time without time zone", "time with time zone", "timetz"})
-# The two members of _TIME_TYPES that carry an offset. Checked BEFORE
-# _TIME_TYPES, which contains them as well.
-_TIMETZ_TYPES = frozenset({"time with time zone", "timetz"})
+_TIME_TYPES = frozenset({"time", "time without time zone"})
 _TIMESTAMPTZ_TYPES = frozenset({"timestamp with time zone", "timestamptz"})
+# Read and written as Postgres's own text: connections._init_connection
+# registers a text codec for each (by its pg_catalog name, interval / timetz).
+_POSTGRES_TEXT_TYPES = frozenset({"interval", "time with time zone", "timetz"})
 
 
 def pg_type_to_wire(data_type: str) -> WireType:
@@ -84,6 +82,9 @@ def pg_type_to_wire(data_type: str) -> WireType:
 
     if dt in _DATETIME_TYPES:
         return WireType.ISO_STRING
+
+    if dt in _POSTGRES_TEXT_TYPES:
+        return WireType.STRING
 
     if dt in ("json", "jsonb"):
         return WireType.JSON
@@ -179,6 +180,8 @@ def from_wire_value(value: Any, column: ColumnMeta) -> Any:
     string becomes a ``datetime``/``date``/``time``, a numeric string becomes a
     ``Decimal``, base64 becomes ``bytes``). Values that asyncpg already binds
     directly (numbers, booleans, plain text, arrays) pass through unchanged.
+    A ``timestamp without time zone`` value always binds as a naive
+    ``datetime``.
 
     Args:
         value: the wire scalar from the decoded JSON payload.
@@ -200,7 +203,16 @@ def from_wire_value(value: Any, column: ColumnMeta) -> Any:
         if data_type in _TIME_TYPES:
             return datetime.time.fromisoformat(value)
 
-        return _parse_iso_datetime(value)
+        moment = _parse_iso_datetime(value)
+
+        if data_type in _TIMESTAMPTZ_TYPES:
+            return moment
+
+        # A zone-less timestamp: asyncpg rejects an aware datetime for it. An
+        # offset-less string (what SqlAdminWriter and the export write) keeps its wall
+        # clock; one with an offset keeps its UTC wall clock, as
+        # from_wire_filter_operand reads the same column.
+        return _to_utc(moment).replace(tzinfo=None)
 
     if wire_type is WireType.STRING:
         if data_type in _NUMERIC_AS_STRING:
@@ -395,8 +407,7 @@ def from_wire_filter_operand(value: Any, column: ColumnMeta) -> Any:
       * ``date`` -> naive ``datetime``, NOT a ``date``: truncating would
         collapse the header row's minute-wide equality range to an empty one.
         ``FilterCompiler`` compares such a column as ``"col"::timestamp``.
-      * ``time with time zone`` -> aware ``time``; the rest of the ``time``
-        family -> naive ``time``
+      * ``time without time zone`` -> naive ``time``
 
     Every non-temporal column returns ``value`` unchanged. Those operands are
     compared as text (``FilterCompiler._column`` casts the column), which is
@@ -419,9 +430,6 @@ def from_wire_filter_operand(value: Any, column: ColumnMeta) -> Any:
 
     moment = _to_utc(_parse_iso_datetime(value))
     data_type = column.data_type.lower()
-
-    if data_type in _TIMETZ_TYPES:
-        return moment.timetz()
 
     if data_type in _TIME_TYPES:
         return moment.replace(tzinfo=None).time()
