@@ -1,5 +1,7 @@
 // The RENAME TABLE dialog form: a single new-name field. Used by the
 // controller's renameTable launcher, embedded as a SqlPreviewDialog's `form`.
+// The form reports edits to the name through `onFieldChange`, which
+// SqlPreviewDialog uses to keep the preview in step.
 
 import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
@@ -30,6 +32,19 @@ class RenameTableForm extends Panel {
     /** @returns the `renameTable`-tagged AlterTableSpec for the entered new name. */
     readSpec(): AlterTableSpec {
         return buildAlterTableSpec(this._schema, this._name, "renameTable", { newName: this._newNameField.getValue() });
+    }
+
+    /**
+     * Register `listener` to run whenever the new name changes. `SqlPreviewDialog`
+     * uses it to keep the SQL preview in step with the form.
+     *
+     * @param listener - Called after each field change.
+     * @returns This form, for chaining.
+     */
+    onFieldChange(listener: () => void): this {
+        this._newNameField.on("change", listener);
+
+        return this;
     }
 }
 

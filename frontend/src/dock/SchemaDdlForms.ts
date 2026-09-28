@@ -6,7 +6,9 @@
 // database diagram" already does (see
 // plans/implemented/schema-sequence-ddl.md's drift notes). Rename acts on an
 // existing schema node directly; drop reuses the generic ConfirmCascadeForm
-// and is built inline by the controller's `dropSchema` launcher.
+// and is built inline by the controller's `dropSchema` launcher. The rename
+// form reports edits to the name through `onFieldChange`, which
+// SqlPreviewDialog uses to keep the preview in step.
 
 import { Panel, callable } from "@jimka/typescript-ui/core";
 import { VBox } from "@jimka/typescript-ui/layout";
@@ -63,6 +65,19 @@ class RenameSchemaForm extends Panel {
     /** @returns the entered new name. */
     newName(): string {
         return this._newNameField.getValue();
+    }
+
+    /**
+     * Register `listener` to run whenever the new name changes. `SqlPreviewDialog`
+     * uses it to keep the SQL preview in step with the form.
+     *
+     * @param listener - Called after each field change.
+     * @returns This form, for chaining.
+     */
+    onFieldChange(listener: () => void): this {
+        this._newNameField.on("change", listener);
+
+        return this;
     }
 }
 
