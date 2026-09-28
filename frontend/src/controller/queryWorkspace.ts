@@ -131,6 +131,9 @@ export class QueryWorkspace {
             // Mirror this panel's latest exportable result (rows or plan) so
             // the menubar export can reach it while it is the active panel.
             onResult  : (active: ActiveExport | null) => this.host.setActiveExport(id, active),
+            // Mirror the editor's caret/selection readout to the status bar while
+            // this panel is the active tab.
+            onCaretChange: (readout: string) => this.host.setCaretReadout(id, readout),
             splitLayout         : this.host.layout.bindSplit("query"),
             explainDiagramLayout: this.host.layout.bindAccordion("explainDiagram"),
             // The advisor needs a database name for /structure; omitted (no

@@ -52,6 +52,9 @@
 // it back), so the frontend blocks it for a statement that does not look
 // read-only — plain Explain is always safe.
 //
+// The editor reports its caret line/column and selection size through
+// onCaretChange, which the controller shows in the status bar.
+//
 // Built as a class-first composition wrapper (the instance owns `content`
 // rather than `extends`-ing a library base — see COMPONENT_CONVENTIONS.md's
 // composition fallback). The Dock destroys `content` and every registered
@@ -93,6 +96,7 @@ import { ApiError }                      from "../data/api";
 import { formatSqlErrorMessage, locateSqlError } from "../data/sqlErrorPosition";
 import type { SqlErrorLocation }         from "../data/sqlErrorPosition";
 import { isChartable }                   from "../data/chartConfig";
+import { formatCaretReadout }            from "../textFormat";
 import { HistoryCursor }                 from "../data/historyCursor";
 import { isReadOnlyStatement }           from "../data/explain";
 import { parseExplainPlan, parseExplainSummary } from "../data/parseExplainPlan";
@@ -176,6 +180,13 @@ export interface QueryPanelOptions {
      * reference back to it.
      */
     onResult?: (active: ActiveExport | null) => void;
+    /**
+     * Called with the editor's caret/selection readout (see formatCaretReadout)
+     * whenever the caret moves or the selection's size changes, and once at
+     * construction. The controller shows it in the status bar while this panel
+     * is the active tab.
+     */
+    onCaretChange?: (readout: string) => void;
     /** The saved editor/result Split geometry plus its save hooks (`controller.layout.bindSplit("query")`). */
     splitLayout: SplitLayoutBinding;
     /** The saved Explain-diagram info-column Accordion open state and section sizes plus its save hooks (`controller.layout.bindAccordion("explainDiagram")`). */
@@ -244,7 +255,7 @@ export class QueryPanel {
     readonly content: QueryPanelContent;
 
     constructor(options: QueryPanelOptions) {
-        const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult, splitLayout, explainDiagramLayout, indexAdvisor } = options;
+        const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult, onCaretChange, splitLayout, explainDiagramLayout, indexAdvisor } = options;
 
         // lint: live parser-error diagnostics — a wavy underline plus a gutter
         // mark, refreshed 750ms after the last edit. On here because this is the
@@ -1311,6 +1322,19 @@ export class QueryPanel {
         // the document transaction commits, so getValue() already reflects the new
         // text by the time this runs.
         editor.on("change", () => syncToolbarButtons());
+
+        /** Report the editor's caret line/column and selection size to the status bar. */
+        function reportCaret(): void {
+            onCaretChange?.(formatCaretReadout(editor.getCursorPosition(), editor.getSelection()));
+        }
+
+        // Keep the status bar's caret readout current. Both events are needed: a
+        // select-all with the caret already at the end changes the selection without
+        // moving the caret. The first report shows the pre-mount default (Ln 1, Col 1);
+        // the onFirstLayout moveCursorToEnd below fires "cursorchange" with the real one.
+        editor.on("cursorchange", reportCaret);
+        editor.on("selectionchange", reportCaret);
+        reportCaret();
 
         // Initial state: Run/Save/Clear disabled for an empty panel (enabled when
         // seeded); Chart/Export disabled until a rows result is shown.
