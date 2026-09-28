@@ -20,10 +20,9 @@ import type { DiagramData, DiagramLayoutResult } from "@jimka/typescript-ui/comp
 import { stubBundledEdgeRoutes, stubGeometry } from "../data/edgeRouteStubs";
 import { elkWorkerFactory } from "./elkWorkerFactory";
 
-// Resolved here rather than inside edgeRouteStubs: this module already imports
-// the diagram barrel at runtime, while that one must not — its modules touch
-// `document` at import scope, and the transform stays pure so the app's
-// DOM-less vitest can exercise it.
+// The library's marker extent is bound here, in the one module that runs
+// the transform, so edgeRouteStubs stays a pure function of its inputs
+// (see its `stubGeometry`).
 const STUB_GEOMETRY = stubGeometry(EDGE_MARKER_EXTENT);
 
 /** An ElkLayoutEngine whose result is passed through {@link stubBundledEdgeRoutes} before returning. */

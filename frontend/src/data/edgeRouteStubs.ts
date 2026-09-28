@@ -1,11 +1,10 @@
 // Pure rewrite of an ELK layout result: gives every fan-out/fan-in bundle of
 // portless edges a short shared run near the node they share, instead of the
-// long coincident trunk `elk.layered.mergeEdges` used to produce. No DOM, no
-// ELK — type-only imports from the diagram barrel keep this node-vitest-
-// testable, the same purity discipline as fkCardinality.ts:1-7 (never import
-// UI-bundle runtime code, which runs DOM-touching module-level side effects on
-// import). Nothing here mutates `result`, its edges, or their sections; see
-// `stubBundledEdgeRoutes`'s own purity note.
+// long coincident trunk `elk.layered.mergeEdges` used to produce. No DOM,
+// no ELK — type-only imports from the diagram barrel, per
+// buildSchemaDiagram.ts's header. Nothing here mutates `result`, its
+// edges, or their sections; see `stubBundledEdgeRoutes`'s own purity
+// note.
 
 import type { DiagramData, DiagramLayoutResult, ElkEdgeSection, ElkPoint } from "@jimka/typescript-ui/component/diagram";
 
@@ -52,11 +51,10 @@ export interface StubGeometry {
  * backwards from the arrival vertex over `markerExtent` units, so a shared run
  * shorter than that puts the branch underneath the glyph rather than beside it.
  *
- * The extent is a parameter rather than an import because the library only
- * exposes it (as `EDGE_MARKER_EXTENT`) from a barrel whose modules touch
- * `document` at import scope — see this file's header note on staying
- * node-vitest-testable. `JunctionDiagramView`, which already imports the
- * library at runtime, supplies it.
+ * The extent is a parameter so this transform stays a pure function of its
+ * inputs, and its tests can pin coordinates against an extent they state
+ * themselves. `JunctionDiagramView` binds it to the library's
+ * `EDGE_MARKER_EXTENT`.
  *
  * @param markerExtent - How far an end marker reaches back along the edge.
  * @returns The preferred and minimum junction distances.

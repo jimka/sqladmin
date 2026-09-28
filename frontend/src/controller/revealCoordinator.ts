@@ -1,10 +1,10 @@
-// Owns the two sidebar trees' reveal/select wiring — the "find this node,
-// bring its tree's view forward, select it" tail repeated across seven call
-// sites in SqlAdminController.ts before this split. No library value import:
-// `ExplorerTree`/`TreeNode` are type-only and `matchesObject`/`matchesRole`/
-// `matchesRoleSection` come from the DOM-free navigator/revealMatch.ts, so
-// this module loads under the node vitest harness — mirroring
-// startPageWelcome.ts's own header.
+// Owns the two sidebar trees' reveal/select wiring — the "find this node, bring
+// its tree's view forward, select it" tail repeated across seven call sites in
+// SqlAdminController.ts before this split. No library value import:
+// `ExplorerTree`/`TreeNode` are type-only and
+// `matchesObject`/`matchesRole`/`matchesRoleSection` come from the pure
+// navigator/revealMatch.ts, so this module needs no DOM under node vitest —
+// mirroring startPageWelcome.ts's own header.
 
 import type { TreeNode } from "@jimka/typescript-ui/component/tree";
 import type { ExplorerTree } from "../shell/explorerTree";

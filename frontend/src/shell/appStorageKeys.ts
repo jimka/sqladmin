@@ -6,9 +6,8 @@
 // own confirmed action instead — this is the rule that must never regress,
 // so it lives in its own DOM-free module rather than inline in
 // localStorageWindow.ts, and is unit-tested here rather than only exercised
-// live. Its only import is `PRESETS_KEY` (a plain string constant), so this
-// module carries none of the DOM side effects library component modules run
-// at import scope and keeps running under the node vitest environment.
+// live. Its only import is `PRESETS_KEY` (a plain string constant), so it
+// runs under node vitest with no DOM.
 
 import { PRESETS_KEY } from "../data/presetStore";
 

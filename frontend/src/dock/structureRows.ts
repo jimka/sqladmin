@@ -1,10 +1,8 @@
-// The Structure tab's pure, DOM-free row mapping for the Constraints and
-// Foreign Keys grids (see the "tsui DOM module side effects" convention —
-// kept out of StructurePanel.ts, which runs Glyph.register at import scope
-// and so is unreachable from the node vitest harness, so it can be
-// unit-tested without touching the DOM). Both grids' `reload` need to
-// re-derive these display rows from fresh metadata, so the mapping is
-// callable from the initial build and from reload alike.
+// The Structure tab's pure row mapping for the Constraints and Foreign Keys
+// grids, kept out of StructurePanel.ts (which constructs library components
+// and so needs a DOM) so node vitest can unit-test it. Both grids' `reload`
+// need to re-derive these display rows from fresh metadata, so the mapping
+// is callable from the initial build and from reload alike.
 
 import type { ConstraintMeta, ForeignKeyMeta } from "../contract";
 

@@ -1,6 +1,5 @@
-// Pure, DOM-free row mapping for the Columns grid (see the "tsui DOM module
-// side effects" convention — kept out of columnsGrid.ts so it can be
-// unit-tested under the node vitest harness without touching the DOM).
+// Pure row mapping for the Columns grid, kept out of columnsGrid.ts (which
+// constructs the Table) so node vitest can unit-test it without a DOM.
 //
 // A grid row is flat because MemoryStore fields are flat, so ColumnMeta's
 // nested `sequence` is spread across three fields: a `sequence` display label

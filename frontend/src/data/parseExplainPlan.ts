@@ -1,9 +1,8 @@
 // Pure, DOM-free parser turning a Postgres `EXPLAIN (FORMAT JSON)` payload into
-// a plan-node forest for the diagram + tree. Kept beside explain.ts so the app's
-// node-only vitest can red-green it without a backend or a DOM; it imports no
-// UI-bundle code (the diagram builder and node renderer that consume it read
-// these plain fields) so importing it never triggers a component module's
-// DOM-touching side effects under the node test environment.
+// a plan-node forest for the diagram + tree. Kept beside explain.ts so node
+// vitest can red-green it without a backend or a DOM; it imports no UI module
+// (the diagram builder and node renderer that consume it read these plain
+// fields).
 
 /** A parsed EXPLAIN plan node; the tree and diagram share these ids. */
 export interface ExplainPlanNode {

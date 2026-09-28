@@ -1,7 +1,7 @@
 // Pure registry-logic tests for the object-kind seam: the single source
 // KIND_GLYPH/OBJECT_CATEGORIES/isRelation (in objectGlyphs.ts/NavigatorTree.ts)
 // derive from. DOM-free (no glyph registration or Component construction
-// happens here — see memory "tsui DOM module side effects").
+// happens here).
 
 import { describe, expect, it } from "vitest";
 import { isRelationKind, objectCategories, OBJECT_KINDS, kindDisplayLabel } from "../../src/navigator/objectKinds";

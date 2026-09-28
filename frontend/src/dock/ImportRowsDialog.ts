@@ -16,9 +16,10 @@
 //
 // Errors surface in an in-content banner (ErrorBanner, mirroring
 // QueryPanel.ts's durable error banner) rather than a Notification: a
-// Notification's z-index (10002) sits below the Dialog band (11000, see
-// LayerManager's Z_BAND_DIALOG) so a toast fired while this dialog is open —
-// every error case here — would render invisibly behind the modal backdrop.
+// Notification's z-index (LayerManager.Band.Notification, 10500) sits below the
+// Dialog band (LayerManager.Band.Dialog, 11000) so a toast fired while this
+// dialog is open — every error case here — would render invisibly behind the
+// modal backdrop.
 
 import { Panel }                    from "@jimka/typescript-ui/core";
 import { VBox }                     from "@jimka/typescript-ui/layout";

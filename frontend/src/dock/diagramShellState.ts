@@ -1,12 +1,10 @@
 // The DOM-free root / direction / depth / prune state a DiagramShell drives
 // its controls from, plus the two questions the shell asks of it: which WEST
 // column blocks are on screen, and what the viewport should do once the next
-// layout pass lands. Kept out of diagramShell.ts (which owns the actual
-// controls and imports ComboBox, Checkbox, and the library's Panel at module
-// scope — touching `document` on import and unloadable under this project's
-// node-environment vitest) so this state machine can be unit-tested under the
-// node harness — mirroring depthChoices.ts's own DOM-free split (see that
-// module's header) and recordNavigation.ts's split out of TableWorkPanel.ts.
+// layout pass lands. Kept out of diagramShell.ts (which constructs the actual
+// controls — ComboBox, Checkbox, Panel — and so needs a DOM) so this state
+// machine can be unit-tested under node vitest, mirroring depthChoices.ts's
+// split and recordNavigation.ts's split out of TableWorkPanel.ts.
 
 import type { TraversalDirection } from "../data/relationDiagram";
 import { depthChoice, depthFromChoice } from "./depthChoices";

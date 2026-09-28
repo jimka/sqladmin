@@ -1,8 +1,6 @@
-// TableWorkPanel's quick-search pure logic, split out so it can be
-// unit-tested without pulling in the library's DOM-backed component classes
-// (TableWorkPanel.ts's top-level imports touch `document` at module-load
-// time, which the project's node-environment test runner has no stand-in for
-// — see vitest.config.ts, and tableWriteRules.ts for the same split).
+// TableWorkPanel's quick-search pure logic, split out so node vitest can
+// unit-test it: TableWorkPanel constructs library components, which need
+// a DOM, and this logic needs none (tableWriteRules.ts is the same split).
 //
 // The matching itself is no longer reimplemented here: recordViewControls.ts
 // delegates row-hiding to the library's own `Table.setQuickSearch`, which

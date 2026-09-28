@@ -1,10 +1,9 @@
 // The roles-tree context-menu builder, extracted from RolesTree's own
 // `contextmenu` handler so its shape is unit-testable. Mirrors
 // ../navigator/objectMenu.ts: glyphs are named as strings, never imported —
-// `Glyph.register` stays in the modules that render this menu (RolesTree.ts)
-// — so this module stays free of the DOM side effects library component
-// modules run at import scope and keeps running under the node vitest
-// harness.
+// `Glyph.register` stays in the modules that render this menu
+// (RolesTree.ts) — so this module registers nothing and runs under node
+// vitest with no DOM.
 
 import type { MenuItemConfig }   from "@jimka/typescript-ui/component/container";
 import { buildTableExportItems } from "../dock/menuItems";

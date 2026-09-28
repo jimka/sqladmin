@@ -1,8 +1,6 @@
 // The start page's empty-workspace gating logic, split out from StartPage.ts
-// so it can be unit-tested without pulling in the library's DOM-backed
-// component classes (StartPage.ts's top-level imports touch `document` at
-// module-load time, which the project's node-environment test runner has no
-// stand-in for — see vitest.config.ts).
+// so node vitest can unit-test it: StartPage constructs library components,
+// which need a DOM, and this function needs none.
 
 import type { QueryWorkspace } from "../controller/queryWorkspace";
 

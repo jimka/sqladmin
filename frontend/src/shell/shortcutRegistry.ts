@@ -3,8 +3,9 @@
 // over queryShortcuts.ts — it re-uses that module's key strings (never literals)
 // and adds only the display metadata the keys don't carry (label, category).
 // Key MATCHING stays in queryShortcuts' isXChord helpers; this module
-// defines no matching logic. Pure data + grouping, no typescript-ui import, so it
-// runs under the project's DOM-less node vitest (mirroring startPageWelcome.ts).
+// defines no matching logic. Pure data + grouping, no typescript-ui
+// import, so node vitest tests it without a DOM (mirroring
+// startPageWelcome.ts).
 
 import {
     RUN_SHORTCUT, SAVE_SHORTCUT, CLEAR_SHORTCUT, HISTORY_RECALL_SHORTCUT,

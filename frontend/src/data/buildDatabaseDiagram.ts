@@ -17,9 +17,8 @@ import { LAYERED_RIGHT } from "./diagramLayout";
 
 // The registered glyph name for a table node. Deliberately NOT imported from
 // `../navigator/objectGlyphs` — see buildSchemaDiagram.ts's TABLE_GLYPH for
-// the full rationale (avoids pulling in DOM-touching UI-bundle module-level
-// side effects under this project's DOM-less vitest "node" environment); keep
-// this literal in sync with KIND_GLYPH.table if that mapping ever changes.
+// why; keep this literal in sync with KIND_GLYPH.table if that mapping ever
+// changes.
 const TABLE_GLYPH = "table";
 
 /** One schema's tables and their structures, positionally paired. */

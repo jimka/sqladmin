@@ -1,7 +1,6 @@
-// Pure, DOM-free helpers backing the sequence info form's seeding and dirty
-// tracking (see the "tsui DOM module side effects" convention — kept out of
-// SequenceInfoPanel.ts so these can be unit-tested under the node vitest
-// harness without touching the DOM). Distinct from `ddlSpecs.ts`'s
+// Pure helpers backing the sequence info form's seeding and dirty tracking,
+// kept out of SequenceInfoPanel.ts (which constructs library components) so
+// node vitest can unit-test them without a DOM. Distinct from `ddlSpecs.ts`'s
 // `diffSequenceSpecs`: that function THROWS on a non-integer numeric field,
 // which is correct for a Save-time diff but wrong for a keystroke-by-keystroke
 // dirty check that must also run while a numeric field holds in-progress,

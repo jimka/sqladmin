@@ -9,8 +9,8 @@ import type { TableNodeData } from "./buildDatabaseDiagram";
 
 // The registered glyph shown before a schema container's name, matching the
 // navigator's KIND_GLYPH.schema. Kept as a literal (not imported from
-// ../navigator/objectGlyphs) for the same DOM-less-vitest purity reason
-// buildDatabaseDiagram's TABLE_GLYPH is; keep in sync with KIND_GLYPH.schema.
+// ../navigator/objectGlyphs) for the same layering reason as
+// buildDatabaseDiagram's TABLE_GLYPH; keep in sync with KIND_GLYPH.schema.
 const SCHEMA_GLYPH = "folder";
 
 /**

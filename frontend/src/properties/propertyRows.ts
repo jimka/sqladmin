@@ -1,10 +1,8 @@
 // The Properties inspector's selection→rows mapping, split out of
-// PropertiesPanel.ts so it is unit-testable in the node vitest environment
-// (see roles/roleBaseInfoRows.ts for the same split on the Roles side). Its
-// only library-facing import is `import type { PropertyValueRow }`, so this
-// module carries none of the DOM side effects PropertyValuePanel's own
-// Table/Panel imports run at import scope (see data/treeExpansion.ts's
-// import-type-only rule).
+// PropertiesPanel.ts so node vitest can unit-test it (see
+// roles/roleBaseInfoRows.ts for the same split on the Roles side). Its
+// only library-facing import is `import type { PropertyValueRow }`, so
+// it constructs no Table or Panel and needs no DOM.
 
 import type { ColumnMeta, DbObjectRef } from "../contract";
 import { kindDisplayLabel } from "../navigator/objectKinds";

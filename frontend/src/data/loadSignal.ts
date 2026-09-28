@@ -4,10 +4,8 @@
 // searches a populated tree. Mirrors DiagramView's `whenLaidOut` deferred
 // (_layoutSettled / armLayoutSettled / settleLayout in the library), the shape
 // this app already uses to wait on an async UI step, factored out here rather
-// than written once per tree. Imports nothing at all, so — like treeExpansion.ts
-// beside it — this module carries none of the DOM side effects library component
-// modules run at import scope and keeps running under the node vitest
-// environment.
+// than written once per tree. Imports nothing at all, so — like
+// treeExpansion.ts beside it — it runs under node vitest with no DOM.
 
 /**
  * A re-armable "the load finished" awaitable. Arm it when a load starts and

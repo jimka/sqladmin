@@ -5,9 +5,8 @@
 // ONE-LINE, additive change: append an entry to OBJECT_KINDS below (plus that
 // kind's glyph import/registration in objectGlyphs.ts) — no existing line
 // needs editing, so two phases adding kinds in parallel never collide on the
-// same line. DOM-free: this module only holds data and pure lookups, so it
-// (and its derivations) stay unit-testable under the node vitest harness
-// (see memory "tsui DOM module side effects").
+// same line. Pure: this module only holds data and lookups, so it (and its
+// derivations) unit-test under node vitest with no DOM.
 
 import type { DbObjectKind } from "../contract";
 

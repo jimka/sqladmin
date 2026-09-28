@@ -1,6 +1,5 @@
 // Pure row-mapping tests for the Properties inspector's selection→rows
-// builder. DOM-free (no Table/Panel import happens here — see memory "tsui
-// DOM module side effects").
+// builder. DOM-free (no Table/Panel construction happens here).
 
 import { describe, expect, it } from "vitest";
 import { propertyRows } from "../../src/properties/propertyRows";

@@ -1,9 +1,7 @@
 // Pure resolution of a card-mode column click to the foreign-key edges
-// attached to it and the column rows to highlight at both ends. No DOM, no
-// ELK — type-only imports from the diagram barrel plus this schema's own pure
-// helpers keep this node-vitest-testable, the same purity discipline as
-// buildSchemaDiagram.ts:16-21 (never import UI-bundle runtime code, which
-// runs DOM-touching module-level side effects on import).
+// attached to it and the column rows to highlight at both ends. No DOM,
+// no ELK — type-only imports from the diagram barrel plus this schema's
+// own pure helpers, per buildSchemaDiagram.ts's header.
 
 import type { DiagramData } from "@jimka/typescript-ui/component/diagram";
 import type { FkEdgeData } from "./buildSchemaDiagram";

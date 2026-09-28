@@ -6,11 +6,11 @@
 // guards and branches — the only real logic in this change — can be pinned
 // by node vitest.
 //
-// Kept DOM-free (see memory "tsui DOM module side effects") so the node-only
-// vitest can import it: the library import below is `import type`, which
-// erases at compile time, and glyphs are referenced by their registered string
-// name rather than imported — the `Glyph.register` calls stay in the panel
-// modules that render these buttons. Mirrors the ddlSpecs.ts idiom.
+// Kept pure so node vitest can exercise it: the library import below is
+// `import type`, which erases at compile time, and glyphs are referenced by
+// their registered string name rather than imported — the `Glyph.register`
+// calls stay in the panel modules that render these buttons. Mirrors the
+// ddlSpecs.ts idiom.
 
 import type { MenuItemConfig }   from "@jimka/typescript-ui/component/container";
 import type { ActiveExport }     from "../data/explain";

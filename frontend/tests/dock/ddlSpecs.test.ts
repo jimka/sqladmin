@@ -1,8 +1,8 @@
 // Pure spec-assembly tests for the table-DDL dialog forms: row -> ColumnSpec,
 // action + fields -> the action-tagged specs, and the column-order helper
 // backing ColumnChecklist.readSelected(). DOM-free (the forms themselves
-// touch `document` at import scope — see memory "tsui DOM module side
-// effects" — and are manual-verify; this module is the pure logic they call).
+// construct library components and are manual-verify; this module is the pure
+// logic they call).
 
 import { describe, expect, it } from "vitest";
 import {

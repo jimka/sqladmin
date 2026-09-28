@@ -1,9 +1,7 @@
-// The Type Info tab's pure, DOM-free row mapping (see the "tsui DOM module
-// side effects" convention — kept out of TypeInfoPanel.ts, which runs
-// Glyph.register at import scope and so is unreachable from the node vitest
-// harness, so it can be unit-tested without touching the DOM). Mirrors
-// structureRows.ts's shape: one small pure function per grid/row the panel
-// needs to (re)build.
+// The Type Info tab's pure row mapping, kept out of TypeInfoPanel.ts (which
+// constructs library components and so needs a DOM) so node vitest can
+// unit-test it. Mirrors structureRows.ts's shape: one small pure function
+// per grid/row the panel needs to (re)build.
 
 import type { TypeDefinition } from "../contract";
 

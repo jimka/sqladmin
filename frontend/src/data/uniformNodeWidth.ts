@@ -1,8 +1,8 @@
 // One width for every node in a flat (non-card) diagram, so a layer's nodes
-// share a left and right edge. No DOM by default — the width is estimated
-// from label length, which is what keeps this pure and lets the builders that
-// use it stay node-vitest-testable (see buildSchemaDiagram.ts's header note on
-// never importing UI-bundle runtime code). A caller that can reach the DOM may
+// share a left and right edge. No DOM by default — the width is
+// estimated from label length, which keeps this pure and lets the
+// builders that use it stay node-vitest-testable (see
+// buildSchemaDiagram.ts's header). A caller that can reach the DOM may
 // pass a real measurer instead; see `MeasureWidths`.
 
 /**
