@@ -8,6 +8,35 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎 A review dialog with no other focusable content traps Tab/Shift+Tab in the SQL editor (0.10.0)
+
+Found verifying `typescript-ui-0-10-0-upgrade`'s manual check table. 0.10.0 made `Dialog`
+count a `contenteditable` element as focusable, so `SqlPreviewDialog`'s review dialog now
+opens with the caret in the SQL `CodeEditor` when its content has no other focusable
+element (a create-object Review SQL…, or a Columns/Sequence/Enum/composite Save). That
+part works and is the intended, documented change (see `migration/0.10.0.md`).
+
+What the migration notes do not cover: once focus is there, keyboard `Tab` and
+`Shift+Tab` do not leave the editor. Both keys are consumed by CodeMirror's own binding
+(indent/dedent the current line) rather than being left for the surrounding page's
+tab-order, and `Escape` does not act as an editor-scoped "release focus" fallback either
+— `Dialog` treats it as the dismiss gesture (see "Dialog always dismissable" — the
+title-bar close/backdrop/Escape trio all resolve to a full close), so pressing it closes
+the whole review instead of moving focus to Cancel/Execute. Reproduced live: open a
+create-table Review SQL… dialog, confirm focus is inside `.cm-content` (`document.
+activeElement` reports `cm-content`, `isContentEditable: true`), then press `Tab` and
+`Shift+Tab` — focus stays inside `.cm-content` both times, and the pressed key edits the
+document (a two-space indent on `Tab`) rather than moving focus.
+
+Net effect: a keyboard-only user who opens one of these dialogs has no key that reaches
+Cancel/Execute — only a mouse click, or closing the dialog outright via Escape/backdrop/
+title-bar and reopening, can leave the editor. Before 0.10.0 this was moot, because the
+dialog's initial focus landed on a button, not the editor, so Tab cycling among the
+dialog's own focusable descendants was never exercised from inside CodeMirror. Not
+something this app's `SqlPreviewDialog`/`DdlFormPanel` code can fix on its own —
+`CodeEditor`'s Tab/Shift+Tab keymap is a library binding — so this is left open rather
+than worked around.
+
 ## ✂️🔎 Unclosed-paren diagnostics land at the statement's failure point, not the paren (0.9.0)
 
 Hit while manually verifying `sql-editor-live-linting`'s live diagnostics.
@@ -565,7 +594,7 @@ children array — a minor improvement, not a regression.
 
 ---
 
-## 🐞🔎 Closing any panel with a live subtree listener throws on the next matching event (0.4.1, symlinked)
+## 🐞✅ Closing any panel with a live subtree listener throws on the next matching event (0.4.1, symlinked)
 
 Found during `adopt-dock-owned-teardown`'s manual verification (**M2**/**M3**), not by design. `QueryPanel.ts` wires
 `Event.addSubtreeListener(editor, "keydown", …)` for its Run/Save/Explain/Clear/history-recall shortcuts.
@@ -631,10 +660,8 @@ needed, so a clean single cycle each is sufficient evidence. `list_console_messa
 `401` and the two Vite HMR debug lines throughout the whole session — no new errors from either repro or from
 general navigation (tree expand/collapse, context menu, dialogs).
 
-**Not yet released.** `master` is 178 commits past the `v0.4.1` tag with the version field still reading `0.4.1`
-— this fix ships whenever that batch is cut (the `next.md` changelog page, not yet numbered). SQLAdmin's `^0.4.1`
-range will accept it once tagged; until then this is verified only against the symlinked build, not the installed
-package.
+**Released in 0.5.0** (typescript-ui changelog `0.5.0.md`, "A component disposed synchronously by a handler
+running during an event's own dispatch …"), so every SQLAdmin build since 0.5.0 carries it.
 
 Found while chasing what looked like a teardown regression during `adopt-dock-owned-teardown`'s **M2** (a
 never-run query tab, closed four times): the aggregate `[...document.styleSheets].reduce((n, s) => n +
@@ -656,6 +683,14 @@ perfectly correct disposal. A scoped id-diff against the closed tab's own subtre
 two entries above and below this one both used it instead of the aggregate. Not something the app or this plan
 can fix — CodeMirror's module cache is by design page-global — but worth a "Possible library improvement" if the
 library ever wants to interned/dedupe modules by content instead of by construction identity.
+
+**Fixed in 0.10.0 — measured 2026-09-28.** 0.10.0's changelog: "A `CodeEditor` no longer adds 51 CSS rules to the
+page for every editor." Re-measured against the symlinked 0.10.0 build with the aggregate probes this entry names
+(`rules()` = total `cssRules.length` across every stylesheet, `cmRules()` = the subset whose `selectorText`
+contains `ͼ`): before any query tab was opened, `rules()` was 212 and `cmRules()` was 0. Five cycles of open a new
+query tab / type `select 1` / close it each landed on `rules()` = 445, `cmRules()` = 218 — identical across all
+five, with zero growth cycle to cycle. The aggregate rule-count probe is reliable again for `CodeEditor` scenarios;
+the practical-consequence paragraph above no longer applies to 0.10.0 and later.
 
 ---
 
