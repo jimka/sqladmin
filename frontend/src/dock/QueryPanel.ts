@@ -67,7 +67,7 @@
 // `QueryPanelContent`, a small `Container` subclass whose `destructor()`
 // override disposes both either way.
 
-import { Component, Container, Event }          from "@jimka/typescript-ui/core";
+import { Component, Container, Event, SpatialNavigation } from "@jimka/typescript-ui/core";
 import { Placement }                            from "@jimka/typescript-ui/primitive";
 import { Border as BorderLayout, Split }        from "@jimka/typescript-ui/layout";
 import { ToolBar }                              from "@jimka/typescript-ui/component/menubar";
@@ -1239,10 +1239,19 @@ export class QueryPanel {
         // never fires for CodeMirror keystrokes (the old TextArea was itself the
         // target, which is why addListener worked before the swap). Editor-scoped so
         // Explain acts on this query view and does not clash with the list/editor
-        // select-all elsewhere. Plain arrows (no modifier) are untouched, so normal
-        // caret movement still works — and Clear is Alt+C, not Ctrl+C, so the
-        // editor's Copy is left intact.
+        // select-all elsewhere. Plain arrows (no modifier) and the spatial-navigation
+        // chords are untouched, so normal caret movement still works — and Clear is
+        // Alt+C, not Ctrl+C, so the editor's Copy is left intact.
         Event.addSubtreeListener(editor, "keydown", (e: KeyboardEvent) => {
+            // The spatial-navigation chords (Ctrl+Alt+arrow, Ctrl+Alt+Shift+
+            // arrow) belong to the library service, which moves focus. Without
+            // this, the Ctrl+↑/↓ check below would also recall history on them.
+            const claimedBySpatialNavigation = SpatialNavigation.claimsKey(e);
+
+            if (claimedBySpatialNavigation) {
+                return;
+            }
+
             const chord = e.ctrlKey || e.metaKey;
 
             if (chord && e.key === "Enter") {

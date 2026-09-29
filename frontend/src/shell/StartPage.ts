@@ -113,6 +113,8 @@ class StartPage extends Panel {
             // mounts a scrollbar so a short viewport scrolls the whole home
             // rather than clipping the shortcut legend below the fold.
             autoScroll: "y",
+            // The work area's spatial-navigation region while the Dock is empty.
+            navigationTarget: true,
         });
 
         this.setInsets(new Insets(PAGE_PADDING, PAGE_PADDING, PAGE_PADDING, PAGE_PADDING));

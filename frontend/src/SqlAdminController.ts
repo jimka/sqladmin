@@ -202,9 +202,11 @@ export class SqlAdminController implements PanelHost {
         this._database     = database;
         // The dock owns its own emptiness; drive the start-page deck straight off
         // its "emptychange" aggregate (empty↔populated, once per transition)
-        // instead of shadow-counting opens and closes here.
-        this.dock            = Dock({ listeners: { emptychange: e => this._startToggle?.(e.empty) } });
-        this.statusBar       = new StatusBar();
+        // instead of shadow-counting opens and closes here. It is also the work
+        // area's spatial-navigation region.
+        this.dock            = Dock({ navigationTarget: true, listeners: { emptychange: e => this._startToggle?.(e.empty) } });
+        // A spatial-navigation target, so the keyboard reaches its notification-history button.
+        this.statusBar       = new StatusBar({ navigationTarget: true });
         this.properties      = new PropertiesPanel();
         this.rolesProperties = new RolesPropertiesPanel();
 
@@ -267,6 +269,16 @@ export class SqlAdminController implements PanelHost {
         this.dock.on("attach", (e: DockPanelEvent) => {
             this._openContents.add(e.content);
             this._dirtyTabs.track(e.content);
+        });
+
+        // Each tab's frame is a spatial-navigation target, so Ctrl+Alt+Shift+
+        // arrow moves between tiled tabs and returns to the control last used
+        // in each. The frame is the Dock's stable per-tab wrapper (it survives
+        // a lazy panel's spinner swap and a tear-off), and "attach" fires for
+        // every way a tab opens, so this one handler covers them all.
+        // Re-marking on a re-attach is harmless.
+        this.dock.on("attach", (e: DockPanelEvent) => {
+            e.content.setNavigationTarget(true);
         });
 
         // A deferred panel whose fetch rejected: the Dock has already closed the tab,

@@ -6,21 +6,22 @@ import {
     EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT, LEAVE_EDITOR_SHORTCUT,
     NEW_QUERY_SHORTCUT, OPEN_SAVED_SHORTCUT, QUERY_HISTORY_SHORTCUT,
     DATABASES_RAIL_SHORTCUT, ROLES_RAIL_SHORTCUT, QUERIES_RAIL_SHORTCUT,
-    REFRESH_SHORTCUT, HELP_SHORTCUT,
+    REFRESH_SHORTCUT, HELP_SHORTCUT, FOCUS_REGION_SHORTCUT, FOCUS_CONTROL_SHORTCUT,
 } from "../../src/shell/queryShortcuts";
 
-// The 15 ids the registry must carry: the 13 original shortcuts, the Help chord,
-// and the editor's Leave-the-editor gesture. Pins that no entry is dropped or
-// duplicated as the app grows.
+// The 17 ids the registry must carry: the 13 original shortcuts, the Help chord,
+// the editor's Leave-the-editor gesture, and the two spatial-navigation chords.
+// Pins that no entry is dropped or duplicated as the app grows.
 const EXPECTED_IDS = [
     "run", "save", "clear", "history-recall", "explain", "explain-analyze",
     "leave-editor",
     "new-query", "open-saved", "query-history",
-    "databases-rail", "roles-rail", "queries-rail", "refresh", "help",
+    "databases-rail", "roles-rail", "queries-rail", "refresh",
+    "focus-region", "focus-control", "help",
 ];
 
 describe("SHORTCUTS registry", () => {
-    it("carries exactly the 15 expected ids with no duplicates", () => {
+    it("carries exactly the 17 expected ids with no duplicates", () => {
         const ids = SHORTCUTS.map(entry => entry.id);
 
         expect(new Set(ids).size).toBe(ids.length);
@@ -51,6 +52,8 @@ describe("SHORTCUTS registry", () => {
         expect(byId.get("roles-rail")).toBe(ROLES_RAIL_SHORTCUT);
         expect(byId.get("queries-rail")).toBe(QUERIES_RAIL_SHORTCUT);
         expect(byId.get("refresh")).toBe(REFRESH_SHORTCUT);
+        expect(byId.get("focus-region")).toBe(FOCUS_REGION_SHORTCUT);
+        expect(byId.get("focus-control")).toBe(FOCUS_CONTROL_SHORTCUT);
         expect(byId.get("help")).toBe(HELP_SHORTCUT);
     });
 });
@@ -65,10 +68,10 @@ describe("groupByCategory", () => {
             ["Editor", "Query", "Navigation"]);
     });
 
-    it("groups the entries with counts 7 / 3 / 5", () => {
+    it("groups the entries with counts 7 / 3 / 7", () => {
         const groups = groupByCategory();
 
-        expect(groups.map(group => group.entries.length)).toEqual([7, 3, 5]);
+        expect(groups.map(group => group.entries.length)).toEqual([7, 3, 7]);
     });
 
     it("skips empty groups (an empty input yields no groups)", () => {
@@ -76,10 +79,14 @@ describe("groupByCategory", () => {
     });
 
     it("preserves registry order within a group", () => {
-        const editor = groupByCategory().find(group => group.category === "editor");
+        const editor     = groupByCategory().find(group => group.category === "editor");
+        const navigation = groupByCategory().find(group => group.category === "navigation");
 
         expect(editor?.entries.map(entry => entry.id)).toEqual(
             ["run", "save", "clear", "history-recall", "explain", "explain-analyze",
                 "leave-editor"]);
+        expect(navigation?.entries.map(entry => entry.id)).toEqual(
+            ["databases-rail", "roles-rail", "queries-rail", "refresh",
+                "focus-region", "focus-control", "help"]);
     });
 });
