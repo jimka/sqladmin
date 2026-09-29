@@ -5,7 +5,7 @@ touches-shared: [frontend/src/SqlAdminApp.ts, frontend/src/SqlAdminController.ts
 
 # Spatial Navigation Adoption — Implementation Plan
 
-> **Status: deferred — blocked on typescript-ui 0.11.0.** Do not implement against 0.10.0. This plan waits for typescript-ui 0.11.0 to change `SpatialNavigation`'s default region-tier chord from `Ctrl+Shift`+arrow to `Ctrl+Alt+Shift`+arrow, so SQLAdmin can call plain `SpatialNavigation.enable()` with no modifier override. It is not part of the SQLAdmin 0.10.0 release. Step 1 checks the library default and stops if it has not changed.[^deferred]
+> **Depends on the typescript-ui plan `spatial-navigation-region-chord-default`** (in the typescript-ui repo: `/home/jika/typescript/typescript-ui/plans/`). That plan changes `SpatialNavigation`'s default region-tier chord from `Ctrl+Shift`+arrow to `Ctrl+Alt+Shift`+arrow, so SQLAdmin can call plain `SpatialNavigation.enable()` with no modifier override. This plan runs before any library release, against a symlinked build of that plan's branch; `frontend/package.json` stays on `^0.10.0`. Step 1 checks the linked build's default chord and stops if it has not changed.[^library-branch]
 
 ## Overview
 
@@ -168,9 +168,13 @@ import { Body, DOM, SpatialNavigation } from "@jimka/typescript-ui/core";
 
 ### Part A — setup
 
-1. **Check the dependencies.** Confirm `plans/implemented/typescript-ui-0-10-0-upgrade.md` exists and `grep -n 'await Body.init' frontend/src/SqlAdminApp.ts` prints one line. Then confirm the library's region default has moved: `grep -n 'DEFAULT_TARGET_MODIFIERS' /home/jika/typescript/typescript-ui/packages/lib/src/typescript/lib/core/SpatialNavigation.ts` must show `{ ctrl: true, alt: true, shift: true }`. If any check fails, stop and report: this plan waits on both.
+1. **Check the dependencies.** Confirm `plans/implemented/typescript-ui-0-10-0-upgrade.md` exists and `grep -n 'await Body.init' frontend/src/SqlAdminApp.ts` prints one line. Then confirm the linked library build carries the new chord:
+   - `readlink -f frontend/node_modules/@jimka/typescript-ui` must print the `packages/lib` of the typescript-ui worktree on the library plan's branch (find it with `git -C /home/jika/typescript/typescript-ui worktree list`), not the main typescript-ui checkout.
+   - `grep -c '{ctrl:!0,alt:!0,shift:!0}' frontend/node_modules/@jimka/typescript-ui/dist/lib/SpatialNavigation-*.js` must print `1` or more, and `grep -c '{ctrl:!0,shift:!0}'` on the same file must print `0`. If the file is missing or older than the worktree's `src`, run `npm run build:lib` in the library worktree and re-check.
 
-2. **Worktree install.** From the worktree root: `ln -s /home/jika/typescript/sqladmin/frontend/node_modules frontend/node_modules`. Then `node -p "require('./frontend/node_modules/@jimka/typescript-ui/package.json').version"` must print `0.11.0` or later. Do not run `npm install`.
+   If any check fails, stop and report: this plan waits on both.
+
+2. **Worktree install.** From the worktree root: `ln -s /home/jika/typescript/sqladmin/frontend/node_modules frontend/node_modules`. Then repeat step 1's `grep -c '{ctrl:!0,alt:!0,shift:!0}'` check through the worktree path, to confirm the worktree sees the same linked build. Do not run `npm install`: it would replace the symlink with the registry's 0.10.0.
 
 3. **Baseline.** `cd frontend && npm run typecheck && npm test`. Record the passing test count (call it *N*).
 
@@ -240,7 +244,7 @@ import { Body, DOM, SpatialNavigation } from "@jimka/typescript-ui/core";
 
 ### Part G — manual verification
 
-16. Bring the stack up per `.claude/skills/verify/SKILL.md` against the linked 0.11.0 (or later) build and log in. Open a query tab and a table tab so the Dock has two tabs. Walk every table in [Expected Behaviour](#expected-behaviour) with the DevTools console open. A focus move that lands somewhere other than the stated place is reported, not worked around. If the cause is the library's ranking or reveal behaviour, add a `🐞🔎` entry to `LIBRARY_NOTES.md` under the one from step 14, in the existing entries' shape.
+16. Bring the stack up per `.claude/skills/verify/SKILL.md` against the linked library build from step 1 and log in. In DevTools, confirm the served `SpatialNavigation-<hash>.js` has the same file name as the one in the library worktree's `dist/lib`. Open a query tab and a table tab so the Dock has two tabs. Walk every table in [Expected Behaviour](#expected-behaviour) with the DevTools console open. A focus move that lands somewhere other than the stated place is reported, not worked around. If the cause is the library's ranking or reveal behaviour, add a `🐞🔎` entry to `LIBRARY_NOTES.md` under the one from step 14, in the existing entries' shape.
 
 ---
 
@@ -328,14 +332,14 @@ Start with the Database view open, two tabs in the Dock, and the query tab activ
 
 | # | Where | Command / action | Expect |
 |---|---|---|---|
-| 1 | worktree | `node -p "require('./frontend/node_modules/@jimka/typescript-ui/package.json').version"` | `0.11.0` or later |
+| 1 | worktree | `grep -c '{ctrl:!0,alt:!0,shift:!0}' frontend/node_modules/@jimka/typescript-ui/dist/lib/SpatialNavigation-*.js` | `1` or more |
 | 2 | `frontend` | `npm run typecheck` | clean |
 | 3 | `frontend` | `npm test` | *N* passing |
 | 4 | `frontend` | `npm run build` | succeeds |
 | 5 | repo root | `grep -rn 'SpatialNavigation.enable()' frontend/src` | one match, `SqlAdminApp.ts` |
 | 6 | repo root | `grep -rn 'SpatialNavigation.claimsKey' frontend/src` | one match, `QueryPanel.ts` |
 | 7 | repo root | `grep -rn 'navigationTarget: true\|setNavigationTarget(true)' frontend/src \| wc -l` | `9` |
-| 8 | repo root | `grep -c '"@jimka/typescript-ui": "\^0.9.0"' frontend/package.json` | unchanged from before this plan (no version bump here) |
+| 8 | repo root | `grep -c '"@jimka/typescript-ui": "\^0.10.0"' frontend/package.json` | `1` (no version bump here) |
 | 9 | browser | every manual table in [Expected Behaviour](#expected-behaviour) | walked |
 
 ---
@@ -445,4 +449,4 @@ For the release-time `CHANGELOG.md` pass, in the file's bold-lead-sentence style
 
 [^not-workaround]: An earlier draft passed `targetModifiers: { ctrl: true, alt: true, shift: true }` from the app, with a `FOCUS_REGION_MODIFIERS` constant and a test for it. That override is the library's documented option, but it was dropped under the user's rule to prefer library defaults: a default that breaks word selection in every text input is wrong for any app, so the fix belongs in the library, and every consumer then gets it without configuration.
 
-[^deferred]: The user deferred this plan and `date-time-column-field-types` to typescript-ui 0.11.0. The SQLAdmin 0.10.0 release ships without spatial navigation. The `depends-on` frontmatter can only name SQLAdmin plans, so the library-version requirement is stated here and checked in step 1.
+[^library-branch]: The typescript-ui release waits on SQLAdmin's verification, so this plan cannot wait on the release (memory "Library release gated on SQLAdmin"). It runs against `frontend/node_modules/@jimka/typescript-ui` symlinked to the library worktree's `packages/lib`, while `frontend/package.json` still names `^0.10.0`; that mismatch is expected until the release. The check reads the built chunk rather than the library source or a version number, because the app runs the built `dist/lib`, and a symlink pointing at the main checkout would serve master's build (memory "Verify symlink must target worktree"). The library plan writes the default with its keys in `ctrl, alt, shift` order so the minified literal is stable. The `depends-on` frontmatter can only name SQLAdmin plans, so the library dependency is stated in the banner and checked in step 1.
