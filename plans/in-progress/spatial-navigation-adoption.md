@@ -450,3 +450,57 @@ For the release-time `CHANGELOG.md` pass, in the file's bold-lead-sentence style
 [^not-workaround]: An earlier draft passed `targetModifiers: { ctrl: true, alt: true, shift: true }` from the app, with a `FOCUS_REGION_MODIFIERS` constant and a test for it. That override is the library's documented option, but it was dropped under the user's rule to prefer library defaults: a default that breaks word selection in every text input is wrong for any app, so the fix belongs in the library, and every consumer then gets it without configuration.
 
 [^library-branch]: The typescript-ui release waits on SQLAdmin's verification, so this plan cannot wait on the release (memory "Library release gated on SQLAdmin"). It runs against `frontend/node_modules/@jimka/typescript-ui` symlinked to the library worktree's `packages/lib`, while `frontend/package.json` still names `^0.10.0`; that mismatch is expected until the release. The check reads the built chunk rather than the library source or a version number, because the app runs the built `dist/lib`, and a symlink pointing at the main checkout would serve master's build (memory "Verify symlink must target worktree"). The library plan writes the default with its keys in `ctrl, alt, shift` order so the minified literal is stable. The `depends-on` frontmatter can only name SQLAdmin plans, so the library dependency is stated in the banner and checked in step 1.
+
+---
+
+## Implementation Notes
+
+### Deviations
+
+- **Registry counts.** This branch sits on `feature/review-dialog-keyboard-exit`, which added a `leave-editor` row to the Editor category after the plan was written. The registry therefore carries **17** ids, not 16, and `groupByCategory()` counts are `[7, 3, 7]`, not `[6, 3, 7]`. The test comment, the first test's name and the counts test say 17 and `[7, 3, 7]`. U3's Navigation order is now pinned too: the existing "preserves registry order within a group" test also asserts the Navigation ids in order. No test was added (N stays 1127).
+- **`claimsKey` guard shape.** The plan's snippet put the call inside the `if` condition (`if (SpatialNavigation.claimsKey(e))`). The project rule forbids a call in an `if` condition, so the result is assigned first (`const claimedBySpatialNavigation = SpatialNavigation.claimsKey(e);`) and the variable is checked. The behaviour is the same, and the step-13 grep still finds exactly one `SpatialNavigation.claimsKey` match.
+- **Comment wrapping.** The plan's one-line comment for the outer views ("The whole view is one spatial-navigation region; …") is wrapped over two lines to match the surrounding comment width. The `QueryPanel` comment-block edit is reflowed the same way.
+- **LIBRARY_NOTES "In SQLAdmin" paragraph.** The addendum's last paragraph ("waits for this change … Nothing is enabled until then") would be false once this branch lands, because the library change already exists on the unreleased `feature/spatial-navigation-region-chord-default` branch and this branch enables the service. Following the base branch's 🐞✅ precedent (the review-dialog Tab-trap entry), that paragraph is replaced by a "Fixed in the library … Adopted here … Verified live" paragraph, and the status is ✂️✅, because the linked library branch makes both recommended changes (the default chord, and the accessibility and `CodeEditor` doc trades). It also says the 0.11.0 bump must ship with this adoption. The heading text and the rest of the entry are as written.
+- **New 🐞🔎 LIBRARY_NOTES entry (step 16).** Case C2 failed; see below.
+
+### Step 1 check
+
+`frontend/node_modules/@jimka/typescript-ui` resolves to `/home/jika/typescript/typescript-ui/.worktrees/dialog-escape-releases-tab-owner/packages/lib`. That is the unreleased stack tip. It contains `feature/spatial-navigation-region-chord-default` (commit `1134d6a4` is an ancestor). The minified-text check passed as written: `SpatialNavigation-B3fDdDeZ.js` has one `{ctrl:!0,alt:!0,shift:!0}` and zero `{ctrl:!0,shift:!0}`, and the same result shows through the worktree's `node_modules` symlink. In the browser, `performance.getEntriesByType('resource')` showed the page loaded `/@fs/…/.worktrees/dialog-escape-releases-tab-owner/packages/lib/dist/lib/SpatialNavigation-B3fDdDeZ.js`. That is the same file name, and its fetched text has the new literal and not the old one. The Vite dep cache was cleared (`rm -rf frontend/node_modules/.vite`) and a fresh dev server was started from this worktree before the checks.
+
+### Manual verification (step 16)
+
+Stack: the Compose `db`, the backend run natively from this worktree (`SQLADMIN_ALLOWED_HOSTS=localhost:5432 poetry run uvicorn …`), and Vite from this worktree. Login used Host `localhost`. The browser was Chrome driven through chrome-devtools MCP at 1500×850.
+
+**How the keys were driven.** Every chord and bare key under test was a real key press. The MCP `press_key` tool sends CDP `Input.dispatchKeyEvent`, so the browser gets trusted keydown/keyup with real modifier state, for example `Control+Alt+Shift+ArrowRight` and `Control+Alt+ArrowDown`. No case was driven with synthetic `dispatchEvent` keys. Text was typed with `type_text`, which is also real input. Clicks used the `click` tool, which is a real CDP mouse. Outcomes were read with a read-only `evaluate_script` helper. It reports `document.activeElement` and its `data-ts-ui-navigation-target` ancestors, the editor text, the CodeMirror cursor count and the selection. Setup that has no key or click form used synthetic pointer events and was never the thing under test: the right-click context menus (the verify skill's documented method), the tab drag that tiled `customers` beside `Query 1` for M8, and the pan and wheel-zoom gestures in X6. All nine planned targets were present (`data-ts-ui-navigation-target` on both explorer views, the tree, the inspector, `QueriesView`, both Queries sections, `#work-dock`, `#work-start` and the StatusBar), and the Dock tab frames were marked on attach.
+
+| # | Result |
+|---|---|
+| M1 | Pass. From a clicked table node, region → focused the `Query 1` tab button inside `#work-dock`. |
+| M2 | Pass. Caret at Ln 1 Col 17. Region ← went to the NavigatorTree, and region → went back to `.cm-content` at Col 17. |
+| M3 | Pass. The tree was moved to "Views" with bare ↓×3. Region → went to the Dock's remembered control, and region ← went back to "Views" (still active and selected). |
+| M4 | Pass. Region ↓ went to the Properties section's first control (its Column options button). Region ↑ went back to "Views". |
+| M5 | Pass. Region ← went to rail button 0. Bare ↓ moved to button 1 and bare ↑ moved back. |
+| M6 | Pass. From the editor, region ↑×3 went to the query toolbar (Run), then the Dock tab strip (`Query 1`), then the `Query` menu-bar title. No menu opened. |
+| M7 | Pass. From the editor, region ↓ went to the result `Data` tab, then the result toolbar, then the StatusBar's Notification history button. A 4th ↓ stayed there. |
+| M8 | Pass. With the tabs tiled (query x 280–890, table x 890–1500), region → went into the table tab (x=890), and region ← went back to the editor at the same caret (Col 9). |
+| M9 | Pass. A scratch saved query was created with Ctrl+S (removed afterwards). With the Saved row focused, region ↓ went to the Recent list and region ↑ went back to Saved with the same row active. |
+| M10 | Pass. After closing every tab, the start page showed. Region → from the tree focused its `New Query` button. |
+| M11 | Pass. With the sidebar collapsed (View → Toggle Sidebar), region ← from the editor focused a rail button, not the hidden view. |
+| M12 | Pass (the "expands" outcome). With Properties collapsed, region ↓ from the tree expanded the section and focused its Column options button. |
+| C1 | Pass. Run was reached with region ↑ from the editor, because clicking Run hands focus back to the editor. Control → went to Save query. |
+| C2 | **Fail, reported.** Control ← from the editor went to the result pane's *Record view* button (below-left), not the sidebar. The cause is the library's `rankWithContainerPriority`: see the new 🐞🔎 LIBRARY_NOTES entry. Region ← reaches the sidebar as expected. |
+| C3 | Pass. In the table quick-search field with "ada", control ↓ went to the grid `TableBody`. |
+| X1 | Pass. In the SQL editor, `Ctrl+Shift+→` selected "from", `Ctrl+Shift+←`×2 selected "name ", and focus stayed in the editor. |
+| X2 | Pass in a plain text field: the Save-query name input selected "nav" (←) and "scratch" (→). In the table *toolbar's* quick-search field, `Ctrl+Shift+←` (and bare Home/End) moves toolbar roving focus instead. That is the existing open `ToolBar` text-child entry, not the spatial chords: the region chord now needs Alt and is not claimed. |
+| X3 | Pass. After running `select id, name from customers` and then `select 2`, `Ctrl+↑` recalled the older query and `Ctrl+↓` recalled the newer. |
+| X4 | Pass. From the editor at the newest history entry, `Ctrl+Alt+↑` moved focus to the toolbar. The text stayed `select 2` with one `.cm-cursor`: no recall and no extra cursor. `Ctrl+Alt+Shift+↑` moved focus to Run, with the text unchanged. |
+| X5 | Pass. The tree (↓), rail (↑/↓), Dock tab strip (← switched tabs) and table grid (↓ moved the focused row) all worked. |
+| X6 | Pass. On the database diagram, pan and wheel-zoom changed its transform (synthetic pointer/wheel, as noted above). Region ↓ entered the diagram panel, and region ← left it for the NavigatorTree. |
+| X7 | Pass. `Alt+N` opened a query tab, `Alt+D` and `Alt+Q` switched rails, `?` opened the Shortcuts dialog, and `Alt+R` in the tree refetched the schema endpoints (seen in resource timing). |
+| D1 | Pass. In the Keyboard Shortcuts dialog, all four region and all four control directions left focus on the dialog's own close button. The Save-query dialog behaved the same. |
+| D2 | Pass. In the Review SQL dialog (sales → Create ▶ Table), with the caret at the end of line 2, `Ctrl+Shift+←` selected "integer" and focus stayed in `SqlPreviewModal`. It was cancelled, not executed, and `zz_spatial_scratch` does not exist in the DB. |
+| D3 | Pass. With the Query menu open, control ↓ (before and after a bare ↓ into the menu) left the menu open and focus on the menu. |
+| D4 | Pass. In the Local Storage window, control →, ↓, ←×3 and ↑×2 moved between the tree, the JSON editor, the footer buttons and the title-bar controls, and never left the window. |
+| D5 | Pass. The dialog and the start-page legend both list "Ctrl+Alt+Shift+Arrow — Focus the next region" and "Ctrl+Alt+Arrow — Focus the nearest control" under Navigation. No dialog row wraps. |
+
+Console: the only error was the expected pre-login `whoami` 401. No OS-level chord interception was seen (the browser ran under WSL, with no GNOME workspace bindings).
