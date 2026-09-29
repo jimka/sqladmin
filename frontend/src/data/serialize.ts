@@ -64,11 +64,12 @@ function csvCell(value: unknown, wireType: WireType): CsvCell {
             return { text: JSON.stringify(value), isNull: false };
 
         default:
-            // number / string (incl. precision numerics) / isoString / base64:
-            // the wire string verbatim, so no locale drift. A `number` here is a
-            // JS number (already JSON-parsed), so String() gives its shortest
-            // round-trip form — which may differ from the backend's native-float
-            // rendering for floats (see the module header's byte-identity note).
+            // number / string (incl. precision numerics) / isoString / isoDate /
+            // isoTime / base64: the wire string verbatim, so no locale drift. A
+            // `number` here is a JS number (already JSON-parsed), so String()
+            // gives its shortest round-trip form — which may differ from the
+            // backend's native-float rendering for floats (see the module
+            // header's byte-identity note).
             return { text: String(value), isNull: false };
     }
 }
@@ -135,7 +136,8 @@ export function toCSV(columns: ExportColumn[], rows: Record<string, unknown>[]):
  * Render one wire value to its native JSON value: a SQL NULL (`null`,
  * `undefined`, or a missing key) becomes JSON `null`, and every other wire
  * scalar is already its own native JSON type — numbers/booleans/json/jsonArray
- * as themselves, string/isoString/base64 (incl. precision numerics) as strings.
+ * as themselves, string/isoString/isoDate/isoTime/base64 (incl. precision
+ * numerics) as strings.
  *
  * @param value - The wire scalar read from the row object.
  *

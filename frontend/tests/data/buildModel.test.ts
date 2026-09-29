@@ -23,6 +23,8 @@ describe("buildQueryModel", () => {
             { name: "id", wireType: "number" },
             { name: "label", wireType: "string" },
             { name: "at", wireType: "isoString" },
+            { name: "day", wireType: "isoDate" },
+            { name: "opens", wireType: "isoTime" },
         ];
 
         const model  = buildQueryModel(cols);
@@ -34,6 +36,8 @@ describe("buildQueryModel", () => {
             id   : { type: "number", order: 0 },
             label: { type: "string", order: 1 },
             at   : { type: "datetime", order: 2 },
+            day  : { type: "date", order: 3 },
+            opens: { type: "time", order: 4 },
         });
         expect(model.getPrimaryKeyField()).toBeUndefined();
     });
@@ -45,6 +49,8 @@ describe("buildModel", () => {
             column({ name: "id", wireType: "number" }),
             column({ name: "label", wireType: "string" }),
             column({ name: "at", wireType: "isoString" }),
+            column({ name: "day", wireType: "isoDate" }),
+            column({ name: "opens", wireType: "isoTime" }),
         ];
 
         const model  = buildModel(cols);
@@ -56,6 +62,8 @@ describe("buildModel", () => {
             id   : { type: "number", order: 0 },
             label: { type: "string", order: 1 },
             at   : { type: "datetime", order: 2 },
+            day  : { type: "date", order: 3 },
+            opens: { type: "time", order: 4 },
         });
     });
 

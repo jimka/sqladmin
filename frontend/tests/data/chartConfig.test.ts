@@ -10,6 +10,8 @@ const NUMERIC_COL2: QueryColumnMeta = { name: "quantity", wireType: "number" };
 const STRING_COL: QueryColumnMeta   = { name: "label", wireType: "string" };
 const BOOL_COL: QueryColumnMeta     = { name: "active", wireType: "boolean" };
 const DATE_COL: QueryColumnMeta     = { name: "createdAt", wireType: "isoString" };
+const DAY_COL: QueryColumnMeta      = { name: "day", wireType: "isoDate" };
+const TIME_COL: QueryColumnMeta     = { name: "opens", wireType: "isoTime" };
 const JSON_COL: QueryColumnMeta     = { name: "meta", wireType: "json" };
 const BASE64_COL: QueryColumnMeta   = { name: "blob", wireType: "base64" };
 const JSON_ARRAY_COL: QueryColumnMeta = { name: "tags", wireType: "jsonArray" };
@@ -32,6 +34,14 @@ describe("xCandidates", () => {
             { field: "amount",    label: "amount" },
             { field: "quantity",  label: "quantity" },
             { field: "createdAt", label: "createdAt" },
+            { field: ROW_INDEX_FIELD, label: "Row #" },
+        ]);
+    });
+
+    it("includes an isoDate column and excludes an isoTime one", () => {
+        expect(xCandidates([NUMERIC_COL, TIME_COL, DAY_COL])).toEqual([
+            { field: "amount", label: "amount" },
+            { field: "day",    label: "day" },
             { field: ROW_INDEX_FIELD, label: "Row #" },
         ]);
     });
@@ -66,6 +76,12 @@ describe("defaultChartConfig", () => {
         expect(defaultChartConfig(columns)).toEqual({ kind: "line", xField: "createdAt", yField: "amount" });
     });
 
+    it("picks an isoDate column as x when no isoString column precedes it", () => {
+        const columns = [NUMERIC_COL, TIME_COL, DAY_COL, NUMERIC_COL2];
+
+        expect(defaultChartConfig(columns)).toEqual({ kind: "line", xField: "day", yField: "amount" });
+    });
+
     it("picks the first numeric as x, second numeric as y, and \"bar\" with >=2 numeric and no datetime", () => {
         const columns = [NUMERIC_COL, NUMERIC_COL2, STRING_COL];
 
@@ -84,6 +100,11 @@ describe("isTimeX", () => {
 
     it("is true when xField names a datetime column", () => {
         expect(isTimeX(columns, "createdAt")).toBe(true);
+    });
+
+    it("is true for an isoDate column and false for an isoTime one", () => {
+        expect(isTimeX([DAY_COL, TIME_COL], "day")).toBe(true);
+        expect(isTimeX([DAY_COL, TIME_COL], "opens")).toBe(false);
     });
 
     it("is false for a numeric xField or the Row # ordinal", () => {
@@ -109,6 +130,15 @@ describe("buildChartSeries", () => {
 
         expect(buildChartSeries(columns, rows, { kind: "line", xField: "createdAt", yField: "amount" })).toEqual([
             { name: "amount", data: [{ x: expectedX, y: 5 }] },
+        ]);
+    });
+
+    it("plots an isoDate value at local midnight of its day and drops a null date", () => {
+        const columns = [DAY_COL, NUMERIC_COL];
+        const rows = [{ day: "2026-06-28", amount: 5 }, { day: null, amount: 6 }];
+
+        expect(buildChartSeries(columns, rows, { kind: "line", xField: "day", yField: "amount" })).toEqual([
+            { name: "amount", data: [{ x: new Date(2026, 5, 28).getTime(), y: 5 }] },
         ]);
     });
 

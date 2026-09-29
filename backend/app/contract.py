@@ -21,7 +21,9 @@ class WireType(str, Enum):
     NUMBER = "number"          # smallint/int/bigint/real/double
     STRING = "string"          # text/varchar/char/uuid, and numeric (precision-preserving)
     BOOLEAN = "boolean"        # bool
-    ISO_STRING = "isoString"   # timestamptz/timestamp/date/time -> ISO-8601 string
+    ISO_STRING = "isoString"   # timestamptz/timestamp -> ISO-8601 date-time (offset only for timestamptz)
+    ISO_DATE = "isoDate"       # date -> "YYYY-MM-DD"
+    ISO_TIME = "isoTime"       # time (without time zone) -> "HH:MM:SS[.ffffff]"
     JSON = "json"              # json/jsonb -> passthrough (object/array/scalar)
     BASE64 = "base64"          # bytea -> base64 string
     JSON_ARRAY = "jsonArray"   # Postgres array -> JSON array

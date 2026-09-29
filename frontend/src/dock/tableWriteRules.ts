@@ -26,12 +26,19 @@ export function isRequiredColumn(column: ColumnMeta): boolean {
 }
 
 /** The wire types the backend's FilterCompiler can bind a filter value for. */
-const FILTERABLE_WIRE_TYPES: ReadonlySet<ColumnMeta["wireType"]> = new Set(["number", "string", "boolean", "isoString"]);
+const FILTERABLE_WIRE_TYPES: ReadonlySet<ColumnMeta["wireType"]> = new Set([
+    "number",
+    "string",
+    "boolean",
+    "isoString",
+    "isoDate",
+    "isoTime",
+]);
 
 /**
  * Whether this column gets a filter input in the grid's header filter row.
  * True for the wire types the SQL filter compiler can bind: number, string,
- * boolean, and isoString.
+ * boolean, isoString, isoDate and isoTime.
  */
 export function isFilterableColumn(column: ColumnMeta): boolean {
     return FILTERABLE_WIRE_TYPES.has(column.wireType);
@@ -48,7 +55,8 @@ export function isFilterableColumn(column: ColumnMeta): boolean {
  * The grid is generated from a live schema and declares no widths, so its
  * `string`/`auto` columns size themselves from the loaded page rather than
  * sharing the viewport equally (`autoSizeColumns`). Only `number`/`string`/
- * `boolean`/`isoString` columns get a header filter input (`isFilterableColumn`).
+ * `boolean`/`isoString`/`isoDate`/`isoTime` columns get a header filter input
+ * (`isFilterableColumn`).
  */
 export function buildColumnSpec(columns: ColumnMeta[], canUpdate: boolean): ColumnSpec {
     return {

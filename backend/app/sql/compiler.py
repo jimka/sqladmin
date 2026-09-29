@@ -10,6 +10,7 @@ no database, trivially unit-testable.
 
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
 from ..contract import ColumnMeta
@@ -17,10 +18,6 @@ from ..errors import ValidationError
 from ..wire import from_wire_filter_operand
 
 _COMPARATORS = {"eq": "=", "neq": "<>", "gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
-# A `date` column is compared against an instant rather than truncated to a
-# day -- see `from_wire_filter_operand`. The cast also pins the bound
-# parameter's type, which a bare `"day" >= $1` would infer as `date`.
-_INSTANT_CAST_TYPES = frozenset({"date"})
 
 
 def quote_ident(name: str) -> str:
@@ -150,23 +147,26 @@ class FilterCompiler:
         except (ValueError, TypeError) as e:
             raise ValidationError(f"Invalid filter value for column '{field}': {e}")
 
-    def _instant_cast(self, field: str) -> str:
-        """
-        The cast that makes a `date` column comparable to a filter operand's
-        full instant, or '' for every other column.
-        """
-        return "::timestamp" if self._meta(field).data_type.lower() in _INSTANT_CAST_TYPES else ""
-
     def _column(self, field: str, values: list[Any]) -> str:
         """
         The column expression to compare against. A text operand can only have
         come from a string-typed model field, whose Postgres type may be text,
         varchar, char, uuid, or numeric -- comparing the column's text form
-        makes every one of those valid.
+        makes every one of those valid. An interval operand can only have come
+        from a `time` column (see `from_wire_filter_operand`), which is compared
+        as an interval so a bound of 24:00:00 keeps its meaning.
         """
         ident = self._ident(field)
+        all_text = bool(values) and all(isinstance(v, str) for v in values)
+        all_interval = bool(values) and all(isinstance(v, datetime.timedelta) for v in values)
 
-        return ident + "::text" if values and all(isinstance(v, str) for v in values) else ident
+        if all_text:
+            return ident + "::text"
+
+        if all_interval:
+            return ident + "::interval"
+
+        return ident
 
     def _node(self, f: dict) -> str:
         """
@@ -183,7 +183,7 @@ class FilterCompiler:
         if t in _COMPARATORS:
             field = f["field"]
             value = self._operand(field, f["value"])
-            col = self._column(field, [value]) + self._instant_cast(field)
+            col = self._column(field, [value])
 
             return f"{col} {_COMPARATORS[t]} {self._bind(value)}"
 

@@ -108,7 +108,7 @@ describe("isFilterableColumn", () => {
         return column({ wireType });
     }
 
-    it.each<WireType>(["number", "string", "boolean", "isoString"])("is true for wireType %s", wireType => {
+    it.each<WireType>(["number", "string", "boolean", "isoString", "isoDate", "isoTime"])("is true for wireType %s", wireType => {
         expect(isFilterableColumn(withWireType(wireType))).toBe(true);
     });
 
