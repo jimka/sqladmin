@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
     isNewQueryChord, isOpenSavedChord, isQueryHistoryChord,
     isDatabasesRailChord, isRolesRailChord, isQueriesRailChord, isRefreshChord,
-    isExplainChord, isExplainAnalyzeChord, isHelpChord,
+    isExplainChord, isExplainAnalyzeChord, isSaveChord, isSaveAsChord, isHelpChord,
 } from "../../src/shell/queryShortcuts";
 
 /** A minimal KeyboardEvent-like stub; every modifier defaults to false. */
@@ -34,6 +34,8 @@ const ALL_MATCHERS: readonly { name: string; matcher: (event: KeyboardEvent) => 
     ...ALT_CHORDS,
     { name: "isExplainChord",         matcher: isExplainChord },
     { name: "isExplainAnalyzeChord",  matcher: isExplainAnalyzeChord },
+    { name: "isSaveChord",            matcher: isSaveChord },
+    { name: "isSaveAsChord",          matcher: isSaveAsChord },
     { name: "isHelpChord",            matcher: isHelpChord },
 ];
 
@@ -83,6 +85,33 @@ describe("isExplainChord / isExplainAnalyzeChord", () => {
     it("isExplainAnalyzeChord is false without Shift, or with Alt also held", () => {
         expect(isExplainAnalyzeChord(keyEvent({ ctrlKey: true, key: "e" }))).toBe(false);
         expect(isExplainAnalyzeChord(keyEvent({ ctrlKey: true, shiftKey: true, altKey: true, key: "e" }))).toBe(false);
+    });
+});
+
+describe("isSaveChord / isSaveAsChord", () => {
+    it("isSaveChord is true for Ctrl/Cmd+S (either key casing) with no Shift", () => {
+        expect(isSaveChord(keyEvent({ ctrlKey: true, key: "s" }))).toBe(true);
+        expect(isSaveChord(keyEvent({ metaKey: true, key: "s" }))).toBe(true);
+        expect(isSaveChord(keyEvent({ ctrlKey: true, key: "S" }))).toBe(true);
+    });
+
+    it("isSaveChord is false when Shift is also held, Alt is also held, no modifier is held, or the key differs", () => {
+        expect(isSaveChord(keyEvent({ ctrlKey: true, shiftKey: true, key: "s" }))).toBe(false);
+        expect(isSaveChord(keyEvent({ ctrlKey: true, altKey: true, key: "s" }))).toBe(false);
+        expect(isSaveChord(keyEvent({ key: "s" }))).toBe(false);
+        expect(isSaveChord(keyEvent({ altKey: true, key: "s" }))).toBe(false);
+        expect(isSaveChord(keyEvent({ ctrlKey: true, key: "f" }))).toBe(false);
+    });
+
+    it("isSaveAsChord is true for Ctrl/Cmd+Shift+S (either key casing)", () => {
+        expect(isSaveAsChord(keyEvent({ ctrlKey: true, shiftKey: true, key: "s" }))).toBe(true);
+        expect(isSaveAsChord(keyEvent({ metaKey: true, shiftKey: true, key: "S" }))).toBe(true);
+    });
+
+    it("isSaveAsChord is false without Shift, or with Alt also held", () => {
+        expect(isSaveAsChord(keyEvent({ ctrlKey: true, key: "s" }))).toBe(false);
+        expect(isSaveAsChord(keyEvent({ ctrlKey: true, shiftKey: true, altKey: true, key: "s" }))).toBe(false);
+        expect(isSaveAsChord(keyEvent({ altKey: true, key: "s" }))).toBe(false);
     });
 });
 

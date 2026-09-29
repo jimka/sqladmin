@@ -1,10 +1,11 @@
 // A small async modal that asks the user to name a thing before saving it,
 // built on the library's Dialog (an in-app, styled overlay) rather than the
 // browser's window.prompt. Shared by every "save this as a named thing" entry
-// point — the query panel's toolbar Save button, the Queries view's Recent
-// "Save…" action, and the login dialog's "Save preset" — so the naming UX is
-// identical wherever a save starts; `title`/`placeholder` let each caller word
-// the prompt for what it's actually naming.
+// point — the query panel's Save as (its toolbar button's chevron menu,
+// Ctrl/Cmd+Shift+S, and Save's fall-through when its link is gone), the
+// Queries view's Recent "Save…" action, and the login dialog's "Save preset"
+// — so the naming UX is identical wherever a save starts; `title`/`placeholder`
+// let each caller word the prompt for what it's actually naming.
 
 import { Dialog, DialogButtons } from "@jimka/typescript-ui/overlay";
 import { Panel }                 from "@jimka/typescript-ui/core";

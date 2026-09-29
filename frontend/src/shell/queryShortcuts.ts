@@ -10,13 +10,15 @@
 // the browser-reserved Ctrl/Cmd+N, reliably interceptable. N = new, S = saved,
 // H = history; the rail switches are D = Databases, O = rOles (R is taken by
 // Refresh), Q = Queries; and R = Refresh the active view. The editor-scoped
-// chords — Run/Save/Clear, the Ctrl/Cmd+↑/↓ history recall, and Explain /
+// chords — Run/Save/Save as/Clear, the Ctrl/Cmd+↑/↓ history recall, and Explain /
 // Explain-Analyze (Ctrl/Cmd+E / Ctrl/Cmd+Shift+E) — are bound inside QueryPanel,
 // but their display strings live here too so the legend and the panel tooltips
-// share one source. The Help chord (?) opens the Keyboard Shortcuts dialog.
-// The spatial-navigation chords (Ctrl+Alt+arrow, Ctrl+Alt+Shift+arrow) are the
-// library SpatialNavigation service's defaults, enabled in SqlAdminApp.ts; only
-// their display strings live here.
+// share one source. Save is Ctrl/Cmd+S, Save as is Ctrl/Cmd+Shift+S — mirroring
+// the Explain / Explain-Analyze pair's Shift-adds-the-variant shape. The Help
+// chord (?) opens the Keyboard Shortcuts dialog. The spatial-navigation chords
+// (Ctrl+Alt+arrow, Ctrl+Alt+Shift+arrow) are the library SpatialNavigation
+// service's defaults, enabled in SqlAdminApp.ts; only their display strings
+// live here.
 
 /** Display labels shown on the menu items and the start-page hints. */
 export const NEW_QUERY_SHORTCUT     = "Alt+N";
@@ -33,6 +35,7 @@ export const REFRESH_SHORTCUT        = "Alt+R";
 // the arrow keys the CodeEditor's history recall walks.
 export const RUN_SHORTCUT             = "Ctrl/Cmd+Enter";
 export const SAVE_SHORTCUT            = "Ctrl/Cmd+S";
+export const SAVE_AS_SHORTCUT         = "Ctrl/Cmd+Shift+S";
 export const CLEAR_SHORTCUT           = "Alt+C";
 export const OLDER_QUERY_SHORTCUT     = "Ctrl/Cmd+↑";
 export const NEWER_QUERY_SHORTCUT     = "Ctrl/Cmd+↓";
@@ -130,6 +133,26 @@ export function isExplainAnalyzeChord(event: KeyboardEvent): boolean {
         && event.shiftKey
         && !event.altKey
         && (event.key === "e" || event.key === "E");
+}
+
+/**
+ * Whether a keydown is the Save chord (Ctrl/Cmd+S). Rides Ctrl/Cmd like the
+ * Explain family and is bound scoped to the query editor, not at the document
+ * level.
+ */
+export function isSaveChord(event: KeyboardEvent): boolean {
+    return (event.ctrlKey || event.metaKey)
+        && !event.shiftKey
+        && !event.altKey
+        && (event.key === "s" || event.key === "S");
+}
+
+/** Whether a keydown is the Save-As chord (Ctrl/Cmd+Shift+S). */
+export function isSaveAsChord(event: KeyboardEvent): boolean {
+    return (event.ctrlKey || event.metaKey)
+        && event.shiftKey
+        && !event.altKey
+        && (event.key === "s" || event.key === "S");
 }
 
 /**

@@ -72,7 +72,7 @@ import { Placement }                            from "@jimka/typescript-ui/primi
 import { Border as BorderLayout, Split }        from "@jimka/typescript-ui/layout";
 import { ToolBar }                              from "@jimka/typescript-ui/component/menubar";
 import { Spacer, TabPanel }                     from "@jimka/typescript-ui/component/container";
-import { glyphButton, glyphMenuButton }         from "./glyphButton";
+import { glyphButton, glyphMenuButton, glyphSplitButton } from "./glyphButton";
 import { CodeEditor }                           from "@jimka/typescript-ui/component/editor";
 import { Glyph, ProgressSpinner }               from "@jimka/typescript-ui/component/display";
 import { play }                                 from "@jimka/typescript-ui/glyphs/solid/play";
@@ -110,8 +110,8 @@ import type { ActiveExport, RunExplain } from "../data/explain";
 import type { HistoryEntry }             from "../data/queryStore";
 import type { SplitLayoutBinding, AccordionLayoutBinding } from "../data/layoutStore";
 import {
-    isExplainChord, isExplainAnalyzeChord,
-    RUN_SHORTCUT, SAVE_SHORTCUT, CLEAR_SHORTCUT, EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT,
+    isExplainChord, isExplainAnalyzeChord, isSaveChord, isSaveAsChord,
+    RUN_SHORTCUT, SAVE_SHORTCUT, SAVE_AS_SHORTCUT, CLEAR_SHORTCUT, EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT,
     OLDER_QUERY_SHORTCUT, NEWER_QUERY_SHORTCUT,
 } from "../shell/queryShortcuts";
 import type { QueryExplainResult, QueryResult, QueryRowsResult } from "../contract";
@@ -167,11 +167,19 @@ export interface QueryPanelOptions {
     /** Newest-first SQL snapshot for the Ctrl+↑/↓ history recall (from the store). */
     getHistory?: () => string[];
     /**
-     * Save the current editor SQL (the toolbar Save button). The controller
-     * binds this to the naming modal + saved-query store; the panel stays a pure
-     * view, handing over the trimmed SQL and leaving the naming/persist to it.
+     * Save the current editor SQL to the tab's linked saved query, or prompt
+     * for a name when unlinked (the toolbar Save button / Ctrl/Cmd+S). The
+     * controller binds this to the save flow + saved-query store; the panel
+     * stays a pure view, handing over the trimmed SQL. Resolves `true` when
+     * something was saved, in which case the panel marks the editor clean.
      */
-    onSave?: (sql: string) => void;
+    onSave?: (sql: string) => Promise<boolean>;
+    /**
+     * Save the current editor SQL under a new name, always prompting (the Save
+     * button's chevron menu / Ctrl/Cmd+Shift+S). Same shape and clean-marking
+     * as {@link onSave}.
+     */
+    onSaveAs?: (sql: string) => Promise<boolean>;
     /**
      * Called whenever the exportable result changes: a rows result on a
      * successful SELECT/RETURNING, an EXPLAIN plan after an Explain run, or null
@@ -255,7 +263,7 @@ export class QueryPanel {
     readonly content: QueryPanelContent;
 
     constructor(options: QueryPanelOptions) {
-        const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onResult, onCaretChange, splitLayout, explainDiagramLayout, indexAdvisor } = options;
+        const { runQuery, runExplain, notify, onError, initialSql = "", autoRun = false, autoExplain, onRun, getHistory, onSave, onSaveAs, onResult, onCaretChange, splitLayout, explainDiagramLayout, indexAdvisor } = options;
 
         // lint: live parser-error diagnostics — a wavy underline plus a gutter
         // mark, refreshed 750ms after the last edit. On here because this is the
@@ -328,7 +336,8 @@ export class QueryPanel {
         body.addComponent(editor, { weight: 0 });
 
         const runButton     = glyphButton("play", CONSTRUCTIVE_COLOR, `Run (${RUN_SHORTCUT})`, () => void run());
-        const saveButton    = glyphButton("floppy-disk", PRIMARY_COLOR, `Save query (${SAVE_SHORTCUT})`, () => save());
+        const saveButton    = glyphSplitButton("floppy-disk", PRIMARY_COLOR, `Save query (${SAVE_SHORTCUT})`, () => void persist(onSave),
+                                               [{ text: "Save as…", shortcut: SAVE_AS_SHORTCUT, action: () => void persist(onSaveAs) }]);
         const clearButton   = glyphButton("eraser", CAUTION_COLOR, `Clear (${CLEAR_SHORTCUT})`, () => clear());
         const formatButton  = glyphButton("wand-magic-sparkles", NEUTRAL_COLOR, "Format SQL", () => void formatSql());
         // Chart the current Data result on demand (opens/refreshes the closeable
@@ -661,10 +670,10 @@ export class QueryPanel {
         }
 
         /**
-         * Save the current query: hand the trimmed editor SQL to the injected saver
-         * (which prompts for a name and persists it). A no-op on an empty editor.
+         * Hand the trimmed editor SQL to `saver`, then mark the editor clean when it
+         * reports a save. A no-op (with a hint) on an empty editor.
          */
-        function save(): void {
+        async function persist(saver: ((sql: string) => Promise<boolean>) | undefined): Promise<void> {
             const sql = editor.getValue().trim();
 
             if (!sql) {
@@ -673,7 +682,15 @@ export class QueryPanel {
                 return;
             }
 
-            onSave?.(sql);
+            if (saver === undefined) {
+                return;
+            }
+
+            const saved = await saver(sql);
+
+            if (saved) {
+                editor.markClean();
+            }
         }
 
         /** Format the editor SQL; on invalid SQL format() rejects and leaves text untouched. */
@@ -1227,9 +1244,9 @@ export class QueryPanel {
             notify(result.analyze ? "EXPLAIN ANALYZE plan (side-effects rolled back)" : "EXPLAIN plan");
         }
 
-        // Editor accelerators: Ctrl/Cmd+Enter runs, Ctrl/Cmd+S saves, Ctrl/Cmd+E
-        // explains (Ctrl/Cmd+Shift+E explain-analyzes), Alt+C clears, Ctrl/Cmd+↑/↓
-        // recalls history (bash-style). CodeEditor has no "keydown" event, so this
+        // Editor accelerators: Ctrl/Cmd+Enter runs, Ctrl/Cmd+S saves (Ctrl/Cmd+Shift+S
+        // saves as), Ctrl/Cmd+E explains (Ctrl/Cmd+Shift+E explain-analyzes), Alt+C
+        // clears, Ctrl/Cmd+↑/↓ recalls history (bash-style). CodeEditor has no "keydown" event, so this
         // is wired through Event.addSubtreeListener — a window capture-phase
         // dispatcher firing before CodeMirror's own key handling, so preventDefault()
         // here still suppresses any CodeMirror default. It MUST be addSubtreeListener,
@@ -1261,9 +1278,16 @@ export class QueryPanel {
                 return;
             }
 
-            if (chord && (e.key === "s" || e.key === "S")) {
+            if (isSaveAsChord(e)) {
                 e.preventDefault();
-                save();
+                void persist(onSaveAs);
+
+                return;
+            }
+
+            if (isSaveChord(e)) {
+                e.preventDefault();
+                void persist(onSave);
 
                 return;
             }

@@ -178,8 +178,9 @@ export class SavedQueryStore {
     }
 
     /**
-     * Upsert a named query: replace the existing entry with this name, else add
-     * a new one. A "save as" over an existing name overwrites it.
+     * A plain upsert; callers confirm before replacing another query (see
+     * querySaveFlow.ts): replace the existing entry with this name, else add a
+     * new one.
      *
      * @param name - The query name (the upsert key).
      * @param sql - The SQL to store under that name.
