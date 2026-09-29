@@ -37,6 +37,11 @@ export const HISTORY_RECALL_SHORTCUT  = "Ctrl/Cmd+↑ / ↓";
 export const EXPLAIN_SHORTCUT         = "Ctrl/Cmd+E";
 export const EXPLAIN_ANALYZE_SHORTCUT = "Ctrl/Cmd+Shift+E";
 
+// Display-only: the editor's own exit gesture, so the legend can tell users how
+// to leave a SQL editor whose Tab indents. The library (inside a Dialog) and
+// CodeMirror (elsewhere) handle the keys, so no isXChord matcher exists.
+export const LEAVE_EDITOR_SHORTCUT    = "Escape, then Tab";
+
 /** The Help chord (?) that opens the Keyboard Shortcuts dialog. */
 export const HELP_SHORTCUT = "?";
 
