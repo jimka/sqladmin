@@ -41,6 +41,10 @@ export type WireType =
     | "string"
     | "boolean"
     | "isoString"
+    /** A Postgres `date`, as `YYYY-MM-DD`. */
+    | "isoDate"
+    /** A Postgres `time without time zone`, as `HH:MM:SS[.ffffff]`. */
+    | "isoTime"
     | "json"
     | "base64"
     | "jsonArray";

@@ -171,6 +171,21 @@ def test_short_name_type_mapping() -> None:
     assert by_name == {"a": "number", "b": "boolean", "c": "isoString"}
 
 
+def test_short_name_temporal_type_mapping() -> None:
+    # A query result carries no Postgres type, so date and time get their own
+    # wire types rather than sharing isoString with timestamp.
+    op = RunQueryCommand(NO_CONN, "select d, t, ts")
+    op._attrs = [_attr("d", "date"), _attr("t", "time"), _attr("ts", "timestamp")]
+    op._records = [(datetime.date(2020, 1, 1), datetime.time(9, 30), datetime.datetime(2020, 1, 1, 9, 30))]
+    op._status = "SELECT 1"
+
+    result = op.get_result()
+    by_name = {c["name"]: c["wireType"] for c in result["columns"]}
+
+    assert by_name == {"d": "isoDate", "t": "isoTime", "ts": "isoString"}
+    assert result["rows"] == [{"d": "2020-01-01", "t": "09:30:00", "ts": "2020-01-01T09:30:00"}]
+
+
 def test_short_name_text_decoded_types() -> None:
     # connections._init_connection decodes interval/timetz as Postgres text, so
     # both result columns are strings that keep that text.

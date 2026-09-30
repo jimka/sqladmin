@@ -40,17 +40,47 @@ describe("SqlAdminWriter", () => {
     });
 });
 
-// Model with temporal fields for the update-diff and wall-clock cases. Dates are
-// built with the local constructor (or Date.UTC for toISOString comparisons), so
-// every case holds in any host time zone.
+// Model with temporal fields for the update-diff and temporal write-form cases.
+// Dates are built with the local constructor and expected offsets derived from
+// getTimezoneOffset(), so every case holds in any host time zone.
 const temporalModel = new Model(
-    [{ name: "id" }, { name: "name" }, { name: "created_at" }, { name: "ts", type: "datetime" }, { name: "tstz", type: "datetime" }],
+    [
+        { name: "id" },
+        { name: "name" },
+        { name: "created_at" },
+        { name: "ts", type: "datetime" },
+        { name: "tstz", type: "datetime" },
+        { name: "d", type: "date" },
+    ],
     "id",
 );
 
 /** A fresh, unedited record of `temporalModel`. */
 function temporalRecord(): ModelRecord {
-    return new ModelRecord(temporalModel, { id: 1, name: "Ada", created_at: "2026-01-01", ts: null, tstz: null });
+    return new ModelRecord(temporalModel, { id: 1, name: "Ada", created_at: "2026-01-01", ts: null, tstz: null, d: null });
+}
+
+// Minutes per hour, for splitting getTimezoneOffset() into an ISO 8601 offset.
+const MINUTES_PER_HOUR = 60;
+
+// ISO 8601 writes an offset's hours and minutes as two digits each.
+const ISO_OFFSET_FIELD_DIGITS = 2;
+
+/**
+ * The local ISO 8601 offset (`±HH:MM`) of `date`, derived from
+ * `getTimezoneOffset()`, which is positive west of UTC.
+ *
+ * @param date - The date whose local offset to format.
+ *
+ * @returns The offset, `+00:00` at UTC, never `Z`.
+ */
+function localOffset(date: Date): string {
+    const offset  = -date.getTimezoneOffset();
+    const sign    = offset < 0 ? "-" : "+";
+    const hours   = String(Math.floor(Math.abs(offset) / MINUTES_PER_HOUR)).padStart(ISO_OFFSET_FIELD_DIGITS, "0");
+    const minutes = String(Math.abs(offset) % MINUTES_PER_HOUR).padStart(ISO_OFFSET_FIELD_DIGITS, "0");
+
+    return `${sign}${hours}:${minutes}`;
 }
 
 describe("SqlAdminWriter operation-aware bodies", () => {
@@ -77,6 +107,7 @@ describe("SqlAdminWriter operation-aware bodies", () => {
             name: "Ada",
             ts: null,
             tstz: null,
+            d: null,
         });
     });
 
@@ -92,7 +123,7 @@ describe("SqlAdminWriter operation-aware bodies", () => {
     it("writeRecords applies the update diff to each record", () => {
         const writer = new SqlAdminWriter(new Set());
         const first  = temporalRecord();
-        const second = new ModelRecord(temporalModel, { id: 2, name: "Alan", created_at: "2026-01-02", ts: null, tstz: null });
+        const second = new ModelRecord(temporalModel, { id: 2, name: "Alan", created_at: "2026-01-02", ts: null, tstz: null, d: null });
 
         first.set("name", "Grace");
         second.set("created_at", "2027-01-01");
@@ -104,49 +135,31 @@ describe("SqlAdminWriter operation-aware bodies", () => {
     });
 });
 
-describe("SqlAdminWriter zone-less timestamp columns", () => {
-    it("writes an edited zone-less timestamp as its local wall clock on update", () => {
-        const writer = new SqlAdminWriter(new Set(), new Set(["ts"]));
+describe("SqlAdminWriter temporal write forms", () => {
+    it.each(["update", "create"] as const)("writes a date field as its bare local date on %s", operation => {
+        const writer = new SqlAdminWriter(new Set());
         const record = temporalRecord();
 
-        record.set("ts", new Date(2026, 5, 28, 8, 0));
+        record.set("d", new Date(2026, 5, 28));
 
-        expect(JSON.parse(writer.writeRecord(record, "update"))).toEqual({ ts: "2026-06-28T08:00:00.000", id: 1 });
+        expect(JSON.parse(writer.writeRecord(record, operation)).d).toBe("2026-06-28");
     });
 
-    it("writes a zone-less timestamp as its local wall clock on create", () => {
-        const writer = new SqlAdminWriter(new Set(), new Set(["ts"]));
+    it.each(["update", "create"] as const)("writes a datetime field as local ISO 8601 with its offset on %s", operation => {
+        const writer = new SqlAdminWriter(new Set());
         const record = temporalRecord();
+        const moment = new Date(2026, 5, 28, 8, 0);
 
-        record.set("ts", new Date(2026, 5, 28, 8, 0));
+        record.set("ts", moment);
 
-        expect(JSON.parse(writer.writeRecord(record, "create")).ts).toBe("2026-06-28T08:00:00.000");
-    });
+        const written: string = JSON.parse(writer.writeRecord(record, operation)).ts;
 
-    it("leaves a zone-aware timestamp as its UTC instant", () => {
-        const writer = new SqlAdminWriter(new Set(), new Set(["ts"]));
-        const record = temporalRecord();
-
-        record.set("tstz", new Date(Date.UTC(2026, 5, 28, 12, 4)));
-
-        expect(JSON.parse(writer.writeRecord(record, "update")).tstz).toBe("2026-06-28T12:04:00.000Z");
-    });
-
-    it.each([
-        ["2026-06-28T08:00:00.000", new Date(2026, 5, 28, 8, 0)],
-        ["2026-12-31T23:59:59.500", new Date(2026, 11, 31, 23, 59, 59, 500)],
-        ["0999-01-01T09:05:07.045", new Date(999, 0, 1, 9, 5, 7, 45)],
-    ])("writes the local wall clock %s", (expected, date) => {
-        const writer = new SqlAdminWriter(new Set(), new Set(["ts"]));
-        const record = temporalRecord();
-
-        record.set("ts", date);
-
-        expect(JSON.parse(writer.writeRecord(record, "update")).ts).toBe(expected);
+        expect(written).toBe(`2026-06-28T08:00:00.000${localOffset(moment)}`);
+        expect(written).not.toMatch(/Z$/);
     });
 
     it("writes null in a zone-less column as null", () => {
-        const writer = new SqlAdminWriter(new Set(), new Set(["ts"]));
+        const writer = new SqlAdminWriter(new Set());
 
         expect(JSON.parse(writer.writeRecord(temporalRecord(), "create")).ts).toBeNull();
     });

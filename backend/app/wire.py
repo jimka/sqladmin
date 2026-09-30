@@ -8,8 +8,9 @@ Pure helpers:
     asyncpg value into its contract scalar.
   * ``from_wire_value`` — the inverse, for a write payload's column values.
   * ``from_wire_filter_operand`` — maps a FILTER comparison operand to the
-    Python value asyncpg binds, which for a temporal column differs from what
-    ``from_wire_value`` binds for a write.
+    Python value asyncpg binds, which differs from what ``from_wire_value``
+    binds for a write for a ``timestamptz`` operand (converted to UTC) and a
+    ``time`` operand (an interval).
 
 None touches a database, so all are trivially unit-testable.
 """
@@ -30,17 +31,6 @@ _NUMBER_TYPES = frozenset(
 )
 # numeric/decimal map to a precision-preserving STRING, not a float.
 _NUMERIC_AS_STRING = frozenset({"numeric", "decimal", "money"})
-_DATETIME_TYPES = frozenset(
-    {
-        "timestamp with time zone",
-        "timestamp without time zone",
-        "timestamp",
-        "timestamptz",
-        "date",
-        "time without time zone",
-        "time",
-    }
-)
 _STRING_TYPES = frozenset(
     {"text", "character varying", "varchar", "character", "char", "bpchar", "name", "uuid", "citext"}
 )
@@ -50,11 +40,19 @@ _STRING_TYPES = frozenset(
 _TRUE_TEXT = frozenset({"true", "t", "1", "yes", "y"})
 _FALSE_TEXT = frozenset({"false", "f", "0", "no", "n"})
 
-# Subsets of the datetime family, used by from_wire_value to pick the Python
-# temporal type (date / time / datetime) an ISO string is parsed into.
+# The temporal families pg_type_to_wire splits into ISO_STRING / ISO_DATE /
+# ISO_TIME, and the subset of timestamps that carry a zone.
+_TIMESTAMP_TYPES = frozenset(
+    {"timestamp with time zone", "timestamp without time zone", "timestamp", "timestamptz"}
+)
+_TIMESTAMPTZ_TYPES = frozenset({"timestamp with time zone", "timestamptz"})
 _DATE_TYPES = frozenset({"date"})
 _TIME_TYPES = frozenset({"time", "time without time zone"})
-_TIMESTAMPTZ_TYPES = frozenset({"timestamp with time zone", "timestamptz"})
+_TEMPORAL_WIRE_TYPES = frozenset({WireType.ISO_STRING, WireType.ISO_DATE, WireType.ISO_TIME})
+# The day typescript-ui puts every time-of-day value on (1 January 1970, local),
+# and so the day a time column's filter operand names. A filter bound on the
+# next day is past 24:00, e.g. the end of the header row's "Equals 23:59" bucket.
+_TIME_OF_DAY_ANCHOR = datetime.datetime(1970, 1, 1)
 # Read and written as Postgres's own text: connections._init_connection
 # registers a text codec for each (by its pg_catalog name, interval / timetz).
 _POSTGRES_TEXT_TYPES = frozenset({"interval", "time with time zone", "timetz"})
@@ -80,8 +78,14 @@ def pg_type_to_wire(data_type: str) -> WireType:
     if dt == "boolean" or dt == "bool":
         return WireType.BOOLEAN
 
-    if dt in _DATETIME_TYPES:
+    if dt in _TIMESTAMP_TYPES:
         return WireType.ISO_STRING
+
+    if dt in _DATE_TYPES:
+        return WireType.ISO_DATE
+
+    if dt in _TIME_TYPES:
+        return WireType.ISO_TIME
 
     if dt in _POSTGRES_TEXT_TYPES:
         return WireType.STRING
@@ -142,7 +146,7 @@ def to_wire_value(value: Any, wire_type: WireType) -> Any:
     if wire_type is WireType.BOOLEAN:
         return bool(value)
 
-    if wire_type is WireType.ISO_STRING:
+    if wire_type in _TEMPORAL_WIRE_TYPES:
         return value.isoformat()
 
     if wire_type is WireType.JSON:
@@ -171,6 +175,14 @@ def _parse_iso_datetime(text: str) -> datetime.datetime:
     return datetime.datetime.fromisoformat(text)
 
 
+def _wall_clock(text: str) -> datetime.datetime:
+    """
+    The naive date-time an ISO string names: its offset, if any, is dropped
+    without converting, so "12:04-07:00" stays 12:04.
+    """
+    return _parse_iso_datetime(text).replace(tzinfo=None)
+
+
 def from_wire_value(value: Any, column: ColumnMeta) -> Any:
     """
     Map one wire scalar back to the Python value asyncpg binds for ``column``.
@@ -181,7 +193,7 @@ def from_wire_value(value: Any, column: ColumnMeta) -> Any:
     ``Decimal``, base64 becomes ``bytes``). Values that asyncpg already binds
     directly (numbers, booleans, plain text, arrays) pass through unchanged.
     A ``timestamp without time zone`` value always binds as a naive
-    ``datetime``.
+    ``datetime`` holding the wall clock written in the string.
 
     Args:
         value: the wire scalar from the decoded JSON payload.
@@ -196,23 +208,22 @@ def from_wire_value(value: Any, column: ColumnMeta) -> Any:
     wire_type = column.wire_type
     data_type = column.data_type.lower()
 
+    if wire_type is WireType.ISO_DATE:
+        # The first ten characters are the calendar day in every form that
+        # arrives: "YYYY-MM-DD" (the grid, import files) and a local-offset
+        # date-time (an older client).
+        return datetime.date.fromisoformat(value[:10])
+
+    if wire_type is WireType.ISO_TIME:
+        return _wall_clock(value).time() if "T" in value else datetime.time.fromisoformat(value)
+
     if wire_type is WireType.ISO_STRING:
-        if data_type in _DATE_TYPES:
-            return datetime.date.fromisoformat(value[:10])
-
-        if data_type in _TIME_TYPES:
-            return datetime.time.fromisoformat(value)
-
         moment = _parse_iso_datetime(value)
 
-        if data_type in _TIMESTAMPTZ_TYPES:
-            return moment
-
-        # A zone-less timestamp: asyncpg rejects an aware datetime for it. An
-        # offset-less string (what SqlAdminWriter and the export write) keeps its wall
-        # clock; one with an offset keeps its UTC wall clock, as
-        # from_wire_filter_operand reads the same column.
-        return _to_utc(moment).replace(tzinfo=None)
+        # A zone-less timestamp: asyncpg rejects an aware datetime for it, and the
+        # wall clock in the string is what the user saw, so any offset is dropped
+        # without converting.
+        return moment if data_type in _TIMESTAMPTZ_TYPES else moment.replace(tzinfo=None)
 
     if wire_type is WireType.STRING:
         if data_type in _NUMERIC_AS_STRING:
@@ -246,8 +257,8 @@ def from_import_scalar(raw: Any, column: ColumnMeta) -> Any:
     and Python's own type of ``raw``. Some checks are deliberately left to
     ``from_wire_value``/the eventual INSERT rather than duplicated here: a
     numeric-as-string value's eventual ``Decimal(...)`` parse, a ``BASE64``
-    value's eventual ``base64.b64decode``, and an ``ISO_STRING`` value's
-    eventual date/time parse.
+    value's eventual ``base64.b64decode``, and an ``ISO_STRING`` /
+    ``ISO_DATE`` / ``ISO_TIME`` value's eventual date/time parse.
 
     Args:
         raw: the raw file value for one cell (``None`` for a SQL NULL).
@@ -328,7 +339,7 @@ def from_import_scalar(raw: Any, column: ColumnMeta) -> Any:
 
         raise ValueError(f"expected a boolean, got {raw!r}")
 
-    if wire_type is WireType.ISO_STRING:
+    if wire_type in _TEMPORAL_WIRE_TYPES:
         if isinstance(raw, str):
             return raw
 
@@ -395,19 +406,24 @@ def from_wire_filter_operand(value: Any, column: ColumnMeta) -> Any:
     Map one wire scalar to the Python value asyncpg binds for a FILTER
     comparison against ``column``.
 
-    A temporal column's filter operand always arrives as a full ISO-8601
-    instant: the grid's filter cell parses the typed text into a JS ``Date``,
-    and ``JSON.stringify`` emits ``Date.toISOString()``. It is mapped to the
-    Python type that keeps the comparison exact, which is NOT always the type
-    ``from_wire_value`` binds for a write:
+    A temporal column's filter operand always arrives as a full local ISO-8601
+    date-time with the browser's offset: the grid's filter cell parses the
+    typed text into a JS ``Date``, and ``AjaxProxy`` writes it with its local
+    offset (``2026-06-28T00:00:00.000-07:00``). A zone-less column keeps the
+    wall clock written in the string, as ``from_wire_value`` does for a write;
+    only a ``timestamptz`` operand keeps its instant:
 
-      * ``timestamp with time zone`` -> aware ``datetime`` (as for a write)
-      * ``timestamp without time zone`` -> naive ``datetime``, the instant's
-        UTC wall clock
-      * ``date`` -> naive ``datetime``, NOT a ``date``: truncating would
-        collapse the header row's minute-wide equality range to an empty one.
-        ``FilterCompiler`` compares such a column as ``"col"::timestamp``.
-      * ``time without time zone`` -> naive ``time``
+      * ``timestamp with time zone`` -> aware ``datetime``, converted to UTC
+      * ``timestamp without time zone`` -> naive ``datetime``, the wall clock
+        in the string with its offset dropped without converting
+      * ``date`` -> ``date``, the day in the string. ``FilterCompiler``
+        compares the column uncast; the header row's "Equals" on a date
+        column is a whole local day, so its two bounds stay distinct days.
+      * ``time without time zone`` -> ``timedelta``, the wall clock's
+        interval since 1 January 1970, 00:00 (the library's time-of-day
+        anchor). ``FilterCompiler`` compares the column as ``::interval``, so
+        the header row's "Equals 23:59" bucket can end at 24:00:00; a ``time``
+        would wrap that bound to 00:00 and match nothing.
 
     Every non-temporal column returns ``value`` unchanged. Those operands are
     compared as text (``FilterCompiler._column`` casts the column), which is
@@ -420,22 +436,24 @@ def from_wire_filter_operand(value: Any, column: ColumnMeta) -> Any:
         column: the column the operand is compared against.
 
     Raises:
-        ValueError: if the operand is not a parseable ISO-8601 instant.
+        ValueError: if the operand is not a parseable ISO-8601 date-time.
 
     Returns:
         The Python value to bind for this comparison.
     """
-    if column.wire_type is not WireType.ISO_STRING or not isinstance(value, str):
+    if column.wire_type not in _TEMPORAL_WIRE_TYPES or not isinstance(value, str):
         return value
 
-    moment = _to_utc(_parse_iso_datetime(value))
-    data_type = column.data_type.lower()
+    moment = _parse_iso_datetime(value)
 
-    if data_type in _TIME_TYPES:
-        return moment.replace(tzinfo=None).time()
+    if column.wire_type is WireType.ISO_DATE:
+        return moment.replace(tzinfo=None).date()
 
-    if data_type in _TIMESTAMPTZ_TYPES:
-        return moment
+    if column.wire_type is WireType.ISO_TIME:
+        return moment.replace(tzinfo=None) - _TIME_OF_DAY_ANCHOR
+
+    if column.data_type.lower() in _TIMESTAMPTZ_TYPES:
+        return _to_utc(moment)
 
     return moment.replace(tzinfo=None)
 

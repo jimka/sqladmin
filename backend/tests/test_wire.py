@@ -37,7 +37,11 @@ from tests.conftest import col
         ("boolean", WireType.BOOLEAN),
         ("timestamp with time zone", WireType.ISO_STRING),
         ("timestamp without time zone", WireType.ISO_STRING),
-        ("date", WireType.ISO_STRING),
+        ("timestamptz", WireType.ISO_STRING),
+        ("timestamp", WireType.ISO_STRING),
+        ("date", WireType.ISO_DATE),
+        ("time", WireType.ISO_TIME),
+        ("time without time zone", WireType.ISO_TIME),
         ("time with time zone", WireType.STRING),
         ("timetz", WireType.STRING),
         ("interval", WireType.STRING),
@@ -75,6 +79,14 @@ def test_datetime_to_iso() -> None:
     assert to_wire_value(dt, WireType.ISO_STRING) == "2026-06-28T12:00:00"
 
 
+def test_date_to_iso_date() -> None:
+    assert to_wire_value(datetime.date(2026, 6, 28), WireType.ISO_DATE) == "2026-06-28"
+
+
+def test_time_to_iso_time() -> None:
+    assert to_wire_value(datetime.time(9, 30, 15, 250000), WireType.ISO_TIME) == "09:30:15.250000"
+
+
 def test_bytea_to_base64() -> None:
     assert to_wire_value(b"hi", WireType.BASE64) == base64.b64encode(b"hi").decode()
 
@@ -105,7 +117,7 @@ def test_rows_to_wire_unknown_column_defaults_to_string() -> None:
 
 
 def test_from_wire_none_passes_through() -> None:
-    assert from_wire_value(None, col("x", WireType.ISO_STRING, data_type="date")) is None
+    assert from_wire_value(None, col("x", WireType.ISO_DATE, data_type="date")) is None
 
 
 def test_from_wire_number_and_boolean_pass_through() -> None:
@@ -159,13 +171,14 @@ def test_from_wire_timestamp_without_tz() -> None:
         ("2026-06-28T08:00:00.000", datetime.datetime(2026, 6, 28, 8, 0)),
         ("2026-06-28T12:04:59.500000", datetime.datetime(2026, 6, 28, 12, 4, 59, 500000)),
         ("2026-06-28T12:04:00.000Z", datetime.datetime(2026, 6, 28, 12, 4)),
-        ("2026-06-28T14:04:00+02:00", datetime.datetime(2026, 6, 28, 12, 4)),
+        ("2026-06-28T14:04:00+02:00", datetime.datetime(2026, 6, 28, 14, 4)),
+        ("2026-06-28T12:04:00.000-07:00", datetime.datetime(2026, 6, 28, 12, 4)),
     ],
 )
 def test_from_wire_timestamp_without_tz_binds_naive(wire_value: str, expected: datetime.datetime) -> None:
-    # asyncpg rejects an aware datetime for a zone-less timestamp parameter: an
-    # offset-less value keeps its wall clock, one with an offset its UTC wall
-    # clock.
+    # asyncpg rejects an aware datetime for a zone-less timestamp parameter, and
+    # the wall clock written in the string is what the user saw: any offset is
+    # dropped without converting, as Postgres's own ::timestamp cast does.
     result = from_wire_value(wire_value, col("ts", WireType.ISO_STRING, data_type="timestamp without time zone"))
 
     assert result == expected
@@ -179,19 +192,53 @@ def test_from_wire_text_decoded_types_pass_through(data_type: str, value: str) -
     assert from_wire_value(value, col("x", WireType.STRING, data_type=data_type)) == value
 
 
-def test_from_wire_date_and_time() -> None:
-    assert from_wire_value(
-        "2026-06-28", col("d", WireType.ISO_STRING, data_type="date")
-    ) == datetime.date(2026, 6, 28)
-    assert from_wire_value(
-        "12:04:59", col("t", WireType.ISO_STRING, data_type="time without time zone")
-    ) == datetime.time(12, 4, 59)
+def test_from_wire_timestamptz_keeps_the_local_offset_instant() -> None:
+    # The grid writes a timestamptz value as local ISO-8601 plus the browser's
+    # offset; the aware datetime names the same instant.
+    result = from_wire_value(
+        "2026-06-28T12:04:00.000-07:00",
+        col("created_at", WireType.ISO_STRING, data_type="timestamp with time zone"),
+    )
+
+    assert result == datetime.datetime(2026, 6, 28, 19, 4, tzinfo=datetime.timezone.utc)
+    assert result.utcoffset() == datetime.timedelta(hours=-7)
+
+
+@pytest.mark.parametrize(
+    "wire_value,expected",
+    [
+        ("2026-06-28", datetime.date(2026, 6, 28)),
+        ("2026-06-28T00:00:00.000+09:00", datetime.date(2026, 6, 28)),
+    ],
+)
+def test_from_wire_date(wire_value: str, expected: datetime.date) -> None:
+    # The grid and import files send a bare date; an older client sent a
+    # local-offset date-time, whose first ten characters are still the day.
+    assert from_wire_value(wire_value, col("d", WireType.ISO_DATE, data_type="date")) == expected
+
+
+@pytest.mark.parametrize(
+    "wire_value,expected",
+    [
+        ("09:30:15.250", datetime.time(9, 30, 15, 250000)),
+        ("09:30:15.250000", datetime.time(9, 30, 15, 250000)),
+        ("12:04:59", datetime.time(12, 4, 59)),
+        ("1970-01-01T09:30:00.000-08:00", datetime.time(9, 30)),
+    ],
+)
+def test_from_wire_time(wire_value: str, expected: datetime.time) -> None:
+    # A date-time form keeps its wall-clock time of day; the offset is dropped
+    # without converting.
+    result = from_wire_value(wire_value, col("t", WireType.ISO_TIME, data_type="time without time zone"))
+
+    assert result == expected
+    assert result.tzinfo is None
 
 
 def test_from_wire_date_accepts_full_datetime_string() -> None:
     # A date column whose value arrived as a full ISO datetime keeps just the date.
     assert from_wire_value(
-        "2026-06-28T12:04:59.110Z", col("d", WireType.ISO_STRING, data_type="date")
+        "2026-06-28T12:04:59.110Z", col("d", WireType.ISO_DATE, data_type="date")
     ) == datetime.date(2026, 6, 28)
 
 
@@ -210,27 +257,58 @@ UTC = datetime.timezone.utc
 
 
 @pytest.mark.parametrize(
-    "data_type,wire_value,expected",
+    "wire_type,data_type,wire_value,expected",
     [
-        ("timestamp with time zone", "2026-06-28T12:04:00.000Z", datetime.datetime(2026, 6, 28, 12, 4, tzinfo=UTC)),
-        ("timestamp without time zone", "2026-06-28T12:04:00.000Z", datetime.datetime(2026, 6, 28, 12, 4)),
-        ("date", "2026-06-28T00:00:00.000Z", datetime.datetime(2026, 6, 28, 0, 0)),
-        ("time without time zone", "1970-01-01T09:30:00.000Z", datetime.time(9, 30)),
+        (
+            WireType.ISO_STRING,
+            "timestamp with time zone",
+            "2026-06-28T12:04:00.000Z",
+            datetime.datetime(2026, 6, 28, 12, 4, tzinfo=UTC),
+        ),
+        (
+            WireType.ISO_STRING,
+            "timestamp with time zone",
+            "2026-06-28T12:04:00.000-07:00",
+            datetime.datetime(2026, 6, 28, 19, 4, tzinfo=UTC),
+        ),
+        (
+            WireType.ISO_STRING,
+            "timestamp without time zone",
+            "2026-06-28T12:04:00.000Z",
+            datetime.datetime(2026, 6, 28, 12, 4),
+        ),
+        (
+            WireType.ISO_STRING,
+            "timestamp without time zone",
+            "2026-06-28T12:04:00.000-07:00",
+            datetime.datetime(2026, 6, 28, 12, 4),
+        ),
+        (WireType.ISO_DATE, "date", "2026-06-28T00:00:00.000-07:00", datetime.date(2026, 6, 28)),
+        (WireType.ISO_DATE, "date", "2026-06-28T00:00:00.000+09:00", datetime.date(2026, 6, 28)),
+        (WireType.ISO_DATE, "date", "2026-06-27T15:00:00.000Z", datetime.date(2026, 6, 27)),
+        (
+            WireType.ISO_TIME,
+            "time without time zone",
+            "1970-01-01T09:30:00.000-08:00",
+            datetime.timedelta(hours=9, minutes=30),
+        ),
+        (WireType.ISO_TIME, "time without time zone", "1970-01-01T09:30:00.000Z", datetime.timedelta(hours=9, minutes=30)),
+        # The upper bound of the filter row's "Equals 23:59" bucket: the next
+        # midnight, which only an interval can hold (a time would wrap to 00:00).
+        (WireType.ISO_TIME, "time without time zone", "1970-01-02T00:00:00.000-08:00", datetime.timedelta(days=1)),
     ],
 )
-def test_from_wire_filter_operand_temporal_types(data_type: str, wire_value: str, expected: object) -> None:
-    column = col("t", WireType.ISO_STRING, data_type=data_type)
+def test_from_wire_filter_operand_temporal_types(
+    wire_type: WireType, data_type: str, wire_value: str, expected: object
+) -> None:
+    # The filter row sends local ISO-8601 plus the browser's offset. A
+    # timestamptz operand keeps its instant; every zone-less column keeps the
+    # wall clock written in the string. A date operand is truncated to its day,
+    # and a time operand becomes its interval since 1 January 1970, 00:00.
+    result = from_wire_filter_operand(wire_value, col("t", wire_type, data_type=data_type))
 
-    assert from_wire_filter_operand(wire_value, column) == expected
-
-
-def test_from_wire_filter_operand_date_keeps_time_of_day() -> None:
-    # A `date` column's operand is compared as an instant, not truncated to a
-    # day -- see FilterCompiler's `::timestamp` cast.
-    result = from_wire_filter_operand("2026-06-28T12:04:59.110Z", col("d", WireType.ISO_STRING, data_type="date"))
-
-    assert result == datetime.datetime(2026, 6, 28, 12, 4, 59, 110000)
-    assert result.tzinfo is None
+    assert result == expected
+    assert type(result) is type(expected)
 
 
 def test_from_wire_filter_operand_timestamptz_normalizes_to_utc() -> None:
@@ -242,13 +320,12 @@ def test_from_wire_filter_operand_timestamptz_normalizes_to_utc() -> None:
     assert result == datetime.datetime(2026, 6, 28, 12, 4, tzinfo=UTC)
 
 
-def test_from_wire_filter_operand_time_without_tz_is_naive() -> None:
+def test_from_wire_filter_operand_time_is_an_interval_since_the_anchor_day() -> None:
     result = from_wire_filter_operand(
-        "1970-01-01T09:30:00.000Z", col("opens_at", WireType.ISO_STRING, data_type="time without time zone")
+        "1970-01-01T09:30:00.000Z", col("opens_at", WireType.ISO_TIME, data_type="time without time zone")
     )
 
-    assert result == datetime.time(9, 30)
-    assert result.tzinfo is None
+    assert result == datetime.timedelta(hours=9, minutes=30)
 
 
 @pytest.mark.parametrize(
@@ -276,16 +353,16 @@ def test_from_wire_filter_operand_passes_non_temporal_columns_through(
 
 
 def test_from_wire_filter_operand_none_on_temporal_column_returns_none() -> None:
-    assert from_wire_filter_operand(None, col("d", WireType.ISO_STRING, data_type="date")) is None
+    assert from_wire_filter_operand(None, col("d", WireType.ISO_DATE, data_type="date")) is None
 
 
 def test_from_wire_filter_operand_non_string_on_temporal_column_passes_through() -> None:
-    assert from_wire_filter_operand(10, col("d", WireType.ISO_STRING, data_type="date")) == 10
+    assert from_wire_filter_operand(10, col("d", WireType.ISO_DATE, data_type="date")) == 10
 
 
 def test_from_wire_filter_operand_unparseable_text_raises_value_error() -> None:
     with pytest.raises(ValueError):
-        from_wire_filter_operand("not-a-date", col("d", WireType.ISO_STRING, data_type="date"))
+        from_wire_filter_operand("not-a-date", col("d", WireType.ISO_DATE, data_type="date"))
 
 
 # --- from_import_scalar ------------------------------------------------------
@@ -297,7 +374,9 @@ def test_from_wire_filter_operand_unparseable_text_raises_value_error() -> None:
     (WireType.STRING, "numeric"),
     (WireType.STRING, "uuid"),
     (WireType.BOOLEAN, "boolean"),
-    (WireType.ISO_STRING, "date"),
+    (WireType.ISO_STRING, "timestamp with time zone"),
+    (WireType.ISO_DATE, "date"),
+    (WireType.ISO_TIME, "time without time zone"),
     (WireType.JSON, "jsonb"),
     (WireType.JSON_ARRAY, "ARRAY"),
     (WireType.BASE64, "bytea"),
@@ -397,15 +476,29 @@ def test_from_import_scalar_boolean_bad_text_raises() -> None:
         from_import_scalar("nope", col("b", WireType.BOOLEAN, data_type="boolean"))
 
 
-def test_from_import_scalar_iso_string_passes_through_text() -> None:
-    column = col("d", WireType.ISO_STRING, data_type="date")
+@pytest.mark.parametrize(
+    "wire,data_type,text",
+    [
+        (WireType.ISO_STRING, "timestamp without time zone", "2026-01-01T08:00:00"),
+        (WireType.ISO_DATE, "date", "2026-01-01"),
+        (WireType.ISO_TIME, "time without time zone", "09:30:15.250000"),
+    ],
+)
+def test_from_import_scalar_temporal_passes_through_text(wire: WireType, data_type: str, text: str) -> None:
+    assert from_import_scalar(text, col("x", wire, data_type=data_type)) == text
 
-    assert from_import_scalar("2026-01-01", column) == "2026-01-01"
 
-
-def test_from_import_scalar_iso_string_rejects_non_string() -> None:
+@pytest.mark.parametrize(
+    "wire,data_type",
+    [
+        (WireType.ISO_STRING, "timestamp without time zone"),
+        (WireType.ISO_DATE, "date"),
+        (WireType.ISO_TIME, "time without time zone"),
+    ],
+)
+def test_from_import_scalar_temporal_rejects_non_string(wire: WireType, data_type: str) -> None:
     with pytest.raises(ValueError):
-        from_import_scalar(20260101, col("d", WireType.ISO_STRING, data_type="date"))
+        from_import_scalar(20260101, col("x", wire, data_type=data_type))
 
 
 def test_from_import_scalar_json_parses_a_json_string() -> None:

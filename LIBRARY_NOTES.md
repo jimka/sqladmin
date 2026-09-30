@@ -8,6 +8,39 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞✅ Store date and time values lost their day and time of day between the grid and the server (0.10.0, symlinked)
+
+Found planning `date-time-column-field-types`. Four library defects, all in how a
+store moves a `Date` to and from text, broke `date`, `time` and `timestamp` columns
+outside UTC:
+
+- `Field` read a bare `2026-06-28` with `new Date(raw)`, which ECMAScript treats as
+  UTC midnight, so a `date` field held 27 June, 17:00 in Los Angeles.
+- `Field` read a `time` value such as `09:30:15.250000` with `new Date(raw)`, an
+  Invalid Date, so every `time` field stored `undefined` and its cell was blank.
+- `JsonWriter` and `AjaxProxy` wrote every `Date` as `toISOString()`, the UTC
+  instant, so a server could not recover the calendar day or wall-clock time the
+  user saw, in a written row or in a `filter=` operand.
+- The filter row read a typed `YYYY-MM-DD` with `new Date(text)` as UTC midnight,
+  so "Equals" on a date built its bucket around the wrong day west of UTC.
+
+Fixed in the library (`store-temporal-local-values`, for the next minor): `Field`
+reads a bare date as local midnight and a time of day on 1 January 1970, local;
+`JsonWriter` writes each `Date` in its field type's form (`2026-06-28`,
+`09:30:15.250`, or local ISO 8601 with its offset); `AjaxProxy` writes every filter
+`Date` with its local offset; and the filter row reads a typed date as a local day.
+Adopted here by `plans/implemented/date-time-column-field-types.md`: the backend
+sends `date` and `time` columns as new `isoDate` / `isoTime` wire types, which
+`buildModel.ts` maps to the library's `date` / `time` field types, and
+`SqlAdminWriter.ts` extends `JsonWriter` (see the entry below). Verified live,
+through the grid in `America/Los_Angeles` and `Asia/Tokyo`, against a symlinked
+build of typescript-ui branch `feature/dialog-escape-releases-tab-owner` at
+`4aed63df`, which contains the fix. `frontend/package.json` still names `^0.10.0`,
+whose `Field` and writers still read and write UTC, so the next typescript-ui minor
+bump must ship with this adoption.
+
+---
+
 ## ✂️✅ `SpatialNavigation`'s default region chord takes word selection; recommend `Ctrl+Alt+Shift` for 0.11.0 (0.10.0)
 
 Found while planning `spatial-navigation-adoption`. `SpatialNavigation` claims
@@ -161,7 +194,7 @@ gesture raises by synchronous turn (`frontend/src/controller/closeRequestBatcher
 which also gives the tab menu's *Close all* rows one prompt — so this is noted, not
 worked around.
 
-## ✂️🩹🔎 JsonWriter writes every Date as a UTC instant, and its dirty mode cannot be extended (0.10.0)
+## ✂️✅ JsonWriter writes every Date as a UTC instant, and its dirty mode cannot be extended (0.10.0)
 
 Found fixing row saves on tables with a `timestamp without time zone` column.
 `JsonWriter` serializes a `Date` with `toISOString()`, the UTC instant. That loses the
@@ -179,11 +212,12 @@ ever sees the finished string. An app that must also drop server-managed columns
 reuse the mode and has to re-implement its one-line rule against
 `ModelRecord.getChangedData()`.
 
-Worked around in `frontend/src/data/SqlAdminWriter.ts`: it still implements `Writer`
-itself, sends `getChangedData()` for an update, and writes each `timestamp without time
-zone` column's `Date` as its local wall clock with no offset. The library fix — a
-local-offset `Date` serialization and a `protected` `dataFor` — is planned in
-`plans/date-time-column-field-types.md`.
+Fixed in the library by `store-temporal-local-values` (verified symlinked; ships in the
+next typescript-ui minor): `JsonWriter` writes each `Date` in its field type's form, a
+`datetime` as local ISO 8601 with its offset, and `dataFor` is `protected`.
+`SqlAdminWriter` now extends `JsonWriter` in `'dirty'` mode, overriding `dataFor` only to
+strip generated columns, and its wall-clock workaround is removed; the backend drops the
+offset without converting for a zone-less column.
 
 ## 🐞✅ A review dialog with no other focusable content traps Tab/Shift+Tab in the SQL editor (0.10.0)
 

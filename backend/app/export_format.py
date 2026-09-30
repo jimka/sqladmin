@@ -103,10 +103,11 @@ def _csv_field(value: object, wire_type: WireType) -> str:
         # breaks if Python escapes é/emoji to \uXXXX while JS emits raw bytes.
         text = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
     else:
-        # number / string (incl. precision numerics) / isoString / base64. A
-        # native float renders with Python's repr (str(1.0) == "1.0"), which may
-        # differ from the frontend's JS-number rendering for floats (see the
-        # module docstring's byte-identity note); every other case is a string.
+        # number / string (incl. precision numerics) / isoString / isoDate /
+        # isoTime / base64. A native float renders with Python's repr
+        # (str(1.0) == "1.0"), which may differ from the frontend's JS-number
+        # rendering for floats (see the module docstring's byte-identity note);
+        # every other case is a string.
         text = str(value)
 
     if text == "" or any(ch in text for ch in ('"', ",", "\r", "\n")):

@@ -12,6 +12,8 @@ const WIRE_TO_FIELD: Record<WireType, FieldType> = {
     string   : "string",
     boolean  : "boolean",
     isoString: "datetime",
+    isoDate  : "date",
+    isoTime  : "time",
     json     : "auto",
     base64   : "string",
     jsonArray: "auto",

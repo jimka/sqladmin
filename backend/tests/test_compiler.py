@@ -18,7 +18,9 @@ UTC = datetime.timezone.utc
 TEMPORAL_COLS = [
     col("id", WireType.NUMBER, pk=True),
     col("created_at", WireType.ISO_STRING, data_type="timestamp with time zone"),
-    col("day", WireType.ISO_STRING, data_type="date"),
+    col("day", WireType.ISO_DATE, data_type="date"),
+    col("logged_at", WireType.ISO_STRING, data_type="timestamp without time zone"),
+    col("opens_at", WireType.ISO_TIME, data_type="time without time zone"),
 ]
 
 
@@ -285,14 +287,13 @@ def test_filter_not_wraps_null_bearing_in() -> None:
     assert params == [["x"]]
 
 
-# --- temporal columns (FilterCompiler._operand / _instant_cast) ------------
+# --- temporal columns (FilterCompiler._operand) ----------------------------
 #
-# A timestamptz/timestamp/time column's filter operand is converted from the
-# wire's ISO-8601 instant into the Python temporal type asyncpg binds -- see
-# from_wire_filter_operand. A `date` column is additionally compared as
-# "col"::timestamp rather than truncated, so the header row's minute-wide
-# equality range matches instead of matching nothing -- see "A `date` column
-# is compared as an instant, not truncated to a day" in the plan.
+# A temporal column's filter operand is converted from the wire's local
+# ISO-8601 date-time into the Python temporal type asyncpg binds -- see
+# from_wire_filter_operand. A `date` operand is truncated to its day and the
+# column compared uncast; the header row's "Equals" on a date column is a whole
+# local day, so its two bounds stay distinct days.
 
 
 @pytest.mark.parametrize(
@@ -312,33 +313,66 @@ def test_filter_comparators_on_timestamptz_column(ftype: str, op: str) -> None:
     "ftype,op",
     [("eq", "="), ("neq", "<>"), ("gt", ">"), ("gte", ">="), ("lt", "<"), ("lte", "<=")],
 )
-def test_filter_comparators_on_date_column_cast_to_timestamp(ftype: str, op: str) -> None:
+def test_filter_comparators_on_date_column_bind_a_date(ftype: str, op: str) -> None:
+    # A date operand is truncated to its local day, so the column is compared
+    # uncast against a bound date.
     where, params = FilterCompiler(
-        [{"type": ftype, "field": "day", "value": "2026-06-28T00:00:00.000Z"}], TEMPORAL_COLS
+        [{"type": ftype, "field": "day", "value": "2026-06-28T00:00:00.000-07:00"}], TEMPORAL_COLS
     ).compile()
 
-    assert where == f'WHERE "day"::timestamp {op} $1'
-    assert params == [datetime.datetime(2026, 6, 28, 0, 0)]
+    assert where == f'WHERE "day" {op} $1'
+    assert params == [datetime.date(2026, 6, 28)]
 
 
 def test_filter_equals_range_on_date_column() -> None:
-    # The header row builds "Equals" on a temporal column as a half-open
-    # range one minute wide, not a single `eq`.
+    # The header row builds "Equals" on a date column as one whole local day,
+    # a half-open range whose bounds truncate to two distinct days.
     where, params = FilterCompiler(
         [
             {
                 "type": "and",
                 "filters": [
-                    {"type": "gte", "field": "day", "value": "2026-06-28T00:00:00.000Z"},
-                    {"type": "lt", "field": "day", "value": "2026-06-28T00:01:00.000Z"},
+                    {"type": "gte", "field": "day", "value": "2026-06-28T00:00:00.000-07:00"},
+                    {"type": "lt", "field": "day", "value": "2026-06-29T00:00:00.000-07:00"},
                 ],
             }
         ],
         TEMPORAL_COLS,
     ).compile()
 
-    assert where == 'WHERE ("day"::timestamp >= $1 AND "day"::timestamp < $2)'
-    assert params == [datetime.datetime(2026, 6, 28, 0, 0), datetime.datetime(2026, 6, 28, 0, 1)]
+    assert where == 'WHERE ("day" >= $1 AND "day" < $2)'
+    assert params == [datetime.date(2026, 6, 28), datetime.date(2026, 6, 29)]
+
+
+def test_filter_equals_range_on_time_column_ending_at_midnight() -> None:
+    # "Equals 23:59" on a time column is the minute up to the next midnight.
+    # The column is compared as an interval, so that bound is 24:00:00 rather
+    # than a time wrapped to 00:00, which would match nothing.
+    where, params = FilterCompiler(
+        [
+            {
+                "type": "and",
+                "filters": [
+                    {"type": "gte", "field": "opens_at", "value": "1970-01-01T23:59:00.000-08:00"},
+                    {"type": "lt", "field": "opens_at", "value": "1970-01-02T00:00:00.000-08:00"},
+                ],
+            }
+        ],
+        TEMPORAL_COLS,
+    ).compile()
+
+    assert where == 'WHERE ("opens_at"::interval >= $1 AND "opens_at"::interval < $2)'
+    assert params == [datetime.timedelta(hours=23, minutes=59), datetime.timedelta(days=1)]
+
+
+def test_filter_on_zoneless_timestamp_keeps_the_wall_clock() -> None:
+    # A zone-less timestamp operand's offset is dropped without converting.
+    where, params = FilterCompiler(
+        [{"type": "gte", "field": "logged_at", "value": "2026-06-28T12:04:00.000-07:00"}], TEMPORAL_COLS
+    ).compile()
+
+    assert where == 'WHERE "logged_at" >= $1'
+    assert params == [datetime.datetime(2026, 6, 28, 12, 4)]
 
 
 def test_filter_equals_range_on_timestamptz_column() -> None:
@@ -364,11 +398,11 @@ def test_filter_equals_range_on_timestamptz_column() -> None:
 
 def test_filter_at_least_on_date_column() -> None:
     where, params = FilterCompiler(
-        [{"type": "gte", "field": "day", "value": "2026-06-28T00:00:00.000Z"}], TEMPORAL_COLS
+        [{"type": "gte", "field": "day", "value": "2026-06-28T00:00:00.000-07:00"}], TEMPORAL_COLS
     ).compile()
 
-    assert where == 'WHERE "day"::timestamp >= $1'
-    assert params == [datetime.datetime(2026, 6, 28, 0, 0)]
+    assert where == 'WHERE "day" >= $1'
+    assert params == [datetime.date(2026, 6, 28)]
 
 
 def test_filter_contains_on_timestamptz_column_still_casts_to_text() -> None:
