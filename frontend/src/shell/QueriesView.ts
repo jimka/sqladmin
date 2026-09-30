@@ -132,6 +132,9 @@ class QueriesView extends AccordionPanel {
 
         super({
             id,
+            // The whole view is one spatial-navigation region; entering it from
+            // outside restores the control last used in it.
+            navigationTarget: true,
             // Draggable gutter between Saved and Recent, so the user apportions the
             // height; the equal weights below seed the split evenly, as before.
             resizable: true,
@@ -208,6 +211,8 @@ function buildSection(config: SectionConfig): Section {
         layoutManager: new Fit(),
         preferredSize: { width: 0, height: SECTION_MIN_HEIGHT },
         minSize      : { width: 0, height: SECTION_MIN_HEIGHT },
+        // Each section is a spatial-navigation target inside the view.
+        navigationTarget: true,
     });
 
     const menu = new Menu();

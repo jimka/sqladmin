@@ -12,7 +12,7 @@ import {
     EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT, LEAVE_EDITOR_SHORTCUT,
     NEW_QUERY_SHORTCUT, OPEN_SAVED_SHORTCUT, QUERY_HISTORY_SHORTCUT,
     DATABASES_RAIL_SHORTCUT, ROLES_RAIL_SHORTCUT, QUERIES_RAIL_SHORTCUT,
-    REFRESH_SHORTCUT, HELP_SHORTCUT,
+    REFRESH_SHORTCUT, HELP_SHORTCUT, FOCUS_REGION_SHORTCUT, FOCUS_CONTROL_SHORTCUT,
 } from "./queryShortcuts";
 
 /** The legend's display grouping. */
@@ -54,6 +54,8 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
     { id: "roles-rail",      keys: ROLES_RAIL_SHORTCUT,      label: "Roles rail",                    category: "navigation" },
     { id: "queries-rail",    keys: QUERIES_RAIL_SHORTCUT,    label: "Queries rail",                  category: "navigation" },
     { id: "refresh",         keys: REFRESH_SHORTCUT,         label: "Refresh the active view",       category: "navigation" },
+    { id: "focus-region",    keys: FOCUS_REGION_SHORTCUT,    label: "Focus the next region",         category: "navigation" },
+    { id: "focus-control",   keys: FOCUS_CONTROL_SHORTCUT,   label: "Focus the nearest control",     category: "navigation" },
     { id: "help",            keys: HELP_SHORTCUT,            label: "Keyboard shortcuts",            category: "navigation" },
 ];
 

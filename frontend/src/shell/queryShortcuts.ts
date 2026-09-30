@@ -14,6 +14,9 @@
 // Explain-Analyze (Ctrl/Cmd+E / Ctrl/Cmd+Shift+E) — are bound inside QueryPanel,
 // but their display strings live here too so the legend and the panel tooltips
 // share one source. The Help chord (?) opens the Keyboard Shortcuts dialog.
+// The spatial-navigation chords (Ctrl+Alt+arrow, Ctrl+Alt+Shift+arrow) are the
+// library SpatialNavigation service's defaults, enabled in SqlAdminApp.ts; only
+// their display strings live here.
 
 /** Display labels shown on the menu items and the start-page hints. */
 export const NEW_QUERY_SHORTCUT     = "Alt+N";
@@ -44,6 +47,17 @@ export const LEAVE_EDITOR_SHORTCUT    = "Escape, then Tab";
 
 /** The Help chord (?) that opens the Keyboard Shortcuts dialog. */
 export const HELP_SHORTCUT = "?";
+
+// Both spatial-navigation strings mirror the library's default modifiers
+// (SpatialNavigation.ts's DEFAULT_COMPONENT_MODIFIERS and
+// DEFAULT_TARGET_MODIFIERS), so they must change if the library's defaults
+// change. They say Ctrl, not Ctrl/Cmd: the service matches ctrlKey exactly.
+
+/** The control-tier chord's display string (the library default modifiers). */
+export const FOCUS_CONTROL_SHORTCUT = "Ctrl+Alt+Arrow";
+
+/** The region-tier chord's display string (the library default modifiers from 0.11.0). */
+export const FOCUS_REGION_SHORTCUT = "Ctrl+Alt+Shift+Arrow";
 
 /**
  * Whether a keydown is an `Alt+<key>` chord with no other modifier, so plain

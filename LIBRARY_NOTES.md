@@ -8,6 +8,76 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## ✂️✅ `SpatialNavigation`'s default region chord takes word selection; recommend `Ctrl+Alt+Shift` for 0.11.0 (0.10.0)
+
+Found while planning `spatial-navigation-adoption`. `SpatialNavigation` claims
+its chords at the window in the capture phase, with no check for text entry,
+and stops a claimed chord's propagation, so a widget below never sees it
+(defaults at `SpatialNavigation.ts:208-209`). On Windows and Linux that
+pre-empts:
+
+- `Ctrl+Shift+←/→` (region tier default): word selection in every text input
+  and in `CodeEditor` — CodeMirror's `selectGroupLeft/Right`, and
+  `selectSyntax`/`selectPage` on macOS — plus the native
+  `<input>`/`<textarea>` gesture.
+- `Ctrl+Alt+↑/↓` (control tier default): CodeMirror's `addCursorAbove/Below`
+  (`Mod-Alt-ArrowUp/Down`), live because `CodeEditor` sets
+  `EditorState.allowMultipleSelections.of(true)`. `Ctrl+Alt+←/→` clashes with
+  nothing; word selection is not affected by the control tier.
+
+**Library change recommended for 0.11.0:**
+
+1. Change the region tier's default from `Ctrl+Shift` to `Ctrl+Alt+Shift`. It
+   has no CodeMirror or browser binding, so every app with text input can use
+   the default.
+2. Document the remaining trades in `docs/concepts/accessibility.md`'s
+   "Spatial focus navigation" section and on the `CodeEditor` component page:
+   the control tier takes `CodeEditor`'s add-cursor keys (Alt+drag rectangular
+   selection still works), and GNOME binds `Ctrl+Alt+arrow` (switch workspace)
+   and `Ctrl+Alt+Shift+arrow` (move window to workspace).
+
+Fixed in the library (`spatial-navigation-region-chord-default`): the region
+tier's default is now `Ctrl+Alt+Shift`, and `docs/concepts/accessibility.md` and
+the `CodeEditor` page document the add-cursor and GNOME trades. Adopted here:
+`plans/implemented/spatial-navigation-adoption.md` calls plain
+`SpatialNavigation.enable()` with no modifier override. Verified live, with real
+key presses, against a symlinked build of typescript-ui branch
+`feature/dialog-escape-releases-tab-owner` at `4aed63df`, which contains the chord
+change. `frontend/package.json` still names `^0.10.0`, whose region default would
+still take word selection, so the 0.11.0 bump must ship with this adoption.
+
+---
+
+## 🐞🔎 `SpatialNavigation` control tier: container priority beats a band-sharing neighbour, so `Ctrl+Alt+←` from a `CodeEditor` stays in its own panel (0.10.0)
+
+Found verifying `spatial-navigation-adoption` against an unreleased library build; the
+same ranking ships in 0.10.0. Paths and line numbers below are under
+`typescript-ui/packages/lib/src/typescript/lib/core` on that build.
+
+In a query tab, `Ctrl+Alt+←` from the SQL editor lands on the result pane's *Record
+view* toolbar button, just below and left of the editor, not on the sidebar tree
+beside it. Geometry at 1500×850: the focused `.cm-content` spans x 331–890, y
+103–253 (CodeMirror's line-number gutter fills x 280–331). The *Record view* button
+is at x 280–300, y 284–308. The navigator tree is at x 41–279, y 81–585.
+
+`rankInDirection` (`SpatialNavigation.ts:122-154`) sorts candidates that share the
+origin's perpendicular band first. The tree shares the editor's vertical band and
+the button does not, so on geometry alone the tree wins. But `rankWithContainerPriority`
+(`SpatialNavigation.ts:559-582`) first ranks every candidate inside the origin's
+nearest revealing container (`FocusReveal.containing`) ahead of every candidate
+outside it. The *Record view* button is inside the query panel's container and the
+tree is not, so the button wins even though it is outside the band.
+
+The priority exists so a move can't skip a scrolled-out sibling. It also overrides
+direction whenever a nearer-in-band control sits outside the container. Suggested
+fix: apply the container priority only among candidates that share the band (or
+only among candidates not yet revealed), so a band-sharing neighbour outside the
+container still beats an off-band one inside it. The region tier is unaffected:
+`Ctrl+Alt+Shift+←` from the editor lands in the sidebar as expected. SQLAdmin does
+not work around it.
+
+---
+
 ## 🐞🔎 `Dialog` restores focus to a disposed opener, throws, and never resolves `show()` (0.9.0, 0.10.0)
 
 Found while verifying the navigator refresh after DDL. After Create schema (or table, view)

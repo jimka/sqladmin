@@ -68,9 +68,13 @@ class TreeExplorerView extends AccordionPanel {
 
         // The tree's section takes all the leftover height via its weight below;
         // TREE_MIN_HEIGHT is its floor, not its target. Pre-super: `this` is
-        // unavailable until super() returns.
+        // unavailable until super() returns. The tree and the inspector are also
+        // spatial-navigation targets inside this view, so Ctrl+Alt+Shift+↑/↓
+        // moves between them.
         tree.setPreferredSize({ width: 0, height: TREE_MIN_HEIGHT });
         tree.setMinSize({ width: 0, height: TREE_MIN_HEIGHT });
+        tree.setNavigationTarget(true);
+        config.inspector.setNavigationTarget(true);
 
         // Also pre-super — AccordionPanel has no post-construction initiallyOpen
         // setter (see COMPONENT_CONVENTIONS.md's super-cascade trap).
@@ -78,6 +82,9 @@ class TreeExplorerView extends AccordionPanel {
 
         super({
             id: config.id,
+            // The whole view is one spatial-navigation region; entering it from
+            // outside restores the control last used in it.
+            navigationTarget: true,
             // Draggable gutter between the tree and the inspector, so the user
             // apportions the height. The tree's weight seeds the split at exactly
             // today's geometry (tree fills, inspector at its 220px preferred); a drag

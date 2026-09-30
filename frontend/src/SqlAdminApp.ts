@@ -10,7 +10,7 @@
 // DOM sink directly rather than router.navigate (see the plan's Architecture
 // Decision on why navigate() would re-dispatch on every sync).
 
-import { Body, DOM }             from "@jimka/typescript-ui/core";
+import { Body, DOM, SpatialNavigation } from "@jimka/typescript-ui/core";
 import { Fit }                   from "@jimka/typescript-ui/layout";
 import { SqlAdminController }    from "./SqlAdminController";
 import { SqlAdminShell }         from "./shell/SqlAdminShell";
@@ -31,6 +31,12 @@ import { APP_FAVICON }           from "./appIdentity";
     // and a deep-linked tab are all measured against the real face rather
     // than the browser's fallback.
     const body = await Body.init({ layoutManager: Fit(), favicon: APP_FAVICON });
+
+    // Keyboard focus movement between regions (Ctrl+Alt+Shift+arrow) and
+    // controls (Ctrl+Alt+arrow), both the library's default chords. The
+    // service stands down on its own while a modal dialog or a menu is open,
+    // so enabling it before the login dialog is safe.
+    SpatialNavigation.enable();
 
     const session = (await whoami()) ?? (await showLoginDialog());
 
