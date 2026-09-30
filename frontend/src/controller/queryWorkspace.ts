@@ -16,7 +16,10 @@ import { QueryHistoryStore, SavedQueryStore } from "../data/queryStore";
 import type { HistoryEntry, SavedQuery } from "../data/queryStore";
 import { NotesStore } from "../data/notesStore";
 import { QueryPanel } from "../dock/QueryPanel";
+import type { QueryPanelOptions } from "../dock/QueryPanel";
 import { DocumentationPanel } from "../dock/DocumentationPanel";
+import { saveQuery, saveQueryAs } from "./querySaveFlow";
+import type { QuerySaveDeps } from "./querySaveFlow";
 import { promptQueryName } from "../promptQueryName";
 import { notesPath } from "../shell/routeTargets";
 import { panelId, notesPanelId, elideName } from "./controllerText";
@@ -39,6 +42,10 @@ export class QueryWorkspace {
     private readonly _history: QueryHistoryStore;
     private readonly _saved  : SavedQueryStore;
     private readonly _notes  : NotesStore;
+
+    // The save flow's injected store/prompt/confirm, built once so every panel's
+    // Save/Save-as callbacks (panelSaveHooks) and promptAndSaveQuery share it.
+    private readonly _saveDeps: QuerySaveDeps;
 
     // Recently opened tables (newest-first), surfaced on the start page.
     private readonly _recentTables: RecentTable[] = [];
@@ -76,6 +83,15 @@ export class QueryWorkspace {
         this._history = new QueryHistoryStore(userId, host.connectionId, window.localStorage);
         this._saved   = new SavedQueryStore(userId, host.connectionId, window.localStorage);
         this._notes   = new NotesStore(userId, host.connectionId, window.localStorage);
+
+        this._saveDeps = {
+            store         : this._saved,
+            promptName    : defaultName => promptQueryName(defaultName),
+            confirmReplace: name => Dialog.confirm(
+                "Replace saved query",
+                `A saved query named “${elideName(name)}” already exists. Do you want to replace it?`,
+            ),
+        };
     }
 
     /**
@@ -98,15 +114,19 @@ export class QueryWorkspace {
      *   `Query N`; a saved query passes its name so the tab reads as the query.
      * @param explain - Auto-EXPLAIN the seeded SQL on open instead of running it
      *   (`"plain"` / `"analyze"`); used by the view panel's Explain actions.
+     * @param savedName - The saved query this tab starts linked to, if any —
+     *   links the tab to this saved query so Save overwrites it with no prompt.
      */
-    openQuery(seedSql?: string, run: boolean = false, title?: string, explain?: "plain" | "analyze"): void {
+    openQuery(seedSql?: string, run: boolean = false, title?: string, explain?: "plain" | "analyze", savedName?: string): void {
         const n     = ++this._queryCounter;
         const id    = `query-${n}`;
         const label = title ?? `Query ${n}`;
 
         // The tab keeps the full name; only the status line, which has to fit a
         // scope and a message beside it, spends a bounded amount on the label.
-        const statusLabel = elideName(label);
+        // A `let`: a Save as under a new name updates it via panelSaveHooks'
+        // onRenamed, so the status prefix follows a rename.
+        let statusLabel = elideName(label);
 
         const notify = (message: string): void => {
             this.host.status(`${statusLabel}: ${message}`);
@@ -125,9 +145,9 @@ export class QueryWorkspace {
             // these injected callbacks (matching notify/onError).
             onRun     : (entry: HistoryEntry) => this.recordRun(id, entry),
             getHistory: () => this._history.list().map(e => e.sql),
-            // The Save toolbar button hands back the trimmed SQL; the
-            // workspace owns the naming modal and the saved-query store.
-            onSave    : (sql: string) => void this.promptAndSaveQuery(sql),
+            // The workspace owns this panel's saved-query link, the naming
+            // prompt, and the saved-query store; the panel only calls Save/Save as.
+            ...this.panelSaveHooks(id, savedName, name => { statusLabel = elideName(name); }),
             // Mirror this panel's latest exportable result (rows or plan) so
             // the menubar export can reach it while it is the active panel.
             onResult  : (active: ActiveExport | null) => this.host.setActiveExport(id, active),
@@ -190,27 +210,28 @@ export class QueryWorkspace {
         const saved = this._saved.get(name);
 
         if (saved) {
-            this.openQuery(saved.sql, run, name);
+            this.openQuery(saved.sql, run, name, undefined, name);
         }
     }
 
     /**
-     * Prompt (via the in-app modal) for a name and save the SQL under it,
-     * reporting the outcome on the status bar. A cancelled or blank name
-     * abandons the save. Bound to the query panel's Save toolbar button and the
-     * Queries view's "Save…" action.
+     * Prompt for a name (confirming before replacing another saved query) and
+     * save the SQL under it, reporting the outcome on the status bar. A
+     * cancelled name abandons the save. Bound to the Queries view's Recent
+     * "Save under a name" action — the query panel's own Save/Save as goes
+     * through `panelSaveHooks` instead, since it has a tab to link.
      *
      * @param sql - The SQL to save.
      */
     async promptAndSaveQuery(sql: string): Promise<void> {
-        const name = await promptQueryName();
+        const name = await saveQueryAs(this._saveDeps, sql, null);
 
         if (name === null) {
             return;
         }
 
-        this.saveQuery(name, sql);
-        this.host.status(`Saved query as “${elideName(name)}”`);
+        this.notifyWorkspaceChanged();
+        this.host.status(`Saved query “${elideName(name)}”`);
     }
 
     /**
@@ -348,10 +369,44 @@ export class QueryWorkspace {
         this._workspaceListeners.push(listener);
     }
 
-    /** Save (upsert) a named query and refresh the workspace surfaces. */
-    private saveQuery(name: string, sql: string): void {
-        this._saved.save(name, sql);
-        this.notifyWorkspaceChanged();
+    /**
+     * Build one query panel's Save / Save as callbacks, holding that panel's
+     * link to a saved query.
+     *
+     * @param id - The panel id (retitled after a Save as to a new name).
+     * @param savedName - The saved query the panel starts linked to, if any.
+     * @param onRenamed - Called with the new name when the link changes.
+     *
+     * @returns The panel's `onSave` / `onSaveAs` options.
+     */
+    private panelSaveHooks(
+        id: string, savedName: string | undefined, onRenamed: (name: string) => void,
+    ): Pick<QueryPanelOptions, "onSave" | "onSaveAs"> {
+        let linkedName: string | null = savedName ?? null;
+
+        // Record a completed save: relink, retitle, refresh the surfaces. Returns
+        // whether anything was saved, which is what the panel's callbacks resolve to.
+        const applySaved = (name: string | null): boolean => {
+            if (name === null) {
+                return false;
+            }
+
+            if (name !== linkedName) {
+                linkedName = name;
+                this.host.dock.setPanelTitle(id, name);
+                onRenamed(name);
+            }
+
+            this.notifyWorkspaceChanged();
+            this.host.status(`Saved query “${elideName(name)}”`);
+
+            return true;
+        };
+
+        return {
+            onSave  : async (sql: string) => applySaved(await saveQuery(this._saveDeps, sql, linkedName)),
+            onSaveAs: async (sql: string) => applySaved(await saveQueryAs(this._saveDeps, sql, linkedName)),
+        };
     }
 
     /**

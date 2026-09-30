@@ -4,13 +4,15 @@
 // view / query / role-grants) as well as the sidebar rails' section tools
 // (Create schema, Show database diagram, Refresh) and the Queries rail's row
 // actions. `glyphMenuButton` is the same face wired to a dropdown menu instead
-// of a click handler, and `glyphToggleButton` is the same face as a two-state
-// toggle instead of a plain button — one owner, so the three variants cannot
-// drift apart in a toolbar that mixes them.
+// of a click handler, `glyphToggleButton` is the same face as a two-state
+// toggle instead of a plain button, and `glyphSplitButton` is the same face
+// with a trailing chevron opening a dropdown beside the primary click — one
+// owner, so the four variants cannot drift apart in a toolbar that mixes them.
 
 import { Button }       from "@jimka/typescript-ui/component/button";
 import { MenuButton }   from "@jimka/typescript-ui/component/button";
 import { ToggleButton } from "@jimka/typescript-ui/component/button";
+import { SplitButton }  from "@jimka/typescript-ui/component/button";
 import type { ButtonOptions }  from "@jimka/typescript-ui/component/button";
 import type { MenuItemConfig } from "@jimka/typescript-ui/component/container";
 
@@ -93,4 +95,27 @@ export function glyphMenuButton(
  */
 export function glyphToggleButton(glyph: string, color: string, label: string, selected: boolean): ToggleButton {
     return new ToggleButton("", { ...glyphButtonOptions(glyph, color, label), selected });
+}
+
+/**
+ * Build a compact, glyph-only toolbar button with a trailing dropdown chevron:
+ * clicking the face runs `handler`, clicking the chevron opens `menuItems`.
+ *
+ * @param glyph - Registered glyph name for the button face.
+ * @param color - Foreground (glyph) color.
+ * @param label - Hover tooltip and accessible name; not shown on the face.
+ * @param handler - The face's click handler, passed the originating MouseEvent.
+ * @param menuItems - The chevron dropdown's items.
+ *
+ * @returns The wired split button.
+ */
+export function glyphSplitButton(
+    glyph: string, color: string, label: string,
+    handler: (event: MouseEvent) => void, menuItems: MenuItemConfig[],
+): SplitButton {
+    const button = new SplitButton(label, { ...glyphButtonOptions(glyph, color, label), menuItems });
+
+    button.on("action", handler);
+
+    return button;
 }

@@ -2,18 +2,18 @@ import { describe, it, expect } from "vitest";
 import { SHORTCUTS, groupByCategory } from "../../src/shell/shortcutRegistry";
 import type { ShortcutCategory } from "../../src/shell/shortcutRegistry";
 import {
-    RUN_SHORTCUT, SAVE_SHORTCUT, CLEAR_SHORTCUT, HISTORY_RECALL_SHORTCUT,
+    RUN_SHORTCUT, SAVE_SHORTCUT, SAVE_AS_SHORTCUT, CLEAR_SHORTCUT, HISTORY_RECALL_SHORTCUT,
     EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT, LEAVE_EDITOR_SHORTCUT,
     NEW_QUERY_SHORTCUT, OPEN_SAVED_SHORTCUT, QUERY_HISTORY_SHORTCUT,
     DATABASES_RAIL_SHORTCUT, ROLES_RAIL_SHORTCUT, QUERIES_RAIL_SHORTCUT,
     REFRESH_SHORTCUT, HELP_SHORTCUT, FOCUS_REGION_SHORTCUT, FOCUS_CONTROL_SHORTCUT,
 } from "../../src/shell/queryShortcuts";
 
-// The 17 ids the registry must carry: the 13 original shortcuts, the Help chord,
-// the editor's Leave-the-editor gesture, and the two spatial-navigation chords.
-// Pins that no entry is dropped or duplicated as the app grows.
+// The 18 ids the registry must carry: the 13 original shortcuts, the Help chord,
+// the editor's Leave-the-editor gesture, the two spatial-navigation chords, and
+// the Save-as chord. Pins that no entry is dropped or duplicated as the app grows.
 const EXPECTED_IDS = [
-    "run", "save", "clear", "history-recall", "explain", "explain-analyze",
+    "run", "save", "save-as", "clear", "history-recall", "explain", "explain-analyze",
     "leave-editor",
     "new-query", "open-saved", "query-history",
     "databases-rail", "roles-rail", "queries-rail", "refresh",
@@ -21,7 +21,7 @@ const EXPECTED_IDS = [
 ];
 
 describe("SHORTCUTS registry", () => {
-    it("carries exactly the 17 expected ids with no duplicates", () => {
+    it("carries exactly the 18 expected ids with no duplicates", () => {
         const ids = SHORTCUTS.map(entry => entry.id);
 
         expect(new Set(ids).size).toBe(ids.length);
@@ -40,6 +40,7 @@ describe("SHORTCUTS registry", () => {
 
         expect(byId.get("run")).toBe(RUN_SHORTCUT);
         expect(byId.get("save")).toBe(SAVE_SHORTCUT);
+        expect(byId.get("save-as")).toBe(SAVE_AS_SHORTCUT);
         expect(byId.get("clear")).toBe(CLEAR_SHORTCUT);
         expect(byId.get("history-recall")).toBe(HISTORY_RECALL_SHORTCUT);
         expect(byId.get("explain")).toBe(EXPLAIN_SHORTCUT);
@@ -68,10 +69,10 @@ describe("groupByCategory", () => {
             ["Editor", "Query", "Navigation"]);
     });
 
-    it("groups the entries with counts 7 / 3 / 7", () => {
+    it("groups the entries with counts 8 / 3 / 7", () => {
         const groups = groupByCategory();
 
-        expect(groups.map(group => group.entries.length)).toEqual([7, 3, 7]);
+        expect(groups.map(group => group.entries.length)).toEqual([8, 3, 7]);
     });
 
     it("skips empty groups (an empty input yields no groups)", () => {
@@ -83,7 +84,7 @@ describe("groupByCategory", () => {
         const navigation = groupByCategory().find(group => group.category === "navigation");
 
         expect(editor?.entries.map(entry => entry.id)).toEqual(
-            ["run", "save", "clear", "history-recall", "explain", "explain-analyze",
+            ["run", "save", "save-as", "clear", "history-recall", "explain", "explain-analyze",
                 "leave-editor"]);
         expect(navigation?.entries.map(entry => entry.id)).toEqual(
             ["databases-rail", "roles-rail", "queries-rail", "refresh",

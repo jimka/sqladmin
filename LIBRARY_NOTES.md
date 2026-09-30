@@ -8,6 +8,22 @@ Status legend: 🐞 bug · ✂️ papercut/friction · ✅ fixed in library · �
 
 ---
 
+## 🐞🔎 `SplitButton`'s dropdown cannot be opened from the keyboard (0.10.0)
+
+Found while giving the query panel's Save button a "Save as…" chevron menu. The chevron is a
+non-focusable `Glyph` inside the `<button>`, opened only by a subtree `click` listener
+(`component/button/SplitButton.ts:141-156`, `_toggleMenu` at `:235`); there is no keydown path
+(e.g. Alt+ArrowDown / ArrowDown) and no `aria-haspopup`/`aria-expanded`, so keyboard and
+screen-reader users cannot reach the menu.
+
+Recommended fix: open the menu on Alt+ArrowDown (and ArrowDown) while the button has focus,
+and expose `aria-haspopup="menu"` plus `aria-expanded`.
+
+SQLAdmin impact: the query panel's "Save as…" menu item is mouse-only; Ctrl/Cmd+Shift+S covers
+keyboard users. SQLAdmin does not work around it.
+
+---
+
 ## 🐞✅ Store date and time values lost their day and time of day between the grid and the server (0.10.0, symlinked)
 
 Found planning `date-time-column-field-types`. Four library defects, all in how a

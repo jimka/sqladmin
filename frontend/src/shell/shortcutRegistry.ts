@@ -8,7 +8,7 @@
 // startPageWelcome.ts).
 
 import {
-    RUN_SHORTCUT, SAVE_SHORTCUT, CLEAR_SHORTCUT, HISTORY_RECALL_SHORTCUT,
+    RUN_SHORTCUT, SAVE_SHORTCUT, SAVE_AS_SHORTCUT, CLEAR_SHORTCUT, HISTORY_RECALL_SHORTCUT,
     EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT, LEAVE_EDITOR_SHORTCUT,
     NEW_QUERY_SHORTCUT, OPEN_SAVED_SHORTCUT, QUERY_HISTORY_SHORTCUT,
     DATABASES_RAIL_SHORTCUT, ROLES_RAIL_SHORTCUT, QUERIES_RAIL_SHORTCUT,
@@ -42,6 +42,7 @@ export interface ShortcutGroup {
 export const SHORTCUTS: readonly ShortcutEntry[] = [
     { id: "run",             keys: RUN_SHORTCUT,             label: "Run the query",                 category: "editor" },
     { id: "save",            keys: SAVE_SHORTCUT,            label: "Save the query",                category: "editor" },
+    { id: "save-as",         keys: SAVE_AS_SHORTCUT,         label: "Save the query under a new name", category: "editor" },
     { id: "clear",           keys: CLEAR_SHORTCUT,           label: "Clear the editor",              category: "editor" },
     { id: "history-recall",  keys: HISTORY_RECALL_SHORTCUT,  label: "Browse query history",          category: "editor" },
     { id: "explain",         keys: EXPLAIN_SHORTCUT,         label: "Explain the statement",         category: "editor" },
