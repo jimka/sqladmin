@@ -9,7 +9,7 @@
 
 import {
     RUN_SHORTCUT, SAVE_SHORTCUT, CLEAR_SHORTCUT, HISTORY_RECALL_SHORTCUT,
-    EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT,
+    EXPLAIN_SHORTCUT, EXPLAIN_ANALYZE_SHORTCUT, LEAVE_EDITOR_SHORTCUT,
     NEW_QUERY_SHORTCUT, OPEN_SAVED_SHORTCUT, QUERY_HISTORY_SHORTCUT,
     DATABASES_RAIL_SHORTCUT, ROLES_RAIL_SHORTCUT, QUERIES_RAIL_SHORTCUT,
     REFRESH_SHORTCUT, HELP_SHORTCUT,
@@ -46,6 +46,7 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
     { id: "history-recall",  keys: HISTORY_RECALL_SHORTCUT,  label: "Browse query history",          category: "editor" },
     { id: "explain",         keys: EXPLAIN_SHORTCUT,         label: "Explain the statement",         category: "editor" },
     { id: "explain-analyze", keys: EXPLAIN_ANALYZE_SHORTCUT, label: "Explain Analyze the statement", category: "editor" },
+    { id: "leave-editor",    keys: LEAVE_EDITOR_SHORTCUT,    label: "Leave the editor",              category: "editor" },
     { id: "new-query",       keys: NEW_QUERY_SHORTCUT,       label: "New query",                     category: "query" },
     { id: "open-saved",      keys: OPEN_SAVED_SHORTCUT,      label: "Open saved queries",            category: "query" },
     { id: "query-history",   keys: QUERY_HISTORY_SHORTCUT,   label: "Query history",                 category: "query" },

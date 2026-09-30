@@ -115,7 +115,7 @@ zone` column's `Date` as its local wall clock with no offset. The library fix �
 local-offset `Date` serialization and a `protected` `dataFor` — is planned in
 `plans/date-time-column-field-types.md`.
 
-## 🐞🔎 A review dialog with no other focusable content traps Tab/Shift+Tab in the SQL editor (0.10.0)
+## 🐞✅ A review dialog with no other focusable content traps Tab/Shift+Tab in the SQL editor (0.10.0)
 
 Found verifying `typescript-ui-0-10-0-upgrade`'s manual check table. 0.10.0 made `Dialog`
 count a `contenteditable` element as focusable, so `SqlPreviewDialog`'s review dialog now
@@ -143,6 +143,14 @@ dialog's own focusable descendants was never exercised from inside CodeMirror. N
 something this app's `SqlPreviewDialog`/`DdlFormPanel` code can fix on its own —
 `CodeEditor`'s Tab/Shift+Tab keymap is a library binding — so this is left open rather
 than worked around.
+
+Fixed in the library (`dialog-escape-releases-tab-owner`): `Escape` inside the editor
+now releases it instead of closing the dialog, so `Escape` then `Tab` reaches
+Cancel/Execute and a second `Escape` closes; the dialog also lets that first `Escape`
+reach CodeMirror, so it closes an open completion list. Adopted here: no code change;
+the shortcut legend gained *Escape, then Tab* — *Leave the editor*. Verified live,
+keyboard only, against a symlinked build of typescript-ui branch
+`feature/dialog-escape-releases-tab-owner` at `4aed63df`.
 
 ## ✂️🔎 Unclosed-paren diagnostics land at the statement's failure point, not the paren (0.9.0)
 

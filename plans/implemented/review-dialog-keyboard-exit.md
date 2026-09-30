@@ -227,3 +227,75 @@ legend row.
     build. Before trusting the run, compare a hashed chunk the page loaded
     (`performance.getEntriesByType('resource')`, e.g. the `Dialog` or `overlay`
     chunk) against the linked checkout's `dist/lib` file name.
+
+---
+
+## Implementation Notes
+
+### Library linkage and proof
+
+`frontend/node_modules` in the worktree is an untracked symlink to the main
+tree's, whose `@jimka/typescript-ui` is a symlink (`ls -ld` shows `lrwxrwxrwx`)
+to `/home/jika/typescript/typescript-ui/.worktrees/dialog-escape-releases-tab-owner/packages/lib`
+(branch `feature/dialog-escape-releases-tab-owner`, `4aed63df`). Its `dist/lib`
+was built at 07:37, after the last library source commit. Step 4's re-link and
+`build:lib` were already done by the caller and were not repeated. Before the
+run, `frontend/node_modules/.vite` was deleted and a fresh Vite dev server
+started from this worktree. `performance.getEntriesByType('resource')` showed
+every library chunk served as
+`/@fs/home/jika/typescript/typescript-ui/.worktrees/dialog-escape-releases-tab-owner/packages/lib/dist/lib/…`
+(e.g. `core.es.js`, `SpatialNavigation-B3fDdDeZ.js`, `OverlayFade-DXL4vGDO.js`)
+— the feature worktree, not the main library tree.
+
+### How the manual cases were driven
+
+Browser: chrome-devtools MCP, a fresh isolated context, backend natively on
+:8000 (Host `localhost`), database `sqladmin`. Every key in the cases below
+was a real key press through the MCP `press_key` / `type_text` tools (CDP
+`Input.dispatchKeyEvent`, the browser's trusted input path), never a
+synthetic `dispatchEvent`. The mouse was used only to open each dialog
+(clicking *Review SQL…*, or the tree context menu's *Rename*, whose right-click
+is itself a synthetic `contextmenu` dispatch per the verify skill because the
+MCP has no right-click tool) and, for M3, to expand the navigator afterwards.
+State after each step was read with `evaluate_script` (`document.activeElement`
+class/label, whether it sits inside the `SqlPreviewModal`, and the editor's
+text).
+
+The create-table form was filled once (name `rdke_scratch`, column `id
+integer`) so every *Review SQL…* opening had valid SQL; the dialog was closed
+and reopened between cases so each started from the dialog's own initial
+focus, confirmed as `cm-content` each time. M3 was run last because it
+executes.
+
+- **M1** — `Tab`: two spaces inserted at the start of the SQL, focus still
+  `cm-content`. Pass. (Undone with `Shift+Tab` before M2.)
+- **M2** — `Escape`, `Tab`: focus on the **Cancel** button, dialog open, SQL
+  unchanged. Pass.
+- **M4** — `Escape`, `Shift+Tab`: focus on the 20×20 icon button inside
+  `DialogTitleBar` (the ✕). Pass.
+- **M5** — `Escape` (dialog still open, focus still in the editor), `Escape`:
+  dialog gone, focus back on *Review SQL…*; `to_regclass('public.rdke_scratch')`
+  was NULL, so nothing executed. Pass.
+- **M6** — `Escape`, `x`, `Tab`: editor text became `  xCREATE TABLE …`
+  (`x` typed, then indented), focus still `cm-content`. Pass.
+- **M7** — `Ctrl+End`, `Enter`, typed `SEL`, `Ctrl+Space`: the completion list
+  (`.cm-tooltip-autocomplete`, offering `select`) opened; `Escape`: list
+  closed, dialog still open, focus in the editor; `Tab`: focus on **Cancel**.
+  Pass.
+- **M3** — fresh dialog, `Escape`, `Tab`, `Tab`: focus on **Execute**; `Enter`:
+  dialog closed and `rdke_scratch` was created (psql `to_regclass` returned
+  it); expanding public → Tables in the navigator listed `rdke_scratch`. Pass.
+- **M8** — tree context menu on `rdke_scratch` → *Rename*: dialog opened with
+  focus in the name `TextField`; `Tab` moved focus into `cm-content`;
+  `Escape`, `Tab`: focus on **Cancel**. Pass. Closed with `Escape`.
+- **M9** — `Alt+N` opened *Query 1* with focus in its editor; `Escape`, `Tab`
+  (consecutive tool calls, well inside two seconds): focus left the editor
+  (landed on the status bar's *Notification history* button, the next tab
+  stop) and no indent was inserted. Pass.
+- **M10** — start page (snapshot + screenshot) and the Keyboard Shortcuts
+  dialog (opened with a real `?` press, screenshot): *Escape, then Tab* —
+  *Leave the editor* is the last Editor row in both, on one line, nothing
+  clipped. Pass.
+
+The scratch table `public.rdke_scratch` was dropped afterwards and the
+backend and Vite processes started for the run were stopped.
